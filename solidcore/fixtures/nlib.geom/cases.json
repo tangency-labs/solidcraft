@@ -1,0 +1,5178 @@
+{
+ "cases": [
+  {
+   "name": "rect_polygon_bbox",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "polygon",
+    "pts": [
+     [
+      -5.0,
+      -3.0,
+      0
+     ],
+     [
+      5.0,
+      -3.0,
+      0
+     ],
+     [
+      5.0,
+      3.0,
+      0
+     ],
+     [
+      -5.0,
+      3.0,
+      0
+     ],
+     [
+      -5.0,
+      -3.0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_side0_dist_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "a": [
+     -5.0,
+     -3.0,
+     0
+    ],
+    "b": [
+     5.0,
+     -3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_adjacent_sides_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      -5.0,
+      -3.0,
+      0
+     ],
+     "v": [
+      10.0,
+      0.0,
+      0
+     ],
+     "bounded": true
+    },
+    "l2": {
+     "p": [
+      5.0,
+      -3.0,
+      0
+     ],
+     "v": [
+      0.0,
+      6.0,
+      0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "rect_side1_dist_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "a": [
+     5.0,
+     -3.0,
+     0
+    ],
+    "b": [
+     5.0,
+     3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_adjacent_sides_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      5.0,
+      -3.0,
+      0
+     ],
+     "v": [
+      0.0,
+      6.0,
+      0
+     ],
+     "bounded": true
+    },
+    "l2": {
+     "p": [
+      5.0,
+      3.0,
+      0
+     ],
+     "v": [
+      -10.0,
+      0.0,
+      0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "rect_side2_dist_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "a": [
+     5.0,
+     3.0,
+     0
+    ],
+    "b": [
+     -5.0,
+     3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_adjacent_sides_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      5.0,
+      3.0,
+      0
+     ],
+     "v": [
+      -10.0,
+      0.0,
+      0
+     ],
+     "bounded": true
+    },
+    "l2": {
+     "p": [
+      -5.0,
+      3.0,
+      0
+     ],
+     "v": [
+      0.0,
+      -6.0,
+      0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "rect_side3_dist_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "a": [
+     -5.0,
+     3.0,
+     0
+    ],
+    "b": [
+     -5.0,
+     -3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_adjacent_sides_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      -5.0,
+      3.0,
+      0
+     ],
+     "v": [
+      0.0,
+      -6.0,
+      0
+     ],
+     "bounded": true
+    },
+    "l2": {
+     "p": [
+      -5.0,
+      -3.0,
+      0
+     ],
+     "v": [
+      10.0,
+      0.0,
+      0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "rect_opposite_sides_parallel",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      -5.0,
+      -3.0,
+      0
+     ],
+     "v": [
+      10.0,
+      0.0,
+      0
+     ],
+     "bounded": false
+    },
+    "l2": {
+     "p": [
+      -5.0,
+      3.0,
+      0
+     ],
+     "v": [
+      10.0,
+      0.0,
+      0
+     ],
+     "bounded": false
+    }
+   }
+  },
+  {
+   "name": "rect_diagonals",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      -5.0,
+      -3.0,
+      0
+     ],
+     "v": [
+      10.0,
+      6.0,
+      0
+     ],
+     "bounded": true
+    },
+    "l2": {
+     "p": [
+      5.0,
+      -3.0,
+      0
+     ],
+     "v": [
+      -10.0,
+      6.0,
+      0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "rect_corners_colinear",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -5.0,
+     -3.0,
+     0,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     5.0,
+     -3.0,
+     0,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     5.0,
+     3.0,
+     0,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -5.0,
+      -3.0,
+      0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "rect_mid_colinear",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -5.0,
+     -3.0,
+     0,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     0.0,
+     -3.0,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     5.0,
+     -3.0,
+     0,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -5.0,
+      -3.0,
+      0
+     ],
+     "n": [
+      1.0,
+      0.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "rect_far_polygon_bbox",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "polygon",
+    "pts": [
+     [
+      -5.0,
+      10000000000.0,
+      0.0
+     ],
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     [
+      -5.0,
+      10000000000.0,
+      0.0
+     ],
+     [
+      -5.0,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_far_side0_dist_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     0.0,
+     10000000000.0,
+     0.0
+    ],
+    "a": [
+     -5.0,
+     10000000000.0,
+     0.0
+    ],
+    "b": [
+     5.0,
+     10000000000.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "rect_far_adjacent_sides_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      -5.0,
+      10000000000.0,
+      0.0
+     ],
+     "v": [
+      10.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    },
+    "l2": {
+     "p": [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "rect_far_side1_dist_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     0.0,
+     10000000000.0,
+     0.0
+    ],
+    "a": [
+     5.0,
+     10000000000.0,
+     0.0
+    ],
+    "b": [
+     5.0,
+     10000000000.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "rect_far_adjacent_sides_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    },
+    "l2": {
+     "p": [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     "v": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "rect_far_side2_dist_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     0.0,
+     10000000000.0,
+     0.0
+    ],
+    "a": [
+     5.0,
+     10000000000.0,
+     0.0
+    ],
+    "b": [
+     -5.0,
+     10000000000.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "rect_far_adjacent_sides_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     "v": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    },
+    "l2": {
+     "p": [
+      -5.0,
+      10000000000.0,
+      0.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "rect_far_side3_dist_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     0.0,
+     10000000000.0,
+     0.0
+    ],
+    "a": [
+     -5.0,
+     10000000000.0,
+     0.0
+    ],
+    "b": [
+     -5.0,
+     10000000000.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "rect_far_adjacent_sides_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      -5.0,
+      10000000000.0,
+      0.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    },
+    "l2": {
+     "p": [
+      -5.0,
+      10000000000.0,
+      0.0
+     ],
+     "v": [
+      10.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "rect_far_opposite_sides_parallel",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      -5.0,
+      10000000000.0,
+      0.0
+     ],
+     "v": [
+      10.0,
+      0.0,
+      0.0
+     ],
+     "bounded": false
+    },
+    "l2": {
+     "p": [
+      -5.0,
+      10000000000.0,
+      0.0
+     ],
+     "v": [
+      10.0,
+      0.0,
+      0.0
+     ],
+     "bounded": false
+    }
+   }
+  },
+  {
+   "name": "rect_far_diagonals",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      -5.0,
+      10000000000.0,
+      0.0
+     ],
+     "v": [
+      10.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    },
+    "l2": {
+     "p": [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     "v": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "rect_far_corners_colinear",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -5.0,
+     10000000000.0,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     5.0,
+     10000000000.0,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     5.0,
+     10000000000.0,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -5.0,
+      10000000000.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "rect_far_mid_colinear",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -5.0,
+     10000000000.0,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     0.0,
+     10000000000.0,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     5.0,
+     10000000000.0,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -5.0,
+      10000000000.0,
+      0.0
+     ],
+     "n": [
+      1.0,
+      0.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "hexagon_polygon",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "polygon",
+    "pts": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      0.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_cpolygon",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "cpolygon",
+    "pts": [
+     [
+      5.0,
+      0.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_cpolygon_rational",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "cpolygon",
+    "pts": [
+     [
+      10.0,
+      0.0,
+      0.0,
+      2.0
+     ],
+     [
+      5.000000000000001,
+      8.660254037844386,
+      0.0,
+      2.0
+     ],
+     [
+      -4.999999999999998,
+      8.660254037844387,
+      0.0,
+      2.0
+     ],
+     [
+      -10.0,
+      1.2246467991473533e-15,
+      0.0,
+      2.0
+     ],
+     [
+      -5.000000000000004,
+      -8.660254037844384,
+      0.0,
+      2.0
+     ],
+     [
+      5.000000000000001,
+      -8.660254037844386,
+      0.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge0_vectors",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "b": [
+     2.5000000000000004,
+     4.330127018922193,
+     0.0
+    ],
+    "alpha": 0.5,
+    "beta": 0.5,
+    "pw": [
+     5.0,
+     0.0,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     7.500000000000002,
+     12.990381056766578,
+     1.7976931348623157e+308,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge0_rotate60",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 0.0
+   }
+  },
+  {
+   "name": "hexagon_edge1_vectors",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     2.5000000000000004,
+     4.330127018922193,
+     0.0
+    ],
+    "b": [
+     -2.499999999999999,
+     4.330127018922194,
+     0.0
+    ],
+    "alpha": 0.5,
+    "beta": 0.5,
+    "pw": [
+     2.5000000000000004,
+     4.330127018922193,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     -7.499999999999997,
+     12.99038105676658,
+     1.7976931348623157e+308,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge1_rotate60",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 60.0
+   }
+  },
+  {
+   "name": "hexagon_edge2_vectors",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -2.499999999999999,
+     4.330127018922194,
+     0.0
+    ],
+    "b": [
+     -5.0,
+     6.123233995736766e-16,
+     0.0
+    ],
+    "alpha": 0.5,
+    "beta": 0.5,
+    "pw": [
+     -2.499999999999999,
+     4.330127018922194,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     -15.0,
+     1.83697019872103e-15,
+     1.7976931348623157e+308,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge2_rotate60",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 120.0
+   }
+  },
+  {
+   "name": "hexagon_edge3_vectors",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -5.0,
+     6.123233995736766e-16,
+     0.0
+    ],
+    "b": [
+     -2.500000000000002,
+     -4.330127018922192,
+     0.0
+    ],
+    "alpha": 0.5,
+    "beta": 0.5,
+    "pw": [
+     -5.0,
+     6.123233995736766e-16,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     -7.500000000000007,
+     -12.990381056766577,
+     1.7976931348623157e+308,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge3_rotate60",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 180.0
+   }
+  },
+  {
+   "name": "hexagon_edge4_vectors",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -2.500000000000002,
+     -4.330127018922192,
+     0.0
+    ],
+    "b": [
+     2.5000000000000004,
+     -4.330127018922193,
+     0.0
+    ],
+    "alpha": 0.5,
+    "beta": 0.5,
+    "pw": [
+     -2.500000000000002,
+     -4.330127018922192,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     7.500000000000002,
+     -12.990381056766578,
+     1.7976931348623157e+308,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge4_rotate60",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 240.0
+   }
+  },
+  {
+   "name": "hexagon_edge5_vectors",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     2.5000000000000004,
+     -4.330127018922193,
+     0.0
+    ],
+    "b": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "alpha": 0.5,
+    "beta": 0.5,
+    "pw": [
+     2.5000000000000004,
+     -4.330127018922193,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     15.0,
+     0.0,
+     1.7976931348623157e+308,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge5_rotate60",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 300.0
+   }
+  },
+  {
+   "name": "hexagon_three_vertices_colinear",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     5.0,
+     0.0,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     2.5000000000000004,
+     4.330127018922193,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     -2.499999999999999,
+     4.330127018922194,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      5.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "pentagon_far_polygon",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "polygon",
+    "pts": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ],
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_cpolygon",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "cpolygon",
+    "pts": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_cpolygon_rational",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "cpolygon",
+    "pts": [
+     [
+      20000000000.000004,
+      20000000000.0,
+      0.0,
+      2.0
+     ],
+     [
+      20000000000.0,
+      20000000000.000004,
+      0.0,
+      2.0
+     ],
+     [
+      19999999999.999996,
+      20000000000.0,
+      0.0,
+      2.0
+     ],
+     [
+      19999999999.999996,
+      20000000000.0,
+      0.0,
+      2.0
+     ],
+     [
+      20000000000.0,
+      19999999999.999996,
+      0.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge0_vectors",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     10000000000.000002,
+     10000000000.0,
+     0.0
+    ],
+    "b": [
+     10000000000.0,
+     10000000000.000002,
+     0.0
+    ],
+    "alpha": 0.5,
+    "beta": 0.5,
+    "pw": [
+     10000000000.000002,
+     10000000000.0,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     30000000000.0,
+     30000000000.000008,
+     1.7976931348623157e+308,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge0_rotate60",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     10000000000.000002,
+     10000000000.0,
+     0.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 0.0
+   }
+  },
+  {
+   "name": "pentagon_far_edge1_vectors",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     10000000000.0,
+     10000000000.000002,
+     0.0
+    ],
+    "b": [
+     9999999999.999998,
+     10000000000.0,
+     0.0
+    ],
+    "alpha": 0.5,
+    "beta": 0.5,
+    "pw": [
+     10000000000.0,
+     10000000000.000002,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     29999999999.999992,
+     30000000000.0,
+     1.7976931348623157e+308,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge1_rotate60",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     10000000000.000002,
+     10000000000.0,
+     0.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 72.0
+   }
+  },
+  {
+   "name": "pentagon_far_edge2_vectors",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     9999999999.999998,
+     10000000000.0,
+     0.0
+    ],
+    "b": [
+     9999999999.999998,
+     10000000000.0,
+     0.0
+    ],
+    "alpha": 0.5,
+    "beta": 0.5,
+    "pw": [
+     9999999999.999998,
+     10000000000.0,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     29999999999.999992,
+     30000000000.0,
+     1.7976931348623157e+308,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge2_rotate60",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     10000000000.000002,
+     10000000000.0,
+     0.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 144.0
+   }
+  },
+  {
+   "name": "pentagon_far_edge3_vectors",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     9999999999.999998,
+     10000000000.0,
+     0.0
+    ],
+    "b": [
+     10000000000.0,
+     9999999999.999998,
+     0.0
+    ],
+    "alpha": 0.5,
+    "beta": 0.5,
+    "pw": [
+     9999999999.999998,
+     10000000000.0,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     30000000000.0,
+     29999999999.999992,
+     1.7976931348623157e+308,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge3_rotate60",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     10000000000.000002,
+     10000000000.0,
+     0.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 216.0
+   }
+  },
+  {
+   "name": "pentagon_far_edge4_vectors",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     10000000000.0,
+     9999999999.999998,
+     0.0
+    ],
+    "b": [
+     10000000000.000002,
+     10000000000.0,
+     0.0
+    ],
+    "alpha": 0.5,
+    "beta": 0.5,
+    "pw": [
+     10000000000.0,
+     9999999999.999998,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     30000000000.000008,
+     30000000000.0,
+     1.7976931348623157e+308,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge4_rotate60",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     10000000000.000002,
+     10000000000.0,
+     0.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 288.0
+   }
+  },
+  {
+   "name": "pentagon_far_three_vertices_colinear",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     10000000000.000002,
+     10000000000.0,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     10000000000.0,
+     10000000000.000002,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     9999999999.999998,
+     10000000000.0,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_points_polygon",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "polygon",
+    "pts": [
+     [
+      -1.0616429349692744,
+      -20.167126109553802,
+      20.02082373943756
+     ],
+     [
+      -1.158343495768524,
+      -19.95343872268017,
+      20.0059217689707
+     ],
+     [
+      -4.594157470164914,
+      -9.652863554299548,
+      19.29094927564143
+     ],
+     [
+      -0.8390871400009248,
+      -20.645564191951244,
+      20.05407058495214
+     ],
+     [
+      -0.22169184902399575,
+      -21.752883811327614,
+      20.07708482750489
+     ],
+     [
+      0.09787679346832802,
+      -21.633397717952313,
+      18.978461556867217
+     ],
+     [
+      -0.2525759380664189,
+      -20.10880763638518,
+      19.018298541213202
+     ],
+     [
+      -0.3262981819065092,
+      -19.760345509317247,
+      19.026748453308592
+     ],
+     [
+      -0.6689215485688522,
+      -17.879224383359258,
+      19.07264718580291
+     ],
+     [
+      -0.8375857346222633,
+      -20.648619822796935,
+      20.054270506974774
+     ],
+     [
+      -0.22211826515506564,
+      -21.75240325273451,
+      20.07740102208611
+     ],
+     [
+      0.09787860127308134,
+      -21.6334057640379,
+      18.978461275445223
+     ],
+     [
+      -0.2528076031107555,
+      -20.10779761067562,
+      19.018327728721825
+     ],
+     [
+      -0.3265146310261884,
+      -19.7592999915767,
+      19.026773809915298
+     ],
+     [
+      -0.40219453853645376,
+      -19.384417128948424,
+      19.035877125510886
+     ]
+    ]
+   }
+  },
+  {
+   "name": "closest_points_net",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "net",
+    "rows": [
+     [
+      [
+       -1.0616429349692744,
+       -20.167126109553802,
+       20.02082373943756
+      ],
+      [
+       -1.158343495768524,
+       -19.95343872268017,
+       20.0059217689707
+      ],
+      [
+       -4.594157470164914,
+       -9.652863554299548,
+       19.29094927564143
+      ],
+      [
+       -0.8390871400009248,
+       -20.645564191951244,
+       20.05407058495214
+      ],
+      [
+       -0.22169184902399575,
+       -21.752883811327614,
+       20.07708482750489
+      ]
+     ],
+     [
+      [
+       0.09787679346832802,
+       -21.633397717952313,
+       18.978461556867217
+      ],
+      [
+       -0.2525759380664189,
+       -20.10880763638518,
+       19.018298541213202
+      ],
+      [
+       -0.3262981819065092,
+       -19.760345509317247,
+       19.026748453308592
+      ],
+      [
+       -0.6689215485688522,
+       -17.879224383359258,
+       19.07264718580291
+      ],
+      [
+       -0.8375857346222633,
+       -20.648619822796935,
+       20.054270506974774
+      ]
+     ],
+     [
+      [
+       -0.22211826515506564,
+       -21.75240325273451,
+       20.07740102208611
+      ],
+      [
+       0.09787860127308134,
+       -21.6334057640379,
+       18.978461275445223
+      ],
+      [
+       -0.2528076031107555,
+       -20.10779761067562,
+       19.018327728721825
+      ],
+      [
+       -0.3265146310261884,
+       -19.7592999915767,
+       19.026773809915298
+      ],
+      [
+       -0.40219453853645376,
+       -19.384417128948424,
+       19.035877125510886
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "closest_pt1_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -1.0616429349692744,
+     -20.167126109553802,
+     20.02082373943756
+    ],
+    "b": [
+     -1.158343495768524,
+     -19.95343872268017,
+     20.0059217689707
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     -1.0616429349692744,
+     -20.167126109553802,
+     20.02082373943756,
+     1.0
+    ],
+    "qw": [
+     -0.579171747884262,
+     -9.976719361340084,
+     10.00296088448535,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt1_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     0.09787679346832802,
+     -21.633397717952313,
+     18.978461556867217
+    ],
+    "a": [
+     -1.0616429349692744,
+     -20.167126109553802,
+     20.02082373943756
+    ],
+    "b": [
+     -1.158343495768524,
+     -19.95343872268017,
+     20.0059217689707
+    ]
+   }
+  },
+  {
+   "name": "closest_pt1_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      -1.0616429349692744,
+      -20.167126109553802,
+      20.02082373943756
+     ],
+     "v": [
+      -0.09670056079924949,
+      0.21368738687363376,
+      -0.014901970466858927
+     ],
+     "bounded": true
+    },
+    "pt": [
+     -0.3262981819065092,
+     -19.760345509317247,
+     19.026748453308592
+    ]
+   }
+  },
+  {
+   "name": "closest_pt1_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      -1.0616429349692744,
+      -20.167126109553802,
+      20.02082373943756
+     ],
+     "n": [
+      -0.09670056079924949,
+      0.21368738687363376,
+      -0.014901970466858927
+     ]
+    },
+    "pt": [
+     -0.8390871400009248,
+     -20.645564191951244,
+     20.05407058495214
+    ],
+    "bounded": false
+   }
+  },
+  {
+   "name": "closest_pt1_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      -1.0616429349692744,
+      -20.167126109553802,
+      20.02082373943756
+     ],
+     "v": [
+      0.8399510859452787,
+      -1.5857577017738116,
+      0.056261088067330434
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      -1.158343495768524,
+      -19.95343872268017,
+      20.0059217689707
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt1_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -2.123285869938549,
+     -40.334252219107604,
+     40.04164747887512,
+     2.0
+    ],
+    "qw": [
+     -1.158343495768524,
+     -19.95343872268017,
+     20.0059217689707,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     -4.594157470164914,
+     -9.652863554299548,
+     19.29094927564143,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -1.158343495768524,
+      -19.95343872268017,
+      20.0059217689707
+     ],
+     "n": [
+      0.09670056079924949,
+      -0.21368738687363376,
+      0.014901970466858927
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt2_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -1.158343495768524,
+     -19.95343872268017,
+     20.0059217689707
+    ],
+    "b": [
+     -4.594157470164914,
+     -9.652863554299548,
+     19.29094927564143
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     -1.158343495768524,
+     -19.95343872268017,
+     20.0059217689707,
+     1.0
+    ],
+    "qw": [
+     -2.297078735082457,
+     -4.826431777149774,
+     9.645474637820715,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt2_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     -0.2525759380664189,
+     -20.10880763638518,
+     19.018298541213202
+    ],
+    "a": [
+     -1.158343495768524,
+     -19.95343872268017,
+     20.0059217689707
+    ],
+    "b": [
+     -4.594157470164914,
+     -9.652863554299548,
+     19.29094927564143
+    ]
+   }
+  },
+  {
+   "name": "closest_pt2_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      -1.158343495768524,
+      -19.95343872268017,
+      20.0059217689707
+     ],
+     "v": [
+      -3.4358139743963902,
+      10.30057516838062,
+      -0.7149724933292703
+     ],
+     "bounded": false
+    },
+    "pt": [
+     -0.6689215485688522,
+     -17.879224383359258,
+     19.07264718580291
+    ]
+   }
+  },
+  {
+   "name": "closest_pt2_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      -1.158343495768524,
+      -19.95343872268017,
+      20.0059217689707
+     ],
+     "n": [
+      -3.4358139743963902,
+      10.30057516838062,
+      -0.7149724933292703
+     ]
+    },
+    "pt": [
+     -0.22169184902399575,
+     -21.752883811327614,
+     20.07708482750489
+    ],
+    "bounded": true
+   }
+  },
+  {
+   "name": "closest_pt2_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      -1.158343495768524,
+      -19.95343872268017,
+      20.0059217689707
+     ],
+     "v": [
+      1.256220289236852,
+      -1.6799589952721448,
+      -1.0274602121034846
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      -4.594157470164914,
+      -9.652863554299548,
+      19.29094927564143
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt2_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -2.316686991537048,
+     -39.90687744536034,
+     40.0118435379414,
+     2.0
+    ],
+    "qw": [
+     -4.594157470164914,
+     -9.652863554299548,
+     19.29094927564143,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     -0.8390871400009248,
+     -20.645564191951244,
+     20.05407058495214,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -4.594157470164914,
+      -9.652863554299548,
+      19.29094927564143
+     ],
+     "n": [
+      3.4358139743963902,
+      -10.30057516838062,
+      0.7149724933292703
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt3_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -4.594157470164914,
+     -9.652863554299548,
+     19.29094927564143
+    ],
+    "b": [
+     -0.8390871400009248,
+     -20.645564191951244,
+     20.05407058495214
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     -4.594157470164914,
+     -9.652863554299548,
+     19.29094927564143,
+     1.0
+    ],
+    "qw": [
+     -0.4195435700004624,
+     -10.322782095975622,
+     10.02703529247607,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt3_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     -0.3262981819065092,
+     -19.760345509317247,
+     19.026748453308592
+    ],
+    "a": [
+     -4.594157470164914,
+     -9.652863554299548,
+     19.29094927564143
+    ],
+    "b": [
+     -0.8390871400009248,
+     -20.645564191951244,
+     20.05407058495214
+    ]
+   }
+  },
+  {
+   "name": "closest_pt3_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      -4.594157470164914,
+      -9.652863554299548,
+      19.29094927564143
+     ],
+     "v": [
+      3.7550703301639894,
+      -10.992700637651696,
+      0.7631213093107085
+     ],
+     "bounded": true
+    },
+    "pt": [
+     -0.8375857346222633,
+     -20.648619822796935,
+     20.054270506974774
+    ]
+   }
+  },
+  {
+   "name": "closest_pt3_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      -4.594157470164914,
+      -9.652863554299548,
+      19.29094927564143
+     ],
+     "n": [
+      3.7550703301639894,
+      -10.992700637651696,
+      0.7631213093107085
+     ]
+    },
+    "pt": [
+     0.09787679346832802,
+     -21.633397717952313,
+     18.978461556867217
+    ],
+    "bounded": false
+   }
+  },
+  {
+   "name": "closest_pt3_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      -4.594157470164914,
+      -9.652863554299548,
+      19.29094927564143
+     ],
+     "v": [
+      4.341581532098496,
+      -10.455944082085631,
+      -0.27265073442822896
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      -0.8390871400009248,
+      -20.645564191951244,
+      20.05407058495214
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt3_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -9.188314940329828,
+     -19.305727108599097,
+     38.58189855128286,
+     2.0
+    ],
+    "qw": [
+     -0.8390871400009248,
+     -20.645564191951244,
+     20.05407058495214,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     -0.22169184902399575,
+     -21.752883811327614,
+     20.07708482750489,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -0.8390871400009248,
+      -20.645564191951244,
+      20.05407058495214
+     ],
+     "n": [
+      -3.7550703301639894,
+      10.992700637651696,
+      -0.7631213093107085
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt4_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -0.8390871400009248,
+     -20.645564191951244,
+     20.05407058495214
+    ],
+    "b": [
+     -0.22169184902399575,
+     -21.752883811327614,
+     20.07708482750489
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     -0.8390871400009248,
+     -20.645564191951244,
+     20.05407058495214,
+     1.0
+    ],
+    "qw": [
+     -0.11084592451199787,
+     -10.876441905663807,
+     10.038542413752445,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt4_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     -0.6689215485688522,
+     -17.879224383359258,
+     19.07264718580291
+    ],
+    "a": [
+     -0.8390871400009248,
+     -20.645564191951244,
+     20.05407058495214
+    ],
+    "b": [
+     -0.22169184902399575,
+     -21.752883811327614,
+     20.07708482750489
+    ]
+   }
+  },
+  {
+   "name": "closest_pt4_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      -0.8390871400009248,
+      -20.645564191951244,
+      20.05407058495214
+     ],
+     "v": [
+      0.617395290976929,
+      -1.1073196193763692,
+      0.023014242552751085
+     ],
+     "bounded": false
+    },
+    "pt": [
+     -0.22211826515506564,
+     -21.75240325273451,
+     20.07740102208611
+    ]
+   }
+  },
+  {
+   "name": "closest_pt4_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      -0.8390871400009248,
+      -20.645564191951244,
+      20.05407058495214
+     ],
+     "n": [
+      0.617395290976929,
+      -1.1073196193763692,
+      0.023014242552751085
+     ]
+    },
+    "pt": [
+     -0.2525759380664189,
+     -20.10880763638518,
+     19.018298541213202
+    ],
+    "bounded": true
+   }
+  },
+  {
+   "name": "closest_pt4_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      -0.8390871400009248,
+      -20.645564191951244,
+      20.05407058495214
+     ],
+     "v": [
+      0.5127889580944156,
+      0.8852186826339974,
+      -1.0273221316435475
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      -0.22169184902399575,
+      -21.752883811327614,
+      20.07708482750489
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt4_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -1.6781742800018495,
+     -41.29112838390249,
+     40.10814116990428,
+     2.0
+    ],
+    "qw": [
+     -0.22169184902399575,
+     -21.752883811327614,
+     20.07708482750489,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     0.09787679346832802,
+     -21.633397717952313,
+     18.978461556867217,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -0.22169184902399575,
+      -21.752883811327614,
+      20.07708482750489
+     ],
+     "n": [
+      -0.617395290976929,
+      1.1073196193763692,
+      -0.023014242552751085
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt5_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -0.22169184902399575,
+     -21.752883811327614,
+     20.07708482750489
+    ],
+    "b": [
+     0.09787679346832802,
+     -21.633397717952313,
+     18.978461556867217
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     -0.22169184902399575,
+     -21.752883811327614,
+     20.07708482750489,
+     1.0
+    ],
+    "qw": [
+     0.04893839673416401,
+     -10.816698858976157,
+     9.489230778433608,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt5_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     -0.8375857346222633,
+     -20.648619822796935,
+     20.054270506974774
+    ],
+    "a": [
+     -0.22169184902399575,
+     -21.752883811327614,
+     20.07708482750489
+    ],
+    "b": [
+     0.09787679346832802,
+     -21.633397717952313,
+     18.978461556867217
+    ]
+   }
+  },
+  {
+   "name": "closest_pt5_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      -0.22169184902399575,
+      -21.752883811327614,
+      20.07708482750489
+     ],
+     "v": [
+      0.31956864249232375,
+      0.11948609337530058,
+      -1.098623270637674
+     ],
+     "bounded": true
+    },
+    "pt": [
+     0.09787860127308134,
+     -21.6334057640379,
+     18.978461275445223
+    ]
+   }
+  },
+  {
+   "name": "closest_pt5_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      -0.22169184902399575,
+      -21.752883811327614,
+      20.07708482750489
+     ],
+     "n": [
+      0.31956864249232375,
+      0.11948609337530058,
+      -1.098623270637674
+     ]
+    },
+    "pt": [
+     -0.3262981819065092,
+     -19.760345509317247,
+     19.026748453308592
+    ],
+    "bounded": false
+   }
+  },
+  {
+   "name": "closest_pt5_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      -0.22169184902399575,
+      -21.752883811327614,
+      20.07708482750489
+     ],
+     "v": [
+      -0.4472296995448565,
+      3.873659427968356,
+      -1.0044376417019798
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      0.09787679346832802,
+      -21.633397717952313,
+      18.978461556867217
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt5_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -0.4433836980479915,
+     -43.50576762265523,
+     40.15416965500978,
+     2.0
+    ],
+    "qw": [
+     0.09787679346832802,
+     -21.633397717952313,
+     18.978461556867217,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     -0.2525759380664189,
+     -20.10880763638518,
+     19.018298541213202,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      0.09787679346832802,
+      -21.633397717952313,
+      18.978461556867217
+     ],
+     "n": [
+      -0.31956864249232375,
+      -0.11948609337530058,
+      1.098623270637674
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt6_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     0.09787679346832802,
+     -21.633397717952313,
+     18.978461556867217
+    ],
+    "b": [
+     -0.2525759380664189,
+     -20.10880763638518,
+     19.018298541213202
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     0.09787679346832802,
+     -21.633397717952313,
+     18.978461556867217,
+     1.0
+    ],
+    "qw": [
+     -0.12628796903320946,
+     -10.05440381819259,
+     9.509149270606601,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt6_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     -0.22211826515506564,
+     -21.75240325273451,
+     20.07740102208611
+    ],
+    "a": [
+     0.09787679346832802,
+     -21.633397717952313,
+     18.978461556867217
+    ],
+    "b": [
+     -0.2525759380664189,
+     -20.10880763638518,
+     19.018298541213202
+    ]
+   }
+  },
+  {
+   "name": "closest_pt6_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      0.09787679346832802,
+      -21.633397717952313,
+      18.978461556867217
+     ],
+     "v": [
+      -0.35045273153474693,
+      1.5245900815671334,
+      0.03983698434598537
+     ],
+     "bounded": false
+    },
+    "pt": [
+     -0.2528076031107555,
+     -20.10779761067562,
+     19.018327728721825
+    ]
+   }
+  },
+  {
+   "name": "closest_pt6_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      0.09787679346832802,
+      -21.633397717952313,
+      18.978461556867217
+     ],
+     "n": [
+      -0.35045273153474693,
+      1.5245900815671334,
+      0.03983698434598537
+     ]
+    },
+    "pt": [
+     -0.6689215485688522,
+     -17.879224383359258,
+     19.07264718580291
+    ],
+    "bounded": true
+   }
+  },
+  {
+   "name": "closest_pt6_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      0.09787679346832802,
+      -21.633397717952313,
+      18.978461556867217
+     ],
+     "v": [
+      -0.9354625280905913,
+      0.9847778951553785,
+      1.0758089501075574
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      -0.2525759380664189,
+      -20.10880763638518,
+      19.018298541213202
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt6_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     0.19575358693665604,
+     -43.266795435904626,
+     37.95692311373443,
+     2.0
+    ],
+    "qw": [
+     -0.2525759380664189,
+     -20.10880763638518,
+     19.018298541213202,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     -0.3262981819065092,
+     -19.760345509317247,
+     19.026748453308592,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -0.2525759380664189,
+      -20.10880763638518,
+      19.018298541213202
+     ],
+     "n": [
+      0.35045273153474693,
+      -1.5245900815671334,
+      -0.03983698434598537
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt7_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -0.2525759380664189,
+     -20.10880763638518,
+     19.018298541213202
+    ],
+    "b": [
+     -0.3262981819065092,
+     -19.760345509317247,
+     19.026748453308592
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     -0.2525759380664189,
+     -20.10880763638518,
+     19.018298541213202,
+     1.0
+    ],
+    "qw": [
+     -0.1631490909532546,
+     -9.880172754658624,
+     9.513374226654296,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt7_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     0.09787860127308134,
+     -21.6334057640379,
+     18.978461275445223
+    ],
+    "a": [
+     -0.2525759380664189,
+     -20.10880763638518,
+     19.018298541213202
+    ],
+    "b": [
+     -0.3262981819065092,
+     -19.760345509317247,
+     19.026748453308592
+    ]
+   }
+  },
+  {
+   "name": "closest_pt7_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      -0.2525759380664189,
+      -20.10880763638518,
+      19.018298541213202
+     ],
+     "v": [
+      -0.0737222438400903,
+      0.34846212706793267,
+      0.008449912095390033
+     ],
+     "bounded": true
+    },
+    "pt": [
+     -0.3265146310261884,
+     -19.7592999915767,
+     19.026773809915298
+    ]
+   }
+  },
+  {
+   "name": "closest_pt7_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      -0.2525759380664189,
+      -20.10880763638518,
+      19.018298541213202
+     ],
+     "n": [
+      -0.0737222438400903,
+      0.34846212706793267,
+      0.008449912095390033
+     ]
+    },
+    "pt": [
+     -0.8375857346222633,
+     -20.648619822796935,
+     20.054270506974774
+    ],
+    "bounded": false
+   }
+  },
+  {
+   "name": "closest_pt7_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      -0.2525759380664189,
+      -20.10880763638518,
+      19.018298541213202
+     ],
+     "v": [
+      0.03045767291135329,
+      -1.6435956163493302,
+      1.0591024808729088
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      -0.3262981819065092,
+      -19.760345509317247,
+      19.026748453308592
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt7_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -0.5051518761328379,
+     -40.21761527277036,
+     38.036597082426404,
+     2.0
+    ],
+    "qw": [
+     -0.3262981819065092,
+     -19.760345509317247,
+     19.026748453308592,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     -0.6689215485688522,
+     -17.879224383359258,
+     19.07264718580291,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -0.3262981819065092,
+      -19.760345509317247,
+      19.026748453308592
+     ],
+     "n": [
+      0.0737222438400903,
+      -0.34846212706793267,
+      -0.008449912095390033
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt8_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -0.3262981819065092,
+     -19.760345509317247,
+     19.026748453308592
+    ],
+    "b": [
+     -0.6689215485688522,
+     -17.879224383359258,
+     19.07264718580291
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     -0.3262981819065092,
+     -19.760345509317247,
+     19.026748453308592,
+     1.0
+    ],
+    "qw": [
+     -0.3344607742844261,
+     -8.939612191679629,
+     9.536323592901455,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt8_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     -0.2528076031107555,
+     -20.10779761067562,
+     19.018327728721825
+    ],
+    "a": [
+     -0.3262981819065092,
+     -19.760345509317247,
+     19.026748453308592
+    ],
+    "b": [
+     -0.6689215485688522,
+     -17.879224383359258,
+     19.07264718580291
+    ]
+   }
+  },
+  {
+   "name": "closest_pt8_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      -0.3262981819065092,
+      -19.760345509317247,
+      19.026748453308592
+     ],
+     "v": [
+      -0.342623366662343,
+      1.8811211259579892,
+      0.04589873249431875
+     ],
+     "bounded": false
+    },
+    "pt": [
+     -0.40219453853645376,
+     -19.384417128948424,
+     19.035877125510886
+    ]
+   }
+  },
+  {
+   "name": "closest_pt8_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      -0.3262981819065092,
+      -19.760345509317247,
+      19.026748453308592
+     ],
+     "n": [
+      -0.342623366662343,
+      1.8811211259579892,
+      0.04589873249431875
+     ]
+    },
+    "pt": [
+     -0.22211826515506564,
+     -21.75240325273451,
+     20.07740102208611
+    ],
+    "bounded": true
+   }
+  },
+  {
+   "name": "closest_pt8_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      -0.3262981819065092,
+      -19.760345509317247,
+      19.026748453308592
+     ],
+     "v": [
+      0.42417678317959057,
+      -1.8730602547206523,
+      -0.04828717786336867
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      -0.6689215485688522,
+      -17.879224383359258,
+      19.07264718580291
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt8_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -0.6525963638130184,
+     -39.520691018634494,
+     38.053496906617184,
+     2.0
+    ],
+    "qw": [
+     -0.6689215485688522,
+     -17.879224383359258,
+     19.07264718580291,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     -0.8375857346222633,
+     -20.648619822796935,
+     20.054270506974774,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -0.6689215485688522,
+      -17.879224383359258,
+      19.07264718580291
+     ],
+     "n": [
+      0.342623366662343,
+      -1.8811211259579892,
+      -0.04589873249431875
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt9_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -0.6689215485688522,
+     -17.879224383359258,
+     19.07264718580291
+    ],
+    "b": [
+     -0.8375857346222633,
+     -20.648619822796935,
+     20.054270506974774
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     -0.6689215485688522,
+     -17.879224383359258,
+     19.07264718580291,
+     1.0
+    ],
+    "qw": [
+     -0.41879286731113163,
+     -10.324309911398467,
+     10.027135253487387,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt9_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     -0.3265146310261884,
+     -19.7592999915767,
+     19.026773809915298
+    ],
+    "a": [
+     -0.6689215485688522,
+     -17.879224383359258,
+     19.07264718580291
+    ],
+    "b": [
+     -0.8375857346222633,
+     -20.648619822796935,
+     20.054270506974774
+    ]
+   }
+  },
+  {
+   "name": "closest_pt9_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      -0.6689215485688522,
+      -17.879224383359258,
+      19.07264718580291
+     ],
+     "v": [
+      -0.16866418605341105,
+      -2.7693954394376767,
+      0.9816233211718632
+     ],
+     "bounded": true
+    },
+    "pt": [
+     -1.0616429349692744,
+     -20.167126109553802,
+     20.02082373943756
+    ]
+   }
+  },
+  {
+   "name": "closest_pt9_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      -0.6689215485688522,
+      -17.879224383359258,
+      19.07264718580291
+     ],
+     "n": [
+      -0.16866418605341105,
+      -2.7693954394376767,
+      0.9816233211718632
+     ]
+    },
+    "pt": [
+     0.09787860127308134,
+     -21.6334057640379,
+     18.978461275445223
+    ],
+    "bounded": false
+   }
+  },
+  {
+   "name": "closest_pt9_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      -0.6689215485688522,
+      -17.879224383359258,
+      19.07264718580291
+     ],
+     "v": [
+      0.4161139454580967,
+      -2.228573227316364,
+      -0.05431945708108543
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      -0.8375857346222633,
+      -20.648619822796935,
+      20.054270506974774
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt9_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -1.3378430971377044,
+     -35.758448766718516,
+     38.14529437160582,
+     2.0
+    ],
+    "qw": [
+     -0.8375857346222633,
+     -20.648619822796935,
+     20.054270506974774,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     -0.22211826515506564,
+     -21.75240325273451,
+     20.07740102208611,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -0.8375857346222633,
+      -20.648619822796935,
+      20.054270506974774
+     ],
+     "n": [
+      0.16866418605341105,
+      2.7693954394376767,
+      -0.9816233211718632
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt10_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -0.8375857346222633,
+     -20.648619822796935,
+     20.054270506974774
+    ],
+    "b": [
+     -0.22211826515506564,
+     -21.75240325273451,
+     20.07740102208611
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     -0.8375857346222633,
+     -20.648619822796935,
+     20.054270506974774,
+     1.0
+    ],
+    "qw": [
+     -0.11105913257753282,
+     -10.876201626367255,
+     10.038700511043055,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt10_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     -0.40219453853645376,
+     -19.384417128948424,
+     19.035877125510886
+    ],
+    "a": [
+     -0.8375857346222633,
+     -20.648619822796935,
+     20.054270506974774
+    ],
+    "b": [
+     -0.22211826515506564,
+     -21.75240325273451,
+     20.07740102208611
+    ]
+   }
+  },
+  {
+   "name": "closest_pt10_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      -0.8375857346222633,
+      -20.648619822796935,
+      20.054270506974774
+     ],
+     "v": [
+      0.6154674694671977,
+      -1.1037834299375753,
+      0.02313051511133679
+     ],
+     "bounded": false
+    },
+    "pt": [
+     -1.158343495768524,
+     -19.95343872268017,
+     20.0059217689707
+    ]
+   }
+  },
+  {
+   "name": "closest_pt10_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      -0.8375857346222633,
+      -20.648619822796935,
+      20.054270506974774
+     ],
+     "n": [
+      0.6154674694671977,
+      -1.1037834299375753,
+      0.02313051511133679
+     ]
+    },
+    "pt": [
+     -0.2528076031107555,
+     -20.10779761067562,
+     19.018327728721825
+    ],
+    "bounded": true
+   }
+  },
+  {
+   "name": "closest_pt10_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      -0.8375857346222633,
+      -20.648619822796935,
+      20.054270506974774
+     ],
+     "v": [
+      0.5110711035960749,
+      0.8893198312202344,
+      -1.027496697059476
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      -0.22211826515506564,
+      -21.75240325273451,
+      20.07740102208611
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt10_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -1.6751714692445265,
+     -41.29723964559387,
+     40.10854101394955,
+     2.0
+    ],
+    "qw": [
+     -0.22211826515506564,
+     -21.75240325273451,
+     20.07740102208611,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     0.09787860127308134,
+     -21.6334057640379,
+     18.978461275445223,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -0.22211826515506564,
+      -21.75240325273451,
+      20.07740102208611
+     ],
+     "n": [
+      -0.6154674694671977,
+      1.1037834299375753,
+      -0.02313051511133679
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt11_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -0.22211826515506564,
+     -21.75240325273451,
+     20.07740102208611
+    ],
+    "b": [
+     0.09787860127308134,
+     -21.6334057640379,
+     18.978461275445223
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     -0.22211826515506564,
+     -21.75240325273451,
+     20.07740102208611,
+     1.0
+    ],
+    "qw": [
+     0.04893930063654067,
+     -10.81670288201895,
+     9.489230637722612,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt11_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     -1.0616429349692744,
+     -20.167126109553802,
+     20.02082373943756
+    ],
+    "a": [
+     -0.22211826515506564,
+     -21.75240325273451,
+     20.07740102208611
+    ],
+    "b": [
+     0.09787860127308134,
+     -21.6334057640379,
+     18.978461275445223
+    ]
+   }
+  },
+  {
+   "name": "closest_pt11_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      -0.22211826515506564,
+      -21.75240325273451,
+      20.07740102208611
+     ],
+     "v": [
+      0.31999686642814695,
+      0.11899748869661053,
+      -1.0989397466408874
+     ],
+     "bounded": true
+    },
+    "pt": [
+     -4.594157470164914,
+     -9.652863554299548,
+     19.29094927564143
+    ]
+   }
+  },
+  {
+   "name": "closest_pt11_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      -0.22211826515506564,
+      -21.75240325273451,
+      20.07740102208611
+     ],
+     "n": [
+      0.31999686642814695,
+      0.11899748869661053,
+      -1.0989397466408874
+     ]
+    },
+    "pt": [
+     -0.3265146310261884,
+     -19.7592999915767,
+     19.026773809915298
+    ],
+    "bounded": false
+   }
+  },
+  {
+   "name": "closest_pt11_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      -0.22211826515506564,
+      -21.75240325273451,
+      20.07740102208611
+     ],
+     "v": [
+      -0.18007627338138812,
+      2.3679861237860855,
+      -1.0415238965752245
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      0.09787860127308134,
+      -21.6334057640379,
+      18.978461275445223
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt11_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -0.4442365303101313,
+     -43.50480650546902,
+     40.15480204417222,
+     2.0
+    ],
+    "qw": [
+     0.09787860127308134,
+     -21.6334057640379,
+     18.978461275445223,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     -0.2528076031107555,
+     -20.10779761067562,
+     19.018327728721825,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      0.09787860127308134,
+      -21.6334057640379,
+      18.978461275445223
+     ],
+     "n": [
+      -0.31999686642814695,
+      -0.11899748869661053,
+      1.0989397466408874
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt12_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     0.09787860127308134,
+     -21.6334057640379,
+     18.978461275445223
+    ],
+    "b": [
+     -0.2528076031107555,
+     -20.10779761067562,
+     19.018327728721825
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     0.09787860127308134,
+     -21.6334057640379,
+     18.978461275445223,
+     1.0
+    ],
+    "qw": [
+     -0.12640380155537775,
+     -10.05389880533781,
+     9.509163864360913,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt12_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     -1.158343495768524,
+     -19.95343872268017,
+     20.0059217689707
+    ],
+    "a": [
+     0.09787860127308134,
+     -21.6334057640379,
+     18.978461275445223
+    ],
+    "b": [
+     -0.2528076031107555,
+     -20.10779761067562,
+     19.018327728721825
+    ]
+   }
+  },
+  {
+   "name": "closest_pt12_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      0.09787860127308134,
+      -21.6334057640379,
+      18.978461275445223
+     ],
+     "v": [
+      -0.35068620438383685,
+      1.5256081533622776,
+      0.03986645327660199
+     ],
+     "bounded": false
+    },
+    "pt": [
+     -0.8390871400009248,
+     -20.645564191951244,
+     20.05407058495214
+    ]
+   }
+  },
+  {
+   "name": "closest_pt12_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      0.09787860127308134,
+      -21.6334057640379,
+      18.978461275445223
+     ],
+     "n": [
+      -0.35068620438383685,
+      1.5256081533622776,
+      0.03986645327660199
+     ]
+    },
+    "pt": [
+     -0.40219453853645376,
+     -19.384417128948424,
+     19.035877125510886
+    ],
+    "bounded": true
+   }
+  },
+  {
+   "name": "closest_pt12_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      0.09787860127308134,
+      -21.6334057640379,
+      18.978461275445223
+     ],
+     "v": [
+      -1.1595215362423557,
+      1.4662796544840973,
+      1.0423624639923368
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      -0.2528076031107555,
+      -20.10779761067562,
+      19.018327728721825
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt12_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     0.1957572025461627,
+     -43.2668115280758,
+     37.95692255089045,
+     2.0
+    ],
+    "qw": [
+     -0.2528076031107555,
+     -20.10779761067562,
+     19.018327728721825,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     -0.3265146310261884,
+     -19.7592999915767,
+     19.026773809915298,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -0.2528076031107555,
+      -20.10779761067562,
+      19.018327728721825
+     ],
+     "n": [
+      0.35068620438383685,
+      -1.5256081533622776,
+      -0.03986645327660199
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt13_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -0.2528076031107555,
+     -20.10779761067562,
+     19.018327728721825
+    ],
+    "b": [
+     -0.3265146310261884,
+     -19.7592999915767,
+     19.026773809915298
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     -0.2528076031107555,
+     -20.10779761067562,
+     19.018327728721825,
+     1.0
+    ],
+    "qw": [
+     -0.1632573155130942,
+     -9.87964999578835,
+     9.513386904957649,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt13_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     -4.594157470164914,
+     -9.652863554299548,
+     19.29094927564143
+    ],
+    "a": [
+     -0.2528076031107555,
+     -20.10779761067562,
+     19.018327728721825
+    ],
+    "b": [
+     -0.3265146310261884,
+     -19.7592999915767,
+     19.026773809915298
+    ]
+   }
+  },
+  {
+   "name": "closest_pt13_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      -0.2528076031107555,
+      -20.10779761067562,
+      19.018327728721825
+     ],
+     "v": [
+      -0.07370702791543288,
+      0.3484976190989215,
+      0.008446081193472565
+     ],
+     "bounded": true
+    },
+    "pt": [
+     -0.22169184902399575,
+     -21.752883811327614,
+     20.07708482750489
+    ]
+   }
+  },
+  {
+   "name": "closest_pt13_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      -0.2528076031107555,
+      -20.10779761067562,
+      19.018327728721825
+     ],
+     "n": [
+      -0.07370702791543288,
+      0.3484976190989215,
+      0.008446081193472565
+     ]
+    },
+    "pt": [
+     -1.0616429349692744,
+     -20.167126109553802,
+     20.02082373943756
+    ],
+    "bounded": false
+   }
+  },
+  {
+   "name": "closest_pt13_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      -0.2528076031107555,
+      -20.10779761067562,
+      19.018327728721825
+     ],
+     "v": [
+      -0.9055358926577683,
+      0.1543588879954534,
+      0.9875940402488759
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      -0.3265146310261884,
+      -19.7592999915767,
+      19.026773809915298
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt13_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -0.505615206221511,
+     -40.21559522135124,
+     38.03665545744365,
+     2.0
+    ],
+    "qw": [
+     -0.3265146310261884,
+     -19.7592999915767,
+     19.026773809915298,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     -0.40219453853645376,
+     -19.384417128948424,
+     19.035877125510886,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -0.3265146310261884,
+      -19.7592999915767,
+      19.026773809915298
+     ],
+     "n": [
+      0.07370702791543288,
+      -0.3484976190989215,
+      -0.008446081193472565
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt14_vectors",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     -0.3265146310261884,
+     -19.7592999915767,
+     19.026773809915298
+    ],
+    "b": [
+     -0.40219453853645376,
+     -19.384417128948424,
+     19.035877125510886
+    ],
+    "alpha": -1.5,
+    "beta": 2.0,
+    "pw": [
+     -0.3265146310261884,
+     -19.7592999915767,
+     19.026773809915298,
+     1.0
+    ],
+    "qw": [
+     -0.20109726926822688,
+     -9.692208564474212,
+     9.517938562755443,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "closest_pt14_dist_seg",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     -0.8390871400009248,
+     -20.645564191951244,
+     20.05407058495214
+    ],
+    "a": [
+     -0.3265146310261884,
+     -19.7592999915767,
+     19.026773809915298
+    ],
+    "b": [
+     -0.40219453853645376,
+     -19.384417128948424,
+     19.035877125510886
+    ]
+   }
+  },
+  {
+   "name": "closest_pt14_project_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "project_pt_line",
+    "l": {
+     "p": [
+      -0.3265146310261884,
+      -19.7592999915767,
+      19.026773809915298
+     ],
+     "v": [
+      -0.07567990751026538,
+      0.37488286262827586,
+      0.009103315595588413
+     ],
+     "bounded": false
+    },
+    "pt": [
+     0.09787679346832802,
+     -21.633397717952313,
+     18.978461556867217
+    ]
+   }
+  },
+  {
+   "name": "closest_pt14_plane_ops",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      -0.3265146310261884,
+      -19.7592999915767,
+      19.026773809915298
+     ],
+     "n": [
+      -0.07567990751026538,
+      0.37488286262827586,
+      0.009103315595588413
+     ]
+    },
+    "pt": [
+     -1.158343495768524,
+     -19.95343872268017,
+     20.0059217689707
+    ],
+    "bounded": true
+   }
+  },
+  {
+   "name": "closest_pt14_isect_line_plane",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      -0.3265146310261884,
+      -19.7592999915767,
+      19.026773809915298
+     ],
+     "v": [
+      -4.267642839138726,
+      10.106436437277152,
+      0.26417546572613304
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      -0.40219453853645376,
+      -19.384417128948424,
+      19.035877125510886
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "closest_pt14_reflect",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4120 (my_test_surface_closest_point points)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     -0.6530292620523768,
+     -39.5185999831534,
+     38.053547619830596,
+     2.0
+    ],
+    "qw": [
+     -0.40219453853645376,
+     -19.384417128948424,
+     19.035877125510886,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     -1.0616429349692744,
+     -20.167126109553802,
+     20.02082373943756,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      -0.40219453853645376,
+      -19.384417128948424,
+      19.035877125510886
+     ],
+     "n": [
+      0.07567990751026538,
+      -0.37488286262827586,
+      -0.009103315595588413
+     ]
+    }
+   }
+  },
+  {
+   "name": "join_frame_0.0_3.0_to_world",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605 (my_test_reversed_line_join frames); source/SMLib/src/NL_SrfGeom.cpp:2471",
+   "inputs": {
+    "op": "transform",
+    "o1": [
+     0.0,
+     3.0,
+     0.0
+    ],
+    "x1": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y1": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "z1": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "o2": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x2": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y2": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "z2": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "join_frame_0.0_-3.0_to_world",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605 (my_test_reversed_line_join frames); source/SMLib/src/NL_SrfGeom.cpp:2471",
+   "inputs": {
+    "op": "transform",
+    "o1": [
+     0.0,
+     -3.0,
+     0.0
+    ],
+    "x1": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y1": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "z1": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "o2": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x2": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y2": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "z2": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "join_frame_0.0_5.0_to_world",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605 (my_test_reversed_line_join frames); source/SMLib/src/NL_SrfGeom.cpp:2471",
+   "inputs": {
+    "op": "transform",
+    "o1": [
+     0.0,
+     5.0,
+     0.0
+    ],
+    "x1": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y1": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "z1": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "o2": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x2": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y2": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "z2": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "join_frame_1.0_-1.0_to_world",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605 (my_test_reversed_line_join frames); source/SMLib/src/NL_SrfGeom.cpp:2471",
+   "inputs": {
+    "op": "transform",
+    "o1": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "x1": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y1": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "z1": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "o2": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x2": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y2": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "z2": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "join_line_isect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605 (my_test_reversed_line_join frames)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      -0.5,
+      2.0,
+      0.0
+     ],
+     "v": [
+      0.0,
+      6.0,
+      0.0
+     ],
+     "bounded": true
+    },
+    "l2": {
+     "p": [
+      -3.0,
+      5.0,
+      0.0
+     ],
+     "v": [
+      6.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "frame_rotated_45",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605 (my_test_reversed_line_join frames)",
+   "inputs": {
+    "op": "transform",
+    "o1": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "x1": [
+     0.7071067811865475,
+     0.7071067811865475,
+     0.0
+    ],
+    "y1": [
+     -0.7071067811865475,
+     0.7071067811865475,
+     0.0
+    ],
+    "z1": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "o2": [
+     -4.0,
+     0.5,
+     2.0
+    ],
+    "x2": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "y2": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "z2": [
+     0.0,
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "matrix_rows_vectors",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     1.0,
+     1.0,
+     2.0
+    ],
+    "b": [
+     2.0,
+     4.0,
+     -3.0
+    ],
+    "alpha": 9.0,
+    "beta": 1.0,
+    "pw": [
+     3.0,
+     6.0,
+     -5.0,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     1.0,
+     2.0,
+     3.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "matrix_rows_rotation",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "v": [
+     3.0,
+     6.0,
+     -5.0
+    ],
+    "al": 37.5
+   }
+  },
+  {
+   "name": "normalize_zero",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "alpha": 0.0,
+    "beta": 0.0,
+    "pw": [
+     0.0,
+     0.0,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     0.0,
+     0.0,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ]
+   }
+  },
+  {
+   "name": "normalize_subnormal",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     1e-170,
+     0.0,
+     0.0
+    ],
+    "b": [
+     1e-300,
+     1e-300,
+     0.0
+    ],
+    "alpha": 1.0,
+    "beta": 1.0,
+    "pw": [
+     1.0,
+     1.0,
+     1.0,
+     0.0
+    ],
+    "qw": [
+     1.0,
+     1.0,
+     1.7976931348623157e+308,
+     -1.0
+    ]
+   }
+  },
+  {
+   "name": "normalize_huge",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "vector_ops",
+    "a": [
+     1e+200,
+     1e+200,
+     0.0
+    ],
+    "b": [
+     1e+308,
+     0.0,
+     0.0
+    ],
+    "alpha": 1e+300,
+    "beta": -1e+300,
+    "pw": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "qw": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "rotation_zero_axis",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "al": 90.0
+   }
+  },
+  {
+   "name": "rotation_about_offset_x",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "rotation",
+    "p": [
+     0.0,
+     2.0,
+     -1.0
+    ],
+    "v": [
+     -4.0,
+     0.0,
+     0.0
+    ],
+    "al": -90.0
+   }
+  },
+  {
+   "name": "isect_zero_direction",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    },
+    "l2": {
+     "p": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "v": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "isect_skew",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "v": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "bounded": false
+    },
+    "l2": {
+     "p": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "bounded": false
+    }
+   }
+  },
+  {
+   "name": "isect_endpoint_exact",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "v": [
+      2.0,
+      0.0,
+      0.0
+     ],
+     "bounded": true
+    },
+    "l2": {
+     "p": [
+      2.0,
+      -1.0,
+      0.0
+     ],
+     "v": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "plane_parallel",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "v": [
+      1.0,
+      1.0,
+      0.0
+     ],
+     "bounded": false
+    },
+    "plane": {
+     "p": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      3.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_out_of_bounds",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.5
+     ],
+     "bounded": true
+    },
+    "plane": {
+     "p": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      3.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_zero_normal",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "plane_ops",
+    "plane": {
+     "p": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    "pt": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "bounded": true
+   }
+  },
+  {
+   "name": "seg_degenerate",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "a": [
+     2.0,
+     2.0,
+     2.0
+    ],
+    "b": [
+     2.0,
+     2.0,
+     2.00000005
+    ]
+   }
+  },
+  {
+   "name": "seg_before_start",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     -1.0,
+     1.0,
+     0.0
+    ],
+    "a": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "b": [
+     4.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "seg_after_end",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     5.0,
+     1.0,
+     0.0
+    ],
+    "a": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "b": [
+     4.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "seg_on_segment",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "a": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "b": [
+     4.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "seg_huge",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "dist_seg",
+    "p": [
+     1e+300,
+     -1e+300,
+     0.0
+    ],
+    "a": [
+     -1e+300,
+     0.0,
+     0.0
+    ],
+    "b": [
+     1e+300,
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "polygon_single_point",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "polygon",
+    "pts": [
+     [
+      1.0,
+      -2.0,
+      3.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cpolygon_empty",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "cpolygon",
+    "pts": []
+   }
+  },
+  {
+   "name": "net_single",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "net",
+    "rows": [
+     [
+      [
+       1.0,
+       2.0,
+       3.0
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reflect_2d_point_in_z_plane",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     1.0,
+     2.0,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     2.0,
+     4.0,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     3.0,
+     6.0,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "plane": {
+     "p": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      1e-07
+     ]
+    }
+   }
+  },
+  {
+   "name": "reflect_2d_point_tilted_plane",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     1.0,
+     2.0,
+     1.7976931348623157e+308,
+     2.0
+    ],
+    "qw": [
+     2.0,
+     4.0,
+     1.7976931348623157e+308,
+     2.0
+    ],
+    "rw": [
+     3.0,
+     6.0,
+     1.7976931348623157e+308,
+     2.0
+    ],
+    "plane": {
+     "p": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "colinear_coincident_4d",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "cpt_ops",
+    "pw": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "qw": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "rw": [
+     3.0,
+     6.0,
+     1.0,
+     1.0
+    ],
+    "plane": {
+     "p": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      1.0,
+      0.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "transform_degenerate_axes",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp (edge cases)",
+   "inputs": {
+    "op": "transform",
+    "o1": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "x1": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "y1": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "z1": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "o2": [
+     2.0,
+     2.0,
+     2.0
+    ],
+    "x2": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "y2": [
+     4.0,
+     5.0,
+     6.0
+    ],
+    "z2": [
+     7.0,
+     8.0,
+     9.0
+    ]
+   }
+  }
+ ]
+}

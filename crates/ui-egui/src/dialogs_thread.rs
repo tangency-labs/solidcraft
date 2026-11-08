@@ -13,9 +13,9 @@ use solidcraft_engine::doc::{
 use solidcraft_engine::{Sel, Session};
 
 use crate::dialogs::{Dialog, Kind, combo, edge_sel, face_sel, form_row, object_point, plane_sel, put, set_object_accepting};
-use crate::i18n::tr;
 use crate::selection::{Accept, EDGES, FACES, PLANES, SelInput};
 use crate::ui_kit::{choice_row, expr_row, hint_row, text_row};
+use solidcraft_ui_text::tr;
 
 /// Common metric pitch presets besides the coarse one, not an exhaustive catalogue of standard
 /// diameter/pitch pairs; the current pitch is included separately, custom pairs remain editable.
@@ -179,7 +179,7 @@ pub(crate) fn hole_rows(
                     (false, true) => "thread.drill_range",
                     (false, false) => "thread.drill_range_custom",
                 };
-                let tip = crate::i18n::format(id, &args);
+                let tip = solidcraft_ui_text::format(id, &args);
                 let mut text = drill.clone().unwrap_or_else(|| default.clone());
                 let (submitted, changed) = crate::ui_kit::text_field_tip(ui, &mut text, &default, &tip);
                 if changed {
@@ -434,7 +434,7 @@ pub(crate) fn rows(
     if !f.sizes().is_empty() {
         size_rows(ui, f, designation, suggested);
     }
-    let hint = crate::i18n::format("thread.fits_the_face", &[("example", &example(f))]);
+    let hint = solidcraft_ui_text::format("thread.fits_the_face", &[("example", &example(f))]);
     let (submitted, changed) = text_row(ui, "Designation", designation, &hint);
     enter |= submitted;
     if let Some(at) = crate::scenario::handle_at("dialog:Designation") {
@@ -767,7 +767,7 @@ mod contribution_tests {
         for label in ["Profile", "Size", "Nominal diameter", "Pitch", "Designation", "Tap drill diameter"] {
             let row = crate::scenario::rect_of(&format!("dialog:row:{label}")).unwrap();
             let control = crate::scenario::rect_of(&format!("dialog:control:{label}")).unwrap();
-            assert_eq!(row.height(), crate::theme::Tokens::get().control_height, "{label}");
+            assert_eq!(row.height(), solidcraft_theme::Tokens::get().control_height, "{label}");
             assert!(card.contains_rect(row) && row.contains_rect(control), "{label}: {row:?} {control:?} outside {card:?}");
         }
     }

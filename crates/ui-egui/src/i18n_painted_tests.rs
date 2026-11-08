@@ -3,6 +3,7 @@
 //! paints the English text even though the language has a translation; this sweep catches it
 //! wherever it happens on the surfaces it opens.
 
+use crate::i18n::LocaleNames as _;
 use std::collections::{BTreeMap, BTreeSet};
 
 use solidcraft_engine::Session;
@@ -72,7 +73,7 @@ fn design_names(app: &SolveApp) -> BTreeSet<String> {
 /// A text the language gives another message is its own word, not English: Romanian's Aspect
 /// (Appearance) is also the English Aspect of the Render Frame stage.
 fn english_leaks(language: &str, texts: &BTreeSet<String>, english: &BTreeMap<String, Vec<String>>, names: &BTreeSet<String>) -> Vec<String> {
-    let locale = crate::i18n::Locale::for_language(language);
+    let locale = solidcraft_ui_text::Locale::for_language(language);
     let own: BTreeSet<&str> = english
         .iter()
         .flat_map(|(text, ids)| ids.iter().map(move |id| (text.as_str(), locale.text(id))))
@@ -115,7 +116,7 @@ fn sweep(h: &mut Harness, language: &str) -> BTreeMap<&'static str, BTreeSet<Str
         seen.insert(name, painted(h));
     }
     h.app.ui.palette_open = false;
-    let title = crate::i18n::Locale::for_language(language).text("ui.preferences").to_string();
+    let title = solidcraft_ui_text::Locale::for_language(language).text("ui.preferences").to_string();
     for page in crate::prefs::PAGES {
         h.call("ui.prefs", serde_json::json!({"open": page}));
         h.frames(2);
@@ -147,6 +148,7 @@ fn sweep(h: &mut Harness, language: &str) -> BTreeMap<&'static str, BTreeSet<Str
 
 #[test]
 fn no_english_is_painted_where_the_language_has_a_translation() {
+    crate::i18n::install();
     let english = english_ids();
     let mut h = sample();
     let names = design_names(&h.app);
@@ -168,8 +170,9 @@ fn no_english_is_painted_where_the_language_has_a_translation() {
 /// is a word the language gives another message.
 #[test]
 fn the_sweep_reports_english_only_where_a_translation_exists() {
+    crate::i18n::install();
     let english = english_ids();
-    let locale = crate::i18n::Locale::for_language("ja");
+    let locale = solidcraft_ui_text::Locale::for_language("ja");
     let translated = locale.text("cmd.sketch_rectangle_center").to_string();
     assert_ne!(translated, "Center Rectangle");
     let texts: BTreeSet<String> =
@@ -179,7 +182,7 @@ fn the_sweep_reports_english_only_where_a_translation_exists() {
     assert_eq!(english_leaks("ja", &texts, &english, &names), vec!["Center Rectangle".to_string()]);
     // A word the language gives another message is its own, though English has a message with
     // the same letters: Romanian's Aspect is Appearance, English's Aspect is the Frame stage's.
-    let ro = crate::i18n::Locale::for_language("ro");
+    let ro = solidcraft_ui_text::Locale::for_language("ro");
     assert_eq!(ro.text("cmd.appearance_assign"), "Aspect");
     assert_ne!(ro.text("render.frame_aspect"), "Aspect");
     assert!(english_leaks("ro", &["Aspect".to_string()].into(), &english, &BTreeSet::new()).is_empty());

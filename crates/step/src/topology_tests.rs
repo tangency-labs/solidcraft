@@ -775,6 +775,43 @@ fn edited(edit: impl Fn(&str) -> String) -> Solids {
     read_solids(&parse(&text))
 }
 
+/// The cube with its first edge's LINE replaced by a CURVE_REPLICA of a line 7 mm lower, moved up
+/// by a transformation operator (what FreeCAD writes for a repeated edge).
+fn replica_edge(t: &str) -> String {
+    let at = t.find("=LINE('',#").expect("a line");
+    let (_, line_id) = t[..at].rsplit_once('#').expect("an id");
+    let tail = &t[at + "=LINE('',#".len()..];
+    let (point, tail) = tail.split_once(",#").expect("a vector");
+    let (vector, _) = tail.split_once(')').expect("the end");
+    let pt = t.split_once(&format!("#{point}=CARTESIAN_POINT('',(")).expect("the point").1;
+    let xyz: Vec<f64> = pt.split_once(')').unwrap().0.split(',').map(|v| v.parse().unwrap()).collect();
+    let replaced = t.replacen(&format!("#{line_id}=LINE('',#{point},#{vector})"), &format!("#{line_id}=CURVE_REPLICA('',#9003,#9004)"), 1);
+    format!(
+        "{replaced}#9001=CARTESIAN_POINT('',({},{},{}));#9002=CARTESIAN_POINT('',(0.,0.,7.));#9003=LINE('',#9001,#{vector});#9004=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',$,$,#9002,$,$);",
+        real(xyz[0]),
+        real(xyz[1]),
+        real(xyz[2] - 7.0)
+    )
+}
+
+#[test]
+fn an_edge_on_a_curve_replica_is_the_moved_curve() {
+    let plain = edited(str::to_string);
+    let moved = edited(|t| {
+        let edited = replica_edge(t);
+        assert!(edited.contains("CURVE_REPLICA"), "the edit did not apply");
+        edited
+    });
+    assert!(moved.failures.is_empty(), "{:?}", moved.failures);
+    assert_eq!(moved.solids.len(), 1);
+    let (a, b) = (&plain.solids[0].brep, &moved.solids[0].brep);
+    solidcraft_geom::brep::check::validate(b).unwrap();
+    assert_eq!(counts(a), counts(b));
+    // The replica's edge is the plain cube's edge: same curve, same interval.
+    assert_eq!(a.edges[0].curve, b.edges[0].curve);
+    assert_eq!(a.edges[0].interval, b.edges[0].interval);
+}
+
 #[test]
 fn hostile_topology_is_an_error_never_a_panic() {
     // Sanity: unedited, the cube reads.

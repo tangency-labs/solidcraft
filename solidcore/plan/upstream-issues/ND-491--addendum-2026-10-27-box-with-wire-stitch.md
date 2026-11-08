@@ -1,0 +1,5 @@
+Updates: ND-491
+
+#### ND-491 (update, 2026-10-27). Box with a wire edge and a shell vertex, stitched
+- **Trigger:** `sc_sweep_topology_sweep_body` body 0 (`SmApiCreateBox(origin, 4, 3, 2)` plus a shell vertex at (10,0,0) extended by a wire edge to (15,2,0) and a shell vertex at (-5,0,0)), translation (0,0,10), stitching on (`sweep.topology_sweep` case `nm_box_linear_z_stitch`). The whole-B-rep step sets the wire edge and shell vertex aside before the box part is stitched, so the stitch sees the same box as `nm_box_only_linear_z_stitch`.
+- **Confirmed:** yes. Fresh forked processes after varied parent allocations: 993/1000 succeed (3 regions, 15 faces, 33 edges, 22 vertices), 7/1000 return `SM_ERR`; with shuffled free lists in the child as well, 956/1000 and 44/1000. A probe printing the silhouette order and the `DoStitching` status shows each `SM_ERR` comes from the box stitch, under two distinct silhouette orders. With the silhouettes forced into the HCR insertion order (the Rust port's order), C++ returns `SM_ERR` in the stitch 20/20 for this body and for the box alone, and the difftest record agrees with Rust in every value.

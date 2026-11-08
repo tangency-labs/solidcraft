@@ -1,0 +1,547 @@
+{
+ "coverage": "Fillet/brepForFillet2.smb solid offsets (DoSolidOffset; rounded and extended corners, inset and outset, single shell faces 0-2), plus face 0 rounded outsets with the stitch/merge skipped. BuildOffsetOfFaceuse deletes offset faces whose lamina edges come closer than the distance to the original surface (SmTopologyIntersector::DeleteFaces); the port's deletion failed as a nested notification edit, kept three/five offset faces and at 11.2 looped forever in ResolveOverlappingProtoEdges.",
+ "cases": [
+  {
+   "name": "fillet2_f0_d0_in_rnd",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 5.6,
+     "member_approx_tol": 1e-05,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f0_d0_out_rnd",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 5.6,
+     "member_approx_tol": 1e-05,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f0_d1_in_rnd",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 11.2,
+     "member_approx_tol": 1e-05,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f0_d1_out_rnd",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 11.2,
+     "member_approx_tol": 1e-05,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f0_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 1.4,
+     "member_approx_tol": 1e-05,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f0_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 1.4,
+     "member_approx_tol": 1e-05,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f1_d0_in_rnd",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 5.6,
+     "member_approx_tol": 1e-05,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f1_d0_out_rnd",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 5.6,
+     "member_approx_tol": 1e-05,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f1_d1_in_rnd",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 11.2,
+     "member_approx_tol": 1e-05,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f1_d1_out_rnd",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 11.2,
+     "member_approx_tol": 1e-05,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f1_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 1.4,
+     "member_approx_tol": 1e-05,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f1_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 1.4,
+     "member_approx_tol": 1e-05,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f2_d0_in_rnd",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 5.6,
+     "member_approx_tol": 1e-05,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f2_d0_out_rnd",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 5.6,
+     "member_approx_tol": 1e-05,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f2_d1_in_rnd",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 11.2,
+     "member_approx_tol": 1e-05,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f2_d1_out_rnd",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 11.2,
+     "member_approx_tol": 1e-05,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f2_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 1.4,
+     "member_approx_tol": 1e-05,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f2_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 1.4,
+     "member_approx_tol": 1e-05,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f0_d0_out_rnd_unmerged",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 5.6,
+     "member_approx_tol": 1e-05,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true,
+     "skip_stitch_merge": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  },
+  {
+   "name": "fillet2_f0_d1_out_rnd_unmerged",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/brepForFillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 1e-05,
+    "config": {
+     "member_distance": 11.2,
+     "member_approx_tol": 1e-05,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true,
+     "skip_stitch_merge": true
+    }
+   },
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3790-3835 (BuildOffsetOfFaceuse lamina-edge face delete)"
+  }
+ ]
+}

@@ -6,7 +6,6 @@
 //! fork fixed in its own sources; each one turned on here says which fork commit it matches.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -108,10 +107,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_resolve_crossing_loops = true;
     f.offset_walls_touch_refused = true;
     f.offset_analytic_mate_edges = true;
-    f.precise_properties_split_at_surface_knots = true;
     f.nurb_cylinder_inside_out_frame = true;
     f.shell_inner_shell_of_statuses = true;
-    f.local_operation_offset_status = true;
     f.local_operation_refuses_loose_tangent_edges = true;
     f.torus_major_radius_from_origin = true;
     f.fillet_corner_sphere_from_four_arcs = true;
@@ -147,13 +144,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.torus_signed_gen_curve_interval = true;
     f.sheet_sweep_joins_profile_wires = true;
     f.point_solve_keeps_triangle_guess = true;
-    f.fillet_setback_from_start_vertex = true;
     f.imprint_trims_edge_to_proto_vertex = true;
     f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;
-    f.fillet_point_bigger_step_retry = true;
-    f.fillet_through_extended_rail_end = true;
     f.precise_properties_body_length_scale = true;
     f.offset_extension_from_base = true;
     f.corner_blend_stays_inside_neighbours = true;
@@ -166,7 +160,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.shell_empty_cavity_fails = true;
     f.fillet_refuse_ball_not_fitting = true;
     f.boolean_lists_virtual_surface_copies = true;
-    f.sphere_small_circle_not_touching = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
     f.ssi_singular_start_inside_direction = true;
@@ -174,11 +167,9 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_skips_faces_apart = true;
     f.uv_trim_checks_on_surface = true;
     f.loop_orientation_floor_from_loop_box = true;
-    f.offset_extends_cones_as_themselves = true;
     f.local_operation_box_holds_new_surfaces = true;
     f.uv_trim_joins_drop_pieces = true;
     f.shell_edges_on_analytics_exact = true;
-    f.ssi_no_reverse_of_empty_trace = true;
     f.ssi_pole_point_keeps_its_tangent = true;
     f.iso_curve_sliver_domain_is_degenerate = true;
     f.corner_blend_coons_patch_tangent_to_sides = true;
@@ -230,7 +221,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_cleanup_removes_input_slits = true;
     f.fillet_rail_end_on_continued_surface = true;
     f.glue_vertices_joins_every_region = true;
-    f.fillet_nx1_tangent_side_edge_same_convexity = true;
     f.fillet_removal_takes_ring_fillets = true;
     // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
     f.fillet_trim_inside_by_best_dot = true;
@@ -274,9 +264,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_keep_cavity_regions = true;
     f.offset_four_face_vertex_split = true;
     f.gap_samples_non_bspline_v_stride = true;
-    f.gap_array_append_updates_longest = true;
     f.imprint_skips_collapsed_definition = true;
-    f.precise_properties_trim_base_v = true;
     f.fillet_blend_curve_revolved_on_arc = true;
     f.temporary_radius_setup_errors = true;
     f.ellipse_step_interval_checks = true;
@@ -319,7 +307,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.circle_silhouette_perspective_center = true;
     f.ellipse_convert_to_2d_uses_both_axes = true;
     f.circle_offset_antiparallel_normal = true;
-    f.masked_array_uses_bit_shift = true;
     f.global_solver_identical_prefers_larger_when_maximizing = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.surface_point_solver_propagates_bbox_failure = true;
@@ -331,7 +318,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.crv_in_volume_mults_by_break_index = true;
     f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
     f.polar_box_region_to_arc_transposes_domain = true;
-    f.point_set_centroid_all_blocks = true;
     f.local_solve1d_unbounded_newton_step = true;
     f.composite_curve_bbox_segment_intervals = true;
     f.knot_vector_valid_requires_span = true;
@@ -339,14 +325,12 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.curve_property_gs_branch_bounds = true;
     f.volume_representational_end_continuities = true;
     f.integrator_propagates_failure = true;
-    f.precise_properties_span_end_from_below = true;
     f.offset_open_edge_second_trim_point = true;
     f.close_loop_relates_only_coincident_edges = true;
     f.ssi_split_curves_at_singular_points = true;
     f.surface_parallel_to_vector_checks = true;
     f.fillet_round_ends_at_tangent_continuation = true;
     f.geometric_g2_continuity = true;
-    f.hash_table_grow_preserves_removed_records = true;
     f.bend_volume_bbox_contains_wide_angle_and_inf_u = true;
     f.bend_volume_trim_param_box_across_period = true;
     f.point_set_tight_pbox_projects_points = true;
@@ -367,17 +351,12 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.fillet_surface_plane_curve_on_plane_equation = true;
     f.fillet_gn_section_generator = true;
-    f.face_trim_curves_kept_where_exact = true;
-    f.swap_uv_keeps_analytic_definition = true;
-    f.face_shrink_bound_on_knot = true;
     f.offset_updates_result_tolerances = true;
     f.cone_iso_circle_at_axial_height = true;
     f.boolean_coincident_strip_drops_crossing = true;
     f.fillet_overflow_trim_at_creases = true;
     f.fillet_section_end_trim_at_creases = true;
     f.fillet_refuse_mixed_corner_crossing_rails = true;
-    f.fillet_keep_features = true;
-    f.fillet_blend_corner = true;
     f.fillet_exact_arc_sections = true;
     f.fillet_exact_arc_spans = true;
     // Held back: see `HELD_BACK`.
@@ -385,11 +364,21 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cone_unbounded_parameterized_as_nurb = true;
     f.ellipse_open_arc_keeps_end_angle = true;
     f.fillet_round_as_definition = true;
-    f.fillet_round_on_round_as_definition = true;
     f.fillet_overflow_crease_along_edge = true;
     f.plane_first_torus_section_exact = true;
     f.keep_exact_pcurves = true;
     f.shell_one_construction = true;
+    f.approximate_surface_checks_every_row = true;
+    f.topological_vertex_has_only_edge_uses = true;
+    f.planar_section_face_tolerance = true;
+    f.face_swap_uv_transposes_trims = true;
+    f.closed_smooth_pole_tangent_limit = true;
+    // Held back: see `HELD_BACK`.
+    f.fillet_round_ends_on_outline = false;
+    f.fillet_setback_beside_curved_faces = true;
+    f.fillet_chamfer_corner = true;
+    f.brep_ray_classifies_current_trims = true;
+    f.revolution_frame_from_profile_origin = true;
     f
 }
 
@@ -399,29 +388,31 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// the fork doesn't have stays on, and where solidcore builds what SMLib refuses, a result right
 /// against its closed form is a win.
 ///
-/// `fillet_refuse_rounds_breaking_through` (WR-707, solidcore#2311): sound geometry refused. With it
-/// on, 11 rig cases that pass with it off, each graded against its closed form or invariants, are
-/// refused as breaking through the part (190-fillet-disc-rim-past-its-2mm-wall fails status 1001
-/// instead): every-hole-top-rim-r12-past-plate-bottom, 1080-chamfer-runs-into-openings-cut-by-them
-/// (3350, its closed form), 1080-fillet-notched-block-top-outline-r8,
-/// 324-fillet-over-hole-cut-by-overlong-cylinder, 324-fillet-over-hole-overlap,
-/// 5158-fillet-adjacent-plate-edges-as-thick-as-plate and the sloped and equal-slope basin rims of
-/// #1080 and #5835. A fix under the same flag is in progress on solidcore.
+/// `fillet_refuse_rounds_breaking_through` (WR-707, solidcore#2311): sound geometry refused. At
+/// solidcore 9856ffee5, with it on, the fillet rig's 1668-fillet-both-sides-of-thin-wall-r7 is
+/// refused as breaking through the wall into the hollow behind it ("the largest radius that fits is
+/// 6.828 mm"), where with it off it builds the closed form, 39509.938 (at 8ddce9016 it refused 11
+/// rig cases that pass with it off; at this pin the other 270 fillet rig cases come out as with it
+/// off).
+///
+/// `fillet_round_ends_on_outline` (WR-730, solidcore#2541): volumes wrong against their closed
+/// forms, and rounds too big for their faces built instead of refused. With it on, each of these
+/// passes with it off: `fillet_over_a_cliff` measures 721.832 against the closed form's 693.205;
+/// `a_round_wider_than_its_faces_overflows_onto_its_tangent_sides` 6125.719 against 6107.529;
+/// `taper_follows_the_room_along_the_edge` 4210.926 against 4195.579; the round larger than the
+/// cube in `hostile_inputs_are_errors` builds (4773.168 against the 1094.853 its refusal leaves),
+/// as do the fillets the CLI's `run_strict` and `json_out` tests need to fail; and
+/// `a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges`,
+/// `overflow_goes_first`, `corners_refuse_what_they_cannot_build` and
+/// `fillet_edge_removed_by_a_larger_overflowing_round_is_noted` are refused (too large, no room,
+/// status 1001), where with it off they build. Measured again at solidcore 9856ffee5: the same.
 #[cfg(test)]
-const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through"];
+const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through", "fillet_round_ends_on_outline"];
 
-/// How far apart two kernels' procedural blend serials start. A body keeps the serials of the
-/// kernel that made it and may be used on any other, whose memo of solved stations is keyed by
-/// serial alone: the ranges keep one definition's stations from answering for another's. A serial
-/// only names a definition, so which range one comes from changes no answer.
-pub(crate) const BLEND_SERIALS_PER_KERNEL: u64 = 1 << 40;
-
-/// A new kernel. Each takes the next range of blend serials, the first starting at 0.
+/// A new kernel, with this backend's fixes.
 fn fresh() -> Kernel {
-    static MADE: AtomicU64 = AtomicU64::new(0);
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = fixes();
-    k.blend_last_serial.set(MADE.fetch_add(1, Ordering::Relaxed).wrapping_mul(BLEND_SERIALS_PER_KERNEL));
     k
 }
 

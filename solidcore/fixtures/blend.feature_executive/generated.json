@@ -1,0 +1,2983 @@
+{
+ "cases": [
+  {
+   "name": "single_face_defillet_0",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       0
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_defillet_1",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       1
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_defillet_2",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       2
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_defillet_3",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       3
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_defillet_4",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       4
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_defillet_5",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       5
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_defillet_6",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_defillet_7",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       7
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_defillet_8",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_inset_cube_1x1fillet_0",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x1fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       0
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_inset_cube_1x1fillet_1",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x1fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       1
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_inset_cube_1x1fillet_2",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x1fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       2
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_inset_cube_1x1fillet_3",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x1fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       3
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_inset_cube_1x1fillet_4",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x1fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       4
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_inset_cube_1x1fillet_5",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x1fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       5
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_inset_cube_1x1fillet_6",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x1fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_inset_cube_1x1fillet_7",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x1fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       7
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_inset_cube_1x1fillet_8",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x1fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_inset_cube_1x1fillet_9",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x1fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_flathead_screw_top_0",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/flathead_screw_top.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       0
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_flathead_screw_top_1",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/flathead_screw_top.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       1
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_flathead_screw_top_2",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/flathead_screw_top.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       2
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_flathead_screw_top_3",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/flathead_screw_top.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       3
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_flathead_screw_top_4",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/flathead_screw_top.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       4
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_flathead_screw_top_5",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/flathead_screw_top.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       5
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_flathead_screw_top_6",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Defeature/flathead_screw_top.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_box_with_large_fillet_0",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       0
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_box_with_large_fillet_1",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       1
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_box_with_large_fillet_2",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       2
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_box_with_large_fillet_3",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       3
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_box_with_large_fillet_4",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       4
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_box_with_large_fillet_5",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       5
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_box_with_large_fillet_6",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_filleted_box_0",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       0
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_filleted_box_1",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       1
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_filleted_box_2",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       2
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_filleted_box_3",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       3
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_filleted_box_4",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       4
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_filleted_box_5",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       5
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_filleted_box_6",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_filleted_box_7",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       7
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_filleted_box_8",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_filleted_box_9",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_cyl_on_box_w_fillet_0",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       0
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_cyl_on_box_w_fillet_1",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       1
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_cyl_on_box_w_fillet_2",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       2
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_cyl_on_box_w_fillet_3",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       3
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_cyl_on_box_w_fillet_4",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       4
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_cyl_on_box_w_fillet_5",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       5
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_cyl_on_box_w_fillet_6",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_cyl_on_box_w_fillet_7",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       7
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_cyl_on_box_w_fillet_8",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_fillet1019_0",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       0
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_fillet1019_1",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       1
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_fillet1019_2",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       2
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_fillet1019_3",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       3
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_fillet1019_4",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       4
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_fillet1019_5",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       5
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_fillet1019_6",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_fillet1019_7",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       7
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_face_fillet1019_8",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces) + DoDefeature, every face alone",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_11_defillet_8",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ],
+      "base_rb": 1,
+      "feat_rb": 1
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_00_defillet_8",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ],
+      "base_rb": 0,
+      "feat_rb": 0
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_13_defillet_8",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ],
+      "base_rb": 1,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_22_defillet_8",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ],
+      "base_rb": 2,
+      "feat_rb": 2
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_03_defillet_8",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ],
+      "base_rb": 0,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_33_defillet_8",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ],
+      "base_rb": 3,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_11_box_with_large_fillet_6",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ],
+      "base_rb": 1,
+      "feat_rb": 1
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_00_box_with_large_fillet_6",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ],
+      "base_rb": 0,
+      "feat_rb": 0
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_13_box_with_large_fillet_6",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ],
+      "base_rb": 1,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_22_box_with_large_fillet_6",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ],
+      "base_rb": 2,
+      "feat_rb": 2
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_03_box_with_large_fillet_6",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ],
+      "base_rb": 0,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_33_box_with_large_fillet_6",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ],
+      "base_rb": 3,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_11_filleted_box_9",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9
+      ],
+      "base_rb": 1,
+      "feat_rb": 1
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_00_filleted_box_9",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9
+      ],
+      "base_rb": 0,
+      "feat_rb": 0
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_13_filleted_box_9",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9
+      ],
+      "base_rb": 1,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_22_filleted_box_9",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9
+      ],
+      "base_rb": 2,
+      "feat_rb": 2
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_03_filleted_box_9",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9
+      ],
+      "base_rb": 0,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rb_33_filleted_box_9",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, rb) rebuild type matrix",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9
+      ],
+      "base_rb": 3,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "ext_dist_1e-09_box_with_large_fillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp SetBaseExtDist/SetFeatureExtDist then DoDefeature",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "set_base_ext_dist",
+      "d": 1e-09
+     },
+     {
+      "op": "set_feature_ext_dist",
+      "d": 1e-09
+     },
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "ext_dist_0.001_box_with_large_fillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp SetBaseExtDist/SetFeatureExtDist then DoDefeature",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "set_base_ext_dist",
+      "d": 0.001
+     },
+     {
+      "op": "set_feature_ext_dist",
+      "d": 0.001
+     },
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "ext_dist_0.5_box_with_large_fillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp SetBaseExtDist/SetFeatureExtDist then DoDefeature",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "set_base_ext_dist",
+      "d": 0.5
+     },
+     {
+      "op": "set_feature_ext_dist",
+      "d": 0.5
+     },
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "ext_dist_10.0_box_with_large_fillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp SetBaseExtDist/SetFeatureExtDist then DoDefeature",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "set_base_ext_dist",
+      "d": 10.0
+     },
+     {
+      "op": "set_feature_ext_dist",
+      "d": 10.0
+     },
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "ext_dist_1000000.0_box_with_large_fillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp SetBaseExtDist/SetFeatureExtDist then DoDefeature",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "set_base_ext_dist",
+      "d": 1000000.0
+     },
+     {
+      "op": "set_feature_ext_dist",
+      "d": 1000000.0
+     },
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "ext_dist_0.0_box_with_large_fillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp SetBaseExtDist/SetFeatureExtDist then DoDefeature",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "set_base_ext_dist",
+      "d": 0.0
+     },
+     {
+      "op": "set_feature_ext_dist",
+      "d": 0.0
+     },
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "ext_dist_-1.0_box_with_large_fillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp SetBaseExtDist/SetFeatureExtDist then DoDefeature",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "set_base_ext_dist",
+      "d": -1.0
+     },
+     {
+      "op": "set_feature_ext_dist",
+      "d": -1.0
+     },
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "empty_faces_defillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature with no faces",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "all_faces_defillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature with every face",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "all_faces_filleted_box",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature with every face",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "no_ops_defillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature only",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "edges",
+      "face": 8,
+      "edges": [
+       14,
+       16
+      ]
+     }
+    ],
+    "ops": []
+   }
+  },
+  {
+   "name": "non_bisecting_edge_defillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(face, edges) with an edge not separating the face",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "edges",
+      "face": 8,
+      "edges": [
+       0
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "empty_edges_defillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(face, edges) with no edges",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "edges",
+      "face": 8,
+      "edges": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "empty_loops_defillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(face, loops) with no loops",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "loops",
+      "face": 8,
+      "loops": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "restore_before_defeature_defillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp RestoreFeatures before DoDefeature",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "edges",
+      "face": 8,
+      "edges": [
+       14,
+       16
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "restore"
+     },
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "defeature_twice_defillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp DoDefeature twice",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "edges",
+      "face": 8,
+      "edges": [
+       14,
+       16
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     },
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "restore_after_failed_rebuild_defillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp RestoreFeatures after a no-rebuild DoDefeature",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "edges",
+      "face": 8,
+      "edges": [
+       14,
+       16
+      ],
+      "base_rb": 0,
+      "feat_rb": 0
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     },
+     {
+      "op": "restore"
+     },
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "restore_redefeature_box_with_large_fillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp DoDefeature with no rebuild, RestoreFeatures, change types, DoDefeature",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ],
+      "base_rb": 0,
+      "feat_rb": 0
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     },
+     {
+      "op": "restore"
+     },
+     {
+      "op": "set_base_rb",
+      "t": 2
+     },
+     {
+      "op": "set_feature_rb",
+      "t": 3
+     },
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_filleted_box_rb23",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6,
+       7,
+       8,
+       9
+      ],
+      "base_rb": 2,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_filleted_box_rb11",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6,
+       7,
+       8,
+       9
+      ],
+      "base_rb": 1,
+      "feat_rb": 1
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_each_filleted_box",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp one feature per fillet face",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       7
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       9
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_filleted_box_pair_rb23",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6,
+       7
+      ],
+      "base_rb": 2,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_filleted_box_pair_rb11",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6,
+       7
+      ],
+      "base_rb": 1,
+      "feat_rb": 1
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_each_filleted_box_pair",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp one feature per fillet face",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       7
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_torii_fillet_rb23",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Fillet/torii_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       5,
+       6,
+       7,
+       8
+      ],
+      "base_rb": 2,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_torii_fillet_rb11",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Fillet/torii_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       5,
+       6,
+       7,
+       8
+      ],
+      "base_rb": 1,
+      "feat_rb": 1
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_each_torii_fillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp one feature per fillet face",
+   "inputs": {
+    "file": "Fillet/torii_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       5
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       7
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_torii_fillet_b_rb23",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Fillet/torii_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       11,
+       12
+      ],
+      "base_rb": 2,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_torii_fillet_b_rb11",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Fillet/torii_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       11,
+       12
+      ],
+      "base_rb": 1,
+      "feat_rb": 1
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_each_torii_fillet_b",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp one feature per fillet face",
+   "inputs": {
+    "file": "Fillet/torii_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       11
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       12
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_fillet1019_rb23",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       3,
+       6,
+       8
+      ],
+      "base_rb": 2,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_fillet1019_rb11",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       3,
+       6,
+       8
+      ],
+      "base_rb": 1,
+      "feat_rb": 1
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_each_fillet1019",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp one feature per fillet face",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       3
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       6
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_cyl_on_box_w_fillet_rb23",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       3,
+       8
+      ],
+      "base_rb": 2,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_cyl_on_box_w_fillet_rb11",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       3,
+       8
+      ],
+      "base_rb": 1,
+      "feat_rb": 1
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_each_cyl_on_box_w_fillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp one feature per fillet face",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       3
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       8
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_inset_cube_1x3fillet_rb23",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x3fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9,
+       10,
+       11
+      ],
+      "base_rb": 2,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_inset_cube_1x3fillet_rb11",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x3fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9,
+       10,
+       11
+      ],
+      "base_rb": 1,
+      "feat_rb": 1
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_each_inset_cube_1x3fillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp one feature per fillet face",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x3fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       10
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       11
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_inset_cube_3x1fillet_rb23",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Defeature/inset_cube_3x1fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9,
+       10,
+       11
+      ],
+      "base_rb": 2,
+      "feat_rb": 3
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_group_inset_cube_3x1fillet_rb11",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(fillet faces) + DoDefeature (sm_DefeatureFillets use)",
+   "inputs": {
+    "file": "Defeature/inset_cube_3x1fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9,
+       10,
+       11
+      ],
+      "base_rb": 1,
+      "feat_rb": 1
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_each_inset_cube_3x1fillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp one feature per fillet face",
+   "inputs": {
+    "file": "Defeature/inset_cube_3x1fillet.smb",
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       9
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       10
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       11
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_loop_circle_defillet_2",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(face, loops) with one loop of face 2's boundary",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "loops",
+      "face": 2,
+      "loops": [
+       {
+        "base_rb": 2,
+        "feat_rb": 3,
+        "edges": [
+         14
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_loop_outer_defillet_2",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(face, loops) with one loop of face 2's boundary",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "features": [
+     {
+      "kind": "loops",
+      "face": 2,
+      "loops": [
+       {
+        "base_rb": 2,
+        "feat_rb": 3,
+        "edges": [
+         2,
+         5,
+         4,
+         3
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "attributes_rebuild_fillets_defillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp attributes through PartitionFeature / ApplyPatches copies (SM_NO_COPY by behaviour)",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "attributes": [
+     {
+      "kind": "face",
+      "index": 8,
+      "id": 20001,
+      "behavior": 0
+     },
+     {
+      "kind": "edge",
+      "index": 14,
+      "id": 20002,
+      "behavior": 0
+     },
+     {
+      "kind": "edge",
+      "index": 16,
+      "id": 20003,
+      "behavior": 1
+     },
+     {
+      "kind": "face",
+      "index": 8,
+      "id": 20004,
+      "behavior": 4
+     },
+     {
+      "kind": "face",
+      "index": 0,
+      "id": 20005,
+      "behavior": 0
+     },
+     {
+      "kind": "edge",
+      "index": 0,
+      "id": 20006,
+      "behavior": 2
+     }
+    ],
+    "features": [
+     {
+      "kind": "edges",
+      "face": 8,
+      "edges": [
+       14,
+       16
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "attributes_add_by_faces_extrusion",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp attributes on feature faces, loop edges and base faces of three features",
+   "inputs": {
+    "file": "Defeature/extrusion.smb",
+    "attributes": [
+     {
+      "kind": "face",
+      "index": 10,
+      "id": 20001,
+      "behavior": 0
+     },
+     {
+      "kind": "face",
+      "index": 6,
+      "id": 20002,
+      "behavior": 1
+     },
+     {
+      "kind": "edge",
+      "index": 8,
+      "id": 20003,
+      "behavior": 0
+     },
+     {
+      "kind": "edge",
+      "index": 2,
+      "id": 20004,
+      "behavior": 3
+     },
+     {
+      "kind": "face",
+      "index": 0,
+      "id": 20005,
+      "behavior": 0
+     }
+    ],
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       10
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       6,
+       7,
+       8,
+       9
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       4
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "attributes_restore_defillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp attributes through RestoreFeature's copy back",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "attributes": [
+     {
+      "kind": "face",
+      "index": 8,
+      "id": 20001,
+      "behavior": 0
+     },
+     {
+      "kind": "edge",
+      "index": 14,
+      "id": 20002,
+      "behavior": 0
+     }
+    ],
+    "features": [
+     {
+      "kind": "edges",
+      "face": 8,
+      "edges": [
+       14,
+       16
+      ],
+      "base_rb": 0,
+      "feat_rb": 0
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     },
+     {
+      "op": "restore"
+     }
+    ]
+   }
+  },
+  {
+   "name": "attributes_inner_loop_extrusion",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp attributes through ExtSurfaceRebuild's inner-loop face copy",
+   "inputs": {
+    "file": "Defeature/extrusion.smb",
+    "attributes": [
+     {
+      "kind": "face",
+      "index": 9,
+      "id": 20001,
+      "behavior": 0
+     },
+     {
+      "kind": "face",
+      "index": 10,
+      "id": 20002,
+      "behavior": 0
+     },
+     {
+      "kind": "edge",
+      "index": 25,
+      "id": 20003,
+      "behavior": 0
+     }
+    ],
+    "features": [
+     {
+      "kind": "edges",
+      "face": 10,
+      "edges": [
+       8,
+       25
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  }
+ ]
+}

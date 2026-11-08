@@ -1,0 +1,2245 @@
+{
+ "cases": [
+  {
+   "name": "my_test_pseudobox",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:777",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "set_basis",
+      "r": 0,
+      "b": [
+       [
+        0.7071067811865476,
+        0.0,
+        -0.7071067811865476
+       ],
+       [
+        0.5,
+        0.7071067811865476,
+        0.5
+       ],
+       [
+        0.5,
+        -0.7071067811865476,
+        0.5
+       ]
+      ]
+     },
+     {
+      "cmd": "add_points",
+      "r": 0,
+      "pts": [
+       [
+        0.3,
+        0.2,
+        0.1
+       ],
+       [
+        0.2,
+        0.3,
+        0.4
+       ],
+       [
+        0.25,
+        0.4,
+        0.3
+       ]
+      ]
+     },
+     {
+      "cmd": "distance",
+      "r": 0,
+      "p": [
+       0.25,
+       0.3,
+       0.2
+      ]
+     },
+     {
+      "cmd": "distance",
+      "r": 0,
+      "p": [
+       6.0,
+       3.0,
+       0.5
+      ]
+     },
+     {
+      "cmd": "add_points",
+      "r": 1,
+      "pts": [
+       [
+        0.8,
+        0.2,
+        0.3
+       ],
+       [
+        0.9,
+        0.3,
+        0.4
+       ]
+      ]
+     },
+     {
+      "cmd": "disjoint",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "disjoint",
+      "r": 1,
+      "s": 0
+     },
+     {
+      "cmd": "add",
+      "r": 1,
+      "p": [
+       0.25,
+       0.4,
+       0.3
+      ]
+     },
+     {
+      "cmd": "disjoint",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "disjoint",
+      "r": 0,
+      "s": 1,
+      "proj": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "cmd": "aligned",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "aligned",
+      "r": 1,
+      "s": 1
+     },
+     {
+      "cmd": "contained_by",
+      "r": 0,
+      "s": 1,
+      "tol": 0.0
+     },
+     {
+      "cmd": "contained_by",
+      "r": 1,
+      "s": 0,
+      "tol": 0.0
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "measures",
+      "r": 0
+     },
+     {
+      "cmd": "corners",
+      "r": 0
+     },
+     {
+      "cmd": "edges",
+      "r": 0
+     },
+     {
+      "cmd": "planes",
+      "r": 0
+     },
+     {
+      "cmd": "bounded",
+      "r": 0
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 0
+     },
+     {
+      "cmd": "defined",
+      "r": 0
+     },
+     {
+      "cmd": "neg_volume",
+      "r": 0
+     },
+     {
+      "cmd": "point_sized",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 0
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 0
+     },
+     {
+      "cmd": "dump",
+      "r": 1
+     },
+     {
+      "cmd": "measures",
+      "r": 1
+     },
+     {
+      "cmd": "corners",
+      "r": 1
+     },
+     {
+      "cmd": "edges",
+      "r": 1
+     },
+     {
+      "cmd": "planes",
+      "r": 1
+     },
+     {
+      "cmd": "bounded",
+      "r": 1
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 1
+     },
+     {
+      "cmd": "defined",
+      "r": 1
+     },
+     {
+      "cmd": "neg_volume",
+      "r": 1
+     },
+     {
+      "cmd": "point_sized",
+      "r": 1,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 1,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 1,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 1
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "smtol_scaled_zero_box",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1648",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "set_intervals",
+      "r": 0,
+      "i": [
+       [
+        -20,
+        1
+       ],
+       [
+        -20,
+        1
+       ],
+       [
+        -20,
+        1
+       ]
+      ]
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 0
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "circumscribe_axis_cycle_quirk",
+   "upstream_ref": "source/SMLib/src/SmExtent3d.cpp:129",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "from_basis_intervals",
+      "r": 0,
+      "b": [
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "i": [
+       [
+        1,
+        2
+       ],
+       [
+        3,
+        5
+       ],
+       [
+        -7,
+        -6
+       ]
+      ]
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 0
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 0
+     },
+     {
+      "cmd": "corners",
+      "r": 0
+     },
+     {
+      "cmd": "from_basis_intervals",
+      "r": 1,
+      "b": [
+       [
+        0,
+        -1,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        -1
+       ]
+      ],
+      "i": [
+       [
+        1,
+        2
+       ],
+       [
+        3,
+        5
+       ],
+       [
+        -7,
+        -6
+       ]
+      ]
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 1
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 1
+     },
+     {
+      "cmd": "from_basis_intervals",
+      "r": 2,
+      "b": [
+       [
+        0.7071067811865476,
+        0.0,
+        -0.7071067811865476
+       ],
+       [
+        0.5,
+        0.7071067811865476,
+        0.5
+       ],
+       [
+        0.5,
+        -0.7071067811865476,
+        0.5
+       ]
+      ],
+      "i": [
+       [
+        1,
+        2
+       ],
+       [
+        3,
+        5
+       ],
+       [
+        -7,
+        -6
+       ]
+      ]
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 2
+     },
+     {
+      "cmd": "set_unbounded",
+      "r": 2
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 2
+     },
+     {
+      "cmd": "bounded",
+      "r": 2
+     },
+     {
+      "cmd": "set_interval",
+      "r": 1,
+      "idx": 2,
+      "ivl": [
+       -1234567.0,
+       4
+      ]
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 1
+     },
+     {
+      "cmd": "bounded",
+      "r": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "axis_box_lines",
+   "upstream_ref": "source/SMLib/src/SmPseudoBox.cpp:910",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "from_extent",
+      "r": 0,
+      "e": [
+       0,
+       0,
+       0,
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "cmd": "line",
+      "r": 0,
+      "p": [
+       -1,
+       1,
+       1
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "line",
+      "r": 0,
+      "p": [
+       -1,
+       1,
+       1
+      ],
+      "v": [
+       -2,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "line",
+      "r": 0,
+      "p": [
+       0,
+       3,
+       3
+      ],
+      "v": [
+       1,
+       -1,
+       0
+      ]
+     },
+     {
+      "cmd": "line",
+      "r": 0,
+      "p": [
+       0,
+       3,
+       4
+      ],
+      "v": [
+       1,
+       -1,
+       0
+      ]
+     },
+     {
+      "cmd": "line",
+      "r": 0,
+      "p": [
+       1,
+       2,
+       3
+      ],
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "line",
+      "r": 0,
+      "p": [
+       0.5,
+       0.5,
+       0.5
+      ],
+      "v": [
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "line",
+      "r": 0,
+      "p": [
+       0.5,
+       0.5,
+       9
+      ],
+      "v": [
+       0,
+       0,
+       1e-13
+      ]
+     },
+     {
+      "cmd": "line",
+      "r": 1,
+      "p": [
+       0.5,
+       0.5,
+       9
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "invert",
+      "r": 0,
+      "p": [
+       0.5,
+       1,
+       1.5
+      ]
+     },
+     {
+      "cmd": "classify",
+      "r": 0,
+      "p": [
+       0,
+       2,
+       1.5
+      ],
+      "tol": 1e-12
+     },
+     {
+      "cmd": "classify",
+      "r": 0,
+      "p": [
+       -1e-13,
+       2.5,
+       -3
+      ],
+      "tol": 1e-12
+     },
+     {
+      "cmd": "contains",
+      "r": 0,
+      "p": [
+       1,
+       2,
+       3.0000001
+      ],
+      "tol": 1e-06
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "n": [
+       0.5,
+       0.25,
+       1.0
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "measures",
+      "r": 0
+     },
+     {
+      "cmd": "corners",
+      "r": 0
+     },
+     {
+      "cmd": "edges",
+      "r": 0
+     },
+     {
+      "cmd": "planes",
+      "r": 0
+     },
+     {
+      "cmd": "bounded",
+      "r": 0
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 0
+     },
+     {
+      "cmd": "defined",
+      "r": 0
+     },
+     {
+      "cmd": "neg_volume",
+      "r": 0
+     },
+     {
+      "cmd": "point_sized",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 0
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "distance_branches",
+   "upstream_ref": "source/SMLib/src/SmPseudoBox.cpp:772",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "set_basis",
+      "r": 0,
+      "b": [
+       [
+        0.7071067811865476,
+        0.0,
+        -0.7071067811865476
+       ],
+       [
+        0.5,
+        0.7071067811865476,
+        0.5
+       ],
+       [
+        0.5,
+        -0.7071067811865476,
+        0.5
+       ]
+      ]
+     },
+     {
+      "cmd": "set_intervals",
+      "r": 0,
+      "i": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        2
+       ],
+       [
+        -1,
+        1
+       ]
+      ]
+     },
+     {
+      "cmd": "distance",
+      "r": 0,
+      "p": [
+       0.1,
+       0.1,
+       0.1
+      ]
+     },
+     {
+      "cmd": "distance",
+      "r": 0,
+      "p": [
+       5,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "distance",
+      "r": 0,
+      "p": [
+       5,
+       5,
+       0
+      ]
+     },
+     {
+      "cmd": "distance",
+      "r": 0,
+      "p": [
+       5,
+       5,
+       5
+      ]
+     },
+     {
+      "cmd": "distance",
+      "r": 0,
+      "p": [
+       -5,
+       -5,
+       -5
+      ]
+     },
+     {
+      "cmd": "distance",
+      "r": 1,
+      "p": [
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "set_basis",
+      "r": 2,
+      "b": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0.6,
+        0.8,
+        0
+       ],
+       [
+        0.2,
+        0.3,
+        0.9
+       ]
+      ]
+     },
+     {
+      "cmd": "set_intervals",
+      "r": 2,
+      "i": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "cmd": "distance",
+      "r": 2,
+      "p": [
+       3,
+       -2,
+       4
+      ]
+     },
+     {
+      "cmd": "distance",
+      "r": 2,
+      "p": [
+       -3,
+       0.5,
+       0.3
+      ]
+     },
+     {
+      "cmd": "invert",
+      "r": 2,
+      "p": [
+       3,
+       -2,
+       4
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "measures",
+      "r": 2
+     },
+     {
+      "cmd": "corners",
+      "r": 2
+     },
+     {
+      "cmd": "edges",
+      "r": 2
+     },
+     {
+      "cmd": "planes",
+      "r": 2
+     },
+     {
+      "cmd": "bounded",
+      "r": 2
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 2
+     },
+     {
+      "cmd": "defined",
+      "r": 2
+     },
+     {
+      "cmd": "neg_volume",
+      "r": 2
+     },
+     {
+      "cmd": "point_sized",
+      "r": 2,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 2,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 2,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 2
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "project_axis_box",
+   "upstream_ref": "source/SMLib/src/SmPseudoBox.cpp:2159",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "from_extent",
+      "r": 0,
+      "e": [
+       0,
+       0,
+       0,
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "cmd": "project",
+      "r": 0,
+      "t": 1,
+      "proj": {
+       "kind": "parallel",
+       "point": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "vec": [
+        0,
+        0,
+        1
+       ],
+       "aux": [
+        0,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "cmd": "dump",
+      "r": 1
+     },
+     {
+      "cmd": "measures",
+      "r": 1
+     },
+     {
+      "cmd": "corners",
+      "r": 1
+     },
+     {
+      "cmd": "edges",
+      "r": 1
+     },
+     {
+      "cmd": "planes",
+      "r": 1
+     },
+     {
+      "cmd": "bounded",
+      "r": 1
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 1
+     },
+     {
+      "cmd": "defined",
+      "r": 1
+     },
+     {
+      "cmd": "neg_volume",
+      "r": 1
+     },
+     {
+      "cmd": "point_sized",
+      "r": 1,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 1,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 1,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 1
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 1
+     },
+     {
+      "cmd": "project",
+      "r": 0,
+      "t": 2,
+      "proj": {
+       "kind": "perspective",
+       "point": [
+        0,
+        0,
+        -1
+       ],
+       "vec": [
+        0,
+        0,
+        1
+       ],
+       "aux": [
+        0.5,
+        1,
+        10
+       ]
+      }
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "measures",
+      "r": 2
+     },
+     {
+      "cmd": "corners",
+      "r": 2
+     },
+     {
+      "cmd": "edges",
+      "r": 2
+     },
+     {
+      "cmd": "planes",
+      "r": 2
+     },
+     {
+      "cmd": "bounded",
+      "r": 2
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 2
+     },
+     {
+      "cmd": "defined",
+      "r": 2
+     },
+     {
+      "cmd": "neg_volume",
+      "r": 2
+     },
+     {
+      "cmd": "point_sized",
+      "r": 2,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 2,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 2,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 2
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 2
+     },
+     {
+      "cmd": "project",
+      "r": 0,
+      "t": 3,
+      "proj": {
+       "kind": "rotation",
+       "point": [
+        0.2,
+        -0.3,
+        0
+       ],
+       "vec": [
+        0,
+        0,
+        1
+       ],
+       "aux": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "cmd": "dump",
+      "r": 3
+     },
+     {
+      "cmd": "measures",
+      "r": 3
+     },
+     {
+      "cmd": "corners",
+      "r": 3
+     },
+     {
+      "cmd": "edges",
+      "r": 3
+     },
+     {
+      "cmd": "planes",
+      "r": 3
+     },
+     {
+      "cmd": "bounded",
+      "r": 3
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 3
+     },
+     {
+      "cmd": "defined",
+      "r": 3
+     },
+     {
+      "cmd": "neg_volume",
+      "r": 3
+     },
+     {
+      "cmd": "point_sized",
+      "r": 3,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 3,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 3,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 3
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 3
+     },
+     {
+      "cmd": "project_disjoint",
+      "r": 0,
+      "s": 3,
+      "proj": {
+       "kind": "parallel",
+       "point": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "vec": [
+        0,
+        1,
+        0
+       ],
+       "aux": [
+        0,
+        0,
+        0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "project_rotated_box_rotation",
+   "upstream_ref": "source/SMLib/src/SmPseudoBox.cpp:2312",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "set_basis",
+      "r": 0,
+      "b": [
+       [
+        0.7071067811865476,
+        0.0,
+        -0.7071067811865476
+       ],
+       [
+        0.5,
+        0.7071067811865476,
+        0.5
+       ],
+       [
+        0.5,
+        -0.7071067811865476,
+        0.5
+       ]
+      ]
+     },
+     {
+      "cmd": "set_intervals",
+      "r": 0,
+      "i": [
+       [
+        1,
+        3
+       ],
+       [
+        -1,
+        2
+       ],
+       [
+        0.5,
+        1
+       ]
+      ]
+     },
+     {
+      "cmd": "project",
+      "r": 0,
+      "t": 1,
+      "proj": {
+       "kind": "rotation",
+       "point": [
+        0.1,
+        0,
+        0.2
+       ],
+       "vec": [
+        0,
+        0.7071067811865476,
+        0.7071067811865476
+       ],
+       "aux": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "cmd": "project",
+      "r": 0,
+      "t": 0,
+      "proj": {
+       "kind": "rotation",
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "vec": [
+        0,
+        0,
+        1
+       ],
+       "aux": [
+        0.7071067811865476,
+        0.7071067811865476,
+        0
+       ]
+      }
+     },
+     {
+      "cmd": "dump",
+      "r": 1
+     },
+     {
+      "cmd": "measures",
+      "r": 1
+     },
+     {
+      "cmd": "corners",
+      "r": 1
+     },
+     {
+      "cmd": "edges",
+      "r": 1
+     },
+     {
+      "cmd": "planes",
+      "r": 1
+     },
+     {
+      "cmd": "bounded",
+      "r": 1
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 1
+     },
+     {
+      "cmd": "defined",
+      "r": 1
+     },
+     {
+      "cmd": "neg_volume",
+      "r": 1
+     },
+     {
+      "cmd": "point_sized",
+      "r": 1,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 1,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 1,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 1
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 1
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "measures",
+      "r": 0
+     },
+     {
+      "cmd": "corners",
+      "r": 0
+     },
+     {
+      "cmd": "edges",
+      "r": 0
+     },
+     {
+      "cmd": "planes",
+      "r": 0
+     },
+     {
+      "cmd": "bounded",
+      "r": 0
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 0
+     },
+     {
+      "cmd": "defined",
+      "r": 0
+     },
+     {
+      "cmd": "neg_volume",
+      "r": 0
+     },
+     {
+      "cmd": "point_sized",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 0
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 0
+     },
+     {
+      "cmd": "project_disjoint",
+      "r": 0,
+      "s": 1,
+      "proj": {
+       "kind": "rotation",
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "vec": [
+        0,
+        0,
+        1
+       ],
+       "aux": [
+        1,
+        0,
+        0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "project_make_ortho_failure",
+   "upstream_ref": "source/SMLib/src/SmPseudoBox.cpp:2289",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "from_basis_intervals",
+      "r": 0,
+      "b": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "i": [
+       [
+        -1e+70,
+        1e+70
+       ],
+       [
+        -1e+70,
+        1e+70
+       ],
+       [
+        0,
+        1e+70
+       ]
+      ]
+     },
+     {
+      "cmd": "defined",
+      "r": 0
+     },
+     {
+      "cmd": "set_basis",
+      "r": 1,
+      "b": [
+       [
+        0.7071067811865476,
+        0.0,
+        -0.7071067811865476
+       ],
+       [
+        0.5,
+        0.7071067811865476,
+        0.5
+       ],
+       [
+        0.5,
+        -0.7071067811865476,
+        0.5
+       ]
+      ]
+     },
+     {
+      "cmd": "project",
+      "r": 0,
+      "t": 1,
+      "proj": {
+       "kind": "parallel",
+       "point": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "vec": [
+        0,
+        0,
+        1
+       ],
+       "aux": [
+        0,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "cmd": "dump",
+      "r": 1
+     },
+     {
+      "cmd": "project",
+      "r": 0,
+      "t": 2,
+      "proj": {
+       "kind": "rotation",
+       "point": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "vec": [
+        0,
+        0,
+        1
+       ],
+       "aux": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "disjoint",
+      "r": 0,
+      "s": 1,
+      "proj": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "p": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "invert",
+      "r": 0,
+      "p": [
+       1,
+       2,
+       3
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "inside_out_box",
+   "upstream_ref": "source/SMLib/src/SmPseudoBox.cpp:833",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "distance",
+      "r": 0,
+      "p": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "cmd": "line",
+      "r": 0,
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "set_basis",
+      "r": 0,
+      "b": [
+       [
+        0.7071067811865476,
+        0.0,
+        -0.7071067811865476
+       ],
+       [
+        0.5,
+        0.7071067811865476,
+        0.5
+       ],
+       [
+        0.5,
+        -0.7071067811865476,
+        0.5
+       ]
+      ]
+     },
+     {
+      "cmd": "distance",
+      "r": 0,
+      "p": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "measures",
+      "r": 0
+     },
+     {
+      "cmd": "corners",
+      "r": 0
+     },
+     {
+      "cmd": "edges",
+      "r": 0
+     },
+     {
+      "cmd": "planes",
+      "r": 0
+     },
+     {
+      "cmd": "bounded",
+      "r": 0
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 0
+     },
+     {
+      "cmd": "defined",
+      "r": 0
+     },
+     {
+      "cmd": "neg_volume",
+      "r": 0
+     },
+     {
+      "cmd": "point_sized",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 0
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "singular_and_unscaled_bases",
+   "upstream_ref": "source/SMLib/src/SmPseudoBox.cpp:653",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "set_basis",
+      "r": 0,
+      "b": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        1,
+        1,
+        0
+       ]
+      ]
+     },
+     {
+      "cmd": "set_basis",
+      "r": 0,
+      "b": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        0,
+        3,
+        0
+       ],
+       [
+        0,
+        0,
+        0.5
+       ]
+      ]
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 0
+     },
+     {
+      "cmd": "set_basis",
+      "r": 1,
+      "b": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        0
+       ],
+       [
+        0,
+        1,
+        1
+       ]
+      ]
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 1
+     },
+     {
+      "cmd": "aligned",
+      "r": 1,
+      "s": 0
+     },
+     {
+      "cmd": "set_basis",
+      "r": 2,
+      "b": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        1e-13
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 2
+     },
+     {
+      "cmd": "add_points",
+      "r": 1,
+      "pts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        1
+       ],
+       [
+        2,
+        -1,
+        0.5
+       ]
+      ]
+     },
+     {
+      "cmd": "union",
+      "r": 1,
+      "s": 0,
+      "t": 2,
+      "b": [
+       [
+        0.7071067811865476,
+        0.0,
+        -0.7071067811865476
+       ],
+       [
+        0.5,
+        0.7071067811865476,
+        0.5
+       ],
+       [
+        0.5,
+        -0.7071067811865476,
+        0.5
+       ]
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "union",
+      "r": 1,
+      "s": 1,
+      "t": 1,
+      "b": [
+       [
+        1.0,
+        0,
+        0
+       ],
+       [
+        0,
+        1.0,
+        0
+       ],
+       [
+        0,
+        0,
+        1.0
+       ]
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 1
+     },
+     {
+      "cmd": "expand",
+      "r": 1,
+      "d": 0.25
+     },
+     {
+      "cmd": "dump",
+      "r": 1
+     },
+     {
+      "cmd": "assign_extent",
+      "r": 3,
+      "e": [
+       1,
+       1,
+       1,
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 3
+     },
+     {
+      "cmd": "assign_extent",
+      "r": 3,
+      "e": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "init_basis",
+      "r": 3
+     },
+     {
+      "cmd": "init",
+      "r": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 1
+     },
+     {
+      "cmd": "measures",
+      "r": 1
+     },
+     {
+      "cmd": "corners",
+      "r": 1
+     },
+     {
+      "cmd": "edges",
+      "r": 1
+     },
+     {
+      "cmd": "planes",
+      "r": 1
+     },
+     {
+      "cmd": "bounded",
+      "r": 1
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 1
+     },
+     {
+      "cmd": "defined",
+      "r": 1
+     },
+     {
+      "cmd": "neg_volume",
+      "r": 1
+     },
+     {
+      "cmd": "point_sized",
+      "r": 1,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 1,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 1,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 1
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "flat_boxes",
+   "upstream_ref": "source/SMLib/src/SmPseudoBox.cpp:1190",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "set_basis",
+      "r": 0,
+      "b": [
+       [
+        0.7071067811865476,
+        0.0,
+        -0.7071067811865476
+       ],
+       [
+        0.5,
+        0.7071067811865476,
+        0.5
+       ],
+       [
+        0.5,
+        -0.7071067811865476,
+        0.5
+       ]
+      ]
+     },
+     {
+      "cmd": "add_points",
+      "r": 0,
+      "pts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        1e-14,
+        0
+       ],
+       [
+        0.5,
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "cmd": "point_sized",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 0,
+      "tol": 0.5
+     },
+     {
+      "cmd": "planar",
+      "r": 0,
+      "tol": 0.1
+     },
+     {
+      "cmd": "add_points",
+      "r": 1,
+      "pts": [
+       [
+        1,
+        1,
+        1
+       ]
+      ]
+     },
+     {
+      "cmd": "point_sized",
+      "r": 1,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "add_points",
+      "r": 2,
+      "pts": [
+       [
+        1,
+        1,
+        1
+       ],
+       [
+        3,
+        1,
+        1
+       ]
+      ]
+     },
+     {
+      "cmd": "linear",
+      "r": 2,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 2,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "measures",
+      "r": 0
+     },
+     {
+      "cmd": "corners",
+      "r": 0
+     },
+     {
+      "cmd": "edges",
+      "r": 0
+     },
+     {
+      "cmd": "planes",
+      "r": 0
+     },
+     {
+      "cmd": "bounded",
+      "r": 0
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 0
+     },
+     {
+      "cmd": "defined",
+      "r": 0
+     },
+     {
+      "cmd": "neg_volume",
+      "r": 0
+     },
+     {
+      "cmd": "point_sized",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 0,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 0
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 0
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "measures",
+      "r": 2
+     },
+     {
+      "cmd": "corners",
+      "r": 2
+     },
+     {
+      "cmd": "edges",
+      "r": 2
+     },
+     {
+      "cmd": "planes",
+      "r": 2
+     },
+     {
+      "cmd": "bounded",
+      "r": 2
+     },
+     {
+      "cmd": "axis_aligned",
+      "r": 2
+     },
+     {
+      "cmd": "defined",
+      "r": 2
+     },
+     {
+      "cmd": "neg_volume",
+      "r": 2
+     },
+     {
+      "cmd": "point_sized",
+      "r": 2,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "linear",
+      "r": 2,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "planar",
+      "r": 2,
+      "tol": 1e-12
+     },
+     {
+      "cmd": "circumscribe",
+      "r": 2
+     },
+     {
+      "cmd": "scaled_zero",
+      "r": 2
+     }
+    ]
+   }
+  }
+ ]
+}
