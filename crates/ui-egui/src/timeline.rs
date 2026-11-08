@@ -13,8 +13,8 @@ use solidcraft_engine::doc::{
 use solidcraft_engine::schema::edit::PlaybackAction;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit::Item;
+use solidcraft_theme::Tokens;
 
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
 /// empty design. All orientations reach the same rollback command.
@@ -945,7 +945,7 @@ pub(crate) fn panel_inline(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32) {
     let t = Tokens::get();
-    let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
+    let accent = solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab);
     let r = ui.max_rect();
     let p = ui.painter().clone();
     let n = app.session.doc.features.len();
@@ -1141,7 +1141,7 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
                     reference: false,
                     ink: sketch_state.and_then(|state| state.ink(&t)),
                     // A dragged feature takes the colour of its drop bar.
-                    accent: if drag == Some(Drag::Feature(*id)) { crate::theme::TabAccent::for_tab(&t, "SKETCH") } else { accent },
+                    accent: if drag == Some(Drag::Feature(*id)) { solidcraft_theme::TabAccent::for_tab(&t, "SKETCH") } else { accent },
                 }
                 .paint(&p, br, crate::ui_kit::HistoryStyle::Bottom);
                 if floating && at + 1 == marker {
@@ -2817,8 +2817,8 @@ mod tests {
     fn floating_strip_has_only_history_text_and_accents_the_last_done_chip_and_marker() {
         let mut h = two_boxes(false);
         h.app.ui.tab = "SURFACE".into();
-        let t = crate::theme::Tokens::get();
-        let accent = crate::theme::TabAccent::for_tab(&t, "SURFACE");
+        let t = solidcraft_theme::Tokens::get();
+        let accent = solidcraft_theme::TabAccent::for_tab(&t, "SURFACE");
         for marker_position in [None, Some(1), Some(0)] {
             h.app.session.doc_mut().marker = marker_position;
             let marker_index = marker_position.unwrap_or(2);

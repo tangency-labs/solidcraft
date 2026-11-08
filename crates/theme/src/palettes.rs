@@ -1,6 +1,21 @@
-//! Original light and dark palette values. Compiled by the UI theme boundary.
-use crate::theme::{AnalysisColors, IconColors, Tokens};
+//! Original light and dark palette values.
+use crate::{IconColors, Tokens};
 use egui::Color32;
+use solidcraft_color::AnalysisColors;
+
+/// The primary (`active-3`) strokes, light then dark, that the tokens share with SolidCraft's icon artwork
+/// (`assets/icons/ui/design/palette.toml`, including its colour vision variants). ui-egui's icon tests hold them equal.
+pub mod icon_strokes {
+    pub const SKETCH_PRIMARY: [[u8; 3]; 2] = [[5, 127, 69], [18, 141, 69]];
+    pub const CONSTRAINT_PRIMARY: [[u8; 3]; 2] = [[202, 71, 61], [193, 99, 88]];
+    pub const CONSTRUCTION_PRIMARY: [[u8; 3]; 2] = [[156, 86, 0], [167, 93, 0]];
+    pub const SKETCH_RED_GREEN: [[u8; 3]; 2] = [[29, 125, 82], [29, 127, 137]];
+    pub const CONSTRUCTION_RED_GREEN: [[u8; 3]; 2] = [[185, 115, 0], [167, 93, 0]];
+    pub const CONSTRAINT_RED_GREEN: [[u8; 3]; 2] = [[175, 64, 56], [193, 99, 88]];
+    pub const CONSTRUCTION_BLUE_YELLOW: [[u8; 3]; 2] = [[185, 115, 0], [195, 125, 0]];
+    pub const CONSTRAINT_BLUE_YELLOW: [[u8; 3]; 2] = [[175, 64, 56], [133, 85, 74]];
+}
+use icon_strokes as strokes;
 
 const fn icon_primary(rgb: [u8; 3]) -> Color32 {
     Color32::from_rgb(rgb[0], rgb[1], rgb[2])
@@ -17,7 +32,7 @@ impl Tokens {
             nav_tip_key_border: Color32::from_rgba_unmultiplied_const(128, 140, 160, 153),
             nav_field: Color32::from_rgb(255, 255, 255),
 
-            borders: crate::theme::Borders::LEGACY,
+            borders: crate::Borders::LEGACY,
             file_dim: Color32::from_rgb(58, 70, 86),
             file_recovery_well: Color32::from_rgb(247, 226, 184),
             file_action_height: 32.0,
@@ -118,7 +133,7 @@ impl Tokens {
             text_dim: Color32::from_rgb(110, 116, 128),
             accent: Color32::from_rgb(38, 120, 218),
             accent_soft: Color32::from_rgb(214, 230, 250),
-            sketch_accent: icon_primary(crate::icon_svg::SKETCH_PRIMARY[0]),
+            sketch_accent: icon_primary(strokes::SKETCH_PRIMARY[0]),
             // Icon palette active-3 ramps; these accents have no compiled constants yet.
             surface_accent: Color32::from_rgb(164, 80, 0),
             mesh_accent: Color32::from_rgb(130, 103, 0),
@@ -171,7 +186,7 @@ impl Tokens {
             axis_y: Color32::from_rgb(60, 170, 60),
             axis_z: Color32::from_rgb(60, 100, 230),
             construction_plane: Color32::from_rgba_unmultiplied_const(249, 184, 134, 70),
-            construction_geom: icon_primary(crate::icon_svg::CONSTRUCTION_PRIMARY[0]),
+            construction_geom: icon_primary(strokes::CONSTRUCTION_PRIMARY[0]),
             body: Color32::from_rgb(176, 186, 198),
             body_edge: Color32::from_rgb(40, 44, 52),
             manipulator: Color32::from_rgb(40, 110, 220),
@@ -214,7 +229,7 @@ impl Tokens {
             profile_fill: Color32::from_rgba_unmultiplied_const(255, 196, 120, 70),
             glyph_bg: Color32::WHITE,
             glyph_edge: Color32::from_rgb(190, 110, 100),
-            glyph_text: icon_primary(crate::icon_svg::CONSTRAINT_PRIMARY[0]),
+            glyph_text: icon_primary(strokes::CONSTRAINT_PRIMARY[0]),
             overlay: Color32::from_rgba_unmultiplied_const(255, 255, 255, 235),
             rubber_band: Color32::from_rgb(30, 120, 230),
             app_bar_text: Color32::from_rgb(230, 234, 242),
@@ -338,7 +353,7 @@ impl Tokens {
         t.text_dim = Color32::from_rgb(148, 155, 168);
         t.accent = Color32::from_rgb(58, 136, 238);
         t.accent_soft = Color32::from_rgb(42, 70, 110);
-        t.sketch_accent = icon_primary(crate::icon_svg::SKETCH_PRIMARY[1]);
+        t.sketch_accent = icon_primary(strokes::SKETCH_PRIMARY[1]);
         t.surface_accent = Color32::from_rgb(149, 104, 45);
         t.mesh_accent = Color32::from_rgb(133, 113, 0);
         t.form_accent = Color32::from_rgb(123, 99, 166);
@@ -398,7 +413,7 @@ impl Tokens {
         t.pref_ok = Color32::from_rgb(127, 209, 174);
         t.pref_ok_fill = Color32::from_rgb(31, 58, 49);
         t.pref_disabled = Color32::from_rgb(138, 148, 163);
-        t.construction_geom = icon_primary(crate::icon_svg::CONSTRUCTION_PRIMARY[1]);
+        t.construction_geom = icon_primary(strokes::CONSTRUCTION_PRIMARY[1]);
         t.error = Color32::from_rgb(240, 100, 96);
         t.sketch_conflict = t.error;
         t.warning = Color32::from_rgb(236, 170, 70);
@@ -429,7 +444,7 @@ impl Tokens {
         t.chip = Color32::from_rgb(59, 101, 168);
         t.glyph_bg = Color32::from_rgb(44, 50, 60);
         t.glyph_edge = Color32::from_rgb(200, 130, 120);
-        t.glyph_text = icon_primary(crate::icon_svg::CONSTRAINT_PRIMARY[1]);
+        t.glyph_text = icon_primary(strokes::CONSTRAINT_PRIMARY[1]);
         t.overlay = Color32::from_rgba_unmultiplied_const(34, 38, 46, 240);
         t.rubber_band = Color32::from_rgb(92, 160, 255);
         t.timeline_item = Color32::from_rgb(52, 58, 70);
@@ -472,8 +487,8 @@ impl Tokens {
         if !dark {
             t.form_success = Color32::from_rgb(39, 88, 78);
         }
-        t.construction_geom = icon_primary(crate::icon_svg::CONSTRUCTION_RED_GREEN[dark as usize]);
-        t.glyph_text = icon_primary(crate::icon_svg::CONSTRAINT_RED_GREEN[dark as usize]);
+        t.construction_geom = icon_primary(strokes::CONSTRUCTION_RED_GREEN[dark as usize]);
+        t.glyph_text = icon_primary(strokes::CONSTRAINT_RED_GREEN[dark as usize]);
         // A deeper red keeps conflicting sketch geometry (#7244) apart from the orange
         // construction and centerline lines and the crimson lost links for a red-green loss.
         t.sketch_conflict = Color32::from_rgb(195, 35, 30);
@@ -483,14 +498,14 @@ impl Tokens {
         if dark {
             t.bend_up = Color32::from_rgb(110, 165, 255);
             t.bend_down = Color32::from_rgb(240, 180, 70);
-            t.sketch_accent = icon_primary(crate::icon_svg::SKETCH_RED_GREEN[1]);
+            t.sketch_accent = icon_primary(strokes::SKETCH_RED_GREEN[1]);
         } else {
             t.sketch_projected = Color32::from_rgb(205, 120, 215);
             t.sketch_locked = Color32::from_rgb(60, 150, 120);
             t.timeline_item_error = Color32::from_rgb(232, 196, 170);
             t.bend_up = Color32::from_rgb(30, 100, 210);
             t.bend_down = Color32::from_rgb(200, 120, 0);
-            t.sketch_accent = icon_primary(crate::icon_svg::SKETCH_RED_GREEN[0]);
+            t.sketch_accent = icon_primary(strokes::SKETCH_RED_GREEN[0]);
         }
         t
     }
@@ -505,8 +520,8 @@ impl Tokens {
         // Green and blue status lights merge for tritan vision; use rose for working.
         t.agent_busy = Color32::from_rgb(232, 150, 190);
         t.preview_sketch = Color32::from_rgb(125, 180, 105);
-        t.glyph_text = icon_primary(crate::icon_svg::CONSTRAINT_BLUE_YELLOW[dark as usize]);
-        t.construction_geom = icon_primary(crate::icon_svg::CONSTRUCTION_BLUE_YELLOW[dark as usize]);
+        t.glyph_text = icon_primary(strokes::CONSTRAINT_BLUE_YELLOW[dark as usize]);
+        t.construction_geom = icon_primary(strokes::CONSTRUCTION_BLUE_YELLOW[dark as usize]);
         // Conflicting sketch geometry (#7244) apart from the lost links and the construction and
         // centerline lines for a blue-yellow loss: darker on the light view, lighter on the dark.
         t.sketch_conflict = if dark { Color32::from_rgb(255, 170, 160) } else { Color32::from_rgb(165, 15, 30) };

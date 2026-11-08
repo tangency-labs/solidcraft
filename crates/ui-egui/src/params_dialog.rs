@@ -249,7 +249,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     .reset_scroll(d.reset_scroll);
     let panel = if side == crate::frame::Side::Left {
         let available = crate::sketch_palette::room_left_of(app, ctx, viewport);
-        panel.width((crate::theme::Tokens::get().form_card_width * 3.0).min(available))
+        panel.width((solidcraft_theme::Tokens::get().form_card_width * 3.0).min(available))
     } else {
         panel
     };
@@ -307,8 +307,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 let name_floor = visible
                     .iter()
                     .map(|r| ui_kit::ContentWidth::name(ui, &r.name))
-                    .fold(crate::theme::Tokens::get().form_label_width, f32::max)
-                    .min(crate::theme::Tokens::get().form_card_width);
+                    .fold(solidcraft_theme::Tokens::get().form_label_width, f32::max)
+                    .min(solidcraft_theme::Tokens::get().form_card_width);
                 let Sections { favorites, users, groups } = sections(&visible, d.sort);
                 if !favorites.is_empty() {
                     ui_kit::section_count(ui, "favorites", "Favorites", true, Some(favorites.len()), |ui| {
@@ -320,7 +320,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 ui_kit::section(ui, "models", "Model Parameters", true, |ui| {
                     ui.scope(|ui| {
-                        ui.spacing_mut().indent = crate::theme::Tokens::get().space_14;
+                        ui.spacing_mut().indent = solidcraft_theme::Tokens::get().space_14;
                         ui.indent("model_groups", |ui| {
                             let layout = GroupLayout {
                                 revision: app.session.revision,
@@ -474,10 +474,10 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
     // Name keeps a larger share and a shared content floor so long identifiers stay readable
     // and every section's columns line up (#8533, #8551 review). Full window/column resize is #5097.
     let columns = [
-        Column::new("", 0.0).min_content_width(crate::theme::Tokens::get().space_24 * 3.0),
+        Column::new("", 0.0).min_content_width(solidcraft_theme::Tokens::get().space_24 * 3.0),
         Column::new("Name", 2.0).flex().min_content_width(name_floor),
         Column::new("Unit", 0.65).min_content_width(
-            ui_kit::ContentWidth::dropdown(ui, &units).max(crate::theme::Tokens::get().space_24 * 3.0 + crate::theme::Tokens::get().space_6),
+            ui_kit::ContentWidth::dropdown(ui, &units).max(solidcraft_theme::Tokens::get().space_24 * 3.0 + solidcraft_theme::Tokens::get().space_6),
         ),
         Column::new("Expression", 1.5).flex(),
         Column::new("Value", 1.1).flex(),

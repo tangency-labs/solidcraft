@@ -16,7 +16,7 @@ use egui::Color32;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::theme::{IconColors, Tokens};
+use solidcraft_theme::{IconColors, Tokens};
 
 /// The `format` tag of a theme file.
 pub const FORMAT: &str = "solidcraft-theme/1";
@@ -311,8 +311,8 @@ impl ThemeFile {
 }
 
 /// Strictly bounded strokes shared by file imports and direct preference updates.
-pub(crate) fn parse_borders(values: &BTreeMap<String, Value>) -> Result<crate::theme::Borders, String> {
-    use crate::theme::{Bevel, Borders, InsetBorder};
+pub(crate) fn parse_borders(values: &BTreeMap<String, Value>) -> Result<solidcraft_theme::Borders, String> {
+    use solidcraft_theme::{Bevel, Borders, InsetBorder};
     if values.len() > 7 {
         return Err("`borders` has more than seven roles".into());
     }
@@ -614,12 +614,12 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
 fn parse_tabs(v: Option<&Value>) -> Result<BTreeMap<String, BTreeMap<String, Value>>, String> {
     let Some(v) = v else { return Ok(BTreeMap::new()) };
     let tabs = v.as_object().ok_or("`tabs` must be an object")?;
-    if tabs.len() > crate::theme::TAB_NAMES.len() {
+    if tabs.len() > solidcraft_theme::TAB_NAMES.len() {
         return Err("`tabs` has too many entries".into());
     }
     let mut parsed = BTreeMap::new();
     for (tab, surfaces) in tabs {
-        if !crate::theme::TAB_NAMES.contains(&tab.as_str()) {
+        if !solidcraft_theme::TAB_NAMES.contains(&tab.as_str()) {
             return Err(format!("`tabs.{tab}` is not a ribbon tab"));
         }
         let surfaces = surfaces.as_object().ok_or_else(|| format!("`tabs.{tab}` must be an object"))?;
@@ -1207,7 +1207,7 @@ fn resolve_base(theme: &ThemeFile) -> Tokens {
 /// text, not its base's fixed blue rail and grey cards (#4868). Each ink is whichever candidate
 /// reads best on the fills it sits on.
 fn file_view_from_theme(t: &mut Tokens, dark: bool, set: impl Fn(&str) -> bool) {
-    use crate::theme::contrast_ratio;
+    use solidcraft_theme::contrast_ratio;
     let fallback = t.text;
     let best = |inks: &[Color32], fills: &[Color32]| {
         let worst = |ink: Color32| fills.iter().map(|f| contrast_ratio(ink, *f)).fold(f64::INFINITY, f64::min);
@@ -1568,8 +1568,8 @@ mod tests {
             let file = tab_fixture(base);
             assert_eq!(from_value(&export_file(&file)).unwrap(), file);
             let mut source = export_file(&file);
-            source["tabs"] = json!(crate::theme::TAB_NAMES.iter().map(|tab| (*tab, json!({"panel":"#18202aff"}))).collect::<BTreeMap<_, _>>());
-            assert_eq!(from_value(&source).unwrap().tabs.len(), crate::theme::TAB_NAMES.len());
+            source["tabs"] = json!(solidcraft_theme::TAB_NAMES.iter().map(|tab| (*tab, json!({"panel":"#18202aff"}))).collect::<BTreeMap<_, _>>());
+            assert_eq!(from_value(&source).unwrap().tabs.len(), solidcraft_theme::TAB_NAMES.len());
             for (tabs, offending) in [
                 (json!(null), "tabs"),
                 (json!([]), "tabs"),
@@ -1600,7 +1600,7 @@ mod tests {
             let file = tab_fixture(base);
             let defaults = BTreeMap::new();
             let base = resolve_with(&file, &defaults);
-            for tab in crate::theme::TAB_NAMES {
+            for tab in solidcraft_theme::TAB_NAMES {
                 let mut want = base;
                 if let Some(surfaces) = file.tabs.get(*tab) {
                     for (key, value) in surfaces {
@@ -1609,7 +1609,7 @@ mod tests {
                 }
                 let effective = resolve_for_tab(&file, &defaults, Some(tab));
                 assert_eq!(effective, want, "{tab}");
-                assert_eq!(crate::theme::TabAccent::for_tab(&effective, tab), crate::theme::TabAccent::for_tab(&base, tab));
+                assert_eq!(solidcraft_theme::TabAccent::for_tab(&effective, tab), solidcraft_theme::TabAccent::for_tab(&base, tab));
                 let off = BTreeMap::from([("tab_colours".into(), OptionValue::Bool(false))]);
                 assert_eq!(resolve_for_tab(&file, &off, Some(tab)), resolve_with(&file, &off));
             }
@@ -1625,7 +1625,7 @@ mod tests {
             let off = BTreeMap::from([("tab_colours".into(), OptionValue::Bool(false))]);
             let mut without_tabs = file.clone();
             without_tabs.tabs.clear();
-            for tab in crate::theme::TAB_NAMES {
+            for tab in solidcraft_theme::TAB_NAMES {
                 assert_eq!(resolve_for_tab(file, &off, Some(tab)), resolve_with(file, &off), "{} {tab}: tabs off", file.id);
                 assert_eq!(resolve_for_tab(&without_tabs, &BTreeMap::new(), Some(tab)), resolve(file), "{} {tab}: no tables", file.id);
                 assert_eq!(
@@ -2014,7 +2014,7 @@ mod tests {
 
     #[test]
     fn theme_options_opacity_contrast_protects_text_at_40_over_viewport_extremes() {
-        use crate::theme::{composite, contrast_ratio};
+        use solidcraft_theme::{composite, contrast_ratio};
         for base in ["light", "dark"] {
             let file = from_value(&json!({"format":FORMAT,"name":"Contrast","base":base,
                 "options":[{"id":"opacity","type":"range","default":40}]}))
@@ -2172,7 +2172,7 @@ mod tests {
 
     #[test]
     fn border_roles_roundtrip_on_either_base_and_preserve_legacy_defaults() {
-        use crate::theme::{BorderRole, Borders};
+        use solidcraft_theme::{BorderRole, Borders};
         let settings = json!({
             "primary":{"width":4,"color":"#ffffff"}, "secondary":{"width":1.5,"color":"#aabbcc","pattern":"dotted"},
             "container":{"width":1,"color":"#a8c8ed"},
@@ -2219,11 +2219,11 @@ mod tests {
             assert!(from_value(&json!({"format":FORMAT,"name":"Bad","base":"dark","borders":settings})).is_err(), "{settings}");
         }
         let file = ThemeFile { borders: BTreeMap::from([("primary".into(), json!({"width":1e100,"color":"#ffffff"}))]), ..Default::default() };
-        assert_eq!(resolve(&file).borders, crate::theme::Borders::LEGACY);
+        assert_eq!(resolve(&file).borders, solidcraft_theme::Borders::LEGACY);
         assert!(parse_borders(&BTreeMap::from([("primary".into(), json!({"width":null,"color":"#ffffff"}))])).is_err());
         assert_eq!(resolve(find("blueprint", &[]).unwrap()).borders.primary.unwrap().color, Color32::WHITE);
         for id in ["gruvbox-dark", "gruvbox-light"] {
-            assert_eq!(resolve(find(id, &[]).unwrap()).borders, crate::theme::Borders::LEGACY);
+            assert_eq!(resolve(find(id, &[]).unwrap()).borders, solidcraft_theme::Borders::LEGACY);
         }
     }
 
@@ -2285,7 +2285,7 @@ mod tests {
 
     #[test]
     fn shipped_themes_have_readable_distinct_workspace_colours_and_icon_palettes() {
-        use crate::theme::{TabAccent, contrast_ratio};
+        use solidcraft_theme::{TabAccent, contrast_ratio};
         assert_eq!(builtin().len(), BUILTIN.len(), "all shipped themes must be valid");
         for file in builtin() {
             let gruvbox = matches!(file.id.as_str(), "gruvbox-dark" | "gruvbox-light");
@@ -2375,7 +2375,7 @@ mod tests {
             (t.glyph_text, t.glyph_bg),
             (t.dialog_label, t.dialog_body),
         ] {
-            assert_eq!(crate::theme::contrast_ratio(fg, bg), 21.0, "{id}: {fg:?} on {bg:?}");
+            assert_eq!(solidcraft_theme::contrast_ratio(fg, bg), 21.0, "{id}: {fg:?} on {bg:?}");
         }
         assert_eq!((t.viewport_top, t.viewport_bottom, t.body), (paper, paper, paper), "{id}");
         assert_eq!((t.selected_bg, t.body_selected), (ink, ink), "{id}");
@@ -2416,7 +2416,7 @@ mod tests {
                 assert_eq!(tokens.viewport_top, parse_color(tops[index]).unwrap(), "{id}: {contrast}");
                 assert_eq!(tokens.viewport_bottom, parse_color(bottoms[index]).unwrap(), "{id}: {contrast}");
                 assert_eq!(export_icon_palette(resolve_icon_palette(file, &options))["ink"], inks[index], "{id}: {contrast}");
-                assert_eq!(tokens.borders, crate::theme::Borders::LEGACY);
+                assert_eq!(tokens.borders, solidcraft_theme::Borders::LEGACY);
                 assert_eq!(resolve_with(&from_value(&export_file(file)).unwrap(), &options), tokens);
                 assert_eq!(resolve_icon_palette(&from_value(&export_file(file)).unwrap(), &options), resolve_icon_palette(file, &options));
             }
@@ -2487,7 +2487,7 @@ mod tests {
 
     #[test]
     fn onyx_options_compose_and_keep_small_text_readable() {
-        use crate::theme::{TabAccent, composite, contrast_ratio};
+        use solidcraft_theme::{TabAccent, composite, contrast_ratio};
         let file = find("onyx", &[]).unwrap();
         let ordinary = resolve(file);
         for contrast in ["soft", "defined"] {
@@ -2566,7 +2566,7 @@ mod tests {
 
     #[test]
     fn surface_brightness_is_explicit_continuous_and_precedes_opacity_protection() {
-        use crate::theme::{composite, contrast_ratio};
+        use solidcraft_theme::{composite, contrast_ratio};
         let file = find("onyx", &[]).unwrap();
         let source = export_file(file);
         let index = file.options.iter().position(|option| option.id == "brightness").unwrap();
@@ -2828,8 +2828,8 @@ mod tests {
             assert_eq!(tab.axis_x, original.axis_x);
             for tokens in [overlay, tab] {
                 for background in [Color32::BLACK, Color32::WHITE] {
-                    let ground = crate::theme::composite(tokens.panel, background);
-                    assert!(crate::theme::contrast_ratio(crate::theme::composite(tokens.text, ground), ground) >= 4.5);
+                    let ground = solidcraft_theme::composite(tokens.panel, background);
+                    assert!(solidcraft_theme::contrast_ratio(solidcraft_theme::composite(tokens.text, ground), ground) >= 4.5);
                 }
             }
         }
@@ -2950,7 +2950,7 @@ mod tests {
             // (Solarized Light's text on its soft accent is 4.29:1): a derived colour can't do
             // better than the theme itself.
             let own = [t.text, t.form_ink, t.accent, t.on_accent];
-            let floor = |fill: Color32| own.iter().map(|i| crate::theme::contrast_ratio(*i, fill)).fold(0.0, f64::max).min(4.5) - 1e-6;
+            let floor = |fill: Color32| own.iter().map(|i| solidcraft_theme::contrast_ratio(*i, fill)).fold(0.0, f64::max).min(4.5) - 1e-6;
             for (ink, fill) in [
                 (t.file_rail_ink, t.file_rail),
                 (t.file_rail_ink, t.file_rail_hover),
@@ -2959,7 +2959,7 @@ mod tests {
                 (t.file_dim, t.file_surface),
                 (t.file_dim, t.file_background),
             ] {
-                let ratio = crate::theme::contrast_ratio(ink, fill);
+                let ratio = solidcraft_theme::contrast_ratio(ink, fill);
                 assert!(ratio >= floor(fill), "{}: {ink:?} on {fill:?} is {ratio:.2}:1 (floor {:.2})", theme.id, floor(fill));
             }
         }

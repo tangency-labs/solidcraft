@@ -16,8 +16,8 @@ use egui::{Color32, FontId, Rect, Sense, pos2, vec2};
 
 use crate::SolveApp;
 use crate::context_menu::Target;
-use crate::theme::Tokens;
 use crate::ui_kit::{Container, Edge, Surface};
+use solidcraft_theme::Tokens;
 
 /// The bar's height (logical pixels).
 pub(crate) const HEIGHT: f32 = 24.0;
@@ -223,7 +223,7 @@ mod tests {
         // Each state's text reads on the bar in both themes.
         for t in [Tokens::light(), Tokens::dark()] {
             for state in [SketchState::Under(2), SketchState::Full, SketchState::Conflict, SketchState::Empty] {
-                let ratio = crate::theme::contrast_ratio(state.colour(&t), t.toolbar);
+                let ratio = solidcraft_theme::contrast_ratio(state.colour(&t), t.toolbar);
                 assert!(ratio >= 3.0, "{state:?} on the bar: contrast {ratio:.2}");
             }
         }

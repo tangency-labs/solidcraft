@@ -491,21 +491,21 @@ impl Palette {
 pub struct Look {
     pub dark: bool,
     pub accent: Option<usize>,
-    pub vision: crate::theme::ColorVision,
+    pub vision: solidcraft_theme::ColorVision,
     pub palette: Option<Palette>,
 }
 
 impl Look {
-    pub fn themed(dark: bool, accent: Option<usize>, vision: crate::theme::ColorVision) -> Self {
+    pub fn themed(dark: bool, accent: Option<usize>, vision: solidcraft_theme::ColorVision) -> Self {
         Self { dark, accent, vision, palette: theme_palette(dark) }
     }
 
     fn rgb(self, role: usize) -> [u8; 3] {
         let theme = usize::from(self.dark);
         let vision = match self.vision {
-            crate::theme::ColorVision::Off => "",
-            crate::theme::ColorVision::Protan | crate::theme::ColorVision::Deutan => "red-green",
-            crate::theme::ColorVision::Tritan => "blue-yellow",
+            solidcraft_theme::ColorVision::Off => "",
+            solidcraft_theme::ColorVision::Protan | solidcraft_theme::ColorVision::Deutan => "red-green",
+            solidcraft_theme::ColorVision::Tritan => "blue-yellow",
         };
         if let Some((_, _, _, l, d)) = ACCENT_VARIANTS.iter().find(|(v, a, r, _, _)| *v == vision && Some(*a) == self.accent && *r == role) {
             return if self.dark { *d } else { *l };
@@ -690,7 +690,7 @@ fn default_accent(name: &str) -> Option<usize> {
 }
 
 /// Primary semantic stroke, also used by toolbar affordances. The palette owns its value.
-pub(crate) fn primary(name: &str, dark: bool, vision: crate::theme::ColorVision) -> egui::Color32 {
+pub(crate) fn primary(name: &str, dark: bool, vision: solidcraft_theme::ColorVision) -> egui::Color32 {
     let look = Look::themed(dark, resolve(name).accent, vision);
     role_colour("active-3", look)
 }
@@ -781,7 +781,7 @@ mod tests {
         assert_eq!(blue.stroke, Paint::Role(active));
         for dark in [false, true] {
             for accent in std::iter::once(None).chain((0..ACCENT_NAMES.len()).map(Some)) {
-                let look = Look { dark, accent, vision: crate::theme::ColorVision::Off, palette: None };
+                let look = Look { dark, accent, vision: solidcraft_theme::ColorVision::Off, palette: None };
                 assert_eq!(look.rgb(guide), PALETTE[usize::from(dark)][guide]);
                 let pm = render(&doc, look, 64).unwrap();
                 assert_eq!([pm.pixel(9, 20).unwrap().red(), pm.pixel(9, 20).unwrap().green(), pm.pixel(9, 20).unwrap().blue()], look.rgb(guide));
@@ -795,7 +795,7 @@ mod tests {
         let doc = Doc::parse("<svg><path d='M0 0L64 0L64 64L0 64Z' fill='#8e9faf'/><circle cx='20' cy='20' r='10' fill='#ffffff'/><circle cx='20' cy='20' r='3' fill='#236ead'/><path d='M8 44L56 44' stroke='#ffffff' stroke-width='6'/><circle cx='44' cy='20' r='6' fill='#ffffff' opacity='0.5'/></svg>").unwrap();
         for dark in [false, true] {
             for accent in std::iter::once(None).chain((0..ACCENT_NAMES.len()).map(Some)) {
-                let look = Look { dark, accent, vision: crate::theme::ColorVision::Off, palette: None };
+                let look = Look { dark, accent, vision: solidcraft_theme::ColorVision::Off, palette: None };
                 let pm = render(&doc, look, 64).unwrap();
                 assert_eq!(pm.pixel(26, 20).unwrap().alpha(), 0, "fill must reveal the real background");
                 assert_eq!(pm.pixel(20, 44).unwrap().alpha(), 0, "stroke must reveal the real background");
@@ -809,7 +809,7 @@ mod tests {
     #[test]
     fn knockout_respects_its_clip_and_combines_explicit_masks_with_clips() {
         let doc = Doc::parse("<svg><defs><clipPath id='left'><path d='M0 0L32 0L32 64L0 64Z'/></clipPath><mask id='all'><path d='M0 0L64 0L64 64L0 64Z' fill='white'/></mask></defs><path d='M0 0L64 0L64 64L0 64Z' fill='#8e9faf'/><g clip-path='url(#left)'><circle cx='32' cy='32' r='16' fill='#ffffff' mask='url(#all)'/></g></svg>").unwrap();
-        let pm = render(&doc, Look { dark: false, accent: None, vision: crate::theme::ColorVision::Off, palette: None }, 64).unwrap();
+        let pm = render(&doc, Look { dark: false, accent: None, vision: solidcraft_theme::ColorVision::Off, palette: None }, 64).unwrap();
         assert_eq!(pm.pixel(24, 32).unwrap().alpha(), 0);
         assert_eq!(pm.pixel(40, 32).unwrap().alpha(), 255, "cutout must not escape its parent clip");
     }
@@ -817,7 +817,7 @@ mod tests {
     #[test]
     fn accepted_badges_and_environment_sun_have_transparent_holes() {
         for dark in [false, true] {
-            let look = Look { dark, accent: None, vision: crate::theme::ColorVision::Off, palette: None };
+            let look = Look { dark, accent: None, vision: solidcraft_theme::ColorVision::Off, palette: None };
             assert_eq!(role_colour("gap", look), egui::Color32::TRANSPARENT);
             for (id, x, y) in [("contact_new", 48, 48), ("environment_map", 45, 19), ("line_mid", 35, 28)] {
                 let pm = render(doc_for(id, 64).unwrap(), look, 64).unwrap();
@@ -830,7 +830,7 @@ mod tests {
     fn native_clip_paths_and_plus_mask_keep_the_artwork_inside_its_shape() {
         for dark in [false, true] {
             for px in [16, 24, 64] {
-                let look = Look { dark, accent: None, vision: crate::theme::ColorVision::Off, palette: None };
+                let look = Look { dark, accent: None, vision: solidcraft_theme::ColorVision::Off, palette: None };
                 for id in ["environment_map", "curvature_map", "iso_analysis", "zebra"] {
                     let doc = doc_for(id, px).unwrap();
                     let pm = render(doc, look, px).unwrap();
@@ -838,8 +838,8 @@ mod tests {
                     assert!(pm.pixel(px / 2, px / 2).unwrap().alpha() > 0, "{id} lost its clipped contents");
                 }
             }
-            let pm =
-                render(doc_for("new", 64).unwrap(), Look { dark, accent: None, vision: crate::theme::ColorVision::Off, palette: None }, 64).unwrap();
+            let pm = render(doc_for("new", 64).unwrap(), Look { dark, accent: None, vision: solidcraft_theme::ColorVision::Off, palette: None }, 64)
+                .unwrap();
             assert_eq!(pm.pixel(45, 45).unwrap().alpha(), 0, "the plus is genuinely punched out in the native renderer");
         }
     }
@@ -871,6 +871,34 @@ mod tests {
         }
     }
 
+    /// The token crate writes the primary strokes it shares with the artwork in code; they stay `palette.toml`'s
+    /// `active-3` values, including the colour vision variants.
+    #[test]
+    fn tokens_share_the_artworks_primary_strokes() {
+        use solidcraft_theme::icon_strokes as tokens;
+        let role = ROLE_NAMES.iter().position(|r| *r == "active-3").unwrap();
+        let primary = |accent: &str| {
+            let items = ACCENTS[accent_index(accent).unwrap()];
+            items.iter().find(|(r, _, _)| *r == role).map(|(_, light, dark)| [*light, *dark]).unwrap()
+        };
+        let variant = |vision: &str, accent: &str| {
+            let a = accent_index(accent).unwrap();
+            ACCENT_VARIANTS
+                .iter()
+                .find(|(v, x, r, _, _)| *v == vision && *x == a && *r == role)
+                .map(|(_, _, _, light, dark)| [*light, *dark])
+                .unwrap()
+        };
+        assert_eq!(tokens::SKETCH_PRIMARY, primary("sketch"));
+        assert_eq!(tokens::CONSTRAINT_PRIMARY, primary("constraint"));
+        assert_eq!(tokens::CONSTRUCTION_PRIMARY, primary("construction"));
+        assert_eq!(tokens::SKETCH_RED_GREEN, variant("red-green", "sketch"));
+        assert_eq!(tokens::CONSTRUCTION_RED_GREEN, variant("red-green", "construction"));
+        assert_eq!(tokens::CONSTRAINT_RED_GREEN, variant("red-green", "constraint"));
+        assert_eq!(tokens::CONSTRUCTION_BLUE_YELLOW, variant("blue-yellow", "construction"));
+        assert_eq!(tokens::CONSTRAINT_BLUE_YELLOW, variant("blue-yellow", "constraint"));
+    }
+
     #[test]
     fn shipped_icon_palettes_preserve_alpha_shading_and_colour_vision_overrides() {
         for file in crate::theme_files::builtin() {
@@ -881,7 +909,7 @@ mod tests {
                 assert_ne!(ramp[0], ramp[1], "{} pale/medium", file.id);
                 assert_ne!(ramp[1], ramp[2], "{} medium/strong", file.id);
             }
-            for vision in crate::theme::ColorVision::ALL {
+            for vision in solidcraft_theme::ColorVision::ALL {
                 for name in ["extrude", "surface_extrude", "mesh_export", "line", "c_parallel", "construction"] {
                     let resolved = resolve(name);
                     let plain = Look { dark: file.base.is_dark(), accent: resolved.accent, vision, palette: None };
@@ -892,9 +920,9 @@ mod tests {
                     assert!(before.pixels().iter().zip(after.pixels()).all(|(a, b)| a.alpha() == b.alpha()), "{} {name} alpha", file.id);
                     for (variant, accent, role, light, dark) in ACCENT_VARIANTS {
                         let selected = match vision {
-                            crate::theme::ColorVision::Off => "",
-                            crate::theme::ColorVision::Protan | crate::theme::ColorVision::Deutan => "red-green",
-                            crate::theme::ColorVision::Tritan => "blue-yellow",
+                            solidcraft_theme::ColorVision::Off => "",
+                            solidcraft_theme::ColorVision::Protan | solidcraft_theme::ColorVision::Deutan => "red-green",
+                            solidcraft_theme::ColorVision::Tritan => "blue-yellow",
                         };
                         if *variant == selected && Some(*accent) == custom.accent {
                             assert_eq!(custom.rgb(*role), if file.base.is_dark() { *dark } else { *light });
@@ -908,8 +936,8 @@ mod tests {
     #[test]
     fn semantic_ui_tokens_and_icon_strokes_share_the_palette_including_accessibility() {
         for dark in [false, true] {
-            for vision in crate::theme::ColorVision::ALL {
-                let tokens = crate::theme::Tokens::themed(dark, vision);
+            for vision in solidcraft_theme::ColorVision::ALL {
+                let tokens = solidcraft_theme::Tokens::themed(dark, vision);
                 assert_eq!(primary("line", dark, vision), tokens.sketch_accent);
                 assert_eq!(primary("c_parallel", dark, vision), tokens.glyph_text);
                 assert_eq!(primary("centerline", dark, vision), tokens.construction_geom);
@@ -920,7 +948,7 @@ mod tests {
 
     #[test]
     fn semantic_ramps_preserve_silhouettes_and_passive_faces_in_all_themes() {
-        use crate::theme::ColorVision;
+        use solidcraft_theme::ColorVision;
         for id in ["line", "c_parallel", "construction", "centerline", "sketch_rect_pattern", "surface_extrude", "mesh_export"] {
             let resolved = resolve(id);
             for dark in [false, true] {
@@ -997,7 +1025,7 @@ mod tests {
         let source = SVGS.iter().find(|(id, fam, _)| *id == "folder" && *fam == "model").unwrap().2;
         let expected = Doc::parse(source).unwrap();
         for dark in [false, true] {
-            let look = Look { dark, accent: None, vision: crate::theme::ColorVision::Off, palette: None };
+            let look = Look { dark, accent: None, vision: solidcraft_theme::ColorVision::Off, palette: None };
             let actual = render(doc_for("folder", 64).unwrap(), look, 64).unwrap();
             let reviewed = render(&expected, look, 64).unwrap();
             assert_eq!(actual.data(), reviewed.data());
@@ -1021,7 +1049,7 @@ mod tests {
             for dark in [false, true] {
                 for px in [16, 20, 26, 64] {
                     let Some(doc) = doc_for(id, px) else { panic!("{id}") };
-                    let pm = render(doc, Look { dark, accent: None, vision: crate::theme::ColorVision::Off, palette: None }, px)
+                    let pm = render(doc, Look { dark, accent: None, vision: solidcraft_theme::ColorVision::Off, palette: None }, px)
                         .unwrap_or_else(|| panic!("{id} at {px}"));
                     assert!(coverage(&pm) > 8, "{id} at {px}px (dark {dark}) is blank");
                 }
@@ -1036,14 +1064,14 @@ mod tests {
     #[test]
     fn dark_theme_and_accents_change_colour_not_shape() {
         let doc = doc_for("extrude", 64).unwrap_or_else(|| panic!("extrude"));
-        let light = render(doc, Look { dark: false, accent: None, vision: crate::theme::ColorVision::Off, palette: None }, 64)
+        let light = render(doc, Look { dark: false, accent: None, vision: solidcraft_theme::ColorVision::Off, palette: None }, 64)
             .unwrap_or_else(|| panic!("render"));
-        let dark = render(doc, Look { dark: true, accent: None, vision: crate::theme::ColorVision::Off, palette: None }, 64)
+        let dark = render(doc, Look { dark: true, accent: None, vision: solidcraft_theme::ColorVision::Off, palette: None }, 64)
             .unwrap_or_else(|| panic!("render"));
         assert_ne!(rgba(&light), rgba(&dark));
         let r = resolve("surface_extrude");
         assert_eq!(r.master, "extrude");
-        let surface = render(doc, Look { dark: false, accent: r.accent, vision: crate::theme::ColorVision::Off, palette: None }, 64)
+        let surface = render(doc, Look { dark: false, accent: r.accent, vision: solidcraft_theme::ColorVision::Off, palette: None }, 64)
             .unwrap_or_else(|| panic!("render"));
         assert!(r.accent.is_some());
         assert_ne!(rgba(&light), rgba(&surface));
@@ -1087,7 +1115,7 @@ mod tests {
     #[test]
     fn danger_tint_preserves_faces_outlines_and_transparent_details() {
         for dark in [false, true] {
-            for vision in crate::theme::ColorVision::ALL {
+            for vision in solidcraft_theme::ColorVision::ALL {
                 let look = Look { dark, accent: accent_index("constraint"), vision, palette: None };
                 for id in ["delete", "new", "extrude"] {
                     for px in [16, 20, 64] {

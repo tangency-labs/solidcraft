@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use egui::{Context, Id, Pos2, Rect, Response, RichText, Sense, Ui, UiBuilder, Vec2, vec2};
 
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 const STATE: &str = "prefs_search_state";
 const SCROLL: &str = "prefs_search_force_scroll";

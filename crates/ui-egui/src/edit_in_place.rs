@@ -17,7 +17,7 @@ use solidcraft_engine::geom::Aabb3;
 
 use crate::SolveApp;
 use crate::gpu::GpuScene;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// The assembly around a part being edited in place.
 #[derive(Clone)]

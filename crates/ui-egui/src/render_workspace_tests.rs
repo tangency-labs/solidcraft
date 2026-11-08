@@ -4692,7 +4692,7 @@ fn product_preview_error_uses_shared_wrapped_surface_and_explicit_retry_target()
     let retry = crate::scenario::rect_of("render:preview-retry").unwrap();
     assert!(rect.contains_rect(note) && rect.contains_rect(retry));
     assert!(note.height() > Tokens::get().font_body, "the detailed failure wraps instead of escaping the viewport");
-    assert!(crate::theme::contrast_ratio(Tokens::get().form_error, Tokens::get().form_error_fill) >= 3.0);
+    assert!(solidcraft_theme::contrast_ratio(Tokens::get().form_error, Tokens::get().form_error_fill) >= 3.0);
 }
 
 #[test]
@@ -6348,7 +6348,7 @@ fn render_workspace_wear_tree_selects_the_scene_stack_and_counts_layers_in_both_
 /// Actual application tree at the approved card width, in both themes and both task states.
 #[test]
 fn render_workspace_browser_compact_geometry_search_and_theme_evidence() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     let mut themes = Vec::new();
     for dark in [false, true] {
         let mut h = Harness::new();
@@ -6483,7 +6483,7 @@ fn render_workspace_browser_compact_geometry_search_and_theme_evidence() {
             pair.save(std::path::Path::new(&dir).join(format!("scene-{stage}-themes.png"))).unwrap();
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -6701,7 +6701,7 @@ fn render_workspace_frame_save_shot_dispatches_without_a_ribbon_or_document_edit
 
 #[test]
 fn render_workspace_shots_strip_geometry_and_theme_evidence() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         let mut h = Harness::new();
         h.app.run("solid.box", json!({"length":20,"width":15,"height":10})).unwrap();
@@ -6768,7 +6768,7 @@ fn render_workspace_shots_strip_geometry_and_theme_evidence() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -7255,7 +7255,7 @@ fn output_viewer_evidence() {
     let Some(dir) = std::env::var_os("SOLIDCRAFT_OUTPUT_EVIDENCE") else { return };
     let dir = std::path::PathBuf::from(dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         let mut h = output_viewer_fixture();
         h.app.run("solid.box", json!({"length":24,"width":18,"height":12})).unwrap();
@@ -7268,8 +7268,8 @@ fn output_viewer_evidence() {
         h.ctx = crate::fonts::test_context();
         h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
         h.app.ui.dark = dark;
-        crate::theme::set_dark(dark);
-        crate::theme::apply(&h.ctx);
+        solidcraft_theme::set_dark(dark);
+        solidcraft_theme::apply(&h.ctx);
         let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1440.0, 900.0));
         let mut textures = std::collections::HashMap::new();
         for (index, state) in ["settings", "check", "effects", "running", "completed"].into_iter().enumerate() {
@@ -7345,7 +7345,7 @@ fn output_viewer_evidence() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -7792,7 +7792,7 @@ fn render_assign_gestures_replacement_draft_cannot_cross_a_document_edit() {
 
 #[test]
 fn render_assign_gestures_geometry_and_theme_evidence() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         let mut h = Harness::new();
         h.app.run("solid.cylinder", json!({"body_name":"Boss","radius":10,"height":20})).unwrap();
@@ -7848,7 +7848,7 @@ fn render_assign_gestures_geometry_and_theme_evidence() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -8934,7 +8934,7 @@ fn live_image_imported_mesh_keeps_selected_and_hovered_face_and_body_feedback() 
     let solid_face = (0..solid.body.face_count()).find(|face| solid.body.planar_face(*face).is_some_and(|plane| plane.normal() == Vec3::Z)).unwrap();
     let document = h.app.session.doc.clone();
     let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
-    let tokens = crate::theme::Tokens::get();
+    let tokens = solidcraft_theme::Tokens::get();
     let hover_color = [
         tokens.body.r().saturating_add(tokens.hover_face_lift),
         tokens.body.g().saturating_add(tokens.hover_face_lift),
@@ -9145,7 +9145,7 @@ fn live_capture_aspect_matches_product_navigation_and_frame_without_changing_out
         let note = crate::scenario::rect_of("render:live:status").unwrap();
         assert!(bar.contains_rect(pause), "Pause remains visible even with a long refusal in a narrow bar");
         assert!(pause.right() < note.left());
-        assert!(note.width() <= crate::theme::Tokens::get().control_height * 10.0);
+        assert!(note.width() <= solidcraft_theme::Tokens::get().control_height * 10.0);
         assert!(bar.contains_rect(note));
     }
 }

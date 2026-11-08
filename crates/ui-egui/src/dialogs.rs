@@ -21,9 +21,9 @@ use crate::selection::{
     self, AXES, AXIS_PICKS, Accept, BODIES, CURVES, EDGES, FACES, PLANAR_FACES, PLANES, PROFILES, SelInput, SelectionExt as _, point_value as pt,
     polyline_mid,
 };
-use crate::theme::Tokens;
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::viewport::Hit;
+use solidcraft_theme::Tokens;
 
 #[path = "dialogs_dense.rs"]
 mod dense;

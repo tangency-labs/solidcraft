@@ -15,7 +15,7 @@ use solidcraft_engine::doc::joints::JointKind;
 use crate::SolveApp;
 use crate::dialogs::{combo, form_row};
 use crate::selection::SelInput;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// Most samples the chart takes (each is a solve).
 const SAMPLES: u64 = 201;
@@ -161,7 +161,7 @@ fn chart(ui: &mut egui::Ui, xs: &[f64], ys: &[f64], unit: &str, total: u32, now:
         }
         let pts: Vec<egui::Pos2> = xs.iter().zip(ys).filter(|(_, v)| v.is_finite()).map(|(s, v)| pos2(x(*s), y(*v))).collect();
         p.add(egui::Shape::line(pts, Stroke::new(1.5, t.accent)));
-        let font = FontId::proportional(crate::theme::Tokens::get().font_micro);
+        let font = FontId::proportional(solidcraft_theme::Tokens::get().font_micro);
         p.text(r.left_top() + vec2(4.0, 2.0), Align2::LEFT_TOP, format!("{} {unit}", short(hi)), font.clone(), t.text_dim);
         p.text(r.left_bottom() + vec2(4.0, -2.0), Align2::LEFT_BOTTOM, format!("{} {unit}", short(lo)), font.clone(), t.text_dim);
         if let Some(v) = value_at(xs, ys, now) {

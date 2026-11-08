@@ -59,7 +59,7 @@ pub fn paint_on(p: &Painter, r: Rect, name: &str, dark: Option<bool>, opacity: f
 
 /// Monochrome flat controls on the application bar use its text token exactly.
 pub(crate) fn paint_app_bar(p: &Painter, r: Rect, name: &str, opacity: f32) {
-    paint_with_ink(p, r, name, Some(true), opacity, Some(crate::theme::Tokens::get().app_bar_text), Mirror::None);
+    paint_with_ink(p, r, name, Some(true), opacity, Some(solidcraft_theme::Tokens::get().app_bar_text), Mirror::None);
 }
 
 /// Paint a single-colour icon in `ink`.
@@ -87,7 +87,7 @@ enum Mirror {
 fn paint_with_ink(p: &Painter, r: Rect, name: &str, dark: Option<bool>, opacity: f32, ink: Option<Color32>, mirror: Mirror) {
     let ctx = p.ctx();
     let resolved = icon_svg::resolve(name);
-    let look = Look::themed(dark.unwrap_or_else(|| ctx.global_style().visuals.dark_mode), resolved.accent, crate::theme::vision());
+    let look = Look::themed(dark.unwrap_or_else(|| ctx.global_style().visuals.dark_mode), resolved.accent, solidcraft_theme::vision());
     paint_resolved(p, r, resolved, look, opacity, ink.map_or(Finish::Artwork, Finish::Ink), mirror);
 }
 
@@ -100,7 +100,7 @@ pub fn paint_accented(p: &Painter, r: Rect, name: &str, accent: Option<&str>, op
         Some(name) => icon_svg::accent_index(name).or(resolved.accent),
         None => None,
     };
-    let look = Look::themed(p.ctx().global_style().visuals.dark_mode, accent, crate::theme::vision());
+    let look = Look::themed(p.ctx().global_style().visuals.dark_mode, accent, solidcraft_theme::vision());
     paint_resolved(p, r, resolved, look, opacity, Finish::Artwork, Mirror::None);
 }
 
@@ -109,7 +109,7 @@ pub fn paint_accented(p: &Painter, r: Rect, name: &str, accent: Option<&str>, op
 /// the constraint ramp without flattening the lid, handle or other details.
 pub(crate) fn paint_danger(p: &Painter, r: Rect, name: &str, opacity: f32) {
     let resolved = icon_svg::resolve(name);
-    let look = Look::themed(p.ctx().global_style().visuals.dark_mode, icon_svg::accent_index("constraint"), crate::theme::vision());
+    let look = Look::themed(p.ctx().global_style().visuals.dark_mode, icon_svg::accent_index("constraint"), solidcraft_theme::vision());
     paint_resolved(p, r, resolved, look, opacity, Finish::Danger, Mirror::None);
 }
 
@@ -120,7 +120,7 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: icon_svg::Resolved, look: Look
     let px = (side * ppp).round().clamp(8.0, 512.0) as u32;
     let cache = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::unique("sc_icon_cache"), Cache::default).clone());
     let Ok(mut entries) = cache.0.lock() else { return };
-    let palette = icon_svg::theme_palette(crate::theme::is_dark());
+    let palette = icon_svg::theme_palette(solidcraft_theme::is_dark());
     if entries.palette != palette {
         entries.textures.clear();
         entries.palette = palette;
@@ -155,13 +155,14 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: icon_svg::Resolved, look: Look
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::{self, ColorVision};
+    use crate::theme;
+    use solidcraft_theme::ColorVision;
 
     #[test]
     fn theme_icon_palettes_change_uploaded_pixels_and_reuse_only_matching_textures() {
         use serde_json::json;
         let ctx = crate::fonts::test_context();
-        let dark = theme::is_dark();
+        let dark = solidcraft_theme::is_dark();
         ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
         let mut previous_alpha = None;
         let mut previous_texture = None;
@@ -215,29 +216,29 @@ mod tests {
 
     #[test]
     fn assistant_pixels_use_the_application_bar_text_token() {
-        let previous = theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
             let ctx = crate::fonts::test_context();
-            theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 paint_app_bar(ui.painter(), Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(32.0, 32.0)), "assistant", 1.0);
             });
-            let ink = theme::Tokens::get().app_bar_text;
+            let ink = solidcraft_theme::Tokens::get().app_bar_text;
             assert!(out.textures_delta.set.iter().any(|(_, deltas)| deltas.iter().any(|delta| match &delta.image {
                 egui::ImageData::Color(image) => image.pixels.contains(&ink),
             })));
             out.textures_delta.clear();
         }
-        theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]
     fn actual_uploaded_icon_pixels_follow_semantics_and_vision_cache_changes() {
         let ctx = crate::fonts::test_context();
-        let previous = theme::vision();
+        let previous = solidcraft_theme::vision();
         for dark in [false, true] {
             for vision in [ColorVision::Off, ColorVision::Protan, ColorVision::Tritan] {
-                theme::set_vision(vision);
+                solidcraft_theme::set_vision(vision);
                 // The line types: Normal in the base blue, and Construction, Centerline and Infinite
                 // in the construction accent, as the sketch canvas draws them.
                 for icon in
@@ -273,15 +274,15 @@ mod tests {
                 }
             }
         }
-        theme::set_vision(previous);
+        solidcraft_theme::set_vision(previous);
     }
 
     #[test]
     fn per_call_accents_preserve_roles_and_share_the_existing_cache() {
-        let previous = theme::vision();
+        let previous = solidcraft_theme::vision();
         for dark in [false, true] {
             for vision in ColorVision::ALL {
-                theme::set_vision(vision);
+                solidcraft_theme::set_vision(vision);
                 let ctx = crate::fonts::test_context();
                 ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
                 let mut textures = HashMap::new();
@@ -362,7 +363,7 @@ mod tests {
                 output.textures_delta.clear();
             }
         }
-        theme::set_vision(previous);
+        solidcraft_theme::set_vision(previous);
     }
 
     #[test]

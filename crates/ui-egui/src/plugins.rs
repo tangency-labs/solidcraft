@@ -155,7 +155,7 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             ui.label(solidcraft_ui_text::tr("ui.plugins_desktop"));
             return;
         };
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         let path = dir.display().to_string();
         let searching = crate::ui_kit::settings_search::querying(ui);
         // The page's own box is for browsing Plugins. The dialog search is the filter while it is active.
@@ -292,9 +292,9 @@ mod tests {
 
     #[test]
     fn plugins_production_composition_publishes_page_heading_and_section_geometry() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let mut h = crate::scenario::Harness::new();
             let dir = h.dir.join("page-geometry");
             let ctx = crate::fonts::test_context();
@@ -306,21 +306,21 @@ mod tests {
             let heading = crate::scenario::rect_of("prefs:page_heading").unwrap();
             let section = crate::scenario::rect_of("prefs:section:plugins_installed").unwrap();
             let body = crate::scenario::rect_of("prefs:section:plugins_installed:body").unwrap();
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             assert!(heading.height() >= t.space_24 && heading.bottom() < section.top());
             assert!((section.left() - heading.left()).abs() <= 1.0 && (section.right() - heading.right()).abs() <= 1.0);
             assert!((section.height() - (t.control_height + t.space_2)).abs() <= 1.0);
             assert!((body.top() - section.bottom() - t.space_10).abs() <= 1.0);
             assert!(!dir.exists(), "production layout does not create the plugin folder");
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]
     fn plugin_card_actions_share_a_row_at_normal_width_and_stay_inside_narrow_cards() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             for language in ["en", "de"] {
                 let _language = solidcraft_ui_text::scope(language);
                 for width in [646.0, 200.0] {
@@ -361,7 +361,7 @@ mod tests {
                         assert!((card.height() - 62.0).abs() <= 1.0, "36 pt content plus 12 pt padding and 1 pt border on each side");
                         assert_eq!(folder.height(), 24.0);
                         assert_eq!(checkbox.size(), egui::vec2(16.0, 16.0));
-                        let t = crate::theme::Tokens::get();
+                        let t = solidcraft_theme::Tokens::get();
                         let icon = crate::scenario::rect_of("prefs:plugin:public-one:icon").unwrap();
                         assert_eq!(icon.size(), egui::vec2(36.0, 36.0));
                         assert!((icon.left() - card.left() - 13.0).abs() <= 1.0, "12 pt padding inside the border");
@@ -392,15 +392,15 @@ mod tests {
                 }
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]
     fn plugin_cards_open_their_own_folder_and_cancel_restores_enabled_state() {
         use std::{cell::RefCell, rc::Rc};
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let mut h = crate::scenario::Harness::new();
             let dir = h.dir.join("public-plugins");
             write(&dir, "public-one", r#"{"id":"public-one","name":"Public one","version":"1.2.3","description":"Public fixture."}"#);
@@ -425,7 +425,7 @@ mod tests {
             crate::prefs::control(&mut h.app, &serde_json::json!({"button":"cancel"})).unwrap();
             assert!(enabled(&h.app, "public-one") && enabled(&h.app, "public-two"));
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]

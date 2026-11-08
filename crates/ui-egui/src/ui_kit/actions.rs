@@ -1,8 +1,9 @@
 //! Actions elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
 use super::metrics::*;
+use crate::fonts::RichTextExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{fonts::RichTextExt as _, theme::Tokens};
 use egui::{Response, RichText, Ui, vec2};
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Action {
@@ -84,11 +85,11 @@ fn button_appearance(ui: &Ui, response: Option<&Response>, tone: ButtonTone) -> 
         }
         if matches!(tone, ButtonTone::Ghost) && (hovered || pressed || focused) {
             ink = if pressed { t.form_primary.lerp_to_gamma(t.form_ink, 0.24) } else { t.form_primary };
-        } else if crate::theme::contrast_ratio(ink, fill) < 4.5 {
+        } else if solidcraft_theme::contrast_ratio(ink, fill) < 4.5 {
             // Custom themes can use a light accent with light on-accent text. Select a readable
             // foreground from that same theme for each interaction shade.
             ink = [t.form_ink, t.on_accent, t.tab_on_fill_dark].into_iter().fold(ink, |best, candidate| {
-                if crate::theme::contrast_ratio(candidate, fill) > crate::theme::contrast_ratio(best, fill) { candidate } else { best }
+                if solidcraft_theme::contrast_ratio(candidate, fill) > solidcraft_theme::contrast_ratio(best, fill) { candidate } else { best }
             });
         }
     }
@@ -738,7 +739,7 @@ pub(crate) fn compact_icon_label_button(ui: &mut Ui, label: &str, icon: &str, en
 /// A name chip and quiet actions in a selection card. Feature code supplies command data only.
 pub(crate) fn selection_actions(ui: &mut Ui, name: &str, actions: &[super::StageAction<'_>]) -> Option<usize> {
     let t = Tokens::get();
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     ui.spacing_mut().interact_size.y = t.control_height - t.space_2;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = t.space_2;

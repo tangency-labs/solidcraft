@@ -144,7 +144,7 @@ fn home_page_buttons_fit_their_translated_labels() {
             let (_, text) = texts.iter().find(|(t, _)| t == label).unwrap_or_else(|| panic!("{}: {label:?} is not painted", catalog.id));
             let button = rects
                 .iter()
-                .filter(|r| (r.height() - crate::theme::Tokens::get().file_tile_height).abs() < 1.0 && r.contains(text.left_center()))
+                .filter(|r| (r.height() - solidcraft_theme::Tokens::get().file_tile_height).abs() < 1.0 && r.contains(text.left_center()))
                 .min_by(|a, b| a.area().total_cmp(&b.area()))
                 .unwrap_or_else(|| panic!("{}: no button around {label:?}", catalog.id));
             assert!(text.right() <= button.right(), "{}: {label:?} ends at {} past its button's edge {}", catalog.id, text.right(), button.right());
@@ -270,7 +270,7 @@ fn finish_exit_label_and_its_button_are_centred() {
     let rows = out.shapes.iter().find_map(|shape| label_rows(&shape.shape)).expect("the Finish Sketch panel label is drawn");
     assert_eq!(rows.len(), 1, "the translated Exit section label fits one row: {rows:?}");
     assert!((rows[0].center().x - label.x).abs() < 1.0, "the label is centred: {rows:?}");
-    let hover = crate::theme::Tokens::get().hover;
+    let hover = solidcraft_theme::Tokens::get().hover;
     let lr = out.shapes.iter().find_map(|shape| hover_rect(&shape.shape, hover, label)).expect("the hovered label is highlighted");
     assert!(rows.iter().all(|row| lr.contains_rect(*row)), "the highlight holds the label: {lr:?} {rows:?}");
     out.textures_delta.clear();

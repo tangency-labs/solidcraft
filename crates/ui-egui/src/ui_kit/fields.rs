@@ -4,10 +4,10 @@ use super::{
     metrics::*,
     text::paint_text,
 };
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use egui::{Response, RichText, Ui, vec2};
+use solidcraft_theme::Tokens;
 use std::sync::Arc;
 
 /// One alignment policy for every kit text input. Align the galley itself rather than
@@ -880,7 +880,7 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
             }
         });
     }
-    crate::theme::TabAccent::number_focus(ui, &response);
+    solidcraft_theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
     let label = solidcraft_ui_text::tr_label(label(ui));
     response.widget_info(|| {
@@ -1269,7 +1269,7 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
         info.current_text_value = Some(value.clone());
         info
     });
-    crate::theme::TabAccent::number_focus(ui, &response);
+    solidcraft_theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
     response
 }
@@ -1336,7 +1336,7 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                 }
                 super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
                 publish(ui, &response, egui::Role::TextInput);
-                crate::theme::TabAccent::number_focus(ui, &response);
+                solidcraft_theme::TabAccent::number_focus(ui, &response);
                 t.input_bevel(ui, &response);
                 let (text, error) = note;
                 if !text.is_empty() {
@@ -1389,7 +1389,7 @@ pub(crate) fn search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     if response.has_focus() {
         super::settings_search::note_key_sink(ui.ctx());
     }
-    crate::theme::TabAccent::number_focus(ui, &response);
+    solidcraft_theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
     response
 }
@@ -1487,7 +1487,7 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
     super::scope(ui, |ui| {
         let t = Tokens::get();
         ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
-        let primary = if options.workspace_accent { crate::theme::TabAccent::current(ui.ctx()).ink } else { t.form_primary };
+        let primary = if options.workspace_accent { solidcraft_theme::TabAccent::current(ui.ctx()).ink } else { t.form_primary };
         let limits = (range.start().to_f64(), range.end().to_f64());
         let reserved = if options.show_value {
             // Reserve the actual formatted editor, including suffixes and localized Instant.
@@ -1965,7 +1965,7 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
         info.current_text_value = Some(value.clone());
         info
     });
-    crate::theme::TabAccent::number_focus(ui, &response);
+    solidcraft_theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
     response.backing_on_hover_text(solidcraft_ui_text::tr_label(hint))
 }

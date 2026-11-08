@@ -149,8 +149,8 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{BrowserEntry, Document, FeatureKind};
 
 use crate::context_menu::Target;
-use crate::theme::Tokens;
 use crate::ui_kit::Item;
+use solidcraft_theme::Tokens;
 
 use crate::SolveApp;
 

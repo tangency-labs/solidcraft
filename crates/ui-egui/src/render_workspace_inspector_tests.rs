@@ -1,5 +1,6 @@
 use super::*;
-use crate::{scenario::Harness, theme::Tokens};
+use crate::scenario::Harness;
+use solidcraft_theme::Tokens;
 fn fixture() -> Harness {
     let mut h = Harness::new();
     h.call("ui.resize", json!({"width":1440,"height":1000}));
@@ -66,7 +67,7 @@ fn render_workspace_shot_and_scene_widgets_fit_inspector_content_width() {
                 crate::scenario::clear_handles();
                 let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(content.expand(8.0)), ..Default::default() }, |ui| {
                     ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| {
-                        ui.painter().rect_filled(content, 0.0, crate::theme::Tokens::get().dialog_body);
+                        ui.painter().rect_filled(content, 0.0, solidcraft_theme::Tokens::get().dialog_body);
                         ui_kit::scope(ui, |ui| {
                             let preceding: std::collections::HashSet<_> = ctx.viewport(|vp| {
                                 vp.this_pass.widgets.layers().flat_map(|(_, widgets)| widgets.iter().map(|widget| widget.id)).collect()
@@ -498,7 +499,7 @@ fn surface_stage_contains_preview_target_plane_repeat_angle_and_method_reason_in
 fn stage_catalogs_fill_a_290_by_530_panel_and_keep_two_line_labels_inside_tiles() {
     use crate::{scenario, ui_kit};
     use egui::{Pos2, RawInput, Rect, vec2};
-    let previous_theme = crate::theme::is_dark();
+    let previous_theme = solidcraft_theme::is_dark();
     for dark in [false, true] {
         for (kind, selected, method, key) in [
             ("appearances", None, ImageMethod::Raster, "render:library:catalog"),
@@ -511,7 +512,7 @@ fn stage_catalogs_fill_a_290_by_530_panel_and_keep_two_line_labels_inside_tiles(
             let mut h = fixture();
             // Capture the font atlas from its first upload along with panel textures.
             h.ctx = crate::fonts::test_context();
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             h.ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
             // A resizable 290 pt card needs the floating, wide-screen policy.
             h.app.ui.layout = crate::ui_kit::LayoutMode::Floating;
@@ -593,7 +594,7 @@ fn stage_catalogs_fill_a_290_by_530_panel_and_keep_two_line_labels_inside_tiles(
             }
         }
     }
-    crate::theme::set_dark(previous_theme);
+    solidcraft_theme::set_dark(previous_theme);
 }
 
 #[test]

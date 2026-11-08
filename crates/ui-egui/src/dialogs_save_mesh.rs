@@ -26,8 +26,8 @@ use solidcraft_engine::slicers::{self, Slicer};
 use crate::SolveApp;
 use crate::dialogs::{Kind, form_row};
 use crate::selection::{BODIES, PLANAR_FACES, SelInput};
-use crate::theme::Tokens;
 use solidcraft_engine::Sel;
+use solidcraft_theme::Tokens;
 
 /// The formats, as shown and as `file.save_mesh` names them.
 /// (label, `format` parameter, file extension).
@@ -309,7 +309,7 @@ fn paint_icon(ui: &egui::Ui, rect: egui::Rect, tex: Option<egui::TextureId>, nam
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 letter,
-                egui::FontId::proportional(crate::theme::Tokens::get().font_small),
+                egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small),
                 t.text,
             );
         }
@@ -492,7 +492,7 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
             rect.left_center() + vec2(ICON + 9.0, 0.0),
             egui::Align2::LEFT_CENTER,
             solidcraft_ui_text::tr_label("Custom…"),
-            egui::FontId::proportional(crate::theme::Tokens::get().font_button),
+            egui::FontId::proportional(solidcraft_theme::Tokens::get().font_button),
             Tokens::get().text,
         );
         crate::scenario::publish_handle("dialog:Slicer:Custom", rect.center());

@@ -1267,7 +1267,7 @@ fn point_drawn(h: &mut Harness, world: [f64; 2]) -> bool {
 
 /// Is a sketch curve's hover highlight painted this frame?
 fn hover_painted(h: &Harness) -> bool {
-    let col = egui::epaint::ColorMode::Solid(crate::theme::Tokens::get().hover_profile_edge);
+    let col = egui::epaint::ColorMode::Solid(solidcraft_theme::Tokens::get().hover_profile_edge);
     h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Path(p) if p.stroke.width == 3.0 && p.stroke.color == col))
 }
 
@@ -2061,7 +2061,7 @@ fn a_typed_value_hides_the_curvature_combs() {
     let id = solved(&h).curves[0].id.clone();
     h.app.run("inspect.curvature_comb", json!({"curves":[id]})).unwrap();
     h.step(&json!({"start":"sketch.dimension"})).unwrap();
-    let teeth = egui::epaint::Stroke::new(1.0, crate::theme::Tokens::get().comb_teeth);
+    let teeth = egui::epaint::Stroke::new(1.0, solidcraft_theme::Tokens::get().comb_teeth);
     let comb_drawn = |h: &Harness| h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if *stroke == teeth));
     h.frames(1);
     assert!(comb_drawn(&h), "the comb is drawn");

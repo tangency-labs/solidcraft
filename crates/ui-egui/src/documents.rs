@@ -14,8 +14,8 @@ use solidcraft_engine::Session;
 use solidcraft_engine::render::Camera;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit;
+use solidcraft_theme::Tokens;
 
 /// Continue transient shot queues without adopting their document or view into the active tab.
 pub(crate) fn advance_render_batches(app: &mut SolveApp, ctx: &egui::Context) {
@@ -1000,7 +1000,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 _ => solidcraft_ui_text::Locale::for_language(&app.preferences.language).given_name(name),
             };
             let label = format!("{shown_name}{}", if *dirty { " •" } else { "" });
-            let text = ui.painter().layout_no_wrap(label, crate::fonts::semibold(crate::theme::Tokens::get().font_button), t.app_bar_text).size().x;
+            let text =
+                ui.painter().layout_no_wrap(label, crate::fonts::semibold(solidcraft_theme::Tokens::get().font_button), t.app_bar_text).size().x;
             (text + 40.0).clamp(72.0, MAX_FIT)
         })
         .collect();
@@ -1088,9 +1089,9 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         let name_display = solidcraft_ui_text::Locale::for_language(&app.preferences.language).given_name(name);
         let label = format!("{name_display}{}", if *dirty { " •" } else { "" });
         let font = if active {
-            crate::fonts::semibold(crate::theme::Tokens::get().font_button)
+            crate::fonts::semibold(solidcraft_theme::Tokens::get().font_button)
         } else {
-            FontId::proportional(crate::theme::Tokens::get().font_button)
+            FontId::proportional(solidcraft_theme::Tokens::get().font_button)
         };
         let g = ui.painter().layout_no_wrap(label, font, ink);
         let text_w = (tr.width() - 30.0).max(10.0);
@@ -1152,7 +1153,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             mr.center(),
             egui::Align2::CENTER_CENTER,
             format!("»{}", n - shown),
-            FontId::proportional(crate::theme::Tokens::get().font_body),
+            FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             t.app_bar_text,
         );
         let id = egui::Id::unique("sc_doc_more");
