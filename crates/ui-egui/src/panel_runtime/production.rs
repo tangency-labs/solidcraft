@@ -257,8 +257,7 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
     let mut integration = AppPanelRuntime::new(runtime, Box::new(services))?;
     integration.production = Some(state);
     integration.tick(&app.session)?;
-    let mut options = HostOptions::default();
-    options.content_header_height = 0.0;
+    let mut options = HostOptions { content_header_height: 0.0, ..Default::default() };
     options.metrics.footer_height = 0.0;
     integration.enable_host(options)?;
     let mut catalogue = commands::InMemoryCatalogue::default();
@@ -318,7 +317,7 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
     let Some(state) = app.panel_runtime.as_ref().and_then(|integration| integration.production.clone()) else { return Ok(()) };
     let (actions, visibility, play_button) = {
         let mut snapshot = state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel actions are borrowed"))?;
-        (std::mem::take(&mut snapshot.actions), std::mem::replace(&mut snapshot.visibility, [None, None, None, None]), snapshot.play_button)
+        (std::mem::take(&mut snapshot.actions), std::mem::take(&mut snapshot.visibility), snapshot.play_button)
     };
     for (product, intent) in Product::ALL.into_iter().zip(visibility) {
         if let Some(intent) = intent

@@ -1,3 +1,4 @@
+use super::commands::LayoutCatalogue;
 use super::*;
 
 fn id(value: &str) -> InstanceId {

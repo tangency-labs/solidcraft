@@ -963,12 +963,12 @@ pub(crate) fn sync_production_setting(app: &mut crate::SolveApp) -> PanelResult<
 pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     // Switching placement systems waits until Preferences Apply/Cancel settles
     // its snapshot. Content state itself always remains owned by the app.
-    if !app.prefs_window.open {
-        if let Err(reason) = sync_production_setting(app) {
-            app.set_status(crate::i18n::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
-            if let Some(integration) = &mut app.panel_runtime {
-                integration.last_error = Some(reason);
-            }
+    if !app.prefs_window.open
+        && let Err(reason) = sync_production_setting(app)
+    {
+        app.set_status(crate::i18n::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
+        if let Some(integration) = &mut app.panel_runtime {
+            integration.last_error = Some(reason);
         }
     }
     if let Err(reason) = super::production::drain_production_actions(app)
@@ -1227,10 +1227,8 @@ impl crate::SolveApp {
                     self.panel_runtime = Some(integration);
                 }
             });
-        if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) {
-            if !self.preferences.agent_chat_popped {
-                crate::agent_chat::finish_shared(self, ui.ctx());
-            }
+        if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) && !self.preferences.agent_chat_popped {
+            crate::agent_chat::finish_shared(self, ui.ctx());
         }
     }
 }
