@@ -695,6 +695,26 @@ mod reset_tests {
         assert!(!h.app.toolbar_custom.confirm_reset_all);
     }
 
+    /// Escape while Reset All Tabs asks answers the question without resetting, and reopening the
+    /// window shows no leftover question.
+    #[test]
+    fn escape_drops_the_reset_all_question() {
+        let mut h = customised();
+        let customized = design_keys(&h);
+        h.app.toolbar_custom.customizing = true;
+        h.frames(3);
+        click(&mut h, rect_of("customize:reset_all").unwrap().center());
+        assert!(h.app.toolbar_custom.confirm_reset_all);
+        h.call("ui.key", json!({"key": "Escape"}));
+        h.frames(2);
+        assert!(!h.app.toolbar_custom.confirm_reset_all, "the question is gone");
+        assert_eq!(design_keys(&h), customized, "nothing is reset");
+        h.app.toolbar_custom.customizing = true;
+        h.frames(3);
+        assert!(!h.app.toolbar_custom.confirm_reset_all);
+        assert!(handle_at("dialog:Reset").is_none(), "no leftover question when the window opens again");
+    }
+
     /// Agents and scripts reach Reset All Tabs as a command through `engine.execute`, with no
     /// dialog; command search does not offer it to people, who use the window's button.
     #[test]
