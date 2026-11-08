@@ -152,7 +152,8 @@ mod imp {
     }
 
     /// The pieces as SMLib's curves: one each, but one B-spline for each run of pieces that join
-    /// the one before them ([`Piece::joins_previous`]).
+    /// the one before them ([`Piece::joins_previous`]). A Bézier piece whose control points turn
+    /// back on themselves goes in as its halves ([`unfolded`]): the same curve.
     fn curves(plane: &Plane, pieces: &[Piece]) -> Result<Vec<Curve>> {
         let mut out = Vec::new();
         let mut run = Vec::new();
@@ -160,12 +161,76 @@ mod imp {
             if !x.joins_previous && !run.is_empty() {
                 out.push(joined(std::mem::take(&mut run))?);
             }
-            run.push(curve(plane, &x.seg)?);
+            run.extend(unfolded(curve(plane, &x.seg)?, UNFOLD_DEPTH));
         }
         if !run.is_empty() {
             out.push(joined(run)?);
         }
         Ok(out)
+    }
+
+    /// How sharply a Bézier piece's control polygon may turn back between neighbouring steps
+    /// before the piece goes in as its halves (cosine of the turn, 160°). SMLib's check refuses
+    /// a swept wall whose control net turns back by more than 170° ("Bad NonMonotonic CPts",
+    /// #13243, #12107), though the curve itself may be smooth: a lettering outline drawn with
+    /// one handle pulled past the other. Its halves are the same curve on control polygons
+    /// closer to it, which turn less; 160° leaves the halves room below SMLib's 170°.
+    const UNFOLD_TURN: f64 = -0.939_692_620_785_908_4;
+
+    /// How many times a piece is halved at most: a curve that really turns back on itself (a
+    /// cusp) has a control polygon that does at any depth, and goes in as it is.
+    const UNFOLD_DEPTH: usize = 4;
+
+    /// `c` as it goes into a sweep: a Bézier piece whose control polygon turns back by more than
+    /// [`UNFOLD_TURN`] as its two halves at the middle of its parameter (de Casteljau, in
+    /// homogeneous points, so a rational piece is split exactly too), each again so up to
+    /// `depth` times; anything else as it is. [`joined`] takes the halves back as one B-spline:
+    /// one curve, one wall.
+    fn unfolded(c: Curve, depth: usize) -> Vec<Curve> {
+        let Curve::Nurbs { degree, points, knots } = &c else { return vec![c] };
+        if depth == 0 || points.len() != degree + 1 || knots.len() != 2 * (degree + 1) || !turns_back(points) {
+            return vec![c];
+        }
+        let (left, right) = halves(points);
+        let piece = |points: Vec<[f64; 4]>| Curve::Nurbs { degree: *degree, points, knots: knots.clone() };
+        let mut out = unfolded(piece(left), depth - 1);
+        out.extend(unfolded(piece(right), depth - 1));
+        out
+    }
+
+    /// Whether the control polygon `points` (`[x, y, z, weight]`) turns back by more than
+    /// [`UNFOLD_TURN`] between two steps, a step too short to have a direction passed over.
+    fn turns_back(points: &[[f64; 4]]) -> bool {
+        let at = |q: &[f64; 4]| Vec3::new(q[0], q[1], q[2]);
+        let size = points.iter().map(|q| at(q).len()).fold(1.0, f64::max);
+        let mut last: Option<Vec3> = None;
+        for w in points.windows(2) {
+            let [a, b] = w else { continue };
+            let d = at(b) - at(a);
+            let Some(step) = d.normalized().filter(|_| d.len() > size * 1e-12) else { continue };
+            if last.is_some_and(|l| l.dot(step) < UNFOLD_TURN) {
+                return true;
+            }
+            last = Some(step);
+        }
+        false
+    }
+
+    /// The control points of the two halves of the Bézier `points` (`[x, y, z, weight]`) split
+    /// at the middle of its parameter, by de Casteljau's construction on the homogeneous points.
+    fn halves(points: &[[f64; 4]]) -> (Vec<[f64; 4]>, Vec<[f64; 4]>) {
+        let hom = |q: &[f64; 4]| [q[0] * q[3], q[1] * q[3], q[2] * q[3], q[3]];
+        let euclid = |h: [f64; 4]| if h[3] != 0.0 { [h[0] / h[3], h[1] / h[3], h[2] / h[3], h[3]] } else { h };
+        let mut row: Vec<[f64; 4]> = points.iter().map(hom).collect();
+        let (mut left, mut right) = (Vec::with_capacity(row.len()), Vec::with_capacity(row.len()));
+        while let (Some(first), Some(last)) = (row.first().copied(), row.last().copied()) {
+            left.push(euclid(first));
+            right.push(euclid(last));
+            let mid = |a: &[f64; 4], b: &[f64; 4]| [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]), 0.5 * (a[2] + b[2]), 0.5 * (a[3] + b[3])];
+            row = row.iter().zip(row.iter().skip(1)).map(|(a, b)| mid(a, b)).collect();
+        }
+        right.reverse();
+        (left, right)
     }
 
     /// Bézier curves of one degree, each starting where the one before ends, as the one B-spline

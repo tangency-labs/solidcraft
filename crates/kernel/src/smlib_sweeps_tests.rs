@@ -349,3 +349,39 @@ fn a_twisted_sweep_builds_circles_about_its_path_as_exact_cylinders() {
     assert!((0..b.face_count()).all(|f| !matches!(crate::face_surface(&b, f), Some(crate::FaceSurface::Cylinder { .. }))));
     close(volume(&b), PI * 1.25, 1e-6, "twisted circle off the axis");
 }
+
+#[test]
+fn an_extrusion_of_a_cubic_whose_control_points_fold_back_passes_the_check() {
+    // #13243, #12107: a smooth cubic whose control polygon runs 6 left, steps 0.02 back to the
+    // right and runs 4 left again (the handles of an imported outline pulled past each other).
+    // Its wall's control net turned back by 174 degrees and SMLib's check refused the extrusion
+    // ("Bad NonMonotonic CPts"); the curve itself has no cusp.
+    let top = Seg2::Cubic { p0: Vec2::new(10.0, 10.0), p1: Vec2::new(4.0, 10.0), p2: Vec2::new(4.02, 10.002), p3: Vec2::new(0.0, 10.0) };
+    let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+    let segs = vec![
+        line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)),
+        line(Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0)),
+        top,
+        line(Vec2::new(0.0, 10.0), Vec2::new(0.0, 0.0)),
+    ];
+    let r = region(Loop2 { segs });
+    let b = smlib_sweeps::extrude(&Plane::XY, &pieces_of(&r), Some(&r), 0.0, 3.0, 1.0, None).unwrap();
+    assert_eq!(b.validity(), Vec::<String>::new());
+    // The area under the cubic, by Green's theorem on a fine polyline of it.
+    let at = |t: f64| {
+        let s = 1.0 - t;
+        Vec2::new(10.0, 10.0) * (s * s * s)
+            + Vec2::new(4.0, 10.0) * (3.0 * s * s * t)
+            + Vec2::new(4.02, 10.002) * (3.0 * s * t * t)
+            + Vec2::new(0.0, 10.0) * (t * t * t)
+    };
+    let n = 20_000;
+    let mut pts: Vec<Vec2> = (0..=n).map(|i| at(f64::from(i) / f64::from(n))).collect();
+    pts.extend([Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)]);
+    let area = 0.5 * pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| a.x * b.y - b.x * a.y).sum::<f64>();
+    close(volume(&b), 3.0 * area, 1e-3, "folded cubic prism");
+    // One wall for the cubic, as for any other piece.
+    let mut want = vec![cap(false), cap(true), profile(0), profile(1), profile(2), profile(3)];
+    want.sort();
+    assert_eq!(origins(&b), want);
+}
