@@ -10,45 +10,67 @@
 //! | [`section_blend`]  | (none; SolidCraft's `loft_blend`) |
 //! | [`SectionFrame`]   | (none; SolidCraft's `bridge::Frame`) |
 //! | [`EndOrder`]       | (none; SolidCraft's `Continuity`) |
-//! | [`end_rows`]       | (none; the rows of SolidCraft's `bridge::section`) |
+//! | `end_rows` (crate) | (none; the rows of SolidCraft's `bridge::section`) |
+//! | `third_derivative` (crate) | (none; SolidCraft's `bridge::third_derivative`) |
 //!
 //! **The surface.** The sections run along u, each sampled at the same stations along v. Section
 //! `i` sits at `u = i / (n - 1)` and the surface passes through every station of it: each
 //! control row is interpolated through its stations along v (degree `min(3, stations - 1)`, the
 //! kernel's global interpolation at uniform parameters with averaged knots). Along u the knots are
 //! clamped and repeated `degree` times at every interior section, so every span is one Bezier.
-//! A span's end rows are the Hermite rows ([`end_rows`]) of its two sections: position, then
+//! A span's end rows are the Hermite rows (`end_rows`) of its two sections: position, then
 //! tangent, curvature and change of curvature as the section holds them, written as the Bezier's
 //! leading control rows at the span's parameter interval. The u degree is the largest
 //! `c + c' - 1` over the spans (`c`, `c'` the conditions at its two ends); a span with fewer is
-//! degree-elevated exactly.
+//! degree-elevated exactly (by its own row elevation: the rows are vectors of points before any
+//! surface exists, so the kernel's surface and single-curve elevations do not fit them).
 //!
 //! **What each section holds (the definition, SolidCraft's).**
 //! - The first and the last section hold what their [`EndOrder`] asks (G0 to G3) from the
 //!   caller's frames: the tangent `leave * speed`, the curvature `bend * speed^2` and the change
-//!   of curvature from `bend_change` ([`third_derivative`]: only its part square to the tangent
-//!   holds the condition, the rest a reparametrisation), `speed` a third of the station's chord to
-//!   the neighbouring section times `1 + crown`, over the span's interval. The last section's
-//!   frames point back into the blend, so its odd derivatives turn round.
+//!   of curvature from `bend_change` (`third_derivative`: only its part square to the tangent
+//!   holds the condition, the rest a reparametrisation). The speed is the station's chord to the
+//!   neighbouring section `c`, over 3, times `1 + crown`, over the span's interval `1 / (n - 1)`:
+//!   `d_u = leave * c / 3 * (1 + crown) * (n - 1)` for `n` sections, so the Bezier's first control
+//!   offset is `c (1 + crown) / (3 m)` at span degree `m`. The last section's frames point back
+//!   into the blend, so its odd derivatives turn round.
 //! - An interior section holds its position and the run's derivatives from finite differences of
 //!   the neighbouring sections' stations: the central first and second differences, and a third
 //!   (central, or one-sided at the second and the last-but-one section) where four sections
-//!   reach. So the joint is C3 in u with four or more sections and C2 with three.
+//!   reach. So the joint is C3 in u with four or more sections and C2 with three, at every
+//!   station.
 //!
 //! This is SolidCraft's definition of the blend, not an approximation of another surface: the
 //! finite differences are the conditions the surface is built to, not estimates of a curve the
 //! sections lie on, and no error against anything is claimed. What is exact: the surface passes
-//! through every station; at the ends it holds the frames' conditions to rounding; at an interior
-//! section the spans on either side agree in their u derivatives up to the order held.
+//! through every station; at every station of an end it holds the frames' conditions to rounding;
+//! at every station of an interior section the spans on either side agree in their u derivatives
+//! up to the order held. Between stations the end and joint curves are the v interpolants of the
+//! stations' rows (the interpolation is linear and commutes with evaluation in u), not conditions
+//! of their own.
 //!
 //! **Refused**, naming why: fewer than 2 or more than [`MAX_SECTIONS`] sections; sections of
 //! different station counts, or a count outside [`MIN_STATIONS`] ..= [`MAX_STATIONS`]; a frame
 //! that is not finite, or a `leave` of no length at an end that uses it; a crown outside
 //! `-0.9 ..= 3`; two neighbouring sections that meet at a station (no room for a blend there).
 //!
+//! **The two floors.** Two tests guard divisions, and both refuse; neither adjusts an input or a
+//! result to get past them. A tangent's length (an end's `leave`, and the first derivative in
+//! `third_derivative`) is divided by: a length that is not finite and positive is refused,
+//! never replaced by a default direction. Two neighbouring sections meeting at a station
+//! (distance not positive) leave the span there no room: a speed of zero, and no tangent to
+//! divide by at the next section; the blend is refused, never nudged apart. Both are exact tests,
+//! not SolidCraft's `1e-12` and `1e-9` floors: a chord of `1e-12` is not refused, its speed is
+//! about `1e-12` and the end rows collapse onto the section, a valid but degenerate surface.
+//!
 //! Deviations: no upstream counterpart. SolidCraft's `1e-12` floor on a tangent's length and its
 //! `1e-9` floor on the distance between neighbouring sections are exact tests here (a length that
-//! is not positive); its batched row solves are one solve per row. No recursion.
+//! is not positive): what the floors protect is the division, and an exact test protects it
+//! without a scale-dependent constant. Its one-sided third difference at the last-but-one section
+//! has its sign turned (`f(i-2) - 3 f(i-1) + 3 f(i) - f(i+1)`, the negative of the change of
+//! curvature it estimates); here it is the backward difference, exact on a cubic like the other
+//! two. Its batched row solves are one solve per row. No
+//! recursion.
 
 use crate::error::{Result, SolidError};
 use crate::math::{Point3, Vec3};
@@ -124,11 +146,11 @@ struct Held {
 /// them used), as the span leaves the end (`backward` false: rows `0, 1, ..`) or arrives at it
 /// (`backward` true: rows `m, m - 1, ..`, the odd derivatives read the other way): the leading
 /// rows of a Bezier whose derivatives at that end are `d`. Row `k` comes back at index `k` from
-/// the end. Shared with a bridge's cross-sections.
+/// the end.
 ///
 /// # Errors
 /// `InvalidInput` for more conditions than the degree carries or than `d` gives.
-pub fn end_rows(
+pub(crate) fn end_rows(
     p: Point3,
     d: &[Vec3],
     conditions: usize,
@@ -182,8 +204,9 @@ pub fn end_rows(
 ///
 /// # Errors
 /// `InvalidInput` for a tangent of no length or a result that is not finite.
-pub fn third_derivative(d1: Vec3, d2: Vec3, target: Vec3) -> Result<Vec3> {
+pub(crate) fn third_derivative(d1: Vec3, d2: Vec3, target: Vec3) -> Result<Vec3> {
     let sigma = d1.length();
+    // the floor on the tangent's length, divided by below: refused, never adjusted
     if !(sigma.is_finite() && sigma > 0.0) {
         return Err(invalid(
             "no room for the change of curvature: the tangent has no length",
@@ -289,6 +312,8 @@ pub fn section_blend(
     };
     for i in 0..run - 1 {
         for s in 0..samples {
+            // the floor on coincident sections (a zero speed, no tangent to divide by next):
+            // refused, never nudged apart
             if point(i, s)?.distance(point(i + 1, s)?) <= 0.0 {
                 return Err(invalid(
                     "two neighbouring cross-sections meet at a station: there is no room for a blend",
@@ -338,6 +363,7 @@ pub fn section_blend(
                     (point(i - 1, s)?, crown[1], -1.0)
                 };
                 let length = f.leave.length();
+                // the floor on the tangent's length, divided by below: refused, never defaulted
                 if c >= 2 && !(length.is_finite() && length > 0.0) {
                     return Err(invalid("a blend's leave direction has no length"));
                 }
@@ -379,8 +405,10 @@ pub fn section_blend(
                             (point(i + 2, s)? - point(i + 1, s)? * 3.0 + here * 3.0 - before)
                                 * (1.0 / cube)
                         }
+                        // (the backward stencil f(i+1) - 3 f(i) + 3 f(i-1) - f(i-2): SolidCraft's
+                        // has its sign turned, see Deviations)
                         (Some(k), false) => {
-                            (point(k, s)? - before * 3.0 + here * 3.0 - after) * (1.0 / cube)
+                            (after - here * 3.0 + before * 3.0 - point(k, s)?) * (1.0 / cube)
                         }
                         (None, false) => {
                             return Err(invalid(
@@ -469,6 +497,9 @@ pub fn section_blend(
     for (i, row) in rows.iter().enumerate() {
         let curve = interp_given_params(row, &params, &kv, degree_v)?;
         for (s, c) in curve.cpts().iter().take(samples).enumerate() {
+            // (exact tests: NOW is the stored "no weight" mark of a polynomial row, assigned,
+            // never computed, and 1.0 an assigned unit weight; any other weight is a weighted
+            // point)
             let q = if c.w == NOW || c.w == 1.0 {
                 Point3::new(c.x, c.y, c.z)
             } else {

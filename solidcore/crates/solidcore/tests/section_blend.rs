@@ -91,9 +91,33 @@ fn g1_ends_leave_along_their_frames_at_the_definition_s_speed() {
         let want1 = back.unitize().unwrap() * (-(chord / 3.0 * (1.0 + crown[1])));
         assert!(close(d1, want1), "{d1:?} vs {want1:?}");
     }
+    // three sections: the chord is to the neighbouring section and the speed is over the span's
+    // interval 1/2, `d_u = leave * chord / 3 * (1 + crown) * (n - 1)`
+    let mid: Vec<SectionFrame> = [0.0, 2.0]
+        .iter()
+        .map(|&x| frame(Point3::new(x, 1.5, 0.3)))
+        .collect();
+    let s = Surface::from(
+        section_blend(
+            &[a.clone(), mid.clone(), b.clone()],
+            [EndOrder::G1, EndOrder::G1],
+            crown,
+        )
+        .unwrap(),
+    );
+    for (j, v) in [0.0, 1.0].into_iter().enumerate() {
+        let d0 = derivs(&k, &s, 0.0, v, 1, 0)[1][0];
+        let want0 = lift * (a[j].p.distance(mid[j].p) / 3.0 * (1.0 + crown[0]) * 2.0);
+        assert!(close(d0, want0), "{d0:?} vs {want0:?}");
+        let d1 = derivs(&k, &s, 1.0, v, 1, 0)[1][0];
+        let want1 =
+            back.unitize().unwrap() * (-(b[j].p.distance(mid[j].p) / 3.0 * (1.0 + crown[1]) * 2.0));
+        assert!(close(d1, want1), "{d1:?} vs {want1:?}");
+    }
 }
 
-/// Five sections of the parabolic cylinder `(2 v, t, t^2)` at `t = 0, 1/4, .., 1`, its ends'
+/// Five sections of five stations each of the parabolic cylinder `(2 v, t, t^2)` at
+/// `t = 0, 1/4, .., 1`, `v = 0, 1/4, .., 1` (so v is interpolated at degree 3), its ends'
 /// frames the cylinder's own derivatives at G2 (the crown chosen so the definition's speed is the
 /// parameter's): the interior conditions are finite differences, exact on a quadratic, and every
 /// span is the polynomial its end rows fix, so the blend is the cylinder itself.
@@ -110,7 +134,7 @@ fn a_quadratic_s_sections_and_frames_blend_to_the_quadratic() {
     for i in 0..run {
         let t = f64::from(i) * step;
         let mut section = Vec::new();
-        for v in [0.0, 0.5, 1.0] {
+        for v in [0.0, 0.25, 0.5, 0.75, 1.0] {
             let mut f = frame(at(t, v));
             if i == 0 || i == run - 1 {
                 // the definition's speed: a third of the chord to the neighbour, (1 + crown),
@@ -131,9 +155,10 @@ fn a_quadratic_s_sections_and_frames_blend_to_the_quadratic() {
         sections.push(section);
     }
     let s = Surface::from(section_blend(&sections, [EndOrder::G2, EndOrder::G2], crown).unwrap());
+    // (a grid of half the stations' spacing, between them as well as on them)
     for i in 0..=8 {
-        for j in 0..=4 {
-            let (t, v) = (f64::from(i) / 8.0, f64::from(j) / 4.0);
+        for j in 0..=8 {
+            let (t, v) = (f64::from(i) / 8.0, f64::from(j) / 8.0);
             let got = s.evaluate_point(&k, Point2::new(t, v)).unwrap();
             assert!(
                 close(got, at(t, v)),
@@ -164,8 +189,9 @@ fn interior_joints_are_c3_from_four_sections_and_c2_at_three() {
         let s = Surface::from(
             section_blend(&sections, [EndOrder::G0, EndOrder::G0], [0.0, 0.0]).unwrap(),
         );
-        let joint = 1.0 / f64::from(run - 1);
-        for v in [0.0, 0.4, 1.0] {
+        for (joint, v) in (1..run - 1)
+            .flat_map(|i| [0.0, 0.4, 1.0].map(|v| (f64::from(i) / f64::from(run - 1), v)))
+        {
             let left = derivs(&k, &s, joint, v, order, 0);
             let flags = EvaluateFlags {
                 non_zero_tangents: false,
@@ -179,14 +205,158 @@ fn interior_joints_are_c3_from_four_sections_and_c2_at_three() {
                 let (l, r) = (left[o][0], right[o][0]);
                 assert!(
                     l.distance(r) <= 1e-9 * (1.0 + l.length()),
-                    "run {run}, order {o}, v {v}: {l:?} vs {r:?}"
+                    "run {run}, joint {joint}, order {o}, v {v}: {l:?} vs {r:?}"
                 );
             }
         }
     }
 }
 
-/// The refusals the definition names.
+/// Five sections of the cubic cylinder `(2 v, t, t^3)` at `t = 0, 1/4, .., 1`, held at G0: every
+/// interior section holds the third difference, exact on a cubic (central at the middle section,
+/// forward at the second, backward at the last-but-one), so the surface's `d_uuu` there is
+/// `(0, 0, 6)` at every station.
+#[test]
+fn interior_sections_hold_a_cubic_s_third_derivative() {
+    let k = Kernel::default();
+    let sections: Vec<_> = (0..5)
+        .map(|i| {
+            let t = f64::from(i) / 4.0;
+            [0.0, 0.5, 1.0]
+                .map(|v| frame(Point3::new(2.0 * v, t, t * t * t)))
+                .to_vec()
+        })
+        .collect();
+    let s =
+        Surface::from(section_blend(&sections, [EndOrder::G0, EndOrder::G0], [0.0, 0.0]).unwrap());
+    // each stencil at its own section: the forward one at the second (u = 1/4), the central one
+    // at the middle (1/2), and the backward one at the last-but-one (3/4), where SolidCraft's sign
+    // gave (0, 0, -6)
+    let stencils = [(0.25, "forward"), (0.5, "central"), (0.75, "backward")];
+    for (u, stencil) in stencils {
+        for v in [0.0, 0.5, 1.0] {
+            let d = derivs(&k, &s, u, v, 3, 0)[3][0];
+            // (a third derivative of degree-7 spans over a quarter: rounding grows by about
+            // m (m - 1) (m - 2) / step^3, so 1e-9, not the points' 1e-12)
+            assert!(
+                d.distance(Vec3::new(0.0, 0.0, 6.0)) <= 1e-9 * 6.0,
+                "the {stencil} difference at ({u}, {v}): {d:?}"
+            );
+        }
+    }
+    // the last-but-one section by itself, its sign
+    let back = derivs(&k, &s, 0.75, 0.5, 3, 0)[3][0];
+    assert!(back.z > 0.0, "the backward difference's sign: {back:?}");
+}
+
+/// The helix `(r cos a, r sin a, h a)` at `a`: its point, unit tangent, curvature vector and the
+/// arc-length derivative of its curvature vector (`h = 0`: a circle).
+fn helix(r: f64, h: f64, a: f64) -> (Point3, Vec3, Vec3, Vec3) {
+    let c = (r * r + h * h).sqrt();
+    let (sin, cos) = a.sin_cos();
+    (
+        Point3::new(r * cos, r * sin, h * a),
+        Vec3::new(-r * sin, r * cos, h) * (1.0 / c),
+        Vec3::new(-r * cos, -r * sin, 0.0) * (1.0 / (c * c)),
+        Vec3::new(r * sin, -r * cos, 0.0) * (1.0 / (c * c * c)),
+    )
+}
+
+/// `v`'s part square to the unit `t`.
+fn square_to(v: Vec3, t: Vec3) -> Vec3 {
+    v - t * v.dot(t)
+}
+
+/// G3 at both ends, the frames a circle's (`bend = n / r`, `bend_change` 0) and a helix's (whose
+/// curvature vector turns with its torsion, so `bend_change` has a part square to the tangent),
+/// five stations on helices of growing radius, from `a = 0.3` to `a = 1.5`. At every station
+/// the surface leaves the first section with `d_u = t s`, `d_uu = kappa s^2` and the part of
+/// `d_uuu` square to `t` equal to `s^3 (dkappa/ds)`'s: the helix's own derivatives at the constant
+/// speed `s` the definition gives (a third of the chord, times `1 + crown`), whose derivatives in
+/// u are those exactly. At the last section the frames point back into the blend (`leave = -t`,
+/// `bend_change = -dkappa/ds`) and the surface arrives with the helix's forward derivatives.
+#[test]
+fn g3_ends_hold_a_circle_s_and_a_helix_s_frames() {
+    let k = Kernel::default();
+    let (a0, a1) = (0.3, 1.5);
+    let crown = [0.2, -0.1];
+    for (h, circle) in [(0.0, true), (0.6, false)] {
+        let radius = |j: u32| 1.0 + 0.25 * f64::from(j);
+        let first: Vec<SectionFrame> = (0..5)
+            .map(|j| {
+                let (p, t, kappa, dk) = helix(radius(j), h, a0);
+                SectionFrame {
+                    p,
+                    leave: t,
+                    bend: kappa,
+                    bend_change: if circle { Vec3::ZERO } else { dk },
+                }
+            })
+            .collect();
+        let last: Vec<SectionFrame> = (0..5)
+            .map(|j| {
+                let (p, t, kappa, dk) = helix(radius(j), h, a1);
+                SectionFrame {
+                    p,
+                    leave: -t,
+                    bend: kappa,
+                    bend_change: if circle { Vec3::ZERO } else { -dk },
+                }
+            })
+            .collect();
+        let s = Surface::from(
+            section_blend(
+                &[first.clone(), last.clone()],
+                [EndOrder::G3, EndOrder::G3],
+                crown,
+            )
+            .unwrap(),
+        );
+        for j in 0..5u32 {
+            let v = f64::from(j) / 4.0;
+            let chord = first[j as usize].p.distance(last[j as usize].p);
+            for (u, a, end) in [(0.0, a0, 0usize), (1.0, a1, 1)] {
+                let (_, t, kappa, dk) = helix(radius(j), h, a);
+                let speed = chord / 3.0 * (1.0 + crown[end]);
+                let d = derivs(&k, &s, u, v, 3, 0);
+                let want = [
+                    t * speed,
+                    kappa * (speed * speed),
+                    square_to(dk, t) * (speed * speed * speed),
+                ];
+                if circle {
+                    assert!(want[2].length() <= 1e-15, "a circle's dkappa/ds is along t");
+                }
+                let scale = speed.max(speed * speed * speed);
+                for (o, w) in want.into_iter().enumerate() {
+                    let got = if o == 2 {
+                        square_to(d[3][0], t)
+                    } else {
+                        d[o + 1][0]
+                    };
+                    assert!(
+                        got.distance(w) <= 1e-9 * (scale + w.length()),
+                        "h {h}, station {j}, u {u}, order {}: {got:?} vs {w:?}",
+                        o + 1
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Refused with this reason (the first words of it), as an `InvalidInput`.
+fn refused<T>(r: solidcore::Result<T>, why: &str) {
+    match r {
+        Err(solidcore::SolidError::InvalidInput { reason, .. }) => {
+            assert!(reason.starts_with(why), "{reason:?} is not {why:?}");
+        }
+        Err(e) => panic!("{e:?} is not the refusal {why:?}"),
+        Ok(_) => panic!("built; expected the refusal {why:?}"),
+    }
+}
+
+/// The refusals the definition names, each by its reason, and each bound passing at its limit.
 #[test]
 fn malformed_blends_are_refused() {
     let line = |y: f64| {
@@ -195,19 +365,76 @@ fn malformed_blends_are_refused() {
             frame(Point3::new(1.0, y, 0.0)),
         ]
     };
+    let stations = |y: f64, n: u32| -> Vec<SectionFrame> {
+        (0..n)
+            .map(|j| frame(Point3::new(f64::from(j), y, 0.0)))
+            .collect()
+    };
     let g0 = [EndOrder::G0, EndOrder::G0];
-    assert!(section_blend(&[line(0.0)], g0, [0.0, 0.0]).is_err());
-    assert!(section_blend(&[line(0.0), line(0.0)], g0, [0.0, 0.0]).is_err());
-    assert!(section_blend(&[line(0.0), line(1.0)], g0, [4.0, 0.0]).is_err());
-    assert!(section_blend(&[line(0.0), vec![frame(Point3::ZERO)]], g0, [0.0, 0.0]).is_err());
-    // G1 with no leave direction
-    assert!(section_blend(
-        &[line(0.0), line(1.0)],
-        [EndOrder::G1, EndOrder::G0],
-        [0.0, 0.0]
-    )
-    .is_err());
+    let flat = [0.0, 0.0];
+    // the counts, at and past each bound
+    let run = |n: u32| (0..n).map(|i| line(f64::from(i))).collect::<Vec<_>>();
+    refused(
+        section_blend(&run(1), g0, flat),
+        "a blend runs through 2 to 50",
+    );
+    assert!(section_blend(&run(50), g0, flat).is_ok());
+    refused(
+        section_blend(&run(51), g0, flat),
+        "a blend runs through 2 to 50",
+    );
+    refused(
+        section_blend(&[stations(0.0, 1), stations(1.0, 1)], g0, flat),
+        "a blend's cross-sections take 2 to 257",
+    );
+    assert!(section_blend(&[stations(0.0, 257), stations(1.0, 257)], g0, flat).is_ok());
+    refused(
+        section_blend(&[stations(0.0, 258), stations(1.0, 258)], g0, flat),
+        "a blend's cross-sections take 2 to 257",
+    );
+    refused(
+        section_blend(&[line(0.0), stations(1.0, 3)], g0, flat),
+        "every cross-section of a blend has the same stations",
+    );
+    // the crown, at and past each end of its range
+    for (c, ok) in [
+        (-0.9, true),
+        (-0.900_000_1, false),
+        (3.0, true),
+        (3.000_000_1, false),
+    ] {
+        let r = section_blend(&[line(0.0), line(1.0)], g0, [c, 0.0]);
+        if ok {
+            assert!(r.is_ok(), "crown {c}");
+        } else {
+            refused(r, "a blend's crown is between");
+        }
+    }
+    refused(
+        section_blend(&[line(0.0), line(0.0)], g0, flat),
+        "two neighbouring cross-sections meet",
+    );
     let mut nan = line(1.0);
     nan[0].p.x = f64::NAN;
-    assert!(section_blend(&[line(0.0), nan], g0, [0.0, 0.0]).is_err());
+    refused(
+        section_blend(&[line(0.0), nan], g0, flat),
+        "a blend's frame is not finite",
+    );
+    // an end that uses its tangent with none: G1, and G3
+    for order in [EndOrder::G1, EndOrder::G3] {
+        refused(
+            section_blend(&[line(0.0), line(1.0)], [order, EndOrder::G0], flat),
+            "a blend's leave direction has no length",
+        );
+    }
+    // a curvature too large for its speed: d2 = bend speed^2 overflows
+    let mut steep = line(0.0);
+    for f in &mut steep {
+        f.leave = Vec3::new(0.0, 1.0, 0.0);
+        f.bend = Vec3::new(0.0, 0.0, 1e308);
+    }
+    refused(
+        section_blend(&[steep, line(9.0)], [EndOrder::G2, EndOrder::G0], flat),
+        "a section's derivatives along the run are not finite",
+    );
 }
