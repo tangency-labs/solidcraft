@@ -996,6 +996,9 @@ fn an_unflagged_origin_adds_nothing() {
     run(&mut s, "joint.origin_frame", json!({"origin": "tool0", "frame": true}));
     assert_eq!(package(&s).model.links.len(), before);
     assert!(s.execute("joint.origin_frame", &json!({"origin": "nobody", "frame": true})).is_err());
+    // `frame` on joint.origin is an explicit frame; the flag is `export_frame`, and only a bool.
+    let b = occ(&s, "B");
+    assert!(s.execute("joint.origin", &json!({"name": "t1", "occurrence": b, "face": [5, 5, 20], "export_frame": "yes"})).is_err());
 }
 
 #[test]

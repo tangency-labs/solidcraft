@@ -2122,7 +2122,10 @@ fn origin_point(v: Option<&Value>, message: &str) -> Result<(), String> {
 impl MakeJointOriginParams {
     /// The keys `origin_param` reads, in the cases it reads them, in the order it reads them.
     fn check(m: &Map<String, Value>) -> Result<(), String> {
-        // The path is read first, by the same rule `occurrence.move` uses; `null` is left out.
+        if !matches!(m.get("export_frame"), None | Some(Value::Null | Value::Bool(_))) {
+            return Err("`export_frame` must be true or false".into());
+        }
+        // Then the path, by the same rule `occurrence.move` uses; `null` is left out.
         if let Some(path) = m.get("path").filter(|p| !p.is_null()) {
             OccurrencePath::deserialize(path).map_err(|_| "`path` must list 1..64 occurrence ids")?;
         }
@@ -2214,6 +2217,7 @@ impl<'de> Deserialize<'de> for MakeJointOriginParams {
         // The name is read last, once the origin is made.
         Ok(MakeJointOriginParams {
             name: text(&m, "name")?,
+            export_frame: m.get("export_frame").and_then(Value::as_bool),
             occurrence: m.get("occurrence").and_then(|v| OccurrenceKey::read(v).ok()),
             // Read by the handler's path parser, which `occurrence.move` shares.
             path: raw("path"),

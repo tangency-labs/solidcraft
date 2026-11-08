@@ -1325,6 +1325,11 @@ fn close_by_half_turn(s: &mut Session, id: u64, before: &joints::Solution) -> bo
 
 fn joint_origin(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.origin";
+    let export_frame = match p.get("export_frame") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(bad(cmd, "`export_frame` must be true or false")),
+    };
     let origin = origin_param(s, Some(p), cmd)?;
     let name = match str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
         Some(n) => n.to_string(),
@@ -1333,7 +1338,7 @@ fn joint_origin(s: &mut Session, p: &Value) -> Result<Value> {
     if s.doc.assembly.origins.iter().any(|o| o.name == name) {
         return Err(bad(cmd, format!("there is already a joint origin `{name}`")));
     }
-    s.doc_mut().assembly.origins.push(NamedOrigin { name: name.clone(), origin, export_frame: bool_(p, "export_frame").unwrap_or(false) });
+    s.doc_mut().assembly.origins.push(NamedOrigin { name: name.clone(), origin, export_frame });
     reply(cmd, MakeJointOriginResult { origin: name, param_warnings: Vec::new() })
 }
 

@@ -2066,7 +2066,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 p["name"] = json!(name.trim());
             }
             if *frame {
-                p["frame"] = json!(true);
+                p["export_frame"] = json!(true);
             }
             cmd("joint.origin", p)
         }

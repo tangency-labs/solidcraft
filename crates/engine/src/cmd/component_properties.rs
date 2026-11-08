@@ -2,7 +2,7 @@
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::{CollisionShape, Document, Mat, PhysicalOverride};
 use solidcraft_geom::Aabb3;
@@ -10,7 +10,8 @@ use solidcraft_geom::inertia::{self, Tensor3};
 
 use crate::params::bad;
 use crate::schema::component::{
-    BodyProperties, BoundingBox, InertiaAbout, OccurrencePropertiesResult, PhysicalOverrideSaved, PhysicalProperties, PropertiesResult, TotalProperties,
+    BodyProperties, BoundingBox, InertiaAbout, OccurrencePropertiesResult, PhysicalOverrideSaved, PhysicalProperties, PropertiesResult,
+    TotalProperties,
 };
 use crate::{Result, Session};
 
