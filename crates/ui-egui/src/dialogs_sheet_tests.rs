@@ -1387,7 +1387,7 @@ fn flat_pattern_navigation_slots_hide_orbit_controls_and_keep_fit_home() {
 /// height and turns, and the part builds with two bends.
 #[test]
 fn an_edge_flange_can_be_split_into_segments() {
-    let mut app = plate(crate::shell::LayoutMode::Floating);
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
     app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
     let edge = edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).unwrap();
     app.session.selection = vec![edge];
@@ -1423,7 +1423,7 @@ fn an_edge_flange_can_be_split_into_segments() {
 /// stays explicit, and neither edge takes the other's list).
 #[test]
 fn editing_a_flange_keeps_every_edges_segments() {
-    let mut app = plate(crate::shell::LayoutMode::Floating);
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
     app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
     let params = json!({
         "type": "edge",
@@ -1724,7 +1724,7 @@ fn deleting_a_mid_edit_segment_keeps_the_boundaries_it_did_not_touch() {
 /// chain goes instead, and the guide carries the same words (#5927, #5928).
 #[test]
 fn then_with_segments_is_refused_with_a_message() {
-    let mut app = plate(crate::shell::LayoutMode::Floating);
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
     app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
     let edge = edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).unwrap();
     app.session.selection = vec![edge];

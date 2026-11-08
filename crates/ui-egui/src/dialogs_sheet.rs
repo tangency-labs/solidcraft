@@ -322,7 +322,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                         ui.scope_builder(egui::UiBuilder::new().id_salt(("sm_edge_segments", n)), |ui| {
                             form_row(ui, &format!("Edge {}", n + 1), |ui| {
                                 let add = crate::ui_kit::button(ui, "Split Edge", crate::ui_kit::Button::Normal).backing_on_hover_text(
-                                    crate::i18n::tr_label("One more stretch of the picked edge, each with its own angle, height and turns"),
+                                    solidcraft_ui_text::tr_label("One more stretch of the picked edge, each with its own angle, height and turns"),
                                 );
                                 if add.clicked() && list.len() < 64 {
                                     add_segment(list);
@@ -332,7 +332,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                             for (m, row) in list.iter_mut().enumerate() {
                                 let part = m + 1;
                                 form_row(ui, &format!("Segment {part}"), |ui| {
-                                    if crate::ui_kit::bin_button(ui, crate::i18n::tr_label("Remove this segment")).clicked() {
+                                    if crate::ui_kit::bin_button(ui, solidcraft_ui_text::tr_label("Remove this segment")).clicked() {
                                         drop = Some(m);
                                     }
                                     ui.label(format!("{} … {}", row.from.trim(), row.to.trim()));
