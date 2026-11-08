@@ -393,7 +393,7 @@ impl Drawing {
                 require(d.override_text.is_none(), instead)?;
             }
             DimensionKind::Baseline { origin, targets, direction } | DimensionKind::Ordinate { origin, targets, direction } => {
-                check_set_targets(&d.kind, targets.len())?;
+                d.kind.set().map_or(Ok(()), |set| check_set_targets(set, targets.len()))?;
                 std::iter::once(origin).chain(targets).try_for_each(check_point)?;
                 check_direction(*direction, Reading::Projected)?;
                 let instead = || "a set shows each target's number, never a text instead".into();
@@ -440,23 +440,32 @@ pub fn check_chain_length(points: usize) -> Result<()> {
     require((3..=MAX_CHAIN_POINTS).contains(&points), || format!("a chain has 3 to {MAX_CHAIN_POINTS} points"))
 }
 
-/// A baseline set's number of targets: 2 (one makes a linear dimension) to [`MAX_SET_TARGETS`].
-pub fn check_baseline_targets(targets: usize) -> Result<()> {
-    require((2..=MAX_SET_TARGETS).contains(&targets), || format!("a baseline set has 2 to {MAX_SET_TARGETS} targets"))
+/// The two kinds of dimension set, each measured from one origin to each of its targets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SetKind {
+    Baseline,
+    Ordinate,
 }
 
-/// An ordinate set's number of targets: 1 (beside its origin's 0) to [`MAX_SET_TARGETS`].
-pub fn check_ordinate_targets(targets: usize) -> Result<()> {
-    require((1..=MAX_SET_TARGETS).contains(&targets), || format!("an ordinate set has 1 to {MAX_SET_TARGETS} targets"))
-}
-
-/// `targets`, a number of targets, by the rule of `kind`'s set; any number for other kinds.
-pub fn check_set_targets(kind: &DimensionKind, targets: usize) -> Result<()> {
-    match kind {
-        DimensionKind::Baseline { .. } => check_baseline_targets(targets),
-        DimensionKind::Ordinate { .. } => check_ordinate_targets(targets),
-        _ => Ok(()),
+impl DimensionKind {
+    /// The kind of set it is, if it is one.
+    pub fn set(&self) -> Option<SetKind> {
+        match self {
+            DimensionKind::Baseline { .. } => Some(SetKind::Baseline),
+            DimensionKind::Ordinate { .. } => Some(SetKind::Ordinate),
+            _ => None,
+        }
     }
+}
+
+/// A set's number of targets: a baseline set's 2 (one makes a linear dimension) to
+/// [`MAX_SET_TARGETS`], an ordinate set's 1 (beside its origin's 0) to it.
+pub fn check_set_targets(set: SetKind, targets: usize) -> Result<()> {
+    let (named, least) = match set {
+        SetKind::Baseline => ("a baseline set", 2),
+        SetKind::Ordinate => ("an ordinate set", 1),
+    };
+    require((least..=MAX_SET_TARGETS).contains(&targets), || format!("{named} has {least} to {MAX_SET_TARGETS} targets"))
 }
 
 /// An edge reference's rules (a balloon's edge keeps them too).
