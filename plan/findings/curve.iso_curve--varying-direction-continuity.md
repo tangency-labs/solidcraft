@@ -62,7 +62,8 @@ sharp metadata is `(CInfinity,[Discontinuous,Discontinuous])`; shallow metadata
 has length2; the public projected query returns1006. The regression command is
 `cargo test -p solidcore --test iso_curve_continuity` (the initial red used a
 standalone test binary linked to the already-built parent kernel, without changing
-its Cargo target). No C++ behavior is claimed or needed for this direct proof.
+its Cargo target). The direct proof does not depend on the C++: the pinned
+`SmIsoCurve::CalculateContinuities` has the same defect, recorded as WR-761.
 
 The corrected dispatcher passes both metadata regressions. On the main-based
 kernel, the sharp public query now succeeds for both directions and request modes,

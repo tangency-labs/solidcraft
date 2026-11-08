@@ -21,7 +21,8 @@
 //!
 //! Deviations:
 //! - Continuity is inherited along the varying surface coordinate, matching the
-//!   evaluator and knot list, rather than the fixed iso coordinate.
+//!   evaluator and knot list, rather than the fixed iso coordinate the C++
+//!   passes (WR-761).
 //! - **Surface.** The borrowed C++ surface is an owned, boxed [`Surface`] copy.
 //!   [`IsoCurve::new`] retains the B-spline constructor; [`IsoCurve::from_surface`]
 //!   also supports the other concrete surface kinds through the same virtual dispatch.
