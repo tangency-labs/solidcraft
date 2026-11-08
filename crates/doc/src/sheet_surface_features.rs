@@ -25,6 +25,193 @@ fn err<T>(msg: impl Into<String>) -> Result<T> {
     Err(DocError::Invalid(msg.into()))
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SheetPanelPart {
+    Feature(crate::FeatureId),
+    Name(String),
+}
+
+/// A sheet rim identity, `<panel>:rim.<rim>:<top|bottom>`. The panel's maker IDs
+/// follow feature copies; the rim and side keep their meanings. This is not a kernel edge name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SheetEdgeName {
+    panel: Vec<SheetPanelPart>,
+    rim: String,
+    far_face: bool,
+}
+
+impl SheetEdgeName {
+    /// Reads the same rim identity saved by sheet flange and hem picks.
+    pub fn parse(text: &str) -> Result<Self> {
+        let Some((rest, side)) = text.rsplit_once(':') else { return err("a sheet edge needs a panel, rim and side") };
+        let Some((panel, rim)) = rest.rsplit_once(':') else { return err("a sheet edge needs a panel, rim and side") };
+        let Some(rim) = rim.strip_prefix("rim.").filter(|rim| !rim.is_empty()) else { return err("a sheet edge needs a named rim") };
+        let far_face = match side {
+            "top" => false,
+            "bottom" => true,
+            _ => return err("a sheet edge side must be top or bottom"),
+        };
+        let mut parts = Vec::new();
+        for part in panel.split('.') {
+            if part.is_empty() || part.contains(':') || part.contains('|') {
+                return err("a sheet edge needs a named panel");
+            }
+            let part = match part.strip_prefix('F').filter(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())) {
+                Some(id) => {
+                    SheetPanelPart::Feature(crate::FeatureId(id.parse().map_err(|_| DocError::Invalid("sheet maker ID is too large".into()))?))
+                }
+                None => SheetPanelPart::Name(part.to_owned()),
+            };
+            parts.push(part);
+        }
+        Ok(Self { panel: parts, rim: rim.to_owned(), far_face })
+    }
+
+    fn panel_name(&self) -> String {
+        self.panel
+            .iter()
+            .map(|part| match part {
+                SheetPanelPart::Feature(id) => format!("F{}", id.0),
+                SheetPanelPart::Name(name) => name.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+}
+
+impl std::fmt::Display for SheetEdgeName {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}:rim.{}:{}", self.panel_name(), self.rim, if self.far_face { "bottom" } else { "top" })
+    }
+}
+
+impl serde::Serialize for SheetEdgeName {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SheetEdgeName {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let text = <String as serde::Deserialize<'de>>::deserialize(deserializer)?;
+        Self::parse(&text).map_err(serde::de::Error::custom)
+    }
+}
+
+impl crate::walk::Walk for SheetEdgeName {
+    fn walk_refs<'a>(&'a self, visit: &mut dyn FnMut(crate::walk::RefItem<'a>)) {
+        for part in &self.panel {
+            if let SheetPanelPart::Feature(id) = part {
+                visit(crate::walk::Ref::Feature(id));
+            }
+        }
+    }
+
+    fn walk_refs_mut<'a>(&'a mut self, visit: &mut dyn FnMut(crate::walk::RefItemMut<'a>)) {
+        for part in &mut self.panel {
+            if let SheetPanelPart::Feature(id) = part {
+                visit(crate::walk::Ref::Feature(id));
+            }
+        }
+    }
+}
+
+/// How the two flange panels meet at a corner joint.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CornerJoinKind {
+    /// The panel edges meet with a gap between them.
+    #[default]
+    Butt,
+    /// One panel covers part of the other panel's thickness.
+    PartialOverlap,
+    /// One panel covers the other panel's whole thickness.
+    FullOverlap,
+}
+
+/// A corner join's saved source-edge identities and length expressions. Model joint indices
+/// are resolved for each build, never stored here. The covering source is first in the pair.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CornerJoinParams {
+    /// The source edge of the bend whose flange covers the other flange.
+    pub covering: SheetEdgeName,
+    /// The source edge of the other bend.
+    pub covered: SheetEdgeName,
+    /// How the corner meets; omitted or null values keep Butt.
+    #[serde(default, deserialize_with = "corner_kind_or_default")]
+    pub kind: CornerJoinKind,
+    /// The partial overlap length. Full overlap follows the sheet's thickness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlap: Option<crate::Expr>,
+    /// An explicit gap, or the sheet rule's gap when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gap: Option<crate::Expr>,
+}
+
+impl crate::walk::Walk for CornerJoinParams {
+    fn walk_exprs<'a>(&'a self, visit: &mut dyn FnMut(crate::walk::ExprItem<'a>)) {
+        let overlap = if self.kind == CornerJoinKind::PartialOverlap { self.overlap.as_ref() } else { None };
+        for (label, expr) in [("Overlap", overlap), ("Corner Gap", self.gap.as_ref())] {
+            if let Some(expr) = expr {
+                visit((label, expr, crate::walk::Kind::Length, crate::walk::ExprRole::Input));
+            }
+        }
+    }
+
+    fn walk_exprs_mut<'a>(&'a mut self, visit: &mut dyn FnMut(crate::walk::ExprItemMut<'a>)) {
+        let overlap = if self.kind == CornerJoinKind::PartialOverlap { self.overlap.as_mut() } else { None };
+        for (label, expr) in [("Overlap", overlap), ("Corner Gap", self.gap.as_mut())] {
+            if let Some(expr) = expr {
+                visit((label, expr, crate::walk::Kind::Length, crate::walk::ExprRole::Input));
+            }
+        }
+    }
+
+    fn walk_refs<'a>(&'a self, visit: &mut dyn FnMut(crate::walk::RefItem<'a>)) {
+        crate::walk::Walk::walk_refs(&self.covering, visit);
+        crate::walk::Walk::walk_refs(&self.covered, visit);
+    }
+
+    fn walk_refs_mut<'a>(&'a mut self, visit: &mut dyn FnMut(crate::walk::RefItemMut<'a>)) {
+        crate::walk::Walk::walk_refs_mut(&mut self.covering, visit);
+        crate::walk::Walk::walk_refs_mut(&mut self.covered, visit);
+    }
+}
+
+fn corner_kind_or_default<'de, D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<CornerJoinKind, D::Error> {
+    let kind = <Option<CornerJoinKind> as serde::Deserialize<'de>>::deserialize(deserializer)?;
+    Ok(kind.unwrap_or_default())
+}
+
+impl CornerJoinParams {
+    /// Resolves the two source edges through the current build's edge-to-bend mapping.
+    /// The named sheet rims, not kernel edges or saved points, identify the bends.
+    /// The first joint is the covering bend.
+    pub fn joint_pair(&self, mut resolve: impl FnMut(&SheetEdgeName) -> Result<usize>) -> Result<[usize; 2]> {
+        let joints = [resolve(&self.covering)?, resolve(&self.covered)?];
+        if joints.first() == joints.get(1) {
+            return err("the two source edges resolve to the same bend joint");
+        }
+        Ok(joints)
+    }
+
+    /// Applies the saved sources and lengths using the current build's identity and expression
+    /// resolvers. `length` evaluates a length expression in millimetres. A failed source or
+    /// expression leaves the surface sheet unchanged; only Partial Overlap evaluates overlap.
+    pub fn apply(
+        &self,
+        sheet: &mut SurfaceSheet,
+        resolve: impl FnMut(&SheetEdgeName) -> Result<usize>,
+        mut length: impl FnMut(&crate::Expr) -> Result<f64>,
+    ) -> Result<()> {
+        let joints = self.joint_pair(resolve)?;
+        let gap = self.gap.as_ref().map(&mut length).transpose()?;
+        let overlap = if self.kind == CornerJoinKind::PartialOverlap { self.overlap.as_ref().map(&mut length).transpose()? } else { None };
+        let [covering, _] = joints;
+        sheet.set_corner_join(joints, covering, self.kind, overlap, gap)
+    }
+}
+
 /// A free edge of the sheet, where a pick found it: the panel, the edge's ends in the panel's
 /// chart (its material on the left running from `a` to `b`), and whether the pick was on the
 /// sheet's other face (the one `thickness` into the material).
@@ -164,6 +351,155 @@ fn notches_across(outline: &Loop2, n: Vec2, s0: f64, ba: f64) -> Option<(Loop2, 
 }
 
 impl SurfaceSheet {
+    fn bend_source_rim(&self, joint: &Joint) -> Option<SheetEdgeName> {
+        if !matches!(joint.kind, JointKind::Bend(_)) {
+            return None;
+        }
+        let parent = self.sheet.panels.get(joint.a.panel)?;
+        let flange = self.sheet.panels.get(joint.b.panel)?;
+        let (maker, rest) = flange.name.split_once('.')?;
+        maker.strip_prefix('F')?.parse::<u64>().ok()?;
+        let rim = rest.strip_prefix(&format!("{}.", parent.name))?;
+        SheetEdgeName::parse(&format!("{}:rim.{rim}:top", parent.name)).ok()
+    }
+
+    /// Resolves a named source rim to its unique flange bend. Both slab sides name the same
+    /// bend; no picked point, panel ordinal or nearest-edge fallback is used.
+    pub fn bend_joint_for_edge_name(&self, source: &SheetEdgeName) -> Result<usize> {
+        let mut matches = self.sheet.joints.iter().enumerate().filter_map(|(index, joint)| {
+            self.bend_source_rim(joint).filter(|named| named.panel == source.panel && named.rim == source.rim).map(|_| index)
+        });
+        let Some(joint) = matches.next() else { return Err(DocError::reselect(source.to_string())) };
+        if matches.next().is_some() {
+            return err("the named sheet rim belongs to more than one bend joint");
+        }
+        Ok(joint)
+    }
+
+    /// The canonical source rim of a picked flange bend, for a saved corner parameter.
+    /// A bend without a named rim (such as a fold across a panel) is refused.
+    pub fn bend_source_edge(&self, joint: usize) -> Result<SheetEdgeName> {
+        let source = self
+            .sheet
+            .joints
+            .get(joint)
+            .and_then(|joint| self.bend_source_rim(joint))
+            .ok_or_else(|| DocError::Invalid("select an edge flange with a named source rim".into()))?;
+        if self.bend_joint_for_edge_name(&source)? != joint {
+            return err("the named sheet rim does not identify the picked bend");
+        }
+        Ok(source)
+    }
+
+    /// Changes the corner shared by two bend joints, as [`solidcraft_develop::Corner`] keys
+    /// reliefs. The caller resolves saved source-edge identities to `joints` in the current
+    /// build. `covering_joint` is one of those bends, never a panel name or pick index.
+    /// An empty gap uses the rule's gap. Full overlap follows the sheet's thickness; partial
+    /// overlap needs an explicit length. Invalid choices leave the sheet unchanged.
+    /// The caller rebuilds the body from the updated surface sheet.
+    pub fn set_corner_join(
+        &mut self,
+        joints: [usize; 2],
+        covering_joint: usize,
+        kind: CornerJoinKind,
+        overlap: Option<f64>,
+        gap: Option<f64>,
+    ) -> Result<()> {
+        let [first, second] = joints;
+        if first == second {
+            return err("the corner join needs two different bend joints");
+        }
+        let flange = |joint| match self.sheet.joints.get(joint) {
+            Some(Joint { b, kind: JointKind::Bend(_), .. }) => Some(b.panel),
+            _ => None,
+        };
+        let (Some(first_panel), Some(second_panel)) = (flange(first), flange(second)) else {
+            return err("the corner join needs two existing bend joints");
+        };
+        let covering_panel = if covering_joint == first {
+            first_panel
+        } else if covering_joint == second {
+            second_panel
+        } else {
+            return err("the covering bend is not a side of this corner");
+        };
+        let mut meeting = self.sheet.joints.iter().enumerate().filter(|(_, joint)| {
+            matches!(joint.kind, JointKind::Rip(_))
+                && ((joint.a.panel == first_panel && joint.b.panel == second_panel)
+                    || (joint.a.panel == second_panel && joint.b.panel == first_panel))
+        });
+        let Some((joint, Joint { a, b, kind: JointKind::Rip(rip) })) = meeting.next() else {
+            return err("these bend joints do not share a closed corner");
+        };
+        if meeting.next().is_some() {
+            return err("these bend joints have more than one corner join");
+        }
+        if a.panel == b.panel
+            || ![a.panel, b.panel].into_iter().all(|panel| self.sheet.panels.get(panel).is_some_and(|p| p.surface == Surface::Plane))
+            || !rip.turns.iter().all(|turn| turn.is_finite() && turn.abs() > 1e-9 && turn.abs() < std::f64::consts::PI - 1e-9)
+        {
+            return err("the corner join needs two planar panels meeting between 0 and 180 degrees");
+        }
+        let covering_a = if covering_panel == a.panel {
+            true
+        } else if covering_panel == b.panel {
+            false
+        } else {
+            return err("the covering panel is not a side of this corner joint");
+        };
+        let gap = gap.unwrap_or(self.reliefs.gap);
+        if !(gap.is_finite() && gap >= 0.01) {
+            return err("the corner gap must be at least 0.01 mm");
+        }
+        let lap = match kind {
+            CornerJoinKind::Butt => Lap::Miter { gap },
+            CornerJoinKind::PartialOverlap => {
+                let Some(amount) = overlap else { return err("partial overlap needs an overlap length") };
+                if !(amount.is_finite() && amount > 0.0 && amount <= self.sheet.thickness) {
+                    return err(format!(
+                        "partial overlap must be greater than 0 and at most {} mm (sheet thickness); entered {amount} mm",
+                        self.sheet.thickness
+                    ));
+                }
+                Lap::Overlap { covering_a, amount: Some(amount), gap }
+            }
+            CornerJoinKind::FullOverlap => Lap::Overlap { covering_a, amount: None, gap },
+        };
+        let turn = rip.turns.first().copied().ok_or_else(|| DocError::Invalid("the corner has no turn".into()))?;
+        let (old_a, old_b) = rip.lap.cuts(turn, self.sheet.thickness);
+        let (new_a, new_b) = lap.cuts(turn, self.sheet.thickness);
+        let mut next = self.sheet.clone();
+        for (panel, edge, old_cut, new_cut) in [(a.panel, &rip.edges.0, old_a, new_a), (b.panel, &rip.edges.1, old_b, new_b)] {
+            if old_cut == new_cut {
+                continue;
+            }
+            let bend_joint = if panel == first_panel { first } else { second };
+            let Some(Joint { b: anchor, kind: JointKind::Bend(bend), .. }) = self.sheet.joints.get(bend_joint) else {
+                return err("the corner's bend is no longer present");
+            };
+            let (Some(&start), Some(&end)) = (edge.first(), edge.last()) else {
+                return err("the corner has no edge");
+            };
+            let distance = |point: Vec2| anchor.dir.cross(point - anchor.origin).abs();
+            let (from, end) = if distance(start) <= distance(end) { (start, end) } else { (end, start) };
+            let direction = (end - from).normalized().ok_or_else(|| DocError::Invalid("the corner has no length".into()))?;
+            let along = if (from - anchor.origin).dot(anchor.dir) < bend.length / 2.0 { anchor.dir } else { -anchor.dir };
+            let into = (along - direction * along.dot(direction))
+                .normalized()
+                .ok_or_else(|| DocError::Invalid("the corner side runs along its bend".into()))?;
+            let rise_axis = if along.perp().dot(direction) > 0.0 { along.perp() } else { -along.perp() };
+            let target = next.panels.get_mut(panel).ok_or_else(|| DocError::Invalid("the corner panel is no longer present".into()))?;
+            target.region = retarget_corner_tail(&target.region, from, end, into, rise_axis, old_cut, new_cut)?;
+        }
+        let Some(Joint { kind: JointKind::Rip(rip), .. }) = next.joints.get_mut(joint) else {
+            return err("the corner joint is no longer present");
+        };
+        rip.lap = lap;
+        develop(&next, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
+        self.sheet = next;
+        Ok(())
+    }
+
     /// The free edge of the sheet nearest the point `p` (the body's coordinates), on a face of a
     /// planar panel or its rim: one no joint runs along. `None` when no such edge is within twice
     /// the thickness of `p`; refused where a bend's edge is nearer than any free one. The edges are
@@ -2328,6 +2664,83 @@ impl SurfaceSheet {
         })
     }
 
+    /// The bend that made the panel of a current body-face name. This is a build-local pick
+    /// conversion, not a persistent corner reference. Missing or ambiguous panels/bends return
+    /// `None`, and a support panel with no bend on its `b` anchor is not a flange.
+    pub fn bend_joint_for_face(&self, name: &str) -> Option<usize> {
+        let (panel_name, side) = name.rsplit_once(':')?;
+        if !matches!(side, "top" | "bottom" | "bend.end1" | "bend.end2") && !side.starts_with("rim.") {
+            return None;
+        }
+        let mut panels = self.sheet.panels.iter().enumerate().filter(|(_, panel)| panel.name == panel_name);
+        let (panel, _) = panels.next()?;
+        if panels.next().is_some() {
+            return None;
+        }
+        let mut bends = self.sheet.joints.iter().enumerate().filter(|(_, joint)| joint.b.panel == panel && matches!(joint.kind, JointKind::Bend(_)));
+        let (joint, _) = bends.next()?;
+        bends.next().is_none().then_some(joint)
+    }
+
+    /// The uniquely closed planar flange corners in this sheet, in bend-joint order, identified by
+    /// their two named source rims. Unsupported or ambiguous corners are not offered.
+    pub fn corner_join_sources(&self) -> Vec<[SheetEdgeName; 2]> {
+        if self.unfolded || self.altered_by.is_some() {
+            return Vec::new();
+        }
+        let mut corners = std::collections::BTreeMap::new();
+        for joint in &self.sheet.joints {
+            let JointKind::Rip(rip) = &joint.kind else { continue };
+            if joint.a.panel == joint.b.panel
+                || ![joint.a.panel, joint.b.panel]
+                    .into_iter()
+                    .all(|index| self.sheet.panels.get(index).is_some_and(|panel| panel.surface == Surface::Plane))
+                || rip.turns.is_empty()
+                || !rip.turns.iter().all(|turn| turn.is_finite() && turn.abs() > 1e-9 && turn.abs() < std::f64::consts::PI - 1e-9)
+            {
+                continue;
+            }
+            let bend = |panel: usize| {
+                let name = &self.sheet.panels.get(panel)?.name;
+                self.bend_joint_for_face(&format!("{name}:top"))
+            };
+            let (Some(first), Some(second)) = (bend(joint.a.panel), bend(joint.b.panel)) else { continue };
+            let key = if first < second { [first, second] } else { [second, first] };
+            let (Ok(first_source), Ok(second_source)) = (self.bend_source_edge(first), self.bend_source_edge(second)) else { continue };
+            match corners.entry(key) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(Some([first_source, second_source]));
+                }
+                std::collections::btree_map::Entry::Occupied(mut entry) => {
+                    entry.insert(None);
+                }
+            }
+        }
+        corners.into_values().flatten().collect()
+    }
+
+    /// Resolves two temporary picks on a folded body's flange faces to its bend-joint pair.
+    /// The points are in the body's coordinates. Saved parameters must keep the source edges'
+    /// [`SheetEdgeName`] identities, not these picks or the returned indices.
+    pub fn corner_joints_at(&self, body: &solidcraft_kernel::Body, picks: [Vec3; 2], tol: f64) -> Result<[usize; 2]> {
+        if self.unfolded {
+            return err("pick corner joins on the folded sheet");
+        }
+        if !(tol.is_finite() && tol >= 0.0) || !picks.iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
+            return err("the corner picks and tolerance must be finite");
+        }
+        let bend = |point| {
+            let (face, _) = self.panel_face_at(body, point, tol).ok_or_else(|| DocError::Invalid("pick a flange face of this sheet".into()))?;
+            self.bend_joint_for_face(&face).ok_or_else(|| DocError::Invalid("the picked face has no unique flange bend".into()))
+        };
+        let [first, second] = picks;
+        let joints = [bend(first)?, bend(second)?];
+        if joints.first() == joints.get(1) {
+            return err("pick faces of two different flange bends");
+        }
+        Ok(joints)
+    }
+
     /// Whether the line from `a` to `b` lies on a face of one of the sheet's flat panels, across
     /// it: what [`Self::add_fold`] folds.
     pub fn fold_panel_at(&self, a: Vec3, b: Vec3) -> bool {
@@ -3433,6 +3846,88 @@ fn set_back_past(region: &Region2, from: Vec2, m: Vec2, rise: f64, h: f64, into:
     Some(Region2 { outer: Loop2 { segs: out }, holes: region.holes.clone() })
 }
 
+fn retarget_corner_tail(region: &Region2, from: Vec2, end: Vec2, into: Vec2, rise_axis: Vec2, old_cut: f64, new_cut: f64) -> Result<Region2> {
+    let height = from.dist(end);
+    let direction = (end - from).normalized().ok_or_else(|| DocError::Invalid("the corner has no length".into()))?;
+    let tolerance = height.max(1.0) * 1e-9;
+    let same = |first: Vec2, second: Vec2| first.dist(second) <= tolerance;
+    let old_end = end + into * old_cut;
+    let mut restored = region.clone();
+    if old_cut.abs() > 1e-12 {
+        let mut steps = region.outer.segs.iter().enumerate().filter_map(|(index, segment)| match *segment {
+            Seg2::Line { a, b } if same(a, end) && same(b, old_end) => Some((index, true)),
+            Seg2::Line { a, b } if same(a, old_end) && same(b, end) => Some((index, false)),
+            _ => None,
+        });
+        if let Some((step, forward)) = steps.next() {
+            if steps.next().is_some() || region.outer.segs.len() < 4 {
+                return err("the corner's previous side trim is ambiguous");
+            }
+            let count = region.outer.segs.len();
+            let start = (step + count - 1) % count;
+            let mut segments: Vec<_> = region.outer.segs.iter().cycle().skip(start).take(count).copied().collect();
+            let (Some(Seg2::Line { a: first_start, b: first_end }), Some(Seg2::Line { a: last_start, b: last_end })) =
+                (segments.first().copied(), segments.get(2).copied())
+            else {
+                return err("the corner's previous side trim was modified");
+            };
+            let (top, connected) = if forward {
+                (last_end, same(first_start, from) && same(first_end, end) && same(last_start, old_end))
+            } else {
+                (first_start, same(first_end, old_end) && same(last_start, end) && same(last_end, from))
+            };
+            let past = if forward { 3 } else { count - 1 };
+            let Some(Seg2::Line { a: past_start, b: past_end }) = segments.get(past).copied() else {
+                return err("the edge past the corner's previous trim is not straight");
+            };
+            if !connected
+                || !same(if forward { past_start } else { past_end }, top)
+                || direction.cross(top - old_end).abs() > tolerance
+                || (top - old_end).dot(direction) <= tolerance
+            {
+                return err("the corner's previous side trim was modified");
+            }
+            let original_top = cross_lines((from, direction), (past_start, past_end - past_start))
+                .ok_or_else(|| DocError::Invalid("the edge past the corner runs along its side".into()))?;
+            if (original_top - from).dot(direction) <= height + tolerance {
+                return err("the corner's previous side trim no longer reaches past the other flange");
+            }
+            if let Some(segment) = segments.get_mut(past) {
+                *segment = if forward { Seg2::Line { a: original_top, b: past_end } } else { Seg2::Line { a: past_start, b: original_top } };
+            }
+            let side = if forward { Seg2::Line { a: from, b: original_top } } else { Seg2::Line { a: original_top, b: from } };
+            segments.splice(0..3, [side]);
+            restored.outer.segs = segments;
+        }
+    }
+    let mut sides = restored.outer.segs.iter().filter_map(|segment| {
+        let Seg2::Line { a, b } = *segment else { return None };
+        let top = if same(a, from) {
+            b
+        } else if same(b, from) {
+            a
+        } else {
+            return None;
+        };
+        let rise = (top - from).dot(direction);
+        (rise > height + tolerance && direction.cross(top - from).abs() <= tolerance).then_some(rise)
+    });
+    let Some(rise) = sides.next() else {
+        if restored.outer.segs.iter().any(|segment| (segment.start() - end).dot(rise_axis) > tolerance) {
+            return err("the corner's taller side was modified; its trim cannot be changed");
+        }
+        return Ok(restored);
+    };
+    if sides.next().is_some() {
+        return err("the corner's taller side is ambiguous");
+    }
+    if new_cut.abs() <= 1e-12 {
+        return Ok(restored);
+    }
+    set_back_past(&restored, from, direction, rise, height, into, new_cut)
+        .ok_or_else(|| DocError::Invalid("the edge past the corner's taller side is not straight".into()))
+}
+
 /// How far a point lies from the segment `a`–`b`.
 fn dist_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
     let d = b - a;
@@ -3811,10 +4306,670 @@ mod tests {
 
     use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
     use solidcraft_develop::prelude::*;
-    use solidcraft_develop::{Anchor, Bend, Datum, Joint, JointKind, Panel, Relief, Rigid2, Rigid3, Sheet, Tail, ZoneEnds, develop, fold};
+    use solidcraft_develop::{
+        Anchor, Bend, CornerRelief, Datum, Joint, JointKind, Panel, Relief, Rigid2, Rigid3, Sheet, Tail, ZoneEnds, develop, fold,
+    };
     use solidcraft_geom::prelude::*;
 
-    use super::bent_box;
+    use super::*;
+
+    fn source_params() -> CornerJoinParams {
+        serde_json::from_value(serde_json::json!({
+            "covering": "F7.base.l2:rim.far:top",
+            "covered": "F8.base.l1:rim.far:top",
+        }))
+        .unwrap()
+    }
+
+    fn copied_sources(
+        corner: CornerJoinParams,
+        features: &std::collections::BTreeMap<u64, u64>,
+        bodies: &std::collections::BTreeMap<String, String>,
+    ) -> CornerJoinParams {
+        let mut feature = crate::FeatureKind::SheetCornerJoin { body: None, corner };
+        feature.remap_refs(features, &std::collections::BTreeMap::new());
+        feature.remap_bodies(bodies);
+        let crate::FeatureKind::SheetCornerJoin { corner, .. } = feature else { panic!("the feature stays a corner join") };
+        corner
+    }
+
+    #[test]
+    fn corner_join_expression_walk_preserves_sources_and_length_roles() {
+        use crate::walk::{ExprRole, Kind, Walk};
+
+        let mut saved = serde_json::to_value(source_params()).unwrap();
+        saved["kind"] = serde_json::json!("partial_overlap");
+        saved["overlap"] = serde_json::json!("overlap_length");
+        saved["gap"] = serde_json::json!("corner_gap");
+        let mut params: CornerJoinParams = serde_json::from_value(saved).unwrap();
+        let sources = (params.covering.clone(), params.covered.clone());
+        let mut labels = Vec::new();
+        params.walk_exprs(&mut |(label, expr, kind, role)| {
+            labels.push((label, expr.to_string()));
+            assert!(matches!(kind, Kind::Length));
+            assert!(matches!(role, ExprRole::Input));
+        });
+        assert_eq!(labels, [("Overlap", "overlap_length".to_owned()), ("Corner Gap", "corner_gap".to_owned())]);
+        params.walk_exprs_mut(&mut |(_, expr, _, _)| {
+            *expr = serde_json::from_value(serde_json::json!(format!("copy_{}", expr))).unwrap();
+        });
+        assert_eq!(serde_json::to_value(&params).unwrap()["overlap"], "copy_overlap_length");
+        assert_eq!(serde_json::to_value(&params).unwrap()["gap"], "copy_corner_gap");
+        assert_eq!((params.covering, params.covered), sources);
+    }
+
+    #[test]
+    fn corner_join_feature_walk_remaps_sources_once_and_keeps_external_names() {
+        use std::collections::BTreeMap;
+
+        let mut saved = serde_json::to_value(source_params()).unwrap();
+        saved["type"] = serde_json::json!("sheet_corner_join");
+        saved["body"] = serde_json::json!("B");
+        saved["kind"] = serde_json::json!("partial_overlap");
+        saved["overlap"] = serde_json::json!("overlap_length");
+        saved["gap"] = serde_json::json!("corner_gap");
+        let mut feature: crate::FeatureKind = serde_json::from_value(saved).unwrap();
+        assert!(feature.is_sheet());
+        assert!(feature.names_feature(7, ""));
+        assert!(feature.names_feature(8, ""));
+        assert!(!feature.names_feature(9, ""));
+        assert_eq!(feature.inputs().iter().map(|(label, _, _)| *label).collect::<Vec<_>>(), ["Overlap", "Corner Gap"]);
+        feature.remap_refs(&BTreeMap::from([(7, 8), (8, 9)]), &BTreeMap::new());
+        feature.remap_bodies(&BTreeMap::from([("B".to_owned(), "B2".to_owned())]));
+        let saved = serde_json::to_value(&feature).unwrap();
+        assert_eq!(saved["covering"], "F8.base.l2:rim.far:top");
+        assert_eq!(saved["covered"], "F9.base.l1:rim.far:top");
+        assert_eq!(saved["body"], "B2");
+        assert_eq!(saved["overlap"], "overlap_length");
+        assert_eq!(saved["gap"], "corner_gap");
+        let reopened: crate::FeatureKind = serde_json::from_value(saved).unwrap();
+        assert_eq!(reopened, feature);
+        assert_eq!(feature.kind_key(), "sheet_corner_join");
+        assert_eq!(crate::FeatureKind::type_name_to_kind_key(feature.type_name()), Some("sheet_corner_join"));
+    }
+
+    #[test]
+    fn flange_corner_join_feature_walk_remaps_sources_once_and_visits_only_active_expressions() {
+        use crate::walk::Walk;
+        use std::collections::BTreeMap;
+
+        for kind in ["butt", "partial_overlap", "full_overlap"] {
+            let mut corner = serde_json::to_value(source_params()).unwrap();
+            corner["covering"] = serde_json::json!("F12.F7.base.l2.far:rim.far:bottom");
+            corner["covered"] = serde_json::json!("F8.external.panel:rim.side:top");
+            corner["kind"] = serde_json::json!(kind);
+            corner["overlap"] = serde_json::json!("corner_overlap");
+            corner["gap"] = serde_json::json!("corner_gap");
+            let mut feature: crate::FeatureKind = serde_json::from_value(serde_json::json!({
+                "type": "sheet_flange", "edges": [], "height": "flange_height", "angle": "flange_angle", "corners": [corner]
+            }))
+            .unwrap();
+            assert!(feature.is_sheet());
+            for maker in [7, 8, 12] {
+                assert!(feature.names_feature(maker, ""));
+            }
+            assert!(!feature.names_feature(9, ""));
+            let partial = kind == "partial_overlap";
+            assert_eq!(feature.inputs().iter().any(|(label, _, _)| *label == "Overlap"), partial);
+            assert!(feature.inputs().iter().any(|(label, _, _)| *label == "Corner Gap"));
+            feature.remap_refs(&BTreeMap::from([(7, 8), (8, 9), (12, 22)]), &BTreeMap::new());
+            feature.walk_exprs_mut(&mut |(_, expr, _, _)| {
+                *expr = serde_json::from_value(serde_json::json!(format!("copy_{expr}"))).unwrap();
+            });
+            let saved = serde_json::to_value(&feature).unwrap();
+            assert_eq!(saved["corners"][0]["covering"], "F22.F8.base.l2.far:rim.far:bottom");
+            assert_eq!(saved["corners"][0]["covered"], "F9.external.panel:rim.side:top");
+            assert_eq!(saved["corners"][0]["overlap"], if partial { "copy_corner_overlap" } else { "corner_overlap" });
+            assert_eq!(saved["corners"][0]["gap"], "copy_corner_gap");
+            assert_eq!(saved["height"], "copy_flange_height");
+            assert_eq!(saved["angle"], "copy_flange_angle");
+            let reopened: crate::FeatureKind = serde_json::from_value(saved).unwrap();
+            assert_eq!(reopened, feature);
+        }
+    }
+
+    #[test]
+    fn corner_join_null_type_keeps_butt_and_invalid_types_are_refused() {
+        let mut saved = serde_json::to_value(source_params()).unwrap();
+        for (value, expected) in [
+            (serde_json::Value::Null, CornerJoinKind::Butt),
+            (serde_json::json!("butt"), CornerJoinKind::Butt),
+            (serde_json::json!("partial_overlap"), CornerJoinKind::PartialOverlap),
+            (serde_json::json!("full_overlap"), CornerJoinKind::FullOverlap),
+        ] {
+            saved["kind"] = value;
+            assert_eq!(serde_json::from_value::<CornerJoinParams>(saved.clone()).unwrap().kind, expected);
+        }
+        for value in [serde_json::json!("unknown"), serde_json::json!(1), serde_json::json!({})] {
+            saved["kind"] = value;
+            assert!(serde_json::from_value::<CornerJoinParams>(saved.clone()).is_err());
+        }
+    }
+
+    #[test]
+    fn corner_join_saved_parameters_keep_source_edges_not_joint_indices() {
+        let params = source_params();
+        assert_eq!(params.kind, CornerJoinKind::Butt);
+        let saved = serde_json::to_value(&params).unwrap();
+        assert_eq!(saved["covering"], params.covering.to_string());
+        assert_eq!(saved["covered"], params.covered.to_string());
+        assert!(saved.get("joints").is_none());
+        assert!(saved.get("gap").is_none());
+        assert_eq!(serde_json::from_value::<CornerJoinParams>(saved.clone()).unwrap(), params);
+        for name in ["|", "", "F7:side|F7:top", "base:rim.:top", "base:rim.l1:side", "F18446744073709551616.base:rim.far:top"] {
+            let mut bad = saved.clone();
+            bad["covering"] = serde_json::json!(name);
+            assert!(serde_json::from_value::<CornerJoinParams>(bad).is_err());
+        }
+    }
+
+    #[test]
+    fn corner_join_sources_resolve_to_each_builds_joint_pair() {
+        let params = source_params();
+        for expected in [[2, 9], [8, 12]] {
+            let joints = params
+                .joint_pair(|edge| {
+                    if edge == &params.covering {
+                        Ok(expected[0])
+                    } else if edge == &params.covered {
+                        Ok(expected[1])
+                    } else {
+                        err("source edge not found")
+                    }
+                })
+                .unwrap();
+            assert_eq!(joints, expected);
+        }
+    }
+
+    #[test]
+    fn corner_join_source_resolution_refuses_missing_and_duplicate_bends() {
+        let params = source_params();
+        assert!(params.joint_pair(|_| err("source edge not found")).is_err());
+        assert!(params.joint_pair(|_| Ok(2)).is_err());
+    }
+
+    #[test]
+    fn corner_join_saved_sources_and_lengths_apply_atomically() {
+        let mut params = source_params();
+        params.kind = CornerJoinKind::PartialOverlap;
+        params.overlap = Some(serde_json::from_value(serde_json::json!("1 mm")).unwrap());
+        params.gap = Some(serde_json::from_value(serde_json::json!("0.8 mm")).unwrap());
+        let resolve = |edge: &SheetEdgeName| if edge == &params.covering { Ok(0) } else { Ok(1) };
+        let mut sheet = corner_sheet();
+        params.apply(&mut sheet, resolve, |expr| if Some(expr) == params.gap.as_ref() { Ok(0.8) } else { Ok(1.0) }).unwrap();
+        let JointKind::Rip(rip) = &sheet.sheet.joints[2].kind else { panic!("the corner stays a rip") };
+        assert_eq!(rip.lap, Lap::Overlap { covering_a: true, amount: Some(1.0), gap: 0.8 });
+        let before = sheet.clone();
+        assert!(params.apply(&mut sheet, resolve, |_| Err(DocError::Expr("length could not be evaluated".into()))).is_err());
+        assert_eq!(sheet, before);
+        assert!(params.apply(&mut sheet, |_| Err(DocError::reselect("source edge")), |_| Ok(1.0)).is_err());
+        assert_eq!(sheet, before);
+    }
+
+    #[test]
+    fn corner_join_unused_overlap_is_not_evaluated() {
+        use crate::walk::Walk;
+
+        for kind in [CornerJoinKind::Butt, CornerJoinKind::FullOverlap] {
+            let mut params = source_params();
+            params.kind = kind;
+            params.overlap = Some(serde_json::from_value(serde_json::json!("unused_length")).unwrap());
+            params.walk_exprs(&mut |_| panic!("unused overlap is not an input"));
+            params.walk_exprs_mut(&mut |_| panic!("unused overlap is not a mutable input"));
+            let feature = crate::FeatureKind::SheetCornerJoin { body: None, corner: params.clone() };
+            assert!(feature.inputs().is_empty());
+            assert!(feature.expressions().is_empty());
+            let mut sheet = corner_sheet();
+            params
+                .apply(
+                    &mut sheet,
+                    |edge| if edge == &params.covering { Ok(0) } else { Ok(1) },
+                    |_| Err(DocError::Expr("unused overlap must not be evaluated".into())),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn corner_join_source_copy_remaps_only_mapped_feature_ids() {
+        let params = source_params();
+        let external = params.covered.clone();
+        let params = copied_sources(params, &std::collections::BTreeMap::from([(7, 17)]), &std::collections::BTreeMap::new());
+        assert_eq!(params.covered, external);
+        assert_eq!(params.covering.to_string(), "F17.base.l2:rim.far:top");
+    }
+
+    #[test]
+    fn corner_join_source_copy_remaps_nested_sheet_panel_names() {
+        let mut params = source_params();
+        params.covering = SheetEdgeName::parse("F12.F7.base.l2.far:rim.far:bottom").unwrap();
+        let mapping = std::collections::BTreeMap::from([(7, 8), (8, 9), (12, 22)]);
+        let params = copied_sources(params, &mapping, &std::collections::BTreeMap::new());
+        assert_eq!(params.covering.to_string(), "F22.F8.base.l2.far:rim.far:bottom");
+        assert_eq!(params.covered.to_string(), "F9.base.l1:rim.far:top");
+    }
+
+    #[test]
+    fn corner_join_source_copy_preserves_base_rims_and_side() {
+        let mut params = source_params();
+        params.covering = SheetEdgeName::parse("base:rim.l2:bottom").unwrap();
+        let params = copied_sources(
+            params,
+            &std::collections::BTreeMap::from([(7, 17)]),
+            &std::collections::BTreeMap::from([("Body1".into(), "Body2".into())]),
+        );
+        assert_eq!(params.covering.to_string(), "base:rim.l2:bottom");
+    }
+
+    fn corner_sheet() -> SurfaceSheet {
+        let region = |width, low, high| {
+            let points = [Vec2::new(0.0, low), Vec2::new(width, low), Vec2::new(width, high), Vec2::new(0.0, high)];
+            Region2 { outer: Loop2::polygon(&points).ccw(), holes: Vec::new() }
+        };
+        let bend = |length| {
+            JointKind::Bend(Bend {
+                angle: std::f64::consts::FRAC_PI_2,
+                radius: 2.0,
+                toward_material: true,
+                datum: Datum::Sharp,
+                length,
+                ends: ZoneEnds { near: (0.0, length), far: (0.0, length) },
+                tails: (Tail::Keep, Tail::Keep),
+                relief: (Relief::None, Relief::None),
+            })
+        };
+        let first_edge = Seg2::Line { a: Vec2::new(120.0, -40.0), b: Vec2::new(120.0, 0.0) };
+        let second_edge = Seg2::Line { a: Vec2::new(0.0, -40.0), b: Vec2::ZERO };
+        let sheet = Sheet {
+            thickness: 2.0,
+            k_factor: 0.5,
+            panels: vec![
+                Panel { name: "support".into(), region: region(120.0, 0.0, 90.0), ..Panel::default() },
+                Panel { name: "first".into(), region: region(120.0, -40.0, 0.0), ..Panel::default() },
+                Panel { name: "second".into(), region: region(90.0, -40.0, 0.0), ..Panel::default() },
+            ],
+            joints: vec![
+                Joint {
+                    a: Anchor { panel: 0, origin: Vec2::ZERO, dir: Vec2::X },
+                    b: Anchor { panel: 1, origin: Vec2::ZERO, dir: Vec2::X },
+                    kind: bend(120.0),
+                },
+                Joint {
+                    a: Anchor { panel: 0, origin: Vec2::new(120.0, 0.0), dir: Vec2::Y },
+                    b: Anchor { panel: 2, origin: Vec2::ZERO, dir: Vec2::X },
+                    kind: bend(90.0),
+                },
+                Joint {
+                    a: Anchor { panel: 1, origin: first_edge.start(), dir: Vec2::Y },
+                    b: Anchor { panel: 2, origin: second_edge.start(), dir: Vec2::Y },
+                    kind: JointKind::Rip(Rip {
+                        edges: (vec![first_edge.start(), first_edge.end()], vec![second_edge.start(), second_edge.end()]),
+                        curves: (vec![first_edge], vec![second_edge]),
+                        turns: vec![std::f64::consts::FRAC_PI_2; 2],
+                        lap: Lap::Miter { gap: 0.5 },
+                    }),
+                },
+            ],
+            ..Sheet::default()
+        };
+        serde_json::from_value(serde_json::json!({
+            "body": "corner",
+            "rule": "rule",
+            "sheet": sheet,
+            "places": [null, null, null],
+            "thickness": 2.0,
+            "k_factor": 0.5,
+            "regions": [],
+            "bends": [],
+            "stretch": 0.0,
+            "rolls": 0,
+            "reliefs": { "gap": 0.5, "corner": CornerRelief::Notch, "corner_size": 0.0, "width": 0.0, "depth": 0.0 },
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn corner_join_named_sources_resolve_after_rebuild_without_pick_order() {
+        let mut sheet = corner_sheet();
+        sheet.sheet.panels[1].name = "F7.support.l1".into();
+        sheet.sheet.panels[2].name = "F8.support.l2".into();
+        let sources = [sheet.bend_source_edge(0).unwrap(), sheet.bend_source_edge(1).unwrap()];
+        assert_eq!(sources[0].to_string(), "support:rim.l1:top");
+        assert_eq!(sources[1].to_string(), "support:rim.l2:top");
+        let mut params = source_params();
+        params.covering = sources[0].clone();
+        params.covered = sources[1].clone();
+        assert_eq!(params.joint_pair(|source| sheet.bend_joint_for_edge_name(source)).unwrap(), [0, 1]);
+        let mut bottom = sources[0].clone();
+        bottom.far_face = true;
+        assert_eq!(sheet.bend_joint_for_edge_name(&bottom).unwrap(), 0);
+        let mut rebuilt: SurfaceSheet = serde_json::from_value(serde_json::to_value(&sheet).unwrap()).unwrap();
+        rebuilt.sheet.joints.swap(0, 1);
+        rebuilt.unfolded = true;
+        assert_eq!(params.joint_pair(|source| rebuilt.bend_joint_for_edge_name(source)).unwrap(), [1, 0]);
+    }
+
+    #[test]
+    fn corner_join_named_sources_refuse_missing_and_ambiguous_bends_atomically() {
+        let mut sheet = corner_sheet();
+        sheet.sheet.panels[1].name = "F7.support.l1".into();
+        sheet.sheet.panels[2].name = "F8.support.l2".into();
+        let mut params = source_params();
+        params.covering = sheet.bend_source_edge(0).unwrap();
+        params.covered = sheet.bend_source_edge(1).unwrap();
+        let missing = SheetEdgeName::parse("support:rim.missing:top").unwrap();
+        assert!(matches!(sheet.bend_joint_for_edge_name(&missing), Err(DocError::Reselect { .. })));
+        assert!(sheet.bend_source_edge(2).is_err());
+        sheet.sheet.joints.push(sheet.sheet.joints[0].clone());
+        let before = sheet.clone();
+        assert!(params.apply(&mut sheet, |source| before.bend_joint_for_edge_name(source), |_| Ok(1.0)).is_err());
+        assert_eq!(sheet, before);
+    }
+
+    #[test]
+    fn corner_join_named_sources_apply_to_the_actual_surface_joint() {
+        for covered_maker in [7, 8] {
+            for covering_joint in [0, 1] {
+                let mut sheet = corner_sheet();
+                sheet.sheet.panels[1].name = "F7.support.l1".into();
+                sheet.sheet.panels[2].name = format!("F{covered_maker}.support.l2");
+                let sources = [sheet.bend_source_edge(0).unwrap(), sheet.bend_source_edge(1).unwrap()];
+                assert_eq!(sources[0].to_string(), "support:rim.l1:top");
+                assert_eq!(sources[1].to_string(), "support:rim.l2:top");
+                let mut params = source_params();
+                params.covering = sources[covering_joint].clone();
+                params.covered = sources[1 - covering_joint].clone();
+                params.kind = CornerJoinKind::FullOverlap;
+                let before = sheet.clone();
+                assert_eq!(params.joint_pair(|source| before.bend_joint_for_edge_name(source)).unwrap(), [covering_joint, 1 - covering_joint]);
+                params.apply(&mut sheet, |source| before.bend_joint_for_edge_name(source), |_| Ok(0.0)).unwrap();
+                let JointKind::Rip(rip) = &sheet.sheet.joints[2].kind else { panic!("the corner stays a rip") };
+                assert_eq!(rip.lap, Lap::Overlap { covering_a: covering_joint == 0, amount: None, gap: 0.5 });
+            }
+        }
+    }
+
+    #[test]
+    fn corner_join_records_all_modes_and_covering_sides_on_the_surface_joint() {
+        for kind in [CornerJoinKind::Butt, CornerJoinKind::PartialOverlap, CornerJoinKind::FullOverlap] {
+            for covering_joint in [0, 1] {
+                let mut sheet = corner_sheet();
+                sheet.set_corner_join([0, 1], covering_joint, kind, Some(1.0), None).unwrap();
+                let expected = match kind {
+                    CornerJoinKind::Butt => Lap::Miter { gap: 0.5 },
+                    CornerJoinKind::PartialOverlap => Lap::Overlap { covering_a: covering_joint == 0, amount: Some(1.0), gap: 0.5 },
+                    CornerJoinKind::FullOverlap => Lap::Overlap { covering_a: covering_joint == 0, amount: None, gap: 0.5 },
+                };
+                let JointKind::Rip(rip) = &sheet.sheet.joints[2].kind else { panic!("the corner stays a rip") };
+                assert_eq!(rip.lap, expected);
+                let saved = serde_json::to_vec(&sheet).unwrap();
+                let reopened: SurfaceSheet = serde_json::from_slice(&saved).unwrap();
+                assert_eq!(reopened, sheet);
+            }
+        }
+        let mut sheet = corner_sheet();
+        sheet.set_corner_join([0, 1], 0, CornerJoinKind::Butt, None, Some(0.8)).unwrap();
+        let JointKind::Rip(rip) = &sheet.sheet.joints[2].kind else { panic!("the corner stays a rip") };
+        assert_eq!(rip.lap, Lap::Miter { gap: 0.8 });
+    }
+
+    #[test]
+    fn corner_join_invalid_overlap_names_the_thickness_limit_without_changing_the_sheet() {
+        for amount in [0.0, -1.0, 3.0, f64::NAN, f64::INFINITY] {
+            let mut sheet = corner_sheet();
+            let before = sheet.clone();
+            let error = sheet.set_corner_join([0, 1], 0, CornerJoinKind::PartialOverlap, Some(amount), None).unwrap_err();
+            let message = error.to_string();
+            assert!(message.contains(&format!("at most {} mm (sheet thickness)", sheet.sheet.thickness)), "{message}");
+            assert!(message.contains("entered"), "{message}");
+            assert!(!message.contains("joint"), "{message}");
+            assert_eq!(sheet, before);
+        }
+        let mut sheet = corner_sheet();
+        let thickness = sheet.sheet.thickness;
+        sheet.set_corner_join([0, 1], 0, CornerJoinKind::PartialOverlap, Some(thickness), None).unwrap();
+    }
+
+    #[test]
+    fn corner_join_invalid_choices_leave_the_surface_sheet_unchanged() {
+        for (joints, covering, kind, overlap, gap) in [
+            ([usize::MAX, 1], 0, CornerJoinKind::Butt, None, None),
+            ([0, 0], 0, CornerJoinKind::Butt, None, None),
+            ([0, 1], usize::MAX, CornerJoinKind::Butt, None, None),
+            ([0, 1], 0, CornerJoinKind::Butt, None, Some(0.0)),
+            ([0, 1], 0, CornerJoinKind::Butt, None, Some(-0.5)),
+            ([0, 1], 0, CornerJoinKind::Butt, None, Some(f64::NAN)),
+            ([0, 1], 0, CornerJoinKind::PartialOverlap, None, None),
+            ([0, 1], 0, CornerJoinKind::PartialOverlap, Some(0.0), None),
+            ([0, 1], 0, CornerJoinKind::PartialOverlap, Some(3.0), None),
+            ([0, 1], 0, CornerJoinKind::PartialOverlap, Some(f64::INFINITY), None),
+        ] {
+            let mut sheet = corner_sheet();
+            let before = sheet.clone();
+            assert!(sheet.set_corner_join(joints, covering, kind, overlap, gap).is_err());
+            assert_eq!(sheet, before);
+        }
+    }
+
+    #[test]
+    fn corner_join_refuses_missing_planar_corner_geometry_atomically() {
+        for case in 0..5 {
+            let mut sheet = corner_sheet();
+            match case {
+                0 => sheet.sheet.joints[0].kind = JointKind::Seam,
+                1 => sheet.sheet.panels[1].surface = Surface::Cylinder { radius: 10.0, material_inward: false },
+                2 => {
+                    let JointKind::Rip(rip) = &mut sheet.sheet.joints[2].kind else { panic!("the fixture has a rip") };
+                    rip.turns = vec![0.0; 2];
+                }
+                3 => {
+                    sheet.sheet.joints.pop();
+                }
+                _ => {
+                    sheet.sheet.joints.push(sheet.sheet.joints[2].clone());
+                }
+            }
+            let before = sheet.clone();
+            assert!(sheet.set_corner_join([0, 1], 0, CornerJoinKind::FullOverlap, None, None).is_err());
+            assert_eq!(sheet, before);
+        }
+    }
+
+    #[test]
+    fn corner_join_joint_pair_ignores_panel_names_and_pair_order() {
+        let mut first = corner_sheet();
+        let mut second = first.clone();
+        second.sheet.panels[1].name = "renamed second".into();
+        second.sheet.panels[2].name = "renamed first".into();
+        first.set_corner_join([0, 1], 0, CornerJoinKind::PartialOverlap, Some(1.0), None).unwrap();
+        second.set_corner_join([1, 0], 0, CornerJoinKind::PartialOverlap, Some(1.0), None).unwrap();
+        assert_eq!(first.sheet.joints, second.sheet.joints);
+        let extra = Joint {
+            a: Anchor { panel: 0, origin: Vec2::ZERO, dir: Vec2::X },
+            b: Anchor { panel: 0, origin: Vec2::ZERO, dir: Vec2::X },
+            kind: JointKind::Rip(Rip {
+                edges: (vec![Vec2::ZERO, Vec2::X], vec![Vec2::ZERO, Vec2::X]),
+                curves: (Vec::new(), Vec::new()),
+                turns: vec![0.0; 2],
+                lap: Lap::Cut(0.0, 0.0),
+            }),
+        };
+        second.sheet.joints.push(extra);
+        second.set_corner_join([0, 1], 1, CornerJoinKind::FullOverlap, None, None).unwrap();
+        let JointKind::Rip(rip) = &second.sheet.joints[2].kind else { panic!("the corner stays a rip") };
+        assert_eq!(rip.lap, Lap::Overlap { covering_a: false, amount: None, gap: 0.5 });
+    }
+
+    #[test]
+    fn corner_join_body_faces_resolve_to_unique_flange_bends() {
+        let mut sheet = corner_sheet();
+        for side in ["top", "bottom", "rim.edge0", "bend.end1", "bend.end2"] {
+            assert_eq!(sheet.bend_joint_for_face(&format!("first:{side}")), Some(0));
+            assert_eq!(sheet.bend_joint_for_face(&format!("second:{side}")), Some(1));
+        }
+        assert_eq!(sheet.bend_joint_for_face("support:top"), None);
+        assert_eq!(sheet.bend_joint_for_face("first:bend.end8"), None);
+        assert_eq!(sheet.bend_joint_for_face("missing:top"), None);
+        sheet.sheet.panels[1].name = "renamed".into();
+        assert_eq!(sheet.bend_joint_for_face("first:top"), None);
+        assert_eq!(sheet.bend_joint_for_face("renamed:top"), Some(0));
+        sheet.sheet.panels.push(sheet.sheet.panels[1].clone());
+        assert_eq!(sheet.bend_joint_for_face("renamed:top"), None);
+        sheet.sheet.panels.pop();
+        sheet.sheet.joints.push(sheet.sheet.joints[0].clone());
+        assert_eq!(sheet.bend_joint_for_face("renamed:top"), None);
+    }
+
+    fn unequal_corner(first_height: f64, second_height: f64, turn: f64) -> (SurfaceSheet, [usize; 2]) {
+        let mut sheet = corner_sheet();
+        sheet.sheet.panels.truncate(1);
+        sheet.sheet.joints.clear();
+        sheet.places = vec![Some(Rigid3::IDENTITY)];
+        let first = FreeEdge { panel: 0, a: Vec2::ZERO, b: Vec2::new(120.0, 0.0), far_face: false };
+        let second = FreeEdge { panel: 0, a: first.b, b: Vec2::new(120.0, 90.0), far_face: false };
+        let covering = sheet.add_flange_on(first, first_height, turn, 2.0, "inside", HeightFrom::Outer, true).unwrap();
+        let covered = sheet.add_flange_on(second, second_height, turn, 2.0, "inside", HeightFrom::Outer, true).unwrap();
+        (sheet, [covering, covered])
+    }
+
+    #[test]
+    fn corner_join_full_overlap_restores_the_taller_covering_side() {
+        let (mut sheet, [covering, covered]) = unequal_corner(40.0, 20.0, std::f64::consts::FRAC_PI_2);
+        sheet.set_corner_join([covering, covered], covering, CornerJoinKind::FullOverlap, None, None).unwrap();
+        let panel = sheet.sheet.joints[covering].b.panel;
+        let corner = Vec2::new(120.0, -40.0);
+        assert!(
+            sheet.sheet.panels[panel].region.outer.segs.iter().any(|segment| segment.start().dist(corner) < 1e-9),
+            "full overlap must not leave the old miter setback above the shorter flange: {:?}",
+            sheet.sheet.panels[panel].region.outer.segs
+        );
+    }
+
+    #[test]
+    fn corner_join_unequal_height_modes_roundtrip_on_both_sides() {
+        for taller in [0, 1] {
+            let (mut sheet, joints) = if taller == 0 {
+                unequal_corner(40.0, 20.0, std::f64::consts::FRAC_PI_2)
+            } else {
+                unequal_corner(20.0, 40.0, std::f64::consts::FRAC_PI_2)
+            };
+            for covering in [0, 1] {
+                for (kind, overlap, gap, cut) in [
+                    (CornerJoinKind::FullOverlap, None, None, 0.0),
+                    (CornerJoinKind::PartialOverlap, Some(1.0), Some(0.8), 1.0),
+                    (CornerJoinKind::Butt, None, None, 2.0 + 0.5 / 2.0_f64.sqrt()),
+                    (CornerJoinKind::FullOverlap, None, Some(0.8), 0.0),
+                ] {
+                    sheet.set_corner_join(joints, joints[covering], kind, overlap, gap).unwrap();
+                    let cut = if kind != CornerJoinKind::Butt && taller != covering { 2.0 + gap.unwrap_or(0.5) } else { cut };
+                    let panel = sheet.sheet.joints[joints[taller]].b.panel;
+                    let corner = Vec2::new(if taller == 0 { 120.0 - cut } else { cut }, -40.0);
+                    assert!(
+                        sheet.sheet.panels[panel].region.outer.segs.iter().any(|segment| segment.start().dist(corner) < 1e-9),
+                        "{taller} {covering} {kind:?}: {:?}",
+                        sheet.sheet.panels[panel].region.outer.segs
+                    );
+                    let folded = sheet.build().unwrap();
+                    assert!(folded.face_count() > 0);
+                    let area = sheet.regions.iter().map(Region2::area).sum::<f64>();
+                    sheet.unfolded = true;
+                    assert!(sheet.build().unwrap().face_count() > 0);
+                    assert!((sheet.regions.iter().map(Region2::area).sum::<f64>() - area).abs() < 1e-9);
+                    sheet.unfolded = false;
+                    assert_eq!(sheet.build().unwrap().face_count(), folded.face_count());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn corner_join_slanted_unequal_height_modes_restore_the_original_butt_contour() {
+        for angle in [72.0_f64, 108.0] {
+            for heights in [(40.0, 20.0), (20.0, 40.0)] {
+                let (mut sheet, joints) = unequal_corner(heights.0, heights.1, angle.to_radians());
+                let original = sheet.sheet.panels.clone();
+                for covering in joints {
+                    for (kind, overlap) in
+                        [(CornerJoinKind::FullOverlap, None), (CornerJoinKind::PartialOverlap, Some(1.0)), (CornerJoinKind::Butt, None)]
+                    {
+                        sheet.set_corner_join(joints, covering, kind, overlap, None).unwrap();
+                        let folded = sheet.build().unwrap();
+                        assert!(folded.face_count() > 0, "{angle} {heights:?} {covering} {kind:?}");
+                        let area = sheet.regions.iter().map(Region2::area).sum::<f64>();
+                        sheet.unfolded = true;
+                        assert!(sheet.build().unwrap().face_count() > 0);
+                        assert!((sheet.regions.iter().map(Region2::area).sum::<f64>() - area).abs() < 1e-9);
+                        sheet.unfolded = false;
+                        assert_eq!(sheet.build().unwrap().face_count(), folded.face_count());
+                        if kind == CornerJoinKind::Butt {
+                            for (before, after) in original.iter().zip(&sheet.sheet.panels) {
+                                assert_eq!(before.region.outer.segs.len(), after.region.outer.segs.len());
+                                for segment in &before.region.outer.segs {
+                                    assert!(
+                                        after.region.outer.segs.iter().any(|candidate| {
+                                            segment.start().dist(candidate.start()) < 1e-9 && segment.end().dist(candidate.end()) < 1e-9
+                                        }),
+                                        "{angle} {heights:?} {covering}: {:?}",
+                                        after.region.outer.segs
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn corner_join_modified_taller_side_is_refused_atomically() {
+        let (mut sheet, joints) = unequal_corner(40.0, 20.0, std::f64::consts::FRAC_PI_2);
+        let panel = sheet.sheet.joints[joints[0]].b.panel;
+        let segments = &mut sheet.sheet.panels[panel].region.outer.segs;
+        let index =
+            segments.iter().position(|segment| matches!(*segment, Seg2::Line { a, b } if a.y == -40.0 && b.y == -20.0 && a.x == b.x)).unwrap();
+        let Seg2::Line { a: start, b: end } = segments[index] else { panic!("the tail is straight") };
+        let middle = start.lerp(end, 0.5) + Vec2::new(0.25, 0.0);
+        segments.splice(index..=index, [Seg2::Line { a: start, b: middle }, Seg2::Line { a: middle, b: end }]);
+        let before = sheet.clone();
+        assert!(sheet.set_corner_join(joints, joints[0], CornerJoinKind::FullOverlap, None, None).is_err());
+        assert_eq!(sheet, before);
+    }
+
+    #[test]
+    fn corner_join_record_survives_body_rebuild_unfold_and_refold() {
+        for kind in [CornerJoinKind::Butt, CornerJoinKind::PartialOverlap, CornerJoinKind::FullOverlap] {
+            for covering in [0, 1] {
+                let mut sheet = corner_sheet();
+                sheet.places[0] = Some(Rigid3::IDENTITY);
+                sheet.set_corner_join([0, 1], covering, kind, Some(1.0), None).unwrap();
+                let JointKind::Rip(rip) = &sheet.sheet.joints[2].kind else { panic!("the corner stays a rip") };
+                let lap = rip.lap;
+                let folded = sheet.build().unwrap();
+                assert!(folded.face_count() > 0);
+                let picks = [sheet.far_edge_point(1).unwrap(), sheet.far_edge_point(2).unwrap()];
+                assert_eq!(sheet.corner_joints_at(&folded, picks, 1e-7).unwrap(), [0, 1]);
+                assert!(sheet.corner_joints_at(&folded, [picks[0], picks[0]], 1e-7).is_err());
+                let flat_area = sheet.regions.iter().map(Region2::area).sum::<f64>();
+                assert!(flat_area > 0.0);
+                sheet.unfolded = true;
+                let flat = sheet.build().unwrap();
+                assert!(flat.face_count() > 0);
+                assert!(sheet.corner_joints_at(&flat, picks, 1e-7).is_err());
+                assert!((sheet.regions.iter().map(Region2::area).sum::<f64>() - flat_area).abs() < 1e-9);
+                sheet.unfolded = false;
+                let refolded = sheet.build().unwrap();
+                assert_eq!(refolded.face_count(), folded.face_count());
+                assert_eq!(sheet.corner_joints_at(&refolded, picks, 1e-7).unwrap(), [0, 1]);
+                let JointKind::Rip(rip) = &sheet.sheet.joints[2].kind else { panic!("the corner stays a rip") };
+                assert_eq!(rip.lap, lap);
+                let saved = serde_json::to_vec(&sheet).unwrap();
+                let mut reopened: SurfaceSheet = serde_json::from_slice(&saved).unwrap();
+                assert_eq!(reopened.build().unwrap().face_count(), folded.face_count());
+            }
+        }
+    }
 
     /// A plate with a notch in from its edge beyond a fold, 6.1 wide with a round end (what a
     /// 6 mm router leaves), its sides across the bend zone: the outline passes through the zone

@@ -75,6 +75,12 @@ pub enum JointRefusal {
     RipNotFinite,
     /// A rip that cuts less than 0, or a number that is not finite, from a side.
     RipLap,
+    /// An overlap whose gap is 0 or less, or that covers 0 or less, more than the sheet's
+    /// thickness, or a number that is not finite.
+    OverlapRange,
+    /// An overlap where the sheet runs straight on or turns a half turn: it has no corner for
+    /// one panel to cover the other at.
+    OverlapTurn,
     /// A rip's edge that leaves its panel's surface where it is cut back.
     RipOffSurface,
     /// A rip's edge that is not on its panel's outline.

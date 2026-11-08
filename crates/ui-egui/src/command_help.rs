@@ -164,6 +164,7 @@ pub const DOCUMENTED: &[&str] = &[
     "pulley.insert",
     "shaft_spline.insert",
     "sheet.convert",
+    "sheet.corner_join",
     "sheet.export_bend_table",
     "sheet.export_dxf",
     "sheet.flange",
