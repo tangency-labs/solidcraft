@@ -318,7 +318,7 @@ fn a_model_saved_under_another_check_mode_is_evaluated_again() {
 /// opened from its model or evaluated anew. Two edges of a 20 mm box rounded r2 (a mitre at the
 /// corner (20, 0, 20)), saved; opened, the upright edge there rounded r3: the corner all three
 /// rounded at once make (SMLib's setback corner, kernel `three_rounds_at_a_corner`), 15 faces and
-/// 7928.142563938 mm³, the same body as the design evaluated anew.
+/// 7927.72428251348 mm³, the same body as the design evaluated anew.
 #[test]
 fn a_later_round_after_opening_blends_the_saved_rounds_again() {
     let mut built = Session::default();
@@ -336,7 +336,7 @@ fn a_later_round_after_opening_blends_the_saved_rounds_again() {
         let b = &st.body("Box").unwrap().body;
         let v = solidcraft_engine::kernel::measure(b).unwrap().volume;
         assert_eq!(b.face_count(), 15);
-        assert!((v - 7928.142563938).abs() < 1e-6, "{v}");
+        assert!((v - 7927.72428251348).abs() < 1e-6, "{v}"); // solidcore#2382's setback corner
     }
     assert_eq!(model("later round", &cached), model("later round", &rebuilt));
     let _ = std::fs::remove_file(&path);

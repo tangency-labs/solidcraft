@@ -1,5 +1,6 @@
 //! Atomic timeline ownership changes, preserving the selected world geometry.
 use super::*;
+use crate::schema::component::{BodyComponent, FromBodiesResult};
 use solidcraft_doc::BodyName;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -128,10 +129,10 @@ pub(super) fn from_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     for (name, component) in bodies.into_iter().zip(targets) {
         let feature = transfer(&mut scratch, &name, component, &frames, cmd)?;
         features.push(feature);
-        made.push(json!({"component":component,"body":name,"feature":feature}));
+        made.push(BodyComponent { component, body: name, feature });
     }
     finish(s, &mut scratch, &features, cmd)?;
-    Ok(json!({"components":made}))
+    super::reply(FromBodiesResult { components: made, param_warnings: Vec::new() })
 }
 
 /// A placement path parameter (`component_path`: the target's placement to place by,
