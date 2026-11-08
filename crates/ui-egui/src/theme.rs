@@ -87,6 +87,8 @@ struct Environment {
     logo: bool,
     viewport: Option<bool>,
     background: Option<[u8; 3]>,
+    /// The user's own colours over the theme (`crate::personal`).
+    personal: Option<crate::personal::Personal>,
 }
 
 impl Environment {
@@ -98,11 +100,16 @@ impl Environment {
             logo: LOGO_ACCENT.get(),
             viewport: VIEWPORT_DARK.get(),
             background: viewport_background(),
+            personal: crate::personal::current(),
         }
     }
 
     fn window(self, tokens: Tokens) -> Tokens {
         let tokens = if self.logo { tokens.with_accent_logo() } else { tokens };
+        let tokens = match self.personal {
+            Some(personal) => tokens.personalised(personal),
+            None => tokens,
+        };
         tokens.with_vision(self.dark, self.vision)
     }
 }
