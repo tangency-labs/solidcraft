@@ -30,6 +30,7 @@ use solidcore::math::Point3;
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::topology::api_files::read_brep_from_file;
 use solidcore::topology::brep::p10::TopologyEnv;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{loopuse, EdgeId};
 use solidcore::Brep;
@@ -77,37 +78,45 @@ fn pick(k: &Kernel, b: &Brep, p: [f64; 3]) -> EdgeId {
     best.1.unwrap()
 }
 
-/// The two edges rounded r 2 together as SolidCraft drives the session; the error info's
-/// code, comment and fit on failure.
-fn round() -> Result<(), (i32, String, Option<f64>)> {
+/// The two edges rounded r 2 together as SolidCraft drives the session: the kernel and the
+/// body, or the error info's code, comment and fit on failure.
+fn round() -> Result<(Kernel, Brep), (i32, String, Option<f64>)> {
     let mut k = kernel();
     let mut b = read(&mut k, INPUT);
     let edges = [
         pick(&k, &b, [20.0, 0.874_89, 10.0]),
         pick(&k, &b, [32.874_89, 8.0, 10.0]),
     ];
-    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
-    s.prepare_per_edge_constant_radius(
-        &mut k,
-        &edges,
-        &[2.0, 2.0],
-        &[FilletSurfaceGeneratorType::Circular],
-        1,
-        1.0,
-    )
-    .unwrap();
-    s.create_corners(&k, None).unwrap();
-    s.do_filleting(&mut k, None).map_err(|_| {
-        let info = s.error_info();
-        (
-            info.code,
-            info.comment.clone(),
-            s.fit_size().map(|f| f.size),
+    let done = {
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_per_edge_constant_radius(
+            &mut k,
+            &edges,
+            &[2.0, 2.0],
+            &[FilletSurfaceGeneratorType::Circular],
+            1,
+            1.0,
         )
-    })
+        .unwrap();
+        s.create_corners(&k, None).unwrap();
+        s.do_filleting(&mut k, None).map_err(|_| {
+            let info = s.error_info();
+            (
+                info.code,
+                info.comment.clone(),
+                s.fit_size().map(|f| f.size),
+            )
+        })
+    };
+    done.map(|()| (k, b))
 }
 
+/// The round builds one sound solid: the refusal this test pinned before #2953 held the body
+/// to the fork's answer, so the body it now builds is held to being valid.
 #[test]
 fn the_mixed_corner_builds_the_round() {
-    round().unwrap();
+    let (mut k, mut b) = round().unwrap();
+    assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+    let report = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert!(report.lines().is_empty(), "{report:?}");
 }
