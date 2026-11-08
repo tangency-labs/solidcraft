@@ -205,6 +205,7 @@
     "gen1468": "tangency-labs/solidcore#2717: step 1 names D(3,0), overwritten by D(1,2) at out[15]",
     "gen1562": "tangency-labs/solidcore#2717: step 1 names D(3,0), overwritten by D(1,2) at out[65]",
     "gen1584": "tangency-labs/solidcore#2717: step 4 names D(2,0), overwritten by D(1,2) at out[30]",
+    "gen1603": "tangency-labs/solidcore#2717: step 2 names D(2,0), overwritten by D(1,2) at out[27..28]; input-only revolution oracle confirms both named components are wrong",
     "gen1635": "tangency-labs/solidcore#2717: step 2 names D(2,0), overwritten by D(1,2) at out[87]",
     "gen1643": "tangency-labs/solidcore#2717: step 1 names D(2,0), overwritten by D(1,2) at out[69]; input-only oracle confirms the named value is wrong",
     "gen1694": "tangency-labs/solidcore#2717: step 2 names D(3,0), overwritten by D(1,2) at out[72]",
