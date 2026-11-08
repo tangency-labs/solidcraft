@@ -1138,8 +1138,8 @@ impl history_bar::Contents for BarSteps<'_> {
                 id: *id,
                 slot: i,
                 label: name,
-                kind: ty,
                 icon,
+                icon_accent: crate::ui_kit::feature_icon_accent(ty, icon),
                 state: history_bar::StepState {
                     selected: picked.contains(id),
                     highlighted: strip.from_view.contains(&Some(*id)),

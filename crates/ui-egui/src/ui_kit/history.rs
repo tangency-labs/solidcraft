@@ -73,7 +73,7 @@ pub(crate) struct HistoryChip<'a> {
 
 /// Share the feature classification across chips and name rows. Surface aliases also
 /// cover Patch/Stitch/Thicken and other surface features without a Surface-prefixed kind.
-fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
+pub(crate) fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
     let tab = if kind.starts_with("Sketch") {
         "SKETCH"
     } else if kind.starts_with("Surface") || icon.starts_with("surface_") || icon == "continuity" {
@@ -89,8 +89,15 @@ fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
 }
 
 impl HistoryChip<'_> {
-    /// All strip variants use this painter; no connections are drawn between features.
+    /// All strip variants use this painter; no connections are drawn between features. The
+    /// icon takes the accent of the feature's kind ([`feature_icon_accent`]).
     pub fn paint(&self, painter: &Painter, rect: Rect, style: HistoryStyle) {
+        self.paint_with_accent(painter, rect, style, feature_icon_accent(self.kind, self.icon));
+    }
+
+    /// [`HistoryChip::paint`] with the icon's accent given (an icon palette name; `None`: its
+    /// artwork's own colours).
+    pub fn paint_with_accent(&self, painter: &Painter, rect: Rect, style: HistoryStyle, icon_accent: Option<&str>) {
         let t = Tokens::get();
         let mut p = painter.clone();
         if self.dim || self.suppressed {
@@ -139,7 +146,7 @@ impl HistoryChip<'_> {
             Rect::from_center_size(if names { pos2(rect.left() + t.space_8 + side / 2.0, rect.center().y) } else { rect.center() }, vec2(side, side));
         match self.ink {
             Some(ink) => icons::paint_ink(&p, icon, self.icon, ink),
-            None => icons::paint_accented(&p, icon, self.icon, feature_icon_accent(self.kind, self.icon), 1.0),
+            None => icons::paint_accented(&p, icon, self.icon, icon_accent, 1.0),
         }
         if names {
             let ink = if self.selected {

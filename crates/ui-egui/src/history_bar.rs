@@ -54,10 +54,10 @@ pub struct Step<'a> {
     /// Its slot: its place among the steps the bar shows.
     pub slot: usize,
     pub label: &'a str,
-    /// What kind of step it is (the icon's accent follows it).
-    pub kind: &'a str,
     /// A kit icon name.
     pub icon: &'a str,
+    /// The icon's accent, an icon palette name (`None`: the artwork's own colours).
+    pub icon_accent: Option<&'a str>,
     pub state: StepState,
     pub error: bool,
     pub warning: bool,
@@ -406,7 +406,7 @@ impl Strip<'_, '_> {
         HistoryChip {
             icon: step.icon,
             name: step.label,
-            kind: step.kind,
+            kind: "",
             selected: step.state.selected,
             hovered: resp.hovered() || step.state.highlighted,
             dim: step.state.rolled_back,
@@ -417,7 +417,7 @@ impl Strip<'_, '_> {
             ink: step.ink,
             accent: if dragged { self.bar.drag_accent } else { self.bar.accent },
         }
-        .paint(&self.painter, br, HistoryStyle::Bottom);
+        .paint_with_accent(&self.painter, br, HistoryStyle::Bottom, step.icon_accent);
         if self.bar.floating && step.state.last_done {
             self.painter.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, self.bar.accent.color);
         }
