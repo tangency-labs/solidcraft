@@ -188,8 +188,8 @@ Script mode (scx) gives the agent three tools instead of the usual ones: `run`, 
 `hole`, `sketch(...).extrude`, `fillet`, `hollow`, `with part(...)`, `cmd(...)` for any other
 command), which the server instructions list. Every `run` reply ends with what changed: bodies
 created, changed (volume before and after, bounding box) and removed, so the agent checks its work
-without extra calls. A script stopped at a limit (below) ends instead with a note to call `design`,
-which shows what its earlier steps left. Its prototype (a Python server with the same tools), measured against the usual tools
+without extra calls. A script stopped at a limit (below), or whose worker ends for any other reason,
+ends instead with a note to call `design`, which shows what its earlier steps left. Its prototype (a Python server with the same tools), measured against the usual tools
 on the same tasks, cut the cost of a
 modelling session by 20-59 % at about the same accuracy; the tasks, the harness and the results are in
 [the scx write-up (#12522)](https://github.com/tangency-labs/solidcraft/pull/12522).
@@ -198,9 +198,9 @@ It is off by default and turned on like compact output, with no change to the cl
 configuration:
 
 - **Preferences › AI › Agents through MCP › Script mode (scx)** in the app, for every server
-  bridged to it. The server reads it when the agent first lists its tools, and keeps it for that session: turn it
-  on before starting the agent session. If the app was not running then, start the agent session
-  again (or use `--scx`).
+  bridged to it. The server reads it when the agent session starts (at `initialize`, or at the first tool list)
+  and keeps it for that session: turn it on before starting the agent session. If the app was not
+  running then, start the agent session again once it is (or use `--scx`).
 - `solidcraft-cli mcp --scx`.
 - The environment variable `SOLIDCRAFT_MCP_SCX=1` (the same values as `SOLIDCRAFT_MCP_COMPACT`).
 
@@ -221,8 +221,9 @@ scx-worker` process. On Windows a Job Object caps its memory at 1 GiB and lets i
 process; on Linux and the BSDs `RLIMIT_AS` caps its address space at 1 GiB; macOS does not enforce
 `RLIMIT_AS`, so there the worker has no memory cap and the time limit is the backstop. Monty
 itself refuses to start processes on every platform. Each step may compute for 30 seconds. A script that goes past a limit ends with `MemoryError`, `TimeoutError` or
-`RecursionError`; the server and the design go on. On macOS, with no memory cap, a script that
-allocates without end can exhaust the machine's memory before the time limit stops it.
+`RecursionError`; the server and the design go on, except on macOS: there, with no memory cap, a
+script that allocates without end can exhaust the machine's memory before the time limit stops
+it, which can end the app and the server and lose unsaved changes.
 
 The language is a subset of Python 3: functions, loops, comprehensions, f-strings, `dict`, `list`,
 `set` and `tuple`, but no classes that inherit and no imports beyond `json` and `math`.
