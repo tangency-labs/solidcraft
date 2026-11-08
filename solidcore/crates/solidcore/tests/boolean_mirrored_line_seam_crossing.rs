@@ -23,7 +23,7 @@
 )] // test helpers
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::kernel::UpstreamFixes;
+use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{
     brep_properties, MassPropertyBehavior, PropertyAttributes,
 };
@@ -86,9 +86,9 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// The union of the torso with `tool` mirrored `mirrors` times in x = 0, run with `fixes`:
 /// its volume when it is a closed solid, else why not. The torso is symmetric about x = 0,
 /// so the union's volume does not depend on `mirrors`.
-fn union_volume(tool: &[u8], mirrors: usize, fixes: UpstreamFixes) -> Result<f64, String> {
-    let mut k = Kernel::default();
-    k.fixes = fixes;
+fn union_volume(tool: &[u8], mirrors: usize, fixes: &UpstreamFixes) -> Result<f64, String> {
+    let mut k = Kernel::new(&KernelOptions::default());
+    k.fixes = *fixes;
     let torso = read(&mut k, TORSO);
     let mut t = read(&mut k, tool);
     for _ in 0..mirrors {
@@ -118,16 +118,16 @@ fn assert_same(what: &str, got: Result<f64, String>, want: f64) {
 /// (the same pin, its edges now B-splines) the union keeps that volume; it was 1348.66.
 #[test]
 fn torso_and_twice_mirrored_pin() {
-    let made = union_volume(PIN, 0, UpstreamFixes::default()).unwrap();
+    let made = union_volume(PIN, 0, &UpstreamFixes::default()).unwrap();
     assert!((made - 1365.533).abs() < 1e-3, "{made}");
     assert_same(
         "default fixes",
-        union_volume(PIN, 2, UpstreamFixes::default()),
+        union_volume(PIN, 2, &UpstreamFixes::default()),
         made,
     );
     assert_same(
         "all fixes",
-        union_volume(PIN, 2, UpstreamFixes::all()),
+        union_volume(PIN, 2, &UpstreamFixes::all()),
         made,
     );
 }
@@ -137,21 +137,21 @@ fn torso_and_twice_mirrored_pin() {
 /// (`boolean_union_refuses_solid_leak`, status 1001); with none it gave no solid.
 #[test]
 fn torso_and_mirrored_arm() {
-    let made = union_volume(ARM, 0, UpstreamFixes::all()).unwrap();
+    let made = union_volume(ARM, 0, &UpstreamFixes::all()).unwrap();
     assert!((made - 1516.798).abs() < 1e-3, "{made}");
     assert_same(
         "all fixes",
-        union_volume(ARM, 1, UpstreamFixes::all()),
+        union_volume(ARM, 1, &UpstreamFixes::all()),
         made,
     );
     assert_same(
         "default fixes",
-        union_volume(ARM, 1, UpstreamFixes::default()),
+        union_volume(ARM, 1, &UpstreamFixes::default()),
         made,
     );
     assert_same(
         "twice, all fixes",
-        union_volume(ARM, 2, UpstreamFixes::all()),
+        union_volume(ARM, 2, &UpstreamFixes::all()),
         made,
     );
 }
