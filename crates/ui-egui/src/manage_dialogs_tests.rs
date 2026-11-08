@@ -2,11 +2,11 @@
 use crate::{
     dialogs,
     scenario::{self, Harness},
-    shell::LayoutMode,
-    theme::Tokens,
+    ui_kit::LayoutMode,
 };
 use serde_json::json;
 use solidcraft_engine::Sel;
+use solidcraft_theme::Tokens;
 
 fn fixture() -> Harness {
     let mut h = Harness::new();

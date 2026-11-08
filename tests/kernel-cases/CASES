@@ -1,7 +1,8 @@
 # Every kernel rig case there is, one case directory a line (relative to tests/kernel-cases/),
 # sorted. The list only shrinks: a case that is deleted takes its line out, and no new case
-# comes here. A new kernel case goes to solidcore's corpus, crates/solidcore/tests/kernel_cases/
-# (CONTRIBUTING.md, "Tests"). Checked by `cargo xtask lists`.
+# comes here. A new kernel case goes to solidcore's corpus,
+# solidcore/crates/solidcore/tests/kernel_cases/ (CONTRIBUTING.md, "Tests").
+# Checked by `cargo xtask lists`.
 
 assemblies/cov-browser-reparent-placement-and-body-into-a-turned-part
 assemblies/cov-component-copy-bodies-from-a-turned-part

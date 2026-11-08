@@ -1,0 +1,7458 @@
+{
+ "cases": [
+  {
+   "name": "adv_stale_both_degenerate",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1.0,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 2,
+      "param": 0.5,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_stale_classified",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1.0,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.3,
+        "pcs": [
+         {
+          "class": 106,
+          "obj": 0,
+          "t": 0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       },
+       {
+        "a": 0.3,
+        "b": 0.6,
+        "pcs": [
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 106,
+          "obj": 0,
+          "t": 0.6,
+          "gap": 0.0
+         }
+        ]
+       },
+       {
+        "a": 0.6,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 106,
+          "obj": 0,
+          "t": 0.6,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 106,
+          "obj": 0,
+          "t": 1,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 2,
+      "param": 0.3,
+      "collapse": true
+     },
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 0.0,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_inverted_min_in",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1.0,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0.5,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.3,
+        "b": 0.4,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.9,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 0.45,
+      "collapse": true
+     },
+     {
+      "op": "connect",
+      "t": 0,
+      "j": 1,
+      "end": 1,
+      "allow": true
+     },
+     {
+      "op": "connect",
+      "t": 0,
+      "j": 0,
+      "end": 3,
+      "allow": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_inverted_min_lo",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1.0,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0.5,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.3,
+        "b": 0.4,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.9,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 0.4,
+      "collapse": true
+     },
+     {
+      "op": "connect",
+      "t": 0,
+      "j": 1,
+      "end": 1,
+      "allow": true
+     },
+     {
+      "op": "connect",
+      "t": 0,
+      "j": 0,
+      "end": 3,
+      "allow": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_inverted_max_in",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1.0,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0.5,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.3,
+        "b": 0.4,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.9,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 1,
+      "param": 0.85,
+      "collapse": true
+     },
+     {
+      "op": "connect",
+      "t": 0,
+      "j": 1,
+      "end": 1,
+      "allow": true
+     },
+     {
+      "op": "connect",
+      "t": 0,
+      "j": 0,
+      "end": 3,
+      "allow": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_inverted_max_lo",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1.0,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0.5,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.3,
+        "b": 0.4,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.9,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 0,
+      "param": 0.35,
+      "collapse": true
+     },
+     {
+      "op": "connect",
+      "t": 0,
+      "j": 1,
+      "end": 1,
+      "allow": true
+     },
+     {
+      "op": "connect",
+      "t": 0,
+      "j": 0,
+      "end": 3,
+      "allow": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_inverted_min0",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1.0,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0.5,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.3,
+        "b": 0.4,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.9,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 0,
+      "param": 0.6,
+      "collapse": true
+     },
+     {
+      "op": "connect",
+      "t": 0,
+      "j": 1,
+      "end": 1,
+      "allow": true
+     },
+     {
+      "op": "connect",
+      "t": 0,
+      "j": 0,
+      "end": 3,
+      "allow": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_circle_mate_1.0",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         6.283185307179586
+        ],
+        "rx": 1.0,
+        "ry": null
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 2,
+        "b": 4,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 4,
+        "b": 6.283185307179586,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "update_pc",
+      "t": 0,
+      "j": 0,
+      "tol": 0.001,
+      "pc": {
+       "class": 107,
+       "obj": 1,
+       "t": 0.1,
+       "gap": 1e-08
+      }
+     },
+     {
+      "op": "update_pc",
+      "t": 0,
+      "j": 3,
+      "tol": 0.001,
+      "pc": {
+       "class": 106,
+       "obj": 0,
+       "t": 0.2,
+       "gap": 1e-08
+      }
+     },
+     {
+      "op": "update_pc",
+      "t": 0,
+      "j": 2,
+      "tol": 0.001,
+      "pc": {
+       "class": 106,
+       "obj": 0,
+       "t": 0.3,
+       "gap": 1e-08
+      }
+     },
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 2,
+      "param": 6.283185307179586,
+      "collapse": true
+     },
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 1.99999999999999,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_circle_mate_100000.0",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         6.283185307179586
+        ],
+        "rx": 100000.0,
+        "ry": null
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1.0,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 2,
+        "b": 4,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 4,
+        "b": 6.283185307179586,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "update_pc",
+      "t": 0,
+      "j": 0,
+      "tol": 0.001,
+      "pc": {
+       "class": 107,
+       "obj": 1,
+       "t": 0.1,
+       "gap": 1e-08
+      }
+     },
+     {
+      "op": "update_pc",
+      "t": 0,
+      "j": 3,
+      "tol": 0.001,
+      "pc": {
+       "class": 106,
+       "obj": 0,
+       "t": 0.2,
+       "gap": 1e-08
+      }
+     },
+     {
+      "op": "update_pc",
+      "t": 0,
+      "j": 2,
+      "tol": 0.001,
+      "pc": {
+       "class": 106,
+       "obj": 0,
+       "t": 0.3,
+       "gap": 1e-08
+      }
+     },
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 2,
+      "param": 6.283185307179586,
+      "collapse": true
+     },
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 1.99999999999999,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_circle_mate_1e-05",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         6.283185307179586
+        ],
+        "rx": 1e-05,
+        "ry": null
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1.0000000000000002e-10,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 2,
+        "b": 4,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 4,
+        "b": 6.283185307179586,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "update_pc",
+      "t": 0,
+      "j": 0,
+      "tol": 0.001,
+      "pc": {
+       "class": 107,
+       "obj": 1,
+       "t": 0.1,
+       "gap": 1e-08
+      }
+     },
+     {
+      "op": "update_pc",
+      "t": 0,
+      "j": 3,
+      "tol": 0.001,
+      "pc": {
+       "class": 106,
+       "obj": 0,
+       "t": 0.2,
+       "gap": 1e-08
+      }
+     },
+     {
+      "op": "update_pc",
+      "t": 0,
+      "j": 2,
+      "tol": 0.001,
+      "pc": {
+       "class": 106,
+       "obj": 0,
+       "t": 0.3,
+       "gap": 1e-08
+      }
+     },
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 2,
+      "param": 6.283185307179586,
+      "collapse": true
+     },
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 1.99999999999999,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_ellipse_open_mate",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         3
+        ],
+        "rx": 2,
+        "ry": 1
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 1,
+        "b": 3,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "update_pc",
+      "t": 0,
+      "j": 0,
+      "tol": 0.001,
+      "pc": {
+       "class": 107,
+       "obj": 1,
+       "t": 0.1,
+       "gap": 1e-08
+      }
+     },
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 0,
+      "param": 3.0,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_2d_outside",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "bspline": {
+        "dim": 2,
+        "oob": false,
+        "cpts": [
+         [
+          0.1,
+          0.2,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          0.9,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.9,
+          0.4,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "bspline": {
+        "dim": 2,
+        "oob": true,
+        "cpts": [
+         [
+          0.1,
+          0.2,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          0.9,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.9,
+          0.4,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     {
+      "bsurf": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0.2,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.1,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0.3,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": -0.5,
+        "b": 0.3,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.3,
+        "b": 1.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 1,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": -0.5,
+        "b": 1.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "min_uv",
+      "t": 0,
+      "j": 0,
+      "uv": [
+       7,
+       7
+      ]
+     },
+     {
+      "op": "max_uv",
+      "t": 0,
+      "j": 1,
+      "uv": [
+       7,
+       7
+      ]
+     },
+     {
+      "op": "min_uv",
+      "t": 1,
+      "j": 0,
+      "uv": [
+       7,
+       7
+      ]
+     },
+     {
+      "op": "max_uv",
+      "t": 1,
+      "j": 0,
+      "uv": [
+       7,
+       7
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_cos_outside",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "bspline": {
+        "dim": 2,
+        "oob": false,
+        "cpts": [
+         [
+          0.1,
+          0.2,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          0.9,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.9,
+          0.4,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     {
+      "bsurf": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0.2,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.1,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0.3,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    ],
+    "cos": [
+     [
+      0,
+      1
+     ]
+    ],
+    "cc": [
+     {
+      "curve": 2,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": -0.5,
+        "b": 0.3,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.3,
+        "b": 1.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "min_uv",
+      "t": 0,
+      "j": 0,
+      "uv": [
+       7,
+       7
+      ]
+     },
+     {
+      "op": "max_uv",
+      "t": 0,
+      "j": 1,
+      "uv": [
+       7,
+       7
+      ]
+     },
+     {
+      "op": "min_uv",
+      "t": 0,
+      "j": 1,
+      "uv": [
+       7,
+       7
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_3d_noface",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         0.0001,
+         0,
+         0
+        ],
+        "p2": [
+         0.0001,
+         0.0001,
+         0
+        ],
+        "d2": [
+         0,
+         0.0001,
+         0
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "max_uv",
+      "t": 0,
+      "j": 0,
+      "uv": [
+       3,
+       4
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_connect_size1",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1.0,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "connect",
+      "t": 0,
+      "j": 0,
+      "end": 3,
+      "allow": false
+     },
+     {
+      "op": "reset",
+      "t": 0,
+      "r": {
+       "curve": null,
+       "ivl": null,
+       "uv": null,
+       "tol": -1,
+       "owned": false,
+       "current": false,
+       "s1": null,
+       "s2": null,
+       "uv2": null,
+       "ti": null
+      }
+     },
+     {
+      "op": "connect",
+      "t": 1,
+      "j": 0,
+      "end": 2,
+      "allow": true
+     },
+     {
+      "op": "connect",
+      "t": 1,
+      "j": 0,
+      "end": 0,
+      "allow": false
+     },
+     {
+      "op": "connect",
+      "t": 1,
+      "j": 0,
+      "end": 1,
+      "allow": true
+     },
+     {
+      "op": "assign",
+      "t": 0
+     },
+     {
+      "op": "reset",
+      "t": 0,
+      "r": {
+       "curve": null,
+       "ivl": null,
+       "uv": null,
+       "tol": 0.5,
+       "owned": false,
+       "current": true,
+       "s1": null,
+       "s2": null,
+       "uv2": null,
+       "ti": null
+      }
+     },
+     {
+      "op": "insert",
+      "t": 0,
+      "j": 2,
+      "ivl": {
+       "a": 0.2,
+       "b": 0.4,
+       "pcs": [
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        },
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        },
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_insert_unalloc",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1.0,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": []
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "insert",
+      "t": 0,
+      "j": 3,
+      "ivl": {
+       "a": 0.2,
+       "b": 0.4,
+       "pcs": [
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        },
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        },
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        }
+       ]
+      }
+     },
+     {
+      "op": "reset",
+      "t": 0,
+      "r": {
+       "curve": null,
+       "ivl": null,
+       "uv": null,
+       "tol": 0.001,
+       "owned": false,
+       "current": true,
+       "s1": null,
+       "s2": null,
+       "uv2": null,
+       "ti": null
+      }
+     },
+     {
+      "op": "insert",
+      "t": 0,
+      "j": 1,
+      "ivl": {
+       "a": 0.5,
+       "b": 0.6,
+       "pcs": [
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        },
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        },
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        }
+       ]
+      }
+     },
+     {
+      "op": "insert",
+      "t": 0,
+      "j": 1,
+      "ivl": {
+       "a": 0.7,
+       "b": 0.8,
+       "pcs": [
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        },
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        },
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        }
+       ]
+      }
+     },
+     {
+      "op": "insert",
+      "t": 0,
+      "j": 15,
+      "ivl": {
+       "a": 0.9,
+       "b": 1.0,
+       "pcs": [
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        },
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        },
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        }
+       ]
+      }
+     },
+     {
+      "op": "insert",
+      "t": 0,
+      "j": 16,
+      "ivl": {
+       "a": 0.9,
+       "b": 1.0,
+       "pcs": [
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        },
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        },
+        {
+         "class": 100,
+         "obj": null,
+         "t": 0,
+         "gap": 0
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_2d_edit",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "bspline": {
+        "dim": 2,
+        "oob": false,
+        "cpts": [
+         [
+          0.1,
+          0.2,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          0.9,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.9,
+          0.4,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 106,
+          "obj": 0,
+          "t": 0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 106,
+          "obj": 0,
+          "t": 0.2,
+          "gap": 0.0
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.20000000010000002,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.20000000010000002,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ],
+      "s1": 1
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 0,
+      "param": 0.20000000010000002,
+      "collapse": true
+     },
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 0.2,
+      "collapse": true
+     },
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 0,
+      "param": 1.0,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_herm_0.0001_1e-13",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         0.0001,
+         0,
+         0
+        ],
+        "p2": [
+         0.0001,
+         0.0001,
+         0
+        ],
+        "d2": [
+         0,
+         0.0001,
+         0
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-09,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5,
+        "b": 0.5000000000001,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5000000000001,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 0,
+      "param": 0.50000000000005,
+      "collapse": true
+     },
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 0.500000000000025,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_herm_0.0001_1e-09",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         0.0001,
+         0,
+         0
+        ],
+        "p2": [
+         0.0001,
+         0.0001,
+         0
+        ],
+        "d2": [
+         0,
+         0.0001,
+         0
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-09,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5,
+        "b": 0.500000001,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.500000001,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 0,
+      "param": 0.5000000005,
+      "collapse": true
+     },
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 0.50000000025,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_herm_0.0001_1e-07",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         0.0001,
+         0,
+         0
+        ],
+        "p2": [
+         0.0001,
+         0.0001,
+         0
+        ],
+        "d2": [
+         0,
+         0.0001,
+         0
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-09,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5,
+        "b": 0.5000001,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5000001,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 0,
+      "param": 0.50000005,
+      "collapse": true
+     },
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 0.500000025,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_herm_0.0001_1e-05",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         0.0001,
+         0,
+         0
+        ],
+        "p2": [
+         0.0001,
+         0.0001,
+         0
+        ],
+        "d2": [
+         0,
+         0.0001,
+         0
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-09,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5,
+        "b": 0.50001,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.50001,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 0,
+      "param": 0.500005,
+      "collapse": true
+     },
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 0.5000025,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_herm_10000.0_1e-13",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         10000.0,
+         0,
+         0
+        ],
+        "p2": [
+         10000.0,
+         10000.0,
+         0
+        ],
+        "d2": [
+         0,
+         10000.0,
+         0
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 0.1,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5,
+        "b": 0.5000000000001,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5000000000001,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 0,
+      "param": 0.50000000000005,
+      "collapse": true
+     },
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 0.500000000000025,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_herm_10000.0_1e-09",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         10000.0,
+         0,
+         0
+        ],
+        "p2": [
+         10000.0,
+         10000.0,
+         0
+        ],
+        "d2": [
+         0,
+         10000.0,
+         0
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 0.1,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5,
+        "b": 0.500000001,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.500000001,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 0,
+      "param": 0.5000000005,
+      "collapse": true
+     },
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 0.50000000025,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_herm_10000.0_1e-07",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         10000.0,
+         0,
+         0
+        ],
+        "p2": [
+         10000.0,
+         10000.0,
+         0
+        ],
+        "d2": [
+         0,
+         10000.0,
+         0
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 0.1,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5,
+        "b": 0.5000001,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5000001,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 0,
+      "param": 0.50000005,
+      "collapse": true
+     },
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 0.500000025,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_herm_10000.0_1e-05",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         10000.0,
+         0,
+         0
+        ],
+        "p2": [
+         10000.0,
+         10000.0,
+         0
+        ],
+        "d2": [
+         0,
+         10000.0,
+         0
+        ]
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 0.1,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5,
+        "b": 0.50001,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.50001,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "edit_max",
+      "t": 0,
+      "j": 0,
+      "param": 0.500005,
+      "collapse": true
+     },
+     {
+      "op": "edit_min",
+      "t": 0,
+      "j": 1,
+      "param": 0.5000025,
+      "collapse": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_reset_uvonly",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "bspline": {
+        "dim": 2,
+        "oob": false,
+        "cpts": [
+         [
+          0.1,
+          0.2,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          0.9,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.9,
+          0.4,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1.0,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     },
+     {
+      "bsurf": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0.2,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.1,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0.3,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 1,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": null,
+      "tol": 1e-05,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "reset",
+      "t": 0,
+      "r": {
+       "curve": null,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "uv": 0,
+       "tol": -1e-06,
+       "owned": true,
+       "current": false,
+       "s1": 2,
+       "s2": 2,
+       "uv2": 0,
+       "ti": null
+      }
+     },
+     {
+      "op": "assign",
+      "t": 1
+     },
+     {
+      "op": "reset",
+      "t": 0,
+      "r": {
+       "curve": 1,
+       "ivl": [
+        1,
+        0
+       ],
+       "uv": null,
+       "tol": 0.001,
+       "owned": false,
+       "current": true,
+       "s1": null,
+       "s2": null,
+       "uv2": null,
+       "ti": null
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_refine",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1.0,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "edge": 0
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ],
+      "s1": 1
+     },
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "refine",
+      "t": 0,
+      "sol": {
+       "ty": 2,
+       "s": [
+        0.1,
+        0.2
+       ],
+       "e": [
+        0.10000000001,
+        0.9
+       ],
+       "value": 0
+      },
+      "edge": 2,
+      "sss": [
+       1,
+       2,
+       3
+      ],
+      "count": 5
+     },
+     {
+      "op": "refine",
+      "t": 1,
+      "sol": {
+       "ty": 2,
+       "s": [
+        0.1,
+        0.2
+       ],
+       "e": [
+        0.3,
+        0.9
+       ],
+       "value": 0
+      },
+      "edge": null,
+      "sss": [
+       1,
+       2,
+       3
+      ],
+      "count": 0
+     },
+     {
+      "op": "refine",
+      "t": 1,
+      "sol": {
+       "ty": 0,
+       "s": [
+        0.1,
+        0.2
+       ],
+       "e": [
+        0.3,
+        0.9
+       ],
+       "value": 0
+      },
+      "edge": null,
+      "sss": [
+       1,
+       2,
+       3
+      ],
+      "count": 6
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_assign_owned_hermite_1.0",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         1.0,
+         0,
+         0
+        ],
+        "p2": [
+         1.0,
+         1.0,
+         0
+        ],
+        "d2": [
+         0,
+         1.0,
+         0
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1.0,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         3
+        ],
+        "rx": 2.0,
+        "ry": 1.0
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 1,
+      "tol": 1e-05,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "reset",
+      "t": 0,
+      "r": {
+       "curve": 0,
+       "ivl": [
+        0,
+        1
+       ],
+       "uv": null,
+       "tol": 1e-05,
+       "owned": true,
+       "current": true,
+       "s1": null,
+       "s2": null,
+       "uv2": null,
+       "ti": null
+      }
+     },
+     {
+      "op": "assign",
+      "t": 1
+     },
+     {
+      "op": "crv_loc",
+      "t": 1,
+      "j": 1
+     },
+     {
+      "op": "reset",
+      "t": 0,
+      "r": {
+       "curve": 2,
+       "ivl": [
+        0,
+        3
+       ],
+       "uv": null,
+       "tol": 1e-05,
+       "owned": true,
+       "current": false,
+       "s1": null,
+       "s2": null,
+       "uv2": null,
+       "ti": null
+      }
+     },
+     {
+      "op": "assign",
+      "t": 1
+     },
+     {
+      "op": "crv_loc",
+      "t": 1,
+      "j": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_assign_owned_hermite_0.0001",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         0.0001,
+         0,
+         0
+        ],
+        "p2": [
+         0.0001,
+         0.0001,
+         0
+        ],
+        "d2": [
+         0,
+         0.0001,
+         0
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         0.0001,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         3
+        ],
+        "rx": 0.0002,
+        "ry": 0.0001
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 1e-09,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 1,
+      "tol": 1e-09,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "reset",
+      "t": 0,
+      "r": {
+       "curve": 0,
+       "ivl": [
+        0,
+        1
+       ],
+       "uv": null,
+       "tol": 1e-09,
+       "owned": true,
+       "current": true,
+       "s1": null,
+       "s2": null,
+       "uv2": null,
+       "ti": null
+      }
+     },
+     {
+      "op": "assign",
+      "t": 1
+     },
+     {
+      "op": "crv_loc",
+      "t": 1,
+      "j": 1
+     },
+     {
+      "op": "reset",
+      "t": 0,
+      "r": {
+       "curve": 2,
+       "ivl": [
+        0,
+        3
+       ],
+       "uv": null,
+       "tol": 1e-09,
+       "owned": true,
+       "current": false,
+       "s1": null,
+       "s2": null,
+       "uv2": null,
+       "ti": null
+      }
+     },
+     {
+      "op": "assign",
+      "t": 1
+     },
+     {
+      "op": "crv_loc",
+      "t": 1,
+      "j": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_assign_owned_hermite_10000.0",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         10000.0,
+         0,
+         0
+        ],
+        "p2": [
+         10000.0,
+         10000.0,
+         0
+        ],
+        "d2": [
+         0,
+         10000.0,
+         0
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         10000.0,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         3
+        ],
+        "rx": 20000.0,
+        "ry": 10000.0
+       }
+      }
+     }
+    ],
+    "cos": [],
+    "cc": [
+     {
+      "curve": 0,
+      "tol": 0.1,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 0.5,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       },
+       {
+        "a": 0.5,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 1,
+      "tol": 0.1,
+      "ivls": [
+       {
+        "a": 0,
+        "b": 1,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0,
+          "gap": 0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "reset",
+      "t": 0,
+      "r": {
+       "curve": 0,
+       "ivl": [
+        0,
+        1
+       ],
+       "uv": null,
+       "tol": 0.1,
+       "owned": true,
+       "current": true,
+       "s1": null,
+       "s2": null,
+       "uv2": null,
+       "ti": null
+      }
+     },
+     {
+      "op": "assign",
+      "t": 1
+     },
+     {
+      "op": "crv_loc",
+      "t": 1,
+      "j": 1
+     },
+     {
+      "op": "reset",
+      "t": 0,
+      "r": {
+       "curve": 2,
+       "ivl": [
+        0,
+        3
+       ],
+       "uv": null,
+       "tol": 0.1,
+       "owned": true,
+       "current": false,
+       "s1": null,
+       "s2": null,
+       "uv2": null,
+       "ti": null
+      }
+     },
+     {
+      "op": "assign",
+      "t": 1
+     },
+     {
+      "op": "crv_loc",
+      "t": 1,
+      "j": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_regress_gen8797",
+   "inputs": {
+    "cc": [
+     {
+      "current": true,
+      "curve": 20,
+      "face": 9,
+      "fillet": true,
+      "ignore": false,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.387347163398604,
+        "pcs": [
+         {
+          "class": 105,
+          "gap": 0.0,
+          "obj": 5,
+          "t": 1.6702449829716133
+         },
+         {
+          "class": 105,
+          "gap": 1e-13,
+          "obj": 5,
+          "t": -0.01603740371156681
+         },
+         {
+          "class": 106,
+          "gap": 0.0,
+          "obj": 2,
+          "t": -0.5413309389526374
+         }
+        ]
+       },
+       {
+        "a": 0.387347163398604,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 106,
+          "gap": 0.0,
+          "obj": 2,
+          "t": -0.5413309389526374
+         },
+         {
+          "class": 100,
+          "gap": 1e-06,
+          "obj": null,
+          "t": 1.1874058991024476
+         },
+         {
+          "class": 107,
+          "gap": 0.0,
+          "obj": 3,
+          "t": 1.4747766685894694
+         }
+        ]
+       }
+      ],
+      "loops": [],
+      "ok_tol": true,
+      "other": 12,
+      "s1": null,
+      "s2": 3,
+      "tgt_only": true,
+      "ti": 12,
+      "tol": 1e-05,
+      "uv1": 20,
+      "uv2": null
+     },
+     {
+      "current": true,
+      "curve": 1,
+      "face": null,
+      "fillet": false,
+      "ignore": false,
+      "ivls": [
+       {
+        "a": -2.996336130745016,
+        "b": -2.012736258066938,
+        "pcs": [
+         {
+          "class": 106,
+          "gap": 0.0,
+          "obj": 14,
+          "t": 1.759237848799267
+         },
+         {
+          "class": 100,
+          "gap": 0.0033215353125811867,
+          "obj": null,
+          "t": -0.6617831597627223
+         },
+         {
+          "class": 110,
+          "gap": 0.004286981450023164,
+          "obj": null,
+          "t": 1.3733678220630146
+         }
+        ]
+       },
+       {
+        "a": -2.012736258066938,
+        "b": -2.012736258066938,
+        "pcs": [
+         {
+          "class": 107,
+          "gap": 1e-13,
+          "obj": 3,
+          "t": -0.03666620556987121
+         },
+         {
+          "class": 110,
+          "gap": 1e-06,
+          "obj": null,
+          "t": 1.46458371827475
+         },
+         {
+          "class": 107,
+          "gap": 0.0017997488116508165,
+          "obj": 3,
+          "t": 1.2656258037527501
+         }
+        ]
+       },
+       {
+        "a": -2.012736258066938,
+        "b": -2.012736258066938,
+        "pcs": [
+         {
+          "class": 107,
+          "gap": 0.0017997488116508165,
+          "obj": 3,
+          "t": 1.2656258037527501
+         },
+         {
+          "class": 107,
+          "gap": 0.0,
+          "obj": 4,
+          "t": 1.4664928450660097
+         },
+         {
+          "class": 106,
+          "gap": 0.004874614355069834,
+          "obj": 13,
+          "t": 0.4728108653764673
+         }
+        ]
+       },
+       {
+        "a": -2.012736258066938,
+        "b": -2.012736258066938,
+        "pcs": [
+         {
+          "class": 106,
+          "gap": 0.008158275889675966,
+          "obj": 15,
+          "t": -0.23656026226429017
+         },
+         {
+          "class": 100,
+          "gap": 0.007630368142514859,
+          "obj": null,
+          "t": -0.8605707536667795
+         },
+         {
+          "class": 106,
+          "gap": 0.0,
+          "obj": 15,
+          "t": 0.8269882811105096
+         }
+        ]
+       },
+       {
+        "a": -2.012736258066938,
+        "b": -1.2846661120536185,
+        "pcs": [
+         {
+          "class": 106,
+          "gap": 0.0,
+          "obj": 15,
+          "t": 0.8269882811105096
+         },
+         {
+          "class": 100,
+          "gap": 0.0,
+          "obj": null,
+          "t": 0.9010711278989032
+         },
+         {
+          "class": 110,
+          "gap": 0.00033707439546478926,
+          "obj": null,
+          "t": 0.6664410698371974
+         }
+        ]
+       }
+      ],
+      "loops": [],
+      "ok_tol": true,
+      "other": null,
+      "s1": 3,
+      "s2": 4,
+      "tgt_only": true,
+      "ti": 12,
+      "tol": 1e-08,
+      "uv1": null,
+      "uv2": null
+     }
+    ],
+    "cos": [
+     [
+      0,
+      4
+     ],
+     [
+      14,
+      4
+     ]
+    ],
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "d1": [
+         4.295133738202697,
+         -0.1590946696813198,
+         1.8754763820325069
+        ],
+        "d2": [
+         1.2553942761971353,
+         0.013189064470731537,
+         1.3248049147781158
+        ],
+        "dim": 3,
+        "p1": [
+         -3.3678618655287584,
+         -2.093113620450894,
+         -4.846822776755893
+        ],
+        "p2": [
+         2.1630328259237537,
+         -3.6660539551869498,
+         2.9372264300232365
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "line": {
+        "domain": [
+         -3.001436358559313,
+         -1.0240361575745631
+        ],
+        "inside_out": false,
+        "p": [
+         -4.11435146062102,
+         -5.964551028254896,
+         -5.328292981659937
+        ],
+        "scale": 0.5,
+        "v": [
+         1.4364990155562856,
+         1.2154340352341793,
+         0.9147148685183888
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "bspline": {
+        "cpts": [
+         [
+          -22.372527448866716,
+          -21.975727652508148,
+          1.7976931348623157e+308,
+          0.6496959445789063
+         ],
+         [
+          32.90668113981817,
+          71.35381465401312,
+          1.7976931348623157e+308,
+          0.9735461133998986
+         ],
+         [
+          220.56394701879026,
+          -26.049148369160335,
+          1.7976931348623157e+308,
+          2.266495842927042
+         ],
+         [
+          295.45720872083854,
+          -30.572801218463276,
+          1.7976931348623157e+308,
+          2.1919597864919087
+         ],
+         [
+          48.16603320132362,
+          -3.714592366459861,
+          1.7976931348623157e+308,
+          0.3886157906023597
+         ],
+         [
+          121.5247035698242,
+          75.50519763023752,
+          1.7976931348623157e+308,
+          1.7914125168488404
+         ],
+         [
+          47.34859485504181,
+          -9.884123811087772,
+          1.7976931348623157e+308,
+          0.30992489650025906
+         ],
+         [
+          76.28513820480168,
+          -13.043881373780186,
+          1.7976931348623157e+308,
+          0.9509116917153304
+         ],
+         [
+          425.9061174353086,
+          148.48303996876902,
+          1.7976931348623157e+308,
+          1.6859097832348073
+         ],
+         [
+          262.6142329199248,
+          73.42185825348224,
+          1.7976931348623157e+308,
+          1.6903866095172415
+         ]
+        ],
+        "dim": 2,
+        "oob": false,
+        "p": 4,
+        "u": [
+         0.5733775888287651,
+         0.5733775888287651,
+         0.5733775888287651,
+         0.5733775888287651,
+         0.5733775888287651,
+         0.7654081036118637,
+         0.8171432865602025,
+         1.0467674626217667,
+         1.2397520818953052,
+         1.3276485545169745,
+         1.573377588828765,
+         1.573377588828765,
+         1.573377588828765,
+         1.573377588828765,
+         1.573377588828765
+        ]
+       }
+      }
+     },
+     {
+      "plane": {
+       "n": [
+        -0.47253946651970985,
+        -0.8013024109281035,
+        -0.3669072073727591
+       ],
+       "o": [
+        -4.935606737933184,
+        1.435825731191259,
+        -4.767287604491242
+       ]
+      }
+     },
+     {
+      "bsurf": {
+       "net": [
+        [
+         [
+          -12.605016337805651,
+          -14.759125180946553,
+          -0.01816596628660827,
+          -1.7976931348623157e+308
+         ],
+         [
+          -12.001819370404622,
+          -12.206504992620788,
+          5.358148579082877,
+          -1.7976931348623157e+308
+         ],
+         [
+          -8.071688558629447,
+          -9.297721194267023,
+          10.858667693425376,
+          -1.7976931348623157e+308
+         ],
+         [
+          -6.391629074090885,
+          -8.08807524649291,
+          13.754626606139212,
+          -1.7976931348623157e+308
+         ],
+         [
+          -3.8709983129578864,
+          -7.8061184451413075,
+          16.270586956132952,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          -9.682887874031582,
+          -11.504072226582796,
+          -0.4752295158178599,
+          -1.7976931348623157e+308
+         ],
+         [
+          -6.949239463680736,
+          -7.177241621849582,
+          2.7007429462231096,
+          -1.7976931348623157e+308
+         ],
+         [
+          -4.632792048328162,
+          -7.643727489717462,
+          5.899916751099444,
+          -1.7976931348623157e+308
+         ],
+         [
+          -2.8320027551544005,
+          -5.960835089679944,
+          11.441154252244699,
+          -1.7976931348623157e+308
+         ],
+         [
+          -2.705592288878521,
+          -2.1220269729449956,
+          13.248075771196563,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          -5.714889736723995,
+          -7.109413813864614,
+          -5.493479160598422,
+          -1.7976931348623157e+308
+         ],
+         [
+          -3.2498977804762745,
+          -4.033925017149812,
+          -2.771480827920021,
+          -1.7976931348623157e+308
+         ],
+         [
+          -2.0271240074177594,
+          -3.5552270793271874,
+          2.6246545471560743,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.1169035338476434,
+          -2.246311483977597,
+          5.208943940323867,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.6040321352907203,
+          -0.3948503409866573,
+          10.113621892732013,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          -0.9305820559384566,
+          -2.6753140251888707,
+          -9.095750755785787,
+          -1.7976931348623157e+308
+         ],
+         [
+          -0.35632182175852645,
+          0.709836668775943,
+          -3.3240795264660195,
+          -1.7976931348623157e+308
+         ],
+         [
+          2.3401466498226364,
+          1.8727754965961074,
+          -0.2644915579348741,
+          -1.7976931348623157e+308
+         ],
+         [
+          3.035673072758633,
+          3.8095115070448182,
+          4.3129350828540485,
+          -1.7976931348623157e+308
+         ],
+         [
+          5.4282099426297306,
+          5.520425623663632,
+          6.340456681178845,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "oob": false,
+       "p": 2,
+       "q": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.27263732450024697,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.754436849342146,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "point": [
+       -0.6629463139872875,
+       8.971161160276452,
+       -8.134948609032843
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "loop",
+     "loop",
+     "other",
+     {
+      "curve": {
+       "bspline": {
+        "cpts": [
+         [
+          -0.020952745805825235,
+          -0.7567926026315386,
+          -0.8307571554055044,
+          -1.7976931348623157e+308
+         ],
+         [
+          -0.020952745805825235,
+          -0.49269689829948443,
+          -0.8307571554055044,
+          -1.7976931348623157e+308
+         ],
+         [
+          -0.5491441544699336,
+          -0.49269689829948443,
+          -0.8307571554055044,
+          -1.7976931348623157e+308
+         ],
+         [
+          -0.5491441544699336,
+          -1.0208883069635928,
+          -0.8307571554055044,
+          -1.7976931348623157e+308
+         ],
+         [
+          -0.020952745805825235,
+          -1.0208883069635928,
+          -0.8307571554055044,
+          -1.7976931348623157e+308
+         ],
+         [
+          -0.020952745805825235,
+          -0.7567926026315386,
+          -0.8307571554055044,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "dim": 3,
+        "oob": false,
+        "p": 3,
+        "u": [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.4,
+         0.7,
+         1.0,
+         1.0,
+         1.0,
+         1.0
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "bspline": {
+        "cpts": [
+         [
+          0.1,
+          0.3941154924268856,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.30000000000000004,
+          0.26506602887531844,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          0.3940154055293513,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.7000000000000001,
+          0.1736166133080393,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.9,
+          0.1596197660717027,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "dim": 2,
+        "oob": false,
+        "p": 2,
+        "u": [
+         0.0,
+         0.0,
+         0.0,
+         0.21234426196426698,
+         0.6451799052327062,
+         1.0,
+         1.0,
+         1.0
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "line": {
+        "domain": [
+         0.0,
+         1.0
+        ],
+        "inside_out": false,
+        "p": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "scale": 1.0,
+        "v": [
+         1.0,
+         0.0,
+         0.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": 13
+     },
+     {
+      "face": 4
+     },
+     "other"
+    ],
+    "ops": [
+     {
+      "count": 9,
+      "edge": null,
+      "op": "refine",
+      "sol": {
+       "e": [
+        0.4681219242902718,
+        0.8679552372623902
+       ],
+       "s": [
+        0.02911799941896054,
+        0.8679552372623902
+       ],
+       "ty": 2,
+       "value": 0.0004404577597824192
+      },
+      "sss": [
+       0.1066664769153256,
+       2.9721312120647507,
+       7.019127983240512
+      ],
+      "t": 0
+     },
+     {
+      "op": "reset",
+      "r": {
+       "current": true,
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "owned": true,
+       "s1": 4,
+       "s2": 4,
+       "ti": null,
+       "tol": 9876543.21,
+       "uv": 1,
+       "uv2": 1
+      },
+      "t": 1
+     },
+     {
+      "allow": true,
+      "end": 1,
+      "j": 1,
+      "op": "connect",
+      "t": 0
+     },
+     {
+      "allow": false,
+      "end": 1,
+      "j": 1,
+      "op": "connect",
+      "t": 1
+     },
+     {
+      "op": "assign",
+      "t": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_regress_gen10415",
+   "inputs": {
+    "cc": [
+     {
+      "current": false,
+      "curve": 13,
+      "face": null,
+      "fillet": false,
+      "ignore": false,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.058462283477558885,
+        "pcs": [
+         {
+          "class": 106,
+          "gap": 0.0,
+          "obj": 0,
+          "t": 0.8610389125510709
+         },
+         {
+          "class": 107,
+          "gap": 0.0,
+          "obj": 3,
+          "t": 1.1786302402673172
+         },
+         {
+          "class": 106,
+          "gap": 0.0,
+          "obj": 1,
+          "t": -0.6521441751097009
+         }
+        ]
+       },
+       {
+        "a": 0.058462283477558885,
+        "b": 0.31791177343368193,
+        "pcs": [
+         {
+          "class": 106,
+          "gap": 0.0,
+          "obj": 1,
+          "t": -0.6521441751097009
+         },
+         {
+          "class": 110,
+          "gap": 1e-13,
+          "obj": null,
+          "t": 1.4194556567169467
+         },
+         {
+          "class": 100,
+          "gap": 0.000255862753777415,
+          "obj": null,
+          "t": -0.32968437287149366
+         }
+        ]
+       },
+       {
+        "a": 0.31791177343368193,
+        "b": 0.39225656708122536,
+        "pcs": [
+         {
+          "class": 100,
+          "gap": 0.000255862753777415,
+          "obj": null,
+          "t": -0.32968437287149366
+         },
+         {
+          "class": 100,
+          "gap": 0.008558965040046603,
+          "obj": null,
+          "t": 1.8950990086043817
+         },
+         {
+          "class": 100,
+          "gap": 0.000752008669295986,
+          "obj": null,
+          "t": -0.49271909060301333
+         }
+        ]
+       },
+       {
+        "a": 0.39225656708122536,
+        "b": 0.950611084566932,
+        "pcs": [
+         {
+          "class": 100,
+          "gap": 0.000752008669295986,
+          "obj": null,
+          "t": -0.49271909060301333
+         },
+         {
+          "class": 102,
+          "gap": 0.0,
+          "obj": 16,
+          "t": 1.000632413619833
+         },
+         {
+          "class": 106,
+          "gap": 1e-06,
+          "obj": 0,
+          "t": 0.15534411598882136
+         }
+        ]
+       }
+      ],
+      "loops": [
+       10,
+       10
+      ],
+      "ok_tol": false,
+      "other": null,
+      "s1": 3,
+      "s2": null,
+      "tgt_only": false,
+      "ti": null,
+      "tol": 1e-05,
+      "uv1": 13,
+      "uv2": null
+     },
+     {
+      "current": true,
+      "curve": 0,
+      "face": 16,
+      "fillet": true,
+      "ignore": false,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.6368014042943202,
+        "pcs": [
+         {
+          "class": 106,
+          "gap": 0.009209136234299116,
+          "obj": 1,
+          "t": 1.1122277508564564
+         },
+         {
+          "class": 110,
+          "gap": 0.0,
+          "obj": null,
+          "t": -0.031148047912302634
+         },
+         {
+          "class": 107,
+          "gap": 1e-06,
+          "obj": 3,
+          "t": -0.9375724813355694
+         }
+        ]
+       },
+       {
+        "a": 0.6368014042943202,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 107,
+          "gap": 1e-06,
+          "obj": 3,
+          "t": -0.9375724813355694
+         },
+         {
+          "class": 110,
+          "gap": 1e-06,
+          "obj": null,
+          "t": 0.5608539845656011
+         },
+         {
+          "class": 106,
+          "gap": 0.007863237680800472,
+          "obj": 1,
+          "t": 0.2416273149643402
+         }
+        ]
+       }
+      ],
+      "loops": [
+       9,
+       10
+      ],
+      "ok_tol": true,
+      "other": null,
+      "s1": 2,
+      "s2": null,
+      "tgt_only": true,
+      "ti": 11,
+      "tol": -0.0001,
+      "uv1": null,
+      "uv2": null
+     }
+    ],
+    "cos": [
+     [
+      13,
+      3
+     ]
+    ],
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "d1": [
+         3.041892140984233,
+         -1.3987167785478527,
+         -0.6677515161043601
+        ],
+        "d2": [
+         4.594155679321659,
+         -0.17935832894791037,
+         3.5079365038351096
+        ],
+        "dim": 3,
+        "p1": [
+         -4.147682040960271,
+         3.6738380604170455,
+         0.05290945996448926
+        ],
+        "p2": [
+         -1.6991860533558678,
+         1.2971060812640856,
+         1.0220276376935002
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         0.021291075977829976,
+         2.235380629227376,
+         -4.794657626474596
+        ],
+        "domain": [
+         143.8879821474872,
+         449.8146837295892
+        ],
+        "inside_out": false,
+        "rx": 2.7858697711528757,
+        "ry": null,
+        "x": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "y": [
+         0.650099921568154,
+         -0.018583794289851907,
+         0.8595900027854289
+        ]
+       }
+      }
+     },
+     {
+      "plane": {
+       "n": [
+        0.2918446746934801,
+        0.9464222721647905,
+        0.13824459701374234
+       ],
+       "o": [
+        3.1555533989728595,
+        0.19412409397552466,
+        2.1284353037514077
+       ]
+      }
+     },
+     {
+      "bsurf": {
+       "net": [
+        [
+         [
+          -0.022404233849986913,
+          4.091295355821154,
+          -13.519182120738892,
+          0.8701779061650878
+         ],
+         [
+          -3.312161403747777,
+          8.84569658511749,
+          -13.469790758022306,
+          1.4032143591005892
+         ],
+         [
+          -5.2807501201335905,
+          9.442951268462837,
+          -4.452689807890292,
+          1.1583817437468227
+         ],
+         [
+          -8.233289286349217,
+          11.817200751925071,
+          2.4643783512636674,
+          1.2105067052151872
+         ]
+        ],
+        [
+         [
+          7.670711320228362,
+          3.1352861345438656,
+          -18.973365902351453,
+          1.4964848371868584
+         ],
+         [
+          3.7180886678217764,
+          4.998612573891122,
+          -8.810541879252128,
+          1.2747149325717029
+         ],
+         [
+          0.3653693272388934,
+          3.3238397588701045,
+          -0.608335870228004,
+          0.584987605802086
+         ],
+         [
+          -1.9119213022601553,
+          8.928641471614373,
+          5.738574786830949,
+          1.2288950112425276
+         ]
+        ],
+        [
+         [
+          17.69950670991969,
+          -0.5904670583099378,
+          -16.806443951233838,
+          1.70076313292543
+         ],
+         [
+          12.504846682246333,
+          1.9948610873134505,
+          -6.222235948246846,
+          1.5074396308100384
+         ],
+         [
+          3.9752892865680374,
+          2.0336721458882807,
+          1.1600780679100602,
+          0.6693276375537166
+         ],
+         [
+          4.641794022839792,
+          6.078838566943749,
+          9.612633751578311,
+          1.2660766658242577
+         ]
+        ],
+        [
+         [
+          25.676417416703288,
+          -4.595211879496692,
+          -11.523596938094068,
+          1.632831856247055
+         ],
+         [
+          25.012233352613812,
+          -2.0375500298030653,
+          -2.367365732561402,
+          1.8495146846807486
+         ],
+         [
+          17.525792153486268,
+          0.8997778627708523,
+          7.127379954442944,
+          1.567842491758841
+         ],
+         [
+          17.84672628822639,
+          4.663927112529498,
+          20.2642523511371,
+          1.9722495040344905
+         ]
+        ]
+       ],
+       "oob": false,
+       "p": 2,
+       "q": 3,
+       "u": [
+        -1.8368757361491057,
+        -1.8368757361491057,
+        -1.8368757361491057,
+        -1.0455098435566796,
+        -0.8368757361491057,
+        -0.8368757361491057,
+        -0.8368757361491057
+       ],
+       "v": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "point": [
+       9.241068704072319,
+       -7.80228433653215,
+       -1.006115618443033
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 2
+     },
+     "loop",
+     "loop",
+     "other",
+     {
+      "curve": {
+       "bspline": {
+        "cpts": [
+         [
+          1.4240641448963123,
+          -0.6254746729197538,
+          0.1436692120937979,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.4240641448963123,
+          0.26935451078051065,
+          0.1436692120937979,
+          -1.7976931348623157e+308
+         ],
+         [
+          -0.3655942225042166,
+          0.26935451078051065,
+          0.1436692120937979,
+          -1.7976931348623157e+308
+         ],
+         [
+          -0.3655942225042166,
+          -1.5203038566200182,
+          0.1436692120937979,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.4240641448963123,
+          -1.5203038566200182,
+          0.1436692120937979,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.4240641448963123,
+          -0.6254746729197538,
+          0.1436692120937979,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "dim": 3,
+        "oob": false,
+        "p": 3,
+        "u": [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.4,
+         0.7,
+         1.0,
+         1.0,
+         1.0,
+         1.0
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "bspline": {
+        "cpts": [
+         [
+          0.1,
+          0.4950843900506786,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.18888888888888888,
+          0.8149405073802954,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.2777777777777778,
+          0.4238074262211504,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.3666666666666667,
+          0.7955634025611278,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.4555555555555556,
+          0.23346574357078467,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5444444444444444,
+          0.5803803478620766,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.6333333333333334,
+          0.19084150970018002,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.7222222222222222,
+          0.6961839422213998,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.8111111111111111,
+          0.602959687086053,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.9,
+          0.4644181499190019,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "dim": 2,
+        "oob": false,
+        "p": 4,
+        "u": [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.21360190378855365,
+         0.22283323174717728,
+         0.3168103035364447,
+         0.505603283067653,
+         0.9035556757568438,
+         1.0,
+         1.0,
+         1.0,
+         1.0,
+         1.0
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "line": {
+        "domain": [
+         0.0,
+         1.0
+        ],
+        "inside_out": false,
+        "p": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "scale": 1.0,
+        "v": [
+         1.0,
+         0.0,
+         0.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": 13
+     },
+     {
+      "face": 3
+     },
+     "other"
+    ],
+    "ops": [
+     {
+      "collapse": true,
+      "j": 0,
+      "op": "edit_max",
+      "param": 1e-09,
+      "t": 0
+     },
+     {
+      "op": "reset",
+      "r": {
+       "current": true,
+       "curve": 14,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "owned": true,
+       "s1": 3,
+       "s2": 3,
+       "ti": null,
+       "tol": 1e-05,
+       "uv": null,
+       "uv2": null
+      },
+      "t": 0
+     },
+     {
+      "collapse": true,
+      "j": 0,
+      "op": "edit_max",
+      "param": 1.000000000001,
+      "t": 1
+     },
+     {
+      "op": "reset",
+      "r": {
+       "current": false,
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "owned": true,
+       "s1": 3,
+       "s2": null,
+       "ti": null,
+       "tol": 1e-05,
+       "uv": null,
+       "uv2": 13
+      },
+      "t": 1
+     },
+     {
+      "op": "assign",
+      "t": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_regress_gen11711",
+   "inputs": {
+    "cc": [
+     {
+      "current": false,
+      "curve": 13,
+      "face": 16,
+      "fillet": true,
+      "ignore": true,
+      "ivls": [
+       {
+        "a": 3.7134486749111844,
+        "b": 4.044118987858066,
+        "pcs": [
+         {
+          "class": 106,
+          "gap": 0.007272929398005695,
+          "obj": 13,
+          "t": 1.9727131479423305
+         },
+         {
+          "class": 106,
+          "gap": 1e-06,
+          "obj": 13,
+          "t": 0.9790350456180148
+         },
+         {
+          "class": 110,
+          "gap": 0.00597788239235118,
+          "obj": null,
+          "t": -0.715183753604329
+         }
+        ]
+       },
+       {
+        "a": 4.044118987858066,
+        "b": 4.713448674911184,
+        "pcs": [
+         {
+          "class": 110,
+          "gap": 0.00597788239235118,
+          "obj": null,
+          "t": -0.715183753604329
+         },
+         {
+          "class": 106,
+          "gap": 0.0025727077644319206,
+          "obj": 12,
+          "t": -0.9920089308545371
+         },
+         {
+          "class": 106,
+          "gap": 0.001,
+          "obj": 13,
+          "t": -0.43242086695501547
+         }
+        ]
+       }
+      ],
+      "loops": [],
+      "ok_tol": true,
+      "other": null,
+      "s1": 2,
+      "s2": 3,
+      "tgt_only": false,
+      "ti": null,
+      "tol": 1e-05,
+      "uv1": 1,
+      "uv2": 13
+     },
+     {
+      "current": true,
+      "curve": 13,
+      "face": 8,
+      "fillet": true,
+      "ignore": false,
+      "ivls": [
+       {
+        "a": 3.7134486749111844,
+        "b": 4.111964885200547,
+        "pcs": [
+         {
+          "class": 100,
+          "gap": 0.0,
+          "obj": null,
+          "t": 0.5047420954247159
+         },
+         {
+          "class": 106,
+          "gap": 1e-06,
+          "obj": 1,
+          "t": 0.512491253488919
+         },
+         {
+          "class": 106,
+          "gap": 1e-13,
+          "obj": 0,
+          "t": 1.701871487791463
+         }
+        ]
+       },
+       {
+        "a": 4.111964885200547,
+        "b": 4.213448674911184,
+        "pcs": [
+         {
+          "class": 106,
+          "gap": 1e-13,
+          "obj": 0,
+          "t": 1.701871487791463
+         },
+         {
+          "class": 100,
+          "gap": 1e-13,
+          "obj": null,
+          "t": -0.3929000924675855
+         },
+         {
+          "class": 106,
+          "gap": 0.004168769566711531,
+          "obj": 12,
+          "t": 0.2773550266761615
+         }
+        ]
+       },
+       {
+        "a": 4.213448674911184,
+        "b": 4.213448674911184,
+        "pcs": [
+         {
+          "class": 106,
+          "gap": 0.004168769566711531,
+          "obj": 12,
+          "t": 0.2773550266761615
+         },
+         {
+          "class": 100,
+          "gap": 0.001,
+          "obj": null,
+          "t": 0.7205668141835995
+         },
+         {
+          "class": 110,
+          "gap": 0.004963803352728318,
+          "obj": null,
+          "t": 1.5430799884825381
+         }
+        ]
+       },
+       {
+        "a": 4.213448674911184,
+        "b": 4.713448674911184,
+        "pcs": [
+         {
+          "class": 110,
+          "gap": 0.004963803352728318,
+          "obj": null,
+          "t": 1.5430799884825381
+         },
+         {
+          "class": 110,
+          "gap": 0.0029642636040989414,
+          "obj": null,
+          "t": -0.24882048798783973
+         },
+         {
+          "class": 110,
+          "gap": 1e-13,
+          "obj": null,
+          "t": 0.21021223644120623
+         }
+        ]
+       }
+      ],
+      "loops": [
+       10
+      ],
+      "ok_tol": true,
+      "other": null,
+      "s1": null,
+      "s2": null,
+      "tgt_only": false,
+      "ti": 17,
+      "tol": 0.001,
+      "uv1": null,
+      "uv2": null
+     }
+    ],
+    "cos": [
+     [
+      13,
+      3
+     ]
+    ],
+    "objects": [
+     {
+      "curve": {
+       "bspline": {
+        "cpts": [
+         [
+          -44.13824210859798,
+          -18.6694316795039,
+          -67.07420714013503,
+          -1.7976931348623157e+308
+         ],
+         [
+          74.32076715090625,
+          57.970666566718165,
+          -33.282217332666846,
+          -1.7976931348623157e+308
+         ],
+         [
+          124.39251845179251,
+          70.33700010903465,
+          20.149232965986556,
+          -1.7976931348623157e+308
+         ],
+         [
+          136.42326207421323,
+          -42.21681249311289,
+          -72.12857723936277,
+          -1.7976931348623157e+308
+         ],
+         [
+          78.3606531154042,
+          86.03068766953518,
+          36.72930034727068,
+          -1.7976931348623157e+308
+         ],
+         [
+          117.76886588931823,
+          32.81567145137251,
+          49.03603198542535,
+          -1.7976931348623157e+308
+         ],
+         [
+          219.88860796935012,
+          55.911274646622616,
+          -18.438712929422607,
+          -1.7976931348623157e+308
+         ],
+         [
+          143.56467570280495,
+          -29.77749183368867,
+          65.75685912984085,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "dim": 3,
+        "oob": false,
+        "p": 2,
+        "u": [
+         0.0,
+         0.0,
+         0.0,
+         1.8990543006450575,
+         7.55205710284739,
+         8.24906206265578,
+         8.590176777338483,
+         8.732732125518332,
+         9.530805425401836,
+         9.530805425401836,
+         9.530805425401836
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "hermite": {
+        "d1": [
+         2.039817912813641,
+         -0.2732666451911907,
+         0.9447193115304744
+        ],
+        "d2": [
+         0.6903270082269817,
+         -1.1003497449863175,
+         -1.7385238151154692
+        ],
+        "dim": 3,
+        "p1": [
+         -2.9804493012410758,
+         -4.518944096193195,
+         1.0624575416922797
+        ],
+        "p2": [
+         3.11407480832837,
+         1.7450075152188562,
+         1.38150126795375
+        ]
+       }
+      }
+     },
+     {
+      "plane": {
+       "n": [
+        -0.7078471439870557,
+        -0.4433476440546104,
+        0.5499047983611302
+       ],
+       "o": [
+        -4.256976177616267,
+        2.401613888060269,
+        -4.97627515693821
+       ]
+      }
+     },
+     {
+      "bsurf": {
+       "net": [
+        [
+         [
+          5.458810882906519,
+          5.4164925377978665,
+          0.6996905707062372,
+          -1.7976931348623157e+308
+         ],
+         [
+          4.004237447373981,
+          3.781872337464429,
+          2.570936233827109,
+          -1.7976931348623157e+308
+         ],
+         [
+          3.8029462728690664,
+          3.801133081755511,
+          2.6268636375935075,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          4.674277000017051,
+          3.7533545849696464,
+          2.6511347733289026,
+          -1.7976931348623157e+308
+         ],
+         [
+          5.115116630772361,
+          2.1954006157145933,
+          1.7680758389775595,
+          -1.7976931348623157e+308
+         ],
+         [
+          2.704875344345688,
+          1.8212562111817485,
+          3.328409105046841,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          5.981518679870071,
+          4.456800414762317,
+          3.400951534548665,
+          -1.7976931348623157e+308
+         ],
+         [
+          5.3966288864025405,
+          2.615595837109117,
+          1.377796188821374,
+          -1.7976931348623157e+308
+         ],
+         [
+          4.705084688058085,
+          2.403569404382803,
+          1.496964708797091,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          6.148596463657507,
+          2.7229176607077634,
+          2.0020583125983498,
+          -1.7976931348623157e+308
+         ],
+         [
+          5.48305011053508,
+          2.3453124343337786,
+          3.0071767586285603,
+          -1.7976931348623157e+308
+         ],
+         [
+          3.737749975814124,
+          2.1886530607153336,
+          2.8547935305183936,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          8.077772621675257,
+          3.3416813314030147,
+          2.4612625738731784,
+          -1.7976931348623157e+308
+         ],
+         [
+          6.977849663251774,
+          1.4040278683845224,
+          2.5885670598043298,
+          -1.7976931348623157e+308
+         ],
+         [
+          5.79263548514842,
+          -0.166780025691303,
+          2.773692974905166,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "oob": false,
+       "p": 3,
+       "q": 2,
+       "u": [
+        1.4603229849532489,
+        1.4603229849532489,
+        1.4603229849532489,
+        1.4603229849532489,
+        2.7697095686089375,
+        6.414387843845022,
+        6.414387843845022,
+        6.414387843845022,
+        6.414387843845022
+       ],
+       "v": [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "point": [
+       -5.696068638469574,
+       3.708640891786157,
+       9.733693812834698
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 2
+     },
+     "loop",
+     "loop",
+     "other",
+     {
+      "curve": {
+       "bspline": {
+        "cpts": [
+         [
+          0.08015656235969448,
+          -0.2675727180818208,
+          -0.13741842028533768,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.08015656235969448,
+          0.501888610215629,
+          -0.13741842028533768,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.4587660942352052,
+          0.501888610215629,
+          -0.13741842028533768,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.4587660942352052,
+          -1.0370340463792707,
+          -0.13741842028533768,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.08015656235969448,
+          -1.0370340463792707,
+          -0.13741842028533768,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.08015656235969448,
+          -0.2675727180818208,
+          -0.13741842028533768,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "dim": 3,
+        "oob": false,
+        "p": 3,
+        "u": [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.4,
+         0.7,
+         1.0,
+         1.0,
+         1.0,
+         1.0
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "bspline": {
+        "cpts": [
+         [
+          0.1,
+          0.6923339695877887,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.26,
+          0.8668744514999148,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.42000000000000004,
+          0.1561099734482827,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5800000000000001,
+          0.8488102121448649,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.74,
+          0.5552375198242013,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.9,
+          0.19709878373860762,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "dim": 2,
+        "oob": false,
+        "p": 4,
+        "u": [
+         3.7134486749111844,
+         3.7134486749111844,
+         3.7134486749111844,
+         3.7134486749111844,
+         3.7134486749111844,
+         4.392259169245278,
+         4.713448674911184,
+         4.713448674911184,
+         4.713448674911184,
+         4.713448674911184,
+         4.713448674911184
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "line": {
+        "domain": [
+         0.0,
+         1.0
+        ],
+        "inside_out": false,
+        "p": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "scale": 1.0,
+        "v": [
+         1.0,
+         0.0,
+         0.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": 12
+     },
+     {
+      "face": 3
+     },
+     "other"
+    ],
+    "ops": [
+     {
+      "op": "reset",
+      "r": {
+       "current": true,
+       "curve": 1,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "owned": true,
+       "s1": null,
+       "s2": null,
+       "ti": null,
+       "tol": -0.0001,
+       "uv": 1,
+       "uv2": null
+      },
+      "t": 0
+     },
+     {
+      "op": "assign",
+      "t": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_regress_gen21161",
+   "inputs": {
+    "cc": [
+     {
+      "current": true,
+      "curve": 15,
+      "face": null,
+      "fillet": true,
+      "ignore": false,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 100,
+          "gap": 0.0004964857395408529,
+          "obj": null,
+          "t": -0.6036479475829554
+         },
+         {
+          "class": 107,
+          "gap": 0.003244292669026372,
+          "obj": 4,
+          "t": 0.3068811071253412
+         },
+         {
+          "class": 100,
+          "gap": 0.0,
+          "obj": null,
+          "t": -0.80360553035947
+         }
+        ]
+       }
+      ],
+      "loops": [
+       10
+      ],
+      "ok_tol": true,
+      "other": 18,
+      "s1": null,
+      "s2": null,
+      "tgt_only": false,
+      "ti": null,
+      "tol": 0.001,
+      "uv1": null,
+      "uv2": null
+     },
+     {
+      "current": false,
+      "curve": 2,
+      "face": 17,
+      "fillet": false,
+      "ignore": false,
+      "ivls": [
+       {
+        "a": 0.5,
+        "b": 0.6676707375977449,
+        "pcs": [
+         {
+          "class": 106,
+          "gap": 0.006856196098993006,
+          "obj": 13,
+          "t": 1.8329986436644266
+         },
+         {
+          "class": 106,
+          "gap": 0.0,
+          "obj": 1,
+          "t": 0.10978953200384978
+         },
+         {
+          "class": 100,
+          "gap": 1e-13,
+          "obj": null,
+          "t": 0.298840185624375
+         }
+        ]
+       },
+       {
+        "a": 0.6676707375977449,
+        "b": 0.9155648746547563,
+        "pcs": [
+         {
+          "class": 100,
+          "gap": 1e-13,
+          "obj": null,
+          "t": 0.298840185624375
+         },
+         {
+          "class": 106,
+          "gap": 0.003860587864046844,
+          "obj": 1,
+          "t": -0.40436404326152064
+         },
+         {
+          "class": 100,
+          "gap": 1e-13,
+          "obj": null,
+          "t": 1.0401023796932805
+         }
+        ]
+       }
+      ],
+      "loops": [],
+      "ok_tol": true,
+      "other": null,
+      "s1": null,
+      "s2": 4,
+      "tgt_only": false,
+      "ti": 18,
+      "tol": 9876543.21,
+      "uv1": null,
+      "uv2": 1
+     }
+    ],
+    "cos": [],
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "domain": [
+         -2.7672784624073774,
+         3.0367851521021727
+        ],
+        "inside_out": false,
+        "p": [
+         -2.3393824496781974,
+         5.361183817268401,
+         -2.3351778048724414
+        ],
+        "scale": 0.5,
+        "v": [
+         2.4221316754655993,
+         0.8727068846930743,
+         2.179929786340238
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "hermite": {
+        "d1": [
+         2.689608358323028,
+         -4.472751210607971,
+         1.0628309089178138
+        ],
+        "d2": [
+         3.4197357262025445,
+         -1.7074775227593744,
+         -0.08673720897181347
+        ],
+        "dim": 3,
+        "p1": [
+         -1.1347531624966942,
+         4.844822760709254,
+         2.8988580280932563
+        ],
+        "p2": [
+         2.0793612013383003,
+         -4.471378853016537,
+         1.6546883047253456
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "bspline": {
+        "cpts": [
+         [
+          -35.939601081759946,
+          -22.375085748800075,
+          73.69942554446149,
+          -1.7976931348623157e+308
+         ],
+         [
+          -20.52226364324236,
+          -2.279655626309392,
+          -32.48367093486988,
+          -1.7976931348623157e+308
+         ],
+         [
+          -2.593041045018822,
+          -83.04462859866952,
+          -30.196143451278388,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "dim": 3,
+        "oob": true,
+        "p": 1,
+        "u": [
+         0.0,
+         0.0,
+         0.8590870476630562,
+         1.0,
+         1.0
+        ]
+       }
+      }
+     },
+     {
+      "plane": {
+       "n": [
+        0.5151474610546152,
+        -0.7194859013450118,
+        0.465793013187982
+       ],
+       "o": [
+        0.4581687919042654,
+        1.6153165041611306,
+        -0.2783849025763043
+       ]
+      }
+     },
+     {
+      "bsurf": {
+       "net": [
+        [
+         [
+          -1.7280226360930904,
+          6.287905318631407,
+          6.6408076733494115,
+          1.098645534223111
+         ],
+         [
+          -2.496234024421875,
+          0.5384029933330486,
+          6.196955229106382,
+          1.0582960741720082
+         ],
+         [
+          0.5796206287257373,
+          -1.761162246648417,
+          10.22643424355312,
+          1.1625959148843923
+         ],
+         [
+          4.548720439950038,
+          -4.962592615406435,
+          14.180249751135026,
+          1.7445203480701212
+         ],
+         [
+          0.6748551773741635,
+          -3.2948415639535598,
+          6.588400836413479,
+          0.6276493643260543
+         ]
+        ],
+        [
+         [
+          -1.1541662328468276,
+          5.9857929395506835,
+          5.1309987460908095,
+          1.6093384263749013
+         ],
+         [
+          3.230652727877258,
+          5.062785634339175,
+          2.9913866041762796,
+          1.8770310752238963
+         ],
+         [
+          1.865663739428991,
+          -1.8282467580595767,
+          4.602600296522471,
+          0.8866805253944968
+         ],
+         [
+          3.1174455863170545,
+          -2.811617046828213,
+          4.078818767421111,
+          0.7825261965360526
+         ],
+         [
+          7.4936570513332885,
+          -3.498490427493319,
+          6.104029694887977,
+          1.1300145422692625
+         ]
+        ],
+        [
+         [
+          4.458501126656525,
+          2.7864496282347875,
+          -6.947586647225438,
+          1.5760909672380454
+         ],
+         [
+          3.108874227148959,
+          1.750402602427435,
+          -1.4620937423527594,
+          1.0408828379649042
+         ],
+         [
+          8.15858585154154,
+          -0.46991236672662723,
+          -0.8067067866166255,
+          1.0433769669109458
+         ],
+         [
+          12.953305758570348,
+          -5.899341098879748,
+          2.122606360467139,
+          1.4233924805465503
+         ],
+         [
+          14.268543075133175,
+          -13.019133337558243,
+          4.2858210609342065,
+          1.946573585542544
+         ]
+        ]
+       ],
+       "oob": false,
+       "p": 1,
+       "q": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.34384340090811205,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.2983845139633527,
+        0.974564728610018,
+        0.974564728610018,
+        0.974564728610018,
+        0.974564728610018
+       ]
+      }
+     },
+     {
+      "point": [
+       -0.55721276018728,
+       0.8895960201552278,
+       9.149618790722393
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "loop",
+     "loop",
+     "other",
+     {
+      "curve": {
+       "bspline": {
+        "cpts": [
+         [
+          1.1327075177011467,
+          0.5019846530973016,
+          0.6727854002884623,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.1327075177011467,
+          0.9295118712231074,
+          0.6727854002884623,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.2776530814495351,
+          0.9295118712231074,
+          0.6727854002884623,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.2776530814495351,
+          0.07445743497149576,
+          0.6727854002884623,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.1327075177011467,
+          0.07445743497149576,
+          0.6727854002884623,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.1327075177011467,
+          0.5019846530973016,
+          0.6727854002884623,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "dim": 3,
+        "oob": false,
+        "p": 3,
+        "u": [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.4,
+         0.7,
+         1.0,
+         1.0,
+         1.0,
+         1.0
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "bspline": {
+        "cpts": [
+         [
+          0.1,
+          0.20717611823706417,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.30000000000000004,
+          0.3474719809557024,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          0.26918020875014614,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.7000000000000001,
+          0.7874319037507106,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.9,
+          0.8442579884200136,
+          1.7976931348623157e+308,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "dim": 2,
+        "oob": false,
+        "p": 2,
+        "u": [
+         0.0,
+         0.0,
+         0.0,
+         0.5390003169127379,
+         8.471535748524472,
+         9.843560340411251,
+         9.843560340411251,
+         9.843560340411251
+        ]
+       }
+      }
+     },
+     {
+      "curve": {
+       "line": {
+        "domain": [
+         0.0,
+         1.0
+        ],
+        "inside_out": false,
+        "p": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "scale": 1.0,
+        "v": [
+         1.0,
+         0.0,
+         0.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": 13
+     },
+     {
+      "face": 4
+     },
+     "other"
+    ],
+    "ops": [
+     {
+      "op": "reset",
+      "r": {
+       "current": true,
+       "curve": null,
+       "ivl": null,
+       "owned": false,
+       "s1": 4,
+       "s2": 3,
+       "ti": 18,
+       "tol": 1e-08,
+       "uv": null,
+       "uv2": null
+      },
+      "t": 1
+     },
+     {
+      "op": "reset",
+      "r": {
+       "current": true,
+       "curve": 1,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "owned": true,
+       "s1": 4,
+       "s2": null,
+       "ti": null,
+       "tol": 1e-05,
+       "uv": null,
+       "uv2": 2
+      },
+      "t": 1
+     },
+     {
+      "op": "reset",
+      "r": {
+       "current": true,
+       "curve": null,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "owned": false,
+       "s1": null,
+       "s2": null,
+       "ti": 18,
+       "tol": -0.0001,
+       "uv": 2,
+       "uv2": null
+      },
+      "t": 0
+     },
+     {
+      "op": "assign",
+      "t": 0
+     }
+    ]
+   }
+  }
+ ]
+}

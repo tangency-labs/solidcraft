@@ -1,0 +1,616 @@
+{
+ "cases": [
+  {
+   "name": "cov_remove_all_rational_weights_out_of_range_extreme_dir1",
+   "upstream_ref": "source/SMLib/src/NL_SrfTool.cpp:3597 N_SrfRemoveAllKnots new weights outside [NL_WMIN, NL_WMAX] -> no removal (coverage: nurbs/srf_tool/p3.rs:642,656)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0.0,
+        1
+       ],
+       [
+        0,
+        1,
+        0.0,
+        1
+       ]
+      ],
+      [
+       [
+        0.0015,
+        0.0,
+        0.0,
+        0.0015
+       ],
+       [
+        0.0015,
+        0.0015,
+        0.00045,
+        0.0015
+       ]
+      ],
+      [
+       [
+        160,
+        0,
+        0.0,
+        80
+       ],
+       [
+        160,
+        80,
+        48.0,
+        80
+       ]
+      ],
+      [
+       [
+        0.0045000000000000005,
+        0.0,
+        0.0,
+        0.0015
+       ],
+       [
+        0.0045000000000000005,
+        0.0015,
+        0.0013499999999999999,
+        0.0015
+       ]
+      ],
+      [
+       [
+        4,
+        0,
+        0.0,
+        1
+       ],
+       [
+        4,
+        1,
+        1.2,
+        1
+       ]
+      ]
+     ],
+     "p": 3,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "tol": 1000000.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "cov_remove_all_rational_weights_out_of_range_extreme_dir3",
+   "upstream_ref": "source/SMLib/src/NL_SrfTool.cpp:3597 N_SrfRemoveAllKnots new weights outside [NL_WMIN, NL_WMAX] -> no removal (coverage: nurbs/srf_tool/p3.rs:642,656)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0.0,
+        1
+       ],
+       [
+        0,
+        1,
+        0.0,
+        1
+       ]
+      ],
+      [
+       [
+        0.0015,
+        0.0,
+        0.0,
+        0.0015
+       ],
+       [
+        0.0015,
+        0.0015,
+        0.00045,
+        0.0015
+       ]
+      ],
+      [
+       [
+        160,
+        0,
+        0.0,
+        80
+       ],
+       [
+        160,
+        80,
+        48.0,
+        80
+       ]
+      ],
+      [
+       [
+        0.0045000000000000005,
+        0.0,
+        0.0,
+        0.0015
+       ],
+       [
+        0.0045000000000000005,
+        0.0015,
+        0.0013499999999999999,
+        0.0015
+       ]
+      ],
+      [
+       [
+        4,
+        0,
+        0.0,
+        1
+       ],
+       [
+        4,
+        1,
+        1.2,
+        1
+       ]
+      ]
+     ],
+     "p": 3,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "tol": 1000000.0,
+    "dir": 3
+   }
+  },
+  {
+   "name": "cov_remove_all_rational_weights_out_of_range_high_dir1",
+   "upstream_ref": "source/SMLib/src/NL_SrfTool.cpp:3597 N_SrfRemoveAllKnots new weights outside [NL_WMIN, NL_WMAX] -> no removal (coverage: nurbs/srf_tool/p3.rs:642,656)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0.0,
+        1
+       ],
+       [
+        0,
+        1,
+        0.0,
+        1
+       ]
+      ],
+      [
+       [
+        0.002,
+        0.0,
+        0.0,
+        0.002
+       ],
+       [
+        0.002,
+        0.002,
+        0.0006,
+        0.002
+       ]
+      ],
+      [
+       [
+        2,
+        0,
+        0.0,
+        1
+       ],
+       [
+        2,
+        1,
+        0.6,
+        1
+       ]
+      ],
+      [
+       [
+        270,
+        0,
+        0.0,
+        90
+       ],
+       [
+        270,
+        90,
+        80.99999999999999,
+        90
+       ]
+      ],
+      [
+       [
+        4,
+        0,
+        0.0,
+        1
+       ],
+       [
+        4,
+        1,
+        1.2,
+        1
+       ]
+      ]
+     ],
+     "p": 3,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "tol": 1000000.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "cov_remove_all_rational_weights_out_of_range_high_dir3",
+   "upstream_ref": "source/SMLib/src/NL_SrfTool.cpp:3597 N_SrfRemoveAllKnots new weights outside [NL_WMIN, NL_WMAX] -> no removal (coverage: nurbs/srf_tool/p3.rs:642,656)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0.0,
+        1
+       ],
+       [
+        0,
+        1,
+        0.0,
+        1
+       ]
+      ],
+      [
+       [
+        0.002,
+        0.0,
+        0.0,
+        0.002
+       ],
+       [
+        0.002,
+        0.002,
+        0.0006,
+        0.002
+       ]
+      ],
+      [
+       [
+        2,
+        0,
+        0.0,
+        1
+       ],
+       [
+        2,
+        1,
+        0.6,
+        1
+       ]
+      ],
+      [
+       [
+        270,
+        0,
+        0.0,
+        90
+       ],
+       [
+        270,
+        90,
+        80.99999999999999,
+        90
+       ]
+      ],
+      [
+       [
+        4,
+        0,
+        0.0,
+        1
+       ],
+       [
+        4,
+        1,
+        1.2,
+        1
+       ]
+      ]
+     ],
+     "p": 3,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "tol": 1000000.0,
+    "dir": 3
+   }
+  },
+  {
+   "name": "cov_remove_all_rational_weights_out_of_range_low_dir1",
+   "upstream_ref": "source/SMLib/src/NL_SrfTool.cpp:3597 N_SrfRemoveAllKnots new weights outside [NL_WMIN, NL_WMAX] -> no removal (coverage: nurbs/srf_tool/p3.rs:642,656)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0.0,
+        1
+       ],
+       [
+        0,
+        1,
+        0.0,
+        1
+       ]
+      ],
+      [
+       [
+        0.5,
+        0.0,
+        0.0,
+        0.5
+       ],
+       [
+        0.5,
+        0.5,
+        0.15,
+        0.5
+       ]
+      ],
+      [
+       [
+        0.0022,
+        0.0,
+        0.0,
+        0.0011
+       ],
+       [
+        0.0022,
+        0.0011,
+        0.00066,
+        0.0011
+       ]
+      ],
+      [
+       [
+        1.5,
+        0.0,
+        0.0,
+        0.5
+       ],
+       [
+        1.5,
+        0.5,
+        0.44999999999999996,
+        0.5
+       ]
+      ],
+      [
+       [
+        4,
+        0,
+        0.0,
+        1
+       ],
+       [
+        4,
+        1,
+        1.2,
+        1
+       ]
+      ]
+     ],
+     "p": 3,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "tol": 1000000.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "cov_remove_all_rational_weights_out_of_range_low_dir3",
+   "upstream_ref": "source/SMLib/src/NL_SrfTool.cpp:3597 N_SrfRemoveAllKnots new weights outside [NL_WMIN, NL_WMAX] -> no removal (coverage: nurbs/srf_tool/p3.rs:642,656)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0.0,
+        1
+       ],
+       [
+        0,
+        1,
+        0.0,
+        1
+       ]
+      ],
+      [
+       [
+        0.5,
+        0.0,
+        0.0,
+        0.5
+       ],
+       [
+        0.5,
+        0.5,
+        0.15,
+        0.5
+       ]
+      ],
+      [
+       [
+        0.0022,
+        0.0,
+        0.0,
+        0.0011
+       ],
+       [
+        0.0022,
+        0.0011,
+        0.00066,
+        0.0011
+       ]
+      ],
+      [
+       [
+        1.5,
+        0.0,
+        0.0,
+        0.5
+       ],
+       [
+        1.5,
+        0.5,
+        0.44999999999999996,
+        0.5
+       ]
+      ],
+      [
+       [
+        4,
+        0,
+        0.0,
+        1
+       ],
+       [
+        4,
+        1,
+        1.2,
+        1
+       ]
+      ]
+     ],
+     "p": 3,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "tol": 1000000.0,
+    "dir": 3
+   }
+  }
+ ]
+}

@@ -1,0 +1,41 @@
+{
+  "area": "fillets",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-fillet-g2-four-edge-apex-corner",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g2"
+    },
+    "method": "a regular 4-gon of circumradius 20 lofted to the apex (0, 0, 30); its 4 slant edges; the fillet type curvature (G2 sections and G2 corner patches): every seam of a round and of the corner patch with its neighbours G2, one valid body",
+    "source": "invariants",
+    "what": "the 4 slant edges of a 4-sided pyramid filleted 2 as a curvature-continuous (G2) fillet: a convex corner of 4 edges at the apex"
+  },
+  "expressible": false,
+  "gallery_note": "the default setback is shorter than where the rounds' contact lines meet (3.9027 mm from the apex); the corner should take a setback that works",
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 11 (solid.fillet): invalid input: the setback must be more than 3.9027 mm at the corner (0.000, 0.000, 30.000): the rounds' contact lines meet 3.9027 mm from it along its edges, and the corner's patch starts past that",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": "step 11 (solid.fillet): invalid input: the setback must be more than 3.9027 mm at the corner (0.000, 0.000, 30.000): the rounds' contact lines meet 3.9027 mm from it along its edges, and the corner's patch starts past that",
+    "known_failing": "[fail] step 11 (solid.fillet): invalid input: the setback must be more than 3.9027 mm at the corner (0.000, 0.000, 30.000): the rounds' contact lines meet 3.",
+    "measured": null,
+    "refused_with": null,
+    "status": "fail"
+  },
+  "sources": null,
+  "traced_ops": [
+    "loft_to_point"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the 4 slant edges of a 4-sided pyramid filleted 2 as a curvature-continuous (G2) fillet: a convex corner of 4 edges at the apex",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 11 (solid.fillet): invalid input: the setback must be more than 3.9027 mm at the corner (0.000, 0.000, 30.000): the rounds' contact lines meet 3.9027 mm from it along its edges, and the corner's patch starts past that"
+  ]
+}

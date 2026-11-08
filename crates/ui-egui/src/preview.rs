@@ -26,7 +26,7 @@ use solidcraft_engine::kernel::history::Change;
 
 use crate::SolveApp;
 use crate::gpu::{GpuScene, SceneSlot};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// Colours a preview is drawn with (straight sRGBA).
 #[derive(Clone, Copy, Debug)]
@@ -68,7 +68,7 @@ impl Colors {
 
     fn for_tool(t: &Tokens, tab: &str, active: bool) -> Colors {
         let mut colors = Self::from_tokens(t);
-        let accent = crate::theme::TabAccent::for_tab(t, tab);
+        let accent = solidcraft_theme::TabAccent::for_tab(t, tab);
         if active && accent.color != t.accent {
             colors.added = accent.color.to_srgba_unmultiplied();
             colors.new_body = t.body.lerp_to_gamma(accent.color, 0.45).to_srgba_unmultiplied();
@@ -1011,7 +1011,7 @@ mod tests {
     #[test]
     fn tool_preview_follows_tab_without_recolouring_removal_or_idle_previews() {
         for dark in [false, true] {
-            for vision in crate::theme::ColorVision::ALL {
+            for vision in solidcraft_theme::ColorVision::ALL {
                 let t = Tokens::themed(dark, vision);
                 let base = Colors::from_tokens(&t);
                 for tab in ["MODEL", "SKETCH", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW", "SHEET METAL", "RENDER"] {
@@ -1020,11 +1020,11 @@ mod tests {
                         assert_eq!(colors.removed, base.removed);
                         assert_eq!(colors.body, base.body);
                         assert_eq!(colors.edge, base.edge);
-                        if !active || crate::theme::TabAccent::for_tab(&t, tab).color == t.accent {
+                        if !active || solidcraft_theme::TabAccent::for_tab(&t, tab).color == t.accent {
                             assert_eq!(colors.added, base.added);
                             assert_eq!(colors.new_body, base.new_body);
                         } else {
-                            let accent = crate::theme::TabAccent::for_tab(&t, tab);
+                            let accent = solidcraft_theme::TabAccent::for_tab(&t, tab);
                             assert_eq!(colors.added, accent.color.to_srgba_unmultiplied());
                             assert_ne!(colors.new_body, colors.added);
                         }

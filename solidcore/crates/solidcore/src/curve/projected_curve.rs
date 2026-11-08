@@ -1,0 +1,1666 @@
+//! Projected curves: the image of a 3D curve under a parallel or perspective
+//! projection onto a view plane, or a rotation about an axis into a plane.
+//!
+//! Upstream: `source/SMLib/src/SmProjectedCurve.cpp`, `source/SMLib/inc/SmProjectedCurve.h`.
+//!
+//! | Rust                                         | Upstream                                         |
+//! |----------------------------------------------|--------------------------------------------------|
+//! | [`ProjectedCurve`]                           | `SmProjectedCurve`                               |
+//! | [`OwnsCurve`]                                | `m_bOwnsCurve` (`SmBoolean`: `FALSE`, `TRUE`, `UNSURE`) |
+//! | [`ProjectedCurve::new`]                      | `SmProjectedCurve(const SmCurve*, ...)`          |
+//! | `Clone`                                      | the copy constructor                             |
+//! | [`ProjectedCurve::copy`]                     | `Copy`                                           |
+//! | `Drop` (implicit)                            | `~SmProjectedCurve`                              |
+//! | [`ProjectedCurve::approx_eq`]                | `operator==`                                     |
+//! | [`ProjectedCurve::set_canonical`]            | `SetCanonical`                                   |
+//! | [`ProjectedCurve::make_ortho_normal`]        | `MakeOrthoNormal`                                |
+//! | [`ProjectedCurve::edit_parameterization`]    | `EditParameterization`                           |
+//! | [`ProjectedCurve::natural_interval`]         | `GetNaturalInterval`                             |
+//! | [`ProjectedCurve::knots`]                    | `GetKnots`                                       |
+//! | [`ProjectedCurve::number_natural_knots`]     | `GetNumberNaturalKnots`                          |
+//! | [`ProjectedCurve::calculate_continuities`]   | `CalculateContinuities`                          |
+//! | [`ProjectedCurve::reverse_parameterization`] | `ReverseParameterization`                        |
+//! | [`ProjectedCurve::trim`]                     | `Trim`                                           |
+//! | [`ProjectedCurve::transform`]                | `Transform`                                      |
+//! | [`ProjectedCurve::evaluate`]                 | `Evaluate`                                       |
+//! | [`ProjectedCurve::evaluate_point`]           | `EvaluatePoint`                                  |
+//! | [`ProjectedCurve::read_from_db`]             | `ReadFromDB`                                     |
+//! | [`ProjectedCurve::is_analytic`], [`ProjectedCurve::is_bounded`] | `IsAnalytic`, `IsBounded`     |
+//! | [`ProjectedCurve::TYPE`], [`ProjectedCurve::type_code`], [`ProjectedCurve::type_string`], [`ProjectedCurve::class_string`] | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
+//! | [`ProjectedCurve::is_kind_of`]               | `IsKindOf`                                       |
+//!
+//! Deviations:
+//! - **Nesting.** `new` and `set_canonical` return `InvalidInput` when the projected curve would nest
+//!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
+//!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
+//!   cloning and dropping of nested geometry (no limit upstream).
+//! - **Base curve.** Upstream keeps a pointer to the projected curve that it owns
+//!   or merely borrows (`m_bOwnsCurve`). Here the projected curve always holds its
+//!   own [`Curve`] (callers that borrowed a curve upstream pass a clone); the
+//!   ownership flag is kept as [`OwnsCurve`] because upstream's edits test it
+//!   (`EditParameterization`, `ReverseParameterization` and `Trim` refuse a
+//!   `FALSE` owner; `Transform` refuses anything below `UNSURE` by default, or only
+//!   `FALSE` under
+//!   [`UpstreamFixes::projected_curve_transform_when_owned`](crate::kernel::UpstreamFixes::projected_curve_transform_when_owned)).
+//!   The copy constructor
+//!   (`Clone`) copies an owned base curve (`Copy`, whose B-spline copy fixes its
+//!   knots up) and a borrowed one exactly (no knot fix-up, owner kept), the values
+//!   upstream has when it shares the pointer; [`ProjectedCurve::copy`] (`Copy`) does
+//!   the same. When the owned base
+//!   curve has no `Copy` (a Hermite curve, `SM_ERR`) upstream ignores the status
+//!   and returns a projected curve with a null base curve, which crashes on first
+//!   use; [`ProjectedCurve::copy`] returns that `SM_ERR` instead, and `Clone` (which
+//!   cannot fail) copies such a base anyway.
+//! - **Curve base.** The class derives from `SmCurve`; its base state is the
+//!   dimension, always 3 (`SmCurve(3)`). `SmCurve::operator==` (same type, same
+//!   dimension) is implied by the Rust type. `SetContext`, the context arguments
+//!   and the `Notify` calls (`SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT`) are not
+//!   modelled: the curve object has no context to reach.
+//! - **Arguments.** Out-params become return values. `EditParameterization`'s
+//!   notify flag has no counterpart ([`Curve::edit_parameterization`] does not
+//!   notify); `Trim`'s tri-state flag is [`TrimMode`]; `Trim`'s debug-check flag is
+//!   dropped.
+//! - **Projection type.** `SmProjectionType` is
+//!   [`ProjectionType`]; a value read from a database outside `0..=2` becomes
+//!   [`ProjectionType::Unknown`] (upstream casts the raw value to the enum, which is
+//!   undefined beyond `0..=3`; every method treats such values as "no projection").
+//! - **`ReadFromDB`** always builds a new curve (upstream's "fill the curve passed
+//!   in" branch and its `IsKindOf` check have no counterpart; the unused type and
+//!   dimension arguments are dropped). An ASCII value whose extraction is skipped
+//!   (the stream already failed) stays `SM_UNDEF_DOUBLE`, the member initialiser;
+//!   a projection type or type header that is never extracted is
+//!   [`SolidError::InvalidInput`] (upstream reads an uninitialised local).
+//! - `GetRootCurve`, `DrawPolygon`, `GetMemoryUsed`, `WriteToDB`, `AssertValid`
+//!   and `Dump` are not part of this unit.
+//! - Upstream behaviours kept by default (see `plan/findings/` and `plan/upstream-issues/`):
+//!   `Transform` fails unless the ownership flag is `UNSURE` (opt-in WR-29 fix
+//!   [`UpstreamFixes::projected_curve_transform_when_owned`](crate::kernel::UpstreamFixes::projected_curve_transform_when_owned)
+//!   also accepts `TRUE`). `ReadFromDB` does not call `MakeOrthoNormal`.
+
+use crate::curve::curve::p2::{self as curve_base, Curve, PROJECTED_CURVE_TYPE};
+use crate::error::{Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::extent1d::Extent1d;
+use crate::geom::geom_utility::p2::ContinuityType;
+use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
+use crate::math::{EFF_ZERO, EFF_ZERO_SQ};
+use crate::nurbs::b_spline_curve::ProjectionType;
+use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::surface::surface::p2::{check_geometry_nesting, NestedGeometry};
+use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
+
+const OP: &str = "curve::projected_curve::ProjectedCurve";
+const OP_READ: &str = "curve::projected_curve::ProjectedCurve::read_from_db";
+
+/// Whether a projected curve owns its base curve (`m_bOwnsCurve`, an `SmBoolean`
+/// whose three values the edits test differently).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum OwnsCurve {
+    /// `FALSE` (the constructor default): the base curve is borrowed.
+    #[default]
+    No = 0,
+    /// `TRUE`: the base curve is owned (always after `ReadFromDB`). Accepted by
+    /// [`ProjectedCurve::transform`] when
+    /// [`UpstreamFixes::projected_curve_transform_when_owned`](crate::kernel::UpstreamFixes::projected_curve_transform_when_owned)
+    /// is enabled (WR-29).
+    Yes = 1,
+    /// `UNSURE` (2): the member initialiser; the only value [`ProjectedCurve::transform`]
+    /// accepts by default (pinned C++ tests `m_bOwnsCurve < 2`).
+    Unsure = 2,
+}
+
+/// A curve projected onto a plane (`SmProjectedCurve`).
+#[derive(Debug)]
+pub struct ProjectedCurve {
+    /// `m_cpCurve`: the curve being projected.
+    curve: Box<Curve>,
+    /// `m_sProjPoint`: a point on the view plane (parallel, perspective) or on the
+    /// rotation axis (rotation).
+    proj_point: Point3,
+    /// `m_sProjVec`: the view plane normal (parallel, perspective) or the rotation
+    /// axis vector (rotation).
+    proj_vec: Vec3,
+    /// `m_sAuxData`: unused (parallel), the eye point (perspective), or the X axis
+    /// of the plane spanned with the rotation axis (rotation).
+    aux_data: Vec3,
+    /// `m_eProjType`.
+    proj_type: ProjectionType,
+    /// `m_bOwnsCurve`.
+    owns_curve: OwnsCurve,
+}
+
+/// The copy constructor: an owned base curve is copied ([`Curve::clone`], whose
+/// B-spline copy fixes its knots up), a borrowed one exactly (the bounded exact copy:
+/// no knot fix-up, owner kept), which is what sharing the borrowed pointer upstream
+/// amounts to. Every other member is copied verbatim, and the enclosing
+/// [`Curve::clone`] still resets *its* owner and identity.
+///
+/// The exact branch recurses over the copied base without a depth argument; that is
+/// sound because every path that stores a base curve keeps the graph within
+/// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING):
+/// [`ProjectedCurve::new`] and [`ProjectedCurve::set_canonical`] check it,
+/// [`ProjectedCurve::read_from_db`] reads its base through [`Curve::read_from_db`]
+/// (bounded by [the database reader's nesting
+/// limit](crate::topology::database_io::MAX_READ_NESTING)), and propagates from
+/// bounded instances.
+impl Clone for ProjectedCurve {
+    fn clone(&self) -> Self {
+        let curve = if self.owns_curve == OwnsCurve::No {
+            self.curve.clone_exact_bounded()
+        } else {
+            (*self.curve).clone()
+        };
+        Self {
+            curve: Box::new(curve),
+            proj_point: self.proj_point,
+            proj_vec: self.proj_vec,
+            aux_data: self.aux_data,
+            proj_type: self.proj_type,
+            owns_curve: self.owns_curve,
+        }
+    }
+}
+
+impl ProjectedCurve {
+    /// Exact evaluation copy after the caller validates the geometry depth.
+    pub(crate) fn clone_exact_bounded(&self) -> Self {
+        Self {
+            curve: Box::new(self.curve.clone_exact_bounded()),
+            proj_point: self.proj_point,
+            proj_vec: self.proj_vec,
+            aux_data: self.aux_data,
+            proj_type: self.proj_type,
+            owns_curve: self.owns_curve,
+        }
+    }
+
+    /// An exact evaluation copy; `depth` is the base curve's depth in the shared
+    /// `MAX_GEOMETRY_NESTING` (32) curve/surface/volume traversal.
+    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
+        Ok(Self {
+            curve: Box::new(self.curve.clone_for_evaluation_depth(depth)?),
+            proj_point: self.proj_point,
+            proj_vec: self.proj_vec,
+            aux_data: self.aux_data,
+            proj_type: self.proj_type,
+            owns_curve: self.owns_curve,
+        })
+    }
+
+    /// `SmProjectedCurve_TYPE`.
+    pub const TYPE: i64 = PROJECTED_CURVE_TYPE;
+
+    /// A projection of `curve` (constructor). Data not given keeps the member
+    /// initialiser ([`Vec3::UNDEF`]); when `proj_vec` is given the vectors go
+    /// through [`Self::make_ortho_normal`], whose status is ignored as upstream.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when `curve` nests deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1.
+    pub fn new(
+        curve: Curve,
+        proj_point: Option<Point3>,
+        proj_vec: Option<Vec3>,
+        aux_data: Option<Vec3>,
+        proj_type: ProjectionType,
+        owns_curve: OwnsCurve,
+    ) -> Result<Self> {
+        check_geometry_nesting(NestedGeometry::Curve(&curve), 1, OP)?;
+        let mut c = Self {
+            curve: Box::new(curve),
+            proj_point: proj_point.unwrap_or(Vec3::UNDEF),
+            proj_vec: proj_vec.unwrap_or(Vec3::UNDEF),
+            aux_data: aux_data.unwrap_or(Vec3::UNDEF),
+            proj_type,
+            owns_curve,
+        };
+        if proj_vec.is_some() {
+            let _ = c.make_ortho_normal();
+        }
+        Ok(c)
+    }
+
+    /// The curve being projected.
+    #[must_use]
+    pub fn curve(&self) -> &Curve {
+        &self.curve
+    }
+
+    /// The point on the view plane or rotation axis (`m_sProjPoint`).
+    #[must_use]
+    pub const fn proj_point(&self) -> Point3 {
+        self.proj_point
+    }
+
+    /// The view plane normal or rotation axis (`m_sProjVec`).
+    #[must_use]
+    pub const fn proj_vec(&self) -> Vec3 {
+        self.proj_vec
+    }
+
+    /// The eye point or rotation plane X axis (`m_sAuxData`).
+    #[must_use]
+    pub const fn aux_data(&self) -> Vec3 {
+        self.aux_data
+    }
+
+    /// The projection type (`m_eProjType`).
+    #[must_use]
+    pub const fn proj_type(&self) -> ProjectionType {
+        self.proj_type
+    }
+
+    /// The ownership flag (`m_bOwnsCurve`).
+    #[must_use]
+    pub const fn owns_curve(&self) -> OwnsCurve {
+        self.owns_curve
+    }
+
+    // ---- type queries ---------------------------------------------------------------
+
+    /// `SmProjectedCurve_TYPE` (`GetType`).
+    #[must_use]
+    pub const fn type_code(&self) -> i64 {
+        Self::TYPE
+    }
+
+    /// `"SmProjectedCurve_TYPE"` (`GetTypeString`).
+    #[must_use]
+    pub const fn type_string(&self) -> &'static str {
+        "SmProjectedCurve_TYPE"
+    }
+
+    /// `"SmProjectedCurve"` (`GetClassString`).
+    #[must_use]
+    pub const fn class_string(&self) -> &'static str {
+        "SmProjectedCurve"
+    }
+
+    /// True for `SmProjectedCurve_TYPE` and the `SmCurve` base types (`IsKindOf`).
+    #[must_use]
+    pub const fn is_kind_of(t: i64) -> bool {
+        t == Self::TYPE || curve_base::is_kind_of(t)
+    }
+
+    /// Image-space dimension: always 3 (`SmCurve(3)`).
+    #[must_use]
+    pub const fn dim(&self) -> u64 {
+        3
+    }
+
+    /// `IsAnalytic`: `FALSE`.
+    #[must_use]
+    pub const fn is_analytic(&self) -> bool {
+        false
+    }
+
+    /// `IsBounded`: that of the base curve.
+    #[must_use]
+    pub fn is_bounded(&self) -> bool {
+        self.curve.is_bounded()
+    }
+
+    /// `operator==`: same object, or equal base curves (under
+    /// [`Curve::approx_eq`]) and equal projection data (under [`Vec3::approx_eq`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Curve::approx_eq`] on the base curves.
+    pub fn approx_eq(&self, k: &Kernel, other: &Self) -> Result<bool> {
+        // low work
+        if core::ptr::eq(self, other) {
+            return Ok(true);
+        }
+
+        // check equivalence of these objects
+        Ok((core::ptr::eq(self.curve.as_ref(), other.curve.as_ref())
+            || self.curve.approx_eq(k, &other.curve)?)
+            && self.proj_point.approx_eq(other.proj_point)
+            && self.proj_vec.approx_eq(other.proj_vec)
+            && self.aux_data.approx_eq(other.aux_data)
+            && self.proj_type == other.proj_type)
+    }
+
+    /// `Copy`: a copy of the projected curve (copy constructor).
+    ///
+    /// # Errors
+    ///
+    /// When the base curve is owned, those of its [`Curve::copy`] (`SM_ERR` for a
+    /// Hermite curve; upstream ignores it, see the module notes); when it is borrowed,
+    /// those of `Curve::clone_for_evaluation` (geometry nested too deeply).
+    pub fn copy(&self, k: &Kernel) -> Result<Self> {
+        let curve = if self.owns_curve == OwnsCurve::No {
+            // upstream shares the borrowed base curve: an exact copy that keeps its
+            // owner (`Curve::clone` would fix its knots up)
+            self.curve.clone_for_evaluation()?
+        } else {
+            // copy the Curve
+            self.curve.copy(k)?
+        };
+        Ok(Self {
+            curve: Box::new(curve),
+            proj_point: self.proj_point,
+            proj_vec: self.proj_vec,
+            aux_data: self.aux_data,
+            proj_type: self.proj_type,
+            owns_curve: self.owns_curve,
+        })
+    }
+
+    // ---- set up ---------------------------------------------------------------------
+
+    /// Sets every canonical field, then [`Self::make_ortho_normal`]
+    /// (`SetCanonical`).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when `curve` nests deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1
+    /// (all fields are left unchanged); `SM_ERR` from [`Self::make_ortho_normal`]
+    /// (the fields are set anyway).
+    pub fn set_canonical(
+        &mut self,
+        curve: Curve,
+        proj_point: Point3,
+        proj_vec: Vec3,
+        aux_data: Vec3,
+        proj_type: ProjectionType,
+        owns_curve: OwnsCurve,
+    ) -> Result<()> {
+        check_geometry_nesting(NestedGeometry::Curve(&curve), 1, OP)?;
+        *self.curve = curve;
+        self.proj_point = proj_point;
+        self.proj_vec = proj_vec;
+        self.aux_data = aux_data;
+        self.proj_type = proj_type;
+        self.owns_curve = owns_curve;
+
+        // unitize and orthoganlize ProjVec and AuxData
+        self.make_ortho_normal()
+    }
+
+    /// Unitizes the projection vector and, for rotations, replaces the auxiliary
+    /// vector by its unit component normal to the projection vector
+    /// (`MakeOrthoNormal`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the projection vector (or, for rotations, the auxiliary
+    /// vector) is uninitialised or zero; `SM_ERR_INVALID_INPUT` when the auxiliary
+    /// vector is parallel to the projection vector (it becomes `(0, 0, 1)`).
+    pub fn make_ortho_normal(&mut self) -> Result<()> {
+        // when ProjVec is nonZero - unitize it
+        let proj_init = self.proj_vec.is_initialized();
+        let proj_zero = self.proj_vec.is_zero(EFF_ZERO);
+        if proj_init && !proj_zero {
+            self.proj_vec = self.proj_vec.unitize_or_z();
+        } else {
+            return Err(SolidError::sm_err(OP));
+        }
+
+        // for rotations - make the sAuxData vector orthonormal to the ProjVec
+        if self.proj_type == ProjectionType::Rotation {
+            // when xAuxData is nonZero - make orthonormal to ProjVec
+            let aux_init = self.aux_data.is_initialized();
+            let aux_zero = self.aux_data.is_zero(EFF_ZERO);
+            if aux_init && !aux_zero {
+                self.aux_data = self.proj_vec.normal_in_plane(self.aux_data);
+                // SER(Unitize()): a zero vector becomes (0, 0, 1) and fails
+                let zero = self.aux_data.length_squared() < EFF_ZERO_SQ;
+                self.aux_data = self.aux_data.unitize_or_z();
+                if zero {
+                    return Err(SolidError::Upstream {
+                        operation: OP,
+                        code: SM_ERR_INVALID_INPUT,
+                        entity: None,
+                    });
+                }
+            } else {
+                return Err(SolidError::sm_err(OP));
+            }
+        }
+        Ok(())
+    }
+
+    // ---- queries passed to the base curve -------------------------------------------
+
+    /// The natural interval of the base curve (`GetNaturalInterval`).
+    #[must_use]
+    pub fn natural_interval(&self) -> Extent1d {
+        // pass the call along
+        self.curve.natural_interval()
+    }
+
+    /// Unique knots and multiplicities of the base curve (`GetKnots`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Curve::knots`].
+    pub fn knots(&self, k: &Kernel, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
+        // pass the call along
+        self.curve.knots(k, interval)
+    }
+
+    /// The sum of the knot multiplicities over the natural interval
+    /// (`GetNumberNaturalKnots`); `0` when the knots cannot be read (upstream
+    /// ignores the status).
+    ///
+    /// # Errors
+    ///
+    /// Only [`SolidError::Unported`].
+    pub fn number_natural_knots(&self, k: &Kernel) -> Result<usize> {
+        let (_, mults) = match self.knots(k, None) {
+            Ok(km) => km,
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(_) => (Vec::new(), Vec::new()),
+        };
+
+        // count the knots
+        Ok(mults.iter().sum())
+    }
+
+    /// The continuities of the base curve (`CalculateContinuities`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Curve::calculate_continuities`].
+    pub fn calculate_continuities(
+        &self,
+        k: &Kernel,
+        angle_tol: f64,
+    ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
+        // pass the call along
+        self.curve.calculate_continuities(k, angle_tol)
+    }
+
+    // ---- edits ----------------------------------------------------------------------
+
+    /// `EditParameterization` of the base curve.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the base curve is not owned; those of
+    /// [`Curve::edit_parameterization`].
+    pub fn edit_parameterization(&mut self, k: &Kernel, new_param: &Extent1d) -> Result<()> {
+        // Don't own curve can not reverse parameterization
+        if self.owns_curve == OwnsCurve::No {
+            return Err(SolidError::sm_err(OP));
+        }
+
+        // pass the call along to m_cpCurve
+        self.curve.edit_parameterization(k, new_param)
+    }
+
+    /// `ReverseParameterization` of the base curve: the new interval.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the base curve is not owned; those of
+    /// [`Curve::reverse_parameterization`].
+    pub fn reverse_parameterization(
+        &mut self,
+        k: &Kernel,
+        old_interval: &Extent1d,
+    ) -> Result<Extent1d> {
+        // Don't own curve can not reverse parameterization
+        if self.owns_curve == OwnsCurve::No {
+            return Err(SolidError::sm_err(OP));
+        }
+
+        // pass the call along to the cpCurve
+        self.curve.reverse_parameterization(k, old_interval)
+    }
+
+    /// `Trim` of the base curve; `trim_interval` may be snapped.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the base curve is not owned; those of [`Curve::trim`].
+    pub fn trim(&mut self, k: &Kernel, trim_interval: &mut Extent1d, mode: TrimMode) -> Result<()> {
+        self.trim_with_zone_tol(
+            k,
+            trim_interval,
+            mode,
+            crate::geom::tol::zone_tol_3d(k, crate::geom::tol::SmallTopoType::NormalSize),
+        )
+    }
+
+    /// Trims the owned curve with the caller-resolved owning object's tolerance.
+    pub(crate) fn trim_with_zone_tol(
+        &mut self,
+        k: &Kernel,
+        trim_interval: &mut Extent1d,
+        mode: TrimMode,
+        zone_tol_3d: f64,
+    ) -> Result<()> {
+        // Don't own curve can not trim the curve
+        if self.owns_curve == OwnsCurve::No {
+            return Err(SolidError::sm_err(OP));
+        }
+
+        // pass the call along to the UVCurve
+        self.curve
+            .trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d)
+    }
+
+    /// `Transform`: nothing for an identity placement without (or with unit)
+    /// scale; else transforms the base curve, then the projection data.
+    ///
+    /// # Errors
+    ///
+    /// By default, `SM_ERR` unless the ownership flag is [`OwnsCurve::Unsure`] (upstream
+    /// tests `m_bOwnsCurve < 2`). When
+    /// [`UpstreamFixes::projected_curve_transform_when_owned`](crate::kernel::UpstreamFixes::projected_curve_transform_when_owned)
+    /// is `true` (WR-29), [`OwnsCurve::Yes`] is also accepted and only [`OwnsCurve::No`]
+    /// fails with `SM_ERR`. Also returns any error from [`Curve::transform`].
+    pub fn transform(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+    ) -> Result<()> {
+        self.transform_at_depth(k, rotate_n_move, scale, 0)
+    }
+
+    pub(crate) fn transform_at_depth(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        depth: usize,
+    ) -> Result<()> {
+        let identity_scale = Vec3::new(1.0, 1.0, 1.0);
+
+        // no work - identity transform
+        if rotate_n_move.is_identity(EFF_ZERO) && scale.is_none_or(|s| s.approx_eq(identity_scale))
+        {
+            return Ok(());
+        }
+
+        // Don't own surface, can not transform the curve
+        let disallowed = if k.fixes.projected_curve_transform_when_owned {
+            self.owns_curve == OwnsCurve::No
+        } else {
+            self.owns_curve != OwnsCurve::Unsure
+        };
+        if disallowed {
+            return Err(SolidError::sm_err(OP));
+        }
+
+        // pass the call along to the curve
+        self.curve
+            .transform_at_depth(k, rotate_n_move, scale, depth + 1)?;
+
+        // apply rotations and moves to points and vecs
+        self.proj_point = rotate_n_move.transform_point(self.proj_point);
+        self.proj_vec = rotate_n_move.transform_vector(self.proj_vec);
+        if self.proj_type == ProjectionType::Perspective {
+            self.aux_data = rotate_n_move.transform_point(self.aux_data);
+        } else if self.proj_type == ProjectionType::Rotation {
+            self.aux_data = rotate_n_move.transform_vector(self.aux_data);
+        }
+
+        // apply opt scaling to points
+        if let Some(s) = scale {
+            // scale the points
+            self.proj_point.x *= s.x;
+            self.proj_point.y *= s.y;
+            self.proj_point.z *= s.z;
+
+            if self.proj_type == ProjectionType::Perspective {
+                self.aux_data.x *= s.x;
+                self.aux_data.y *= s.y;
+                self.aux_data.z *= s.z;
+            }
+        }
+        Ok(())
+    }
+
+    // ---- evaluation -----------------------------------------------------------------
+
+    /// Position and derivatives `0..=num_derivs` of the base curve at `t`, projected
+    /// (`Evaluate`). A perspective projection of the derivatives uses the projected
+    /// position, as upstream.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Curve::evaluate`].
+    pub fn evaluate(
+        &self,
+        k: &Kernel,
+        t: f64,
+        num_derivs: usize,
+        from_left: bool,
+        non_zero_tangents: bool,
+    ) -> Result<Vec<Vec3>> {
+        // pass the call along
+        let mut pd = self
+            .curve
+            .evaluate(k, t, num_derivs, from_left, non_zero_tangents)?;
+
+        // project the results
+        match self.proj_type {
+            ProjectionType::Parallel => {
+                let mut it = pd.iter_mut();
+                // position point
+                if let Some(p) = it.next() {
+                    *p = p.project_point_to_plane(self.proj_point, self.proj_vec);
+                }
+                // derivative vectors
+                for d in it.take(num_derivs) {
+                    *d = d.project_to_plane(self.proj_vec);
+                }
+            }
+            ProjectionType::Perspective => {
+                let mut it = pd.iter_mut();
+                // position point
+                let mut base = Vec3::UNDEF;
+                if let Some(p) = it.next() {
+                    *p = p.perspective_project_point_to_plane(
+                        self.proj_point,
+                        self.proj_vec,
+                        self.aux_data,
+                    );
+                    base = *p;
+                }
+                // derivative vectors
+                for d in it.take(num_derivs) {
+                    *d = d.perspective_project_to_plane(
+                        base,
+                        self.proj_point,
+                        self.proj_vec,
+                        self.aux_data,
+                    );
+                }
+            }
+            ProjectionType::Rotation => {
+                let mut it = pd.iter_mut();
+                // position point
+                if let Some(p) = it.next() {
+                    *p = p.rotate_project_point_to_plane(
+                        self.proj_point,
+                        self.proj_vec,
+                        self.aux_data,
+                    );
+                }
+                // derivative vectors
+                for d in it.take(num_derivs) {
+                    *d = d.rotate_project_to_plane(self.proj_vec, self.aux_data);
+                }
+            }
+            ProjectionType::Unknown => {}
+        }
+        Ok(pd)
+    }
+
+    /// The projected point of the base curve at `t` (`EvaluatePoint`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Curve::evaluate_point`].
+    pub fn evaluate_point(&self, k: &Kernel, t: f64) -> Result<Point3> {
+        // base curve evaluation
+        let pnt = self.curve.evaluate_point(k, t)?;
+
+        let mut point = pnt.project_point_to_plane(self.proj_point, self.proj_vec);
+
+        // project the point
+        match self.proj_type {
+            ProjectionType::Parallel => {
+                point = pnt.project_point_to_plane(self.proj_point, self.proj_vec);
+            }
+            ProjectionType::Perspective => {
+                point = pnt.perspective_project_point_to_plane(
+                    self.proj_point,
+                    self.proj_vec,
+                    self.aux_data,
+                );
+            }
+            ProjectionType::Rotation => {
+                point = pnt.rotate_project_point_to_plane(
+                    self.proj_point,
+                    self.proj_vec,
+                    self.aux_data,
+                );
+            }
+            ProjectionType::Unknown => {}
+        }
+        Ok(point)
+    }
+
+    // ---- persistence ----------------------------------------------------------------
+
+    /// Reads a projected curve written in database format `version` (`ReadFromDB`):
+    /// the projection data (versions above 34 include the auxiliary vector), then
+    /// the base curve's type header and the base curve. The result owns its base
+    /// curve; its vectors are not normalised.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a short binary stream or an ASCII value
+    /// upstream would leave uninitialised; those of [`Curve::read_from_db`].
+    pub fn read_from_db(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Self> {
+        let undefined = || SolidError::InvalidInput {
+            operation: OP_READ,
+            reason: "value not extracted from a failed ASCII stream",
+        };
+        let ascii = db.file_type() == FileType::Ascii;
+
+        // locals
+        let mut proj_point = Vec3::UNDEF;
+        let mut proj_vec = Vec3::UNDEF;
+        let mut aux_data = Vec3::UNDEF;
+        // version 34 = pre-rotation extension database format
+        // version 36 = post-rotation extension database format (added member m_sAuxData)
+        let with_aux = version > 34;
+        let proj_type = if ascii {
+            let mut vecs: Vec<&mut Vec3> = vec![&mut proj_point, &mut proj_vec];
+            if with_aux {
+                vecs.push(&mut aux_data);
+            }
+            for v in vecs {
+                if let Some(s) = db.in_stream_mut() {
+                    for coord in [&mut v.x, &mut v.y, &mut v.z] {
+                        if let Some(x) = s.extract_double() {
+                            *coord = x;
+                        }
+                    }
+                }
+                db.go_to_next_line();
+            }
+            let pt = db.in_stream_mut().and_then(InputStream::extract_ulong);
+            db.go_to_next_line();
+            pt.ok_or_else(undefined)?
+        } else {
+            let mut vecs: Vec<&mut Vec3> = vec![&mut proj_point, &mut proj_vec];
+            if with_aux {
+                vecs.push(&mut aux_data);
+            }
+            for v in vecs {
+                v.x = db.read_double()?;
+                v.y = db.read_double()?;
+                v.z = db.read_double()?;
+            }
+            db.read_ulong()?
+        };
+
+        // base curve
+        if ascii {
+            db.go_to_next_line();
+        }
+        let header = db.read_type(true)?;
+        let curve_type = header.type_code.ok_or_else(undefined)?;
+        let curve_dim = header.dim.ok_or_else(undefined)?;
+        let curve = Curve::read_from_db(k, curve_type, db, curve_dim, version)?;
+
+        // load the obj
+        Ok(Self {
+            curve: Box::new(curve),
+            proj_point,
+            proj_vec,
+            aux_data,
+            proj_type: ProjectionType::from_code(proj_type).unwrap_or(ProjectionType::Unknown),
+            owns_curve: OwnsCurve::Yes,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::curve::curve::p2::CurveKind;
+    use crate::curve::hermite_curve::HermiteCurve;
+    use crate::curve::line::Line;
+    use crate::error::SM_ERR;
+    use crate::kernel::UpstreamFixes;
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::nurbs::math::CPoint;
+    use crate::topology::database_io::DatabaseWriter;
+
+    fn base() -> Curve {
+        Curve::from(HermiteCurve::new(
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 2.0),
+            Vec3::new(2.0, 1.0, 3.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            3,
+        ))
+    }
+
+    #[test]
+    fn set_canonical_rejects_excessive_nesting_without_changing_fields() {
+        use crate::surface::surface::p2::MAX_GEOMETRY_NESTING;
+
+        let mut curve = base();
+        for _ in 0..MAX_GEOMETRY_NESTING {
+            curve = Curve::from(
+                ProjectedCurve::new(
+                    curve,
+                    None,
+                    None,
+                    None,
+                    ProjectionType::Parallel,
+                    OwnsCurve::No,
+                )
+                .unwrap(),
+            );
+        }
+        let mut projected = ProjectedCurve::new(
+            base(),
+            None,
+            None,
+            None,
+            ProjectionType::Unknown,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        let before = format!("{projected:?}");
+        assert!(matches!(
+            projected.set_canonical(
+                curve,
+                Vec3::ZERO,
+                Vec3::ZERO,
+                Vec3::ZERO,
+                ProjectionType::Rotation,
+                OwnsCurve::Yes,
+            ),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert_eq!(format!("{projected:?}"), before);
+        // a zero projection vector fails, the fields are set anyway
+        assert!(projected
+            .set_canonical(
+                base(),
+                Vec3::ZERO,
+                Vec3::ZERO,
+                Vec3::ZERO,
+                ProjectionType::Parallel,
+                OwnsCurve::Yes,
+            )
+            .is_err());
+        assert_eq!(projected.proj_type(), ProjectionType::Parallel);
+        assert!(projected
+            .set_canonical(
+                base(),
+                Vec3::ZERO,
+                Vec3::Z,
+                Vec3::ZERO,
+                ProjectionType::Parallel,
+                OwnsCurve::Yes,
+            )
+            .is_ok());
+    }
+
+    #[test]
+    fn nonzero_proj_vec_is_unitized() {
+        let mut c = ProjectedCurve::new(
+            base(),
+            Some(Vec3::new(0.0, 0.0, 0.0)),
+            Some(Vec3::new(0.0, 0.0, 2.0)),
+            None,
+            ProjectionType::Parallel,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert_eq!(c.proj_vec(), Vec3::Z);
+        assert!(c.make_ortho_normal().is_ok());
+    }
+
+    #[test]
+    fn rotation_aux_is_made_orthonormal() {
+        let mut c = ProjectedCurve::new(
+            base(),
+            Some(Vec3::new(0.0, 0.0, 0.0)),
+            Some(Vec3::new(0.0, 0.0, 2.0)),
+            Some(Vec3::new(3.0, 0.0, 5.0)),
+            ProjectionType::Rotation,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert_eq!(c.proj_vec(), Vec3::Z);
+        assert!((c.aux_data() - Vec3::X).length() < 1e-15);
+        assert!(c.make_ortho_normal().is_ok());
+        // an auxiliary vector along the projection vector has no normal part
+        c.aux_data = Vec3::new(0.0, 0.0, 4.0);
+        assert!(matches!(
+            c.make_ortho_normal(),
+            Err(SolidError::Upstream {
+                code: SM_ERR_INVALID_INPUT,
+                ..
+            })
+        ));
+        assert_eq!(c.aux_data(), Vec3::Z);
+    }
+
+    #[test]
+    fn zero_proj_vec_is_rejected() {
+        let mut c = ProjectedCurve::new(
+            base(),
+            Some(Vec3::new(0.0, 0.0, 0.0)),
+            Some(Vec3::new(0.0, 0.0, 0.0)),
+            Some(Vec3::new(0.0, 0.0, 0.0)),
+            ProjectionType::Rotation,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert_eq!(c.proj_vec(), Vec3::ZERO);
+        assert_eq!(c.aux_data(), Vec3::ZERO);
+        assert!(c.make_ortho_normal().is_err());
+    }
+
+    #[test]
+    fn parallel_projection_flattens() {
+        let k = &Kernel::default();
+        let c = ProjectedCurve::new(
+            base(),
+            Some(Vec3::new(0.0, 0.0, -1.0)),
+            None,
+            None,
+            ProjectionType::Parallel,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        let mut c2 = c.clone();
+        c2.proj_vec = Vec3::Z;
+        let p = c2.evaluate_point(k, 0.5).expect("eval");
+        assert!((p.z + 1.0).abs() < 1e-12);
+        let pd = c2.evaluate(k, 0.3, 2, true, false).expect("eval");
+        assert_eq!(pd.len(), 3);
+        for v in pd.iter().skip(1) {
+            assert!(v.z.abs() < 1e-12);
+        }
+        assert!(c.approx_eq(k, &c.clone()).unwrap());
+        assert!(!c.approx_eq(k, &c2).unwrap());
+    }
+
+    #[test]
+    fn edits_respect_ownership() {
+        let k = Kernel::default();
+        let mut c = ProjectedCurve::new(
+            base(),
+            None,
+            None,
+            None,
+            ProjectionType::Parallel,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert!(c
+            .edit_parameterization(&k, &Extent1d::from_min_max(0.0, 2.0))
+            .is_err());
+        let mut a = Axis2Placement::new(Vec3::new(1.0, 0.0, 0.0), Vec3::X, Vec3::Y);
+        assert!(c.transform(&k, &a, None).is_err());
+        a = Axis2Placement::new(Vec3::new(0.0, 0.0, 0.0), Vec3::X, Vec3::Y);
+        assert!(c.transform(&k, &a, None).is_ok());
+        let (_, mults) = c.knots(&k, None).expect("knots");
+        assert_eq!(
+            c.number_natural_knots(&k).expect("knots"),
+            mults.iter().sum::<usize>()
+        );
+        // owned Hermite base has no Copy
+        c.owns_curve = OwnsCurve::Yes;
+        assert!(c.copy(&k).is_err());
+    }
+
+    #[test]
+    fn reads_ascii() {
+        let text = "1 2 3 c\n0 0 1 c\n4 5 6 c\n1 c\n ProjectedCurve->ProjectedCurve \n\
+                    Object Type 14034\nCurve Dim 3\n\
+                    0 0 0\n1 0 0\n1 1 0\n0 1 0\n0 0 0\n0 0 0\n";
+        let mut db = DatabaseReader::new();
+        db.open_for_read(text.as_bytes().to_vec(), FileType::Ascii);
+        let c = ProjectedCurve::read_from_db(&Kernel::default(), &mut db, 36).expect("read");
+        assert_eq!(c.proj_point(), Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(c.aux_data(), Vec3::new(4.0, 5.0, 6.0));
+        assert_eq!(c.proj_type(), ProjectionType::Perspective);
+        assert_eq!(c.owns_curve(), OwnsCurve::Yes);
+        assert_eq!(c.curve().type_code(), HermiteCurve::TYPE);
+    }
+
+    fn upstream_err(code: i32) -> SolidError {
+        SolidError::Upstream {
+            operation: OP,
+            code,
+            entity: None,
+        }
+    }
+
+    /// WR-28 (fixed in v1.0.1 `3fd5b95`): `SmProjectedCurve::MakeOrthoNormal` unitizes a
+    /// non-unit parallel view normal `(0, 0, 2)` to `(0, 0, 1)` so `Evaluate` and
+    /// `EvaluatePoint` match `(0, 0, 1)` without skew.
+    #[test]
+    fn wr28_parallel_non_unit_proj_vec_evaluates_without_skew() {
+        let k = Kernel::default();
+        let plane_pt = Vec3::new(0.0, 0.0, -1.0);
+        let non_unit = Vec3::new(0.0, 0.0, 2.0);
+
+        let mut from_new = ProjectedCurve::new(
+            base(),
+            Some(plane_pt),
+            Some(non_unit),
+            None,
+            ProjectionType::Parallel,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert_eq!(from_new.proj_vec(), Vec3::Z);
+        assert_eq!(from_new.make_ortho_normal(), Ok(()));
+        assert_eq!(from_new.proj_vec(), Vec3::Z);
+
+        let mut from_set = ProjectedCurve::new(
+            base(),
+            None,
+            None,
+            None,
+            ProjectionType::Unknown,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        let res = from_set.set_canonical(
+            base(),
+            plane_pt,
+            non_unit,
+            Vec3::UNDEF,
+            ProjectionType::Parallel,
+            OwnsCurve::No,
+        );
+        assert_eq!(res, Ok(()));
+        assert_eq!(from_set.proj_vec(), Vec3::Z);
+
+        let unit_ref = ProjectedCurve::new(
+            base(),
+            Some(plane_pt),
+            Some(Vec3::Z),
+            None,
+            ProjectionType::Parallel,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert!(from_new.approx_eq(&k, &unit_ref).unwrap());
+        assert!(from_set.approx_eq(&k, &unit_ref).unwrap());
+
+        for t in [0.0, 0.3, 0.5, 1.0] {
+            let p_ref = unit_ref.evaluate_point(&k, t).unwrap();
+            let p_new = from_new.evaluate_point(&k, t).unwrap();
+            let p_set = from_set.evaluate_point(&k, t).unwrap();
+            assert!((p_ref.z + 1.0).abs() < 1e-12);
+            assert_eq!(p_new, p_ref);
+            assert_eq!(p_set, p_ref);
+
+            let d_ref = unit_ref.evaluate(&k, t, 2, true, false).unwrap();
+            let d_new = from_new.evaluate(&k, t, 2, true, false).unwrap();
+            let d_set = from_set.evaluate(&k, t, 2, true, false).unwrap();
+            assert_eq!(d_new, d_ref);
+            assert_eq!(d_set, d_ref);
+            for deriv in d_ref.iter().skip(1) {
+                assert!(deriv.z.abs() < 1e-12);
+            }
+        }
+    }
+
+    /// WR-28 (fixed in v1.0.1 `3fd5b95`): zero `(0, 0, 0)` and uninitialised `Vec3::UNDEF`
+    /// projection vectors fail in `make_ortho_normal` and `set_canonical` with `SM_ERR`.
+    #[test]
+    fn wr28_zero_and_uninitialized_proj_vec_fail_with_sm_err() {
+        let partial_undef = Vec3::new(Vec3::UNDEF.x, 0.0, 2.0);
+        for bad_proj in [Vec3::ZERO, Vec3::UNDEF, partial_undef] {
+            let mut from_new = ProjectedCurve::new(
+                base(),
+                Some(Vec3::ZERO),
+                Some(bad_proj),
+                None,
+                ProjectionType::Parallel,
+                OwnsCurve::No,
+            )
+            .unwrap();
+            assert_eq!(from_new.proj_vec(), bad_proj);
+            let err = from_new.make_ortho_normal();
+            assert_eq!(err, Err(upstream_err(SM_ERR)));
+            assert_eq!(from_new.proj_vec(), bad_proj);
+
+            let mut from_set = ProjectedCurve::new(
+                base(),
+                None,
+                None,
+                None,
+                ProjectionType::Unknown,
+                OwnsCurve::No,
+            )
+            .unwrap();
+            let err = from_set.set_canonical(
+                base(),
+                Vec3::ZERO,
+                bad_proj,
+                Vec3::ZERO,
+                ProjectionType::Parallel,
+                OwnsCurve::Yes,
+            );
+            assert_eq!(err, Err(upstream_err(SM_ERR)));
+            assert_eq!(from_set.proj_vec(), bad_proj);
+        }
+
+        let mut omitted = ProjectedCurve::new(
+            base(),
+            Some(Vec3::ZERO),
+            None,
+            None,
+            ProjectionType::Parallel,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert_eq!(omitted.proj_vec(), Vec3::UNDEF);
+        let err = omitted.make_ortho_normal();
+        assert_eq!(err, Err(upstream_err(SM_ERR)));
+    }
+
+    /// WR-28 (fixed in v1.0.1 `3fd5b95`): `ProjectionType::Rotation` orthonormalizes non-unit
+    /// non-orthogonal `proj_vec` and `aux_data`, rejects zero or uninitialised `aux_data`
+    /// with `SM_ERR`, and rejects parallel `aux_data` with `SM_ERR_INVALID_INPUT` after
+    /// setting `aux_data` to `(0, 0, 1)`.
+    #[test]
+    fn wr28_rotation_orthonormalizes_and_rejects_degenerate_aux_data() {
+        let k = Kernel::default();
+        let axis_pt = Vec3::new(1.0, -1.0, 0.0);
+        let raw_proj = Vec3::new(0.0, 0.0, 2.0);
+        let raw_aux = Vec3::new(3.0, 4.0, 7.0);
+        let unit_aux = Vec3::new(0.6, 0.8, 0.0);
+
+        let mut rot_new = ProjectedCurve::new(
+            base(),
+            Some(axis_pt),
+            Some(raw_proj),
+            Some(raw_aux),
+            ProjectionType::Rotation,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert_eq!(rot_new.proj_vec(), Vec3::Z);
+        assert!((rot_new.aux_data() - unit_aux).length() < 1e-15);
+        assert!(rot_new.proj_vec().dot(rot_new.aux_data()).abs() < 1e-15);
+        assert_eq!(rot_new.make_ortho_normal(), Ok(()));
+
+        let mut rot_set = ProjectedCurve::new(
+            base(),
+            None,
+            None,
+            None,
+            ProjectionType::Unknown,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        let res = rot_set.set_canonical(
+            base(),
+            axis_pt,
+            raw_proj,
+            raw_aux,
+            ProjectionType::Rotation,
+            OwnsCurve::No,
+        );
+        assert_eq!(res, Ok(()));
+        assert_eq!(rot_set.proj_vec(), Vec3::Z);
+        assert!((rot_set.aux_data() - unit_aux).length() < 1e-15);
+
+        let rot_ref = ProjectedCurve::new(
+            base(),
+            Some(axis_pt),
+            Some(Vec3::Z),
+            Some(unit_aux),
+            ProjectionType::Rotation,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert!(rot_new.approx_eq(&k, &rot_ref).unwrap());
+        assert!(rot_set.approx_eq(&k, &rot_ref).unwrap());
+        for t in [0.0, 0.4, 1.0] {
+            let d_new = rot_new.evaluate(&k, t, 2, true, false).unwrap();
+            let d_ref = rot_ref.evaluate(&k, t, 2, true, false).unwrap();
+            for (&a, &b) in d_new.iter().zip(&d_ref) {
+                assert!((a - b).length() < 1e-14);
+            }
+        }
+
+        let partial_undef = Vec3::new(Vec3::UNDEF.x, 3.0, 0.0);
+        for bad_aux in [Vec3::ZERO, Vec3::UNDEF, partial_undef] {
+            let err = rot_set.set_canonical(
+                base(),
+                axis_pt,
+                raw_proj,
+                bad_aux,
+                ProjectionType::Rotation,
+                OwnsCurve::No,
+            );
+            assert_eq!(err, Err(upstream_err(SM_ERR)));
+            assert_eq!(rot_set.proj_vec(), Vec3::Z);
+            assert_eq!(rot_set.aux_data(), bad_aux);
+        }
+
+        let mut omitted_aux = ProjectedCurve::new(
+            base(),
+            Some(axis_pt),
+            Some(raw_proj),
+            None,
+            ProjectionType::Rotation,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert_eq!(omitted_aux.proj_vec(), Vec3::Z);
+        assert_eq!(omitted_aux.aux_data(), Vec3::UNDEF);
+        let err = omitted_aux.make_ortho_normal();
+        assert_eq!(err, Err(upstream_err(SM_ERR)));
+
+        for par_aux in [Vec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -3.0, 0.0)] {
+            let err = rot_set.set_canonical(
+                base(),
+                axis_pt,
+                Vec3::new(0.0, 2.0, 0.0),
+                par_aux,
+                ProjectionType::Rotation,
+                OwnsCurve::No,
+            );
+            assert_eq!(err, Err(upstream_err(SM_ERR_INVALID_INPUT)));
+            assert_eq!(rot_set.proj_vec(), Vec3::Y);
+            assert_eq!(rot_set.aux_data(), Vec3::Z);
+        }
+    }
+
+    fn wr29_line_base() -> Curve {
+        Curve::from(
+            Line::create_line_segment(3, Vec3::new(0.4, -0.3, 1.2), Vec3::new(1.8, 0.9, 2.6), None)
+                .unwrap(),
+        )
+    }
+
+    fn wr29_bspline_base() -> Curve {
+        let cpts = [
+            CPoint::from_point(Vec3::new(0.2, -0.5, 1.1)),
+            CPoint::from_point(Vec3::new(0.7, 0.8, 1.9)),
+            CPoint::from_point(Vec3::new(1.5, -0.2, 2.4)),
+            CPoint::from_point(Vec3::new(2.1, 0.6, 2.8)),
+        ];
+        let knots = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        Curve::from(BSplineCurve::from_data(3, 3, 7, 3, &cpts, &knots).unwrap())
+    }
+
+    fn wr29_general_projections(make_base: fn() -> Curve, owns: OwnsCurve) -> [ProjectedCurve; 3] {
+        [
+            ProjectedCurve::new(
+                make_base(),
+                Some(Vec3::new(-0.3, 0.4, -0.5)),
+                Some(Vec3::new(1.0, -2.0, 3.0)),
+                None,
+                ProjectionType::Parallel,
+                owns,
+            )
+            .unwrap(),
+            ProjectedCurve::new(
+                make_base(),
+                Some(Vec3::new(-0.2, 0.3, -0.4)),
+                Some(Vec3::new(0.2, -0.3, 1.0)),
+                Some(Vec3::new(0.5, -0.4, 9.0)),
+                ProjectionType::Perspective,
+                owns,
+            )
+            .unwrap(),
+            ProjectedCurve::new(
+                make_base(),
+                Some(Vec3::new(0.1, -0.2, 0.3)),
+                Some(Vec3::new(1.0, 1.0, 2.0)),
+                Some(Vec3::new(2.0, -1.0, 0.5)),
+                ProjectionType::Rotation,
+                owns,
+            )
+            .unwrap(),
+        ]
+    }
+
+    fn wr29_axis_aligned_projections(
+        make_base: fn() -> Curve,
+        owns: OwnsCurve,
+    ) -> [ProjectedCurve; 3] {
+        let plane_pt = Vec3::new(0.2, -0.4, -0.6);
+        [
+            ProjectedCurve::new(
+                make_base(),
+                Some(plane_pt),
+                Some(Vec3::Z),
+                None,
+                ProjectionType::Parallel,
+                owns,
+            )
+            .unwrap(),
+            ProjectedCurve::new(
+                make_base(),
+                Some(plane_pt),
+                Some(Vec3::Z),
+                Some(Vec3::new(0.5, -0.3, 9.0)),
+                ProjectionType::Perspective,
+                owns,
+            )
+            .unwrap(),
+            ProjectedCurve::new(
+                make_base(),
+                Some(plane_pt),
+                Some(Vec3::Z),
+                Some(Vec3::X),
+                ProjectionType::Rotation,
+                owns,
+            )
+            .unwrap(),
+        ]
+    }
+
+    fn wr29_rigid_placement() -> Axis2Placement {
+        let mut a = Axis2Placement::IDENTITY;
+        a.rotate_about_axis(0.65, Vec3::new(1.0, 2.0, -1.5));
+        a.translate(Vec3::new(3.25, -1.75, 0.85));
+        a
+    }
+
+    fn wr29_origin_rotation_placement() -> Axis2Placement {
+        let mut a = Axis2Placement::IDENTITY;
+        a.rotate_about_axis(-0.45, Vec3::new(2.0, -1.0, 1.5));
+        a
+    }
+
+    /// WR-29: `ProjectedCurve` with `OwnsCurve::Yes` fails with `SM_ERR` (`1001`) by default
+    /// without mutating the curve, and succeeds under
+    /// `Kernel::fixes.projected_curve_transform_when_owned` across `Parallel`, `Perspective`
+    /// and `Rotation` projections for rigid transforms, isotropic scale + rotation, and
+    /// anisotropic scale (both direct `ProjectedCurve::transform` and polymorphic
+    /// `Curve::transform`, including nested `ProjectedCurve`).
+    #[test]
+    fn wr29_owned_projected_curve_transforms_under_opt_in_all_projection_types() {
+        assert_eq!(SM_ERR, 1001);
+        let k_def = Kernel::default();
+        let mut k_fix = Kernel::default();
+        k_fix.fixes.projected_curve_transform_when_owned = true;
+
+        let rigid = wr29_rigid_placement();
+        let rot_origin = wr29_origin_rotation_placement();
+        let iso_scale = Vec3::new(2.5, 2.5, 2.5);
+        let aniso_scale = Vec3::new(2.0, 3.0, 0.5);
+
+        for make_base in [wr29_line_base, wr29_bspline_base] {
+            // (a) General 3D rigid rotation + non-zero translation (`scale = None`) and
+            // (b) isotropic scale + 3D rotation about the origin.
+            for orig in wr29_general_projections(make_base, OwnsCurve::Yes) {
+                for (placement, scale) in [(&rigid, None), (&rot_origin, Some(iso_scale))] {
+                    let mut pc_def = orig.clone();
+                    let snap = format!("{pc_def:?}");
+                    assert_eq!(
+                        pc_def.transform(&k_def, placement, scale),
+                        Err(upstream_err(SM_ERR))
+                    );
+                    assert_eq!(format!("{pc_def:?}"), snap);
+
+                    let mut crv_def = Curve::from(orig.clone());
+                    let crv_snap = format!("{crv_def:?}");
+                    assert_eq!(
+                        crv_def.transform(&k_def, placement, scale),
+                        Err(upstream_err(SM_ERR))
+                    );
+                    assert_eq!(format!("{crv_def:?}"), crv_snap);
+
+                    let mut pc_fix = orig.clone();
+                    pc_fix.transform(&k_fix, placement, scale).unwrap();
+                    let mut crv_fix = Curve::from(orig.clone());
+                    crv_fix.transform(&k_fix, placement, scale).unwrap();
+
+                    for t in [0.0, 0.35, 0.75, 1.0] {
+                        let pre = orig.evaluate(&k_def, t, 1, true, false).unwrap();
+                        let mut exp_p = placement.transform_point(pre[0]);
+                        let mut exp_d = placement.transform_vector(pre[1]);
+                        if let Some(s) = scale {
+                            exp_p = exp_p.multiply(s);
+                            exp_d = exp_d.multiply(s);
+                        }
+
+                        let post = pc_fix.evaluate(&k_fix, t, 1, true, false).unwrap();
+                        let post_pt = pc_fix.evaluate_point(&k_fix, t).unwrap();
+                        let post_crv = crv_fix.evaluate(&k_fix, t, 1, true, false).unwrap();
+                        assert!((post[0] - exp_p).length() < 1e-12);
+                        assert!((post[1] - exp_d).length() < 1e-12);
+                        assert!((post_pt - exp_p).length() < 1e-12);
+                        assert_eq!(post_crv[0], post[0]);
+                        assert_eq!(post_crv[1], post[1]);
+                    }
+                }
+            }
+
+            // (c) Anisotropic scale `(2.0, 3.0, 0.5)` across all three projection types.
+            for orig in wr29_axis_aligned_projections(make_base, OwnsCurve::Yes) {
+                let mut pc_def = orig.clone();
+                let snap = format!("{pc_def:?}");
+                assert_eq!(
+                    pc_def.transform(&k_def, &Axis2Placement::IDENTITY, Some(aniso_scale)),
+                    Err(upstream_err(SM_ERR))
+                );
+                assert_eq!(format!("{pc_def:?}"), snap);
+
+                let mut pc_fix = orig.clone();
+                pc_fix
+                    .transform(&k_fix, &Axis2Placement::IDENTITY, Some(aniso_scale))
+                    .unwrap();
+                for t in [0.0, 0.25, 0.6, 1.0] {
+                    let pre = orig.evaluate(&k_def, t, 1, true, false).unwrap();
+                    let exp_p = pre[0].multiply(aniso_scale);
+                    let exp_d = pre[1].multiply(aniso_scale);
+                    let post = pc_fix.evaluate(&k_fix, t, 1, true, false).unwrap();
+                    assert!((post[0] - exp_p).length() < 1e-12);
+                    assert!((post[1] - exp_d).length() < 1e-12);
+                }
+            }
+        }
+
+        // Nested `ProjectedCurve` (`OwnsCurve::Yes` wrapping `OwnsCurve::Yes`) through `Curve::transform`.
+        let inner = ProjectedCurve::new(
+            wr29_bspline_base(),
+            Some(Vec3::new(0.0, 0.0, -0.5)),
+            Some(Vec3::new(0.0, 0.6, 0.8)),
+            None,
+            ProjectionType::Parallel,
+            OwnsCurve::Yes,
+        )
+        .unwrap();
+        let outer = ProjectedCurve::new(
+            Curve::from(inner),
+            Some(Vec3::new(0.2, -0.1, 0.3)),
+            Some(Vec3::new(0.8, 0.0, 0.6)),
+            None,
+            ProjectionType::Parallel,
+            OwnsCurve::Yes,
+        )
+        .unwrap();
+        let mut nested_def = Curve::from(outer.clone());
+        let nested_snap = format!("{nested_def:?}");
+        assert_eq!(
+            nested_def.transform(&k_def, &rigid, None),
+            Err(upstream_err(SM_ERR))
+        );
+        assert_eq!(format!("{nested_def:?}"), nested_snap);
+
+        let mut nested_fix = Curve::from(outer.clone());
+        nested_fix.transform(&k_fix, &rigid, None).unwrap();
+        for t in [0.0, 0.5, 1.0] {
+            let pre = outer.evaluate(&k_def, t, 1, true, false).unwrap();
+            let post = nested_fix.evaluate(&k_fix, t, 1, true, false).unwrap();
+            assert!((post[0] - rigid.transform_point(pre[0])).length() < 1e-12);
+            assert!((post[1] - rigid.transform_vector(pre[1])).length() < 1e-12);
+        }
+    }
+
+    /// WR-29: `OwnsCurve::No` still fails with `SM_ERR` under opt-in (except early identity
+    /// return), while `OwnsCurve::Unsure` succeeds identically bit-for-bit in both modes.
+    #[test]
+    fn wr29_borrowed_still_rejected_and_unsure_and_identity_unchanged() {
+        let k_def = Kernel::default();
+        let mut k_fix = Kernel::default();
+        k_fix.fixes.projected_curve_transform_when_owned = true;
+
+        let rigid = wr29_rigid_placement();
+        let non_unit_scale = Vec3::new(2.0, 1.5, 0.75);
+        let unit_scale = Vec3::new(1.0, 1.0, 1.0);
+
+        for orig in wr29_general_projections(wr29_bspline_base, OwnsCurve::No) {
+            for k in [&k_def, &k_fix] {
+                let mut pc = orig.clone();
+                let snap = format!("{pc:?}");
+                assert_eq!(pc.transform(k, &rigid, None), Err(upstream_err(SM_ERR)));
+                assert_eq!(format!("{pc:?}"), snap);
+                assert_eq!(
+                    pc.transform(k, &Axis2Placement::IDENTITY, Some(non_unit_scale)),
+                    Err(upstream_err(SM_ERR))
+                );
+                assert_eq!(format!("{pc:?}"), snap);
+
+                let mut crv = Curve::from(orig.clone());
+                assert_eq!(crv.transform(k, &rigid, None), Err(upstream_err(SM_ERR)));
+
+                // Identity placement with `None` or unit scale returns `Ok(())` early.
+                assert_eq!(pc.transform(k, &Axis2Placement::IDENTITY, None), Ok(()));
+                assert_eq!(
+                    pc.transform(k, &Axis2Placement::IDENTITY, Some(unit_scale)),
+                    Ok(())
+                );
+                assert_eq!(format!("{pc:?}"), snap);
+            }
+        }
+
+        for orig in wr29_general_projections(wr29_bspline_base, OwnsCurve::Unsure) {
+            for scale in [None, Some(non_unit_scale)] {
+                let mut pc_def = orig.clone();
+                let mut pc_fix = orig.clone();
+                pc_def.transform(&k_def, &rigid, scale).unwrap();
+                pc_fix.transform(&k_fix, &rigid, scale).unwrap();
+
+                for t in [0.0, 0.3, 0.7, 1.0] {
+                    let d_def = pc_def.evaluate(&k_def, t, 2, true, false).unwrap();
+                    let d_fix = pc_fix.evaluate(&k_fix, t, 2, true, false).unwrap();
+                    assert_eq!(d_def.len(), d_fix.len());
+                    for (&a, &b) in d_def.iter().zip(&d_fix) {
+                        assert_eq!(a.x.to_bits(), b.x.to_bits());
+                        assert_eq!(a.y.to_bits(), b.y.to_bits());
+                        assert_eq!(a.z.to_bits(), b.z.to_bits());
+                    }
+                }
+            }
+        }
+    }
+
+    fn wr29_write_projected_line_db(
+        file_type: FileType,
+        proj_point: Point3,
+        proj_vec: Vec3,
+        aux_data: Vec3,
+        proj_type: ProjectionType,
+        line: &Line,
+    ) -> Vec<u8> {
+        let mut w = DatabaseWriter::open_for_write(file_type).with_round_trip_doubles(true);
+        w.reals(&[proj_point.x, proj_point.y, proj_point.z]);
+        w.reals(&[proj_vec.x, proj_vec.y, proj_vec.z]);
+        w.reals(&[aux_data.x, aux_data.y, aux_data.z]);
+        if file_type == FileType::Ascii {
+            w.out_u64(proj_type as u64).out_str("\n");
+            w.out_str(" ProjectedCurve->ProjectedCurve \n");
+        } else {
+            w.write_longs(&[proj_type as u64]);
+        }
+        w.write_type(Line::TYPE, Some(3));
+        line.write_to_db(&mut w, 36).unwrap();
+        w.into_bytes()
+    }
+
+    /// WR-29: `ProjectedCurve::read_from_db` sets `OwnsCurve::Yes`, so deserialized projected
+    /// curves fail `Transform` with `SM_ERR` by default and transform cleanly when
+    /// `UpstreamFixes::flag_mut("projected_curve_transform_when_owned")` is enabled.
+    #[test]
+    fn wr29_read_from_db_projected_curve_transforms_and_flag_lookup() {
+        let k_def = Kernel::default();
+        assert!(!k_def.fixes.projected_curve_transform_when_owned);
+        assert!(UpstreamFixes::NAMES.contains(&"projected_curve_transform_when_owned"));
+        assert!(k_def
+            .fixes
+            .flags()
+            .any(|f| f == ("projected_curve_transform_when_owned", false)));
+
+        let mut k_fix = Kernel::default();
+        *k_fix
+            .fixes
+            .flag_mut("projected_curve_transform_when_owned")
+            .expect("WR-29 flag registered in UpstreamFixes") = true;
+        assert!(k_fix.fixes.projected_curve_transform_when_owned);
+        assert!(k_fix
+            .fixes
+            .flags()
+            .any(|f| f == ("projected_curve_transform_when_owned", true)));
+
+        let line = Line::create_line_segment(
+            3,
+            Vec3::new(0.25, -0.5, 1.5),
+            Vec3::new(1.75, 0.75, 2.75),
+            None,
+        )
+        .unwrap();
+        let proj_point = Vec3::new(0.1, -0.2, -0.5);
+        // Exact IEEE-754 unit normal: 0.6^2 + 0.8^2 == 1.0 (`read_from_db` does not unitize).
+        let proj_vec = Vec3::new(0.0, 0.6, 0.8);
+        let eye_point = Vec3::new(0.5, -0.4, 9.0);
+        let rigid = wr29_rigid_placement();
+
+        for file_type in [FileType::Binary, FileType::Ascii] {
+            let bytes = wr29_write_projected_line_db(
+                file_type,
+                proj_point,
+                proj_vec,
+                eye_point,
+                ProjectionType::Perspective,
+                &line,
+            );
+
+            let mut db = DatabaseReader::new();
+            db.open_for_read(bytes.clone(), file_type);
+            let crv_orig =
+                Curve::read_from_db(&k_def, PROJECTED_CURVE_TYPE, &mut db, 3, 36).unwrap();
+            let CurveKind::Projected(pc_inner) = crv_orig.kind() else {
+                panic!("expected CurveKind::Projected");
+            };
+            assert_eq!(pc_inner.owns_curve(), OwnsCurve::Yes);
+            assert_eq!(pc_inner.proj_type(), ProjectionType::Perspective);
+
+            let mut db_direct = DatabaseReader::new();
+            db_direct.open_for_read(bytes, file_type);
+            let mut pc_direct = ProjectedCurve::read_from_db(&k_def, &mut db_direct, 36).unwrap();
+            assert_eq!(pc_direct.owns_curve(), OwnsCurve::Yes);
+            assert_eq!(
+                pc_direct.transform(&k_def, &rigid, None),
+                Err(upstream_err(SM_ERR))
+            );
+
+            let mut crv_def = crv_orig.clone();
+            let snap = format!("{crv_def:?}");
+            assert_eq!(
+                crv_def.transform(&k_def, &rigid, None),
+                Err(upstream_err(SM_ERR))
+            );
+            assert_eq!(format!("{crv_def:?}"), snap);
+
+            let mut crv_fix = crv_orig.clone();
+            crv_fix.transform(&k_fix, &rigid, None).unwrap();
+            pc_direct.transform(&k_fix, &rigid, None).unwrap();
+
+            for t in [0.0, 0.4, 1.0] {
+                let pre = crv_orig.evaluate(&k_def, t, 1, true, false).unwrap();
+                let post_crv = crv_fix.evaluate(&k_fix, t, 1, true, false).unwrap();
+                let post_pc = pc_direct.evaluate(&k_fix, t, 1, true, false).unwrap();
+                let exp_p = rigid.transform_point(pre[0]);
+                let exp_d = rigid.transform_vector(pre[1]);
+                assert!((post_crv[0] - exp_p).length() < 1e-12);
+                assert!((post_crv[1] - exp_d).length() < 1e-12);
+                assert_eq!(post_crv[0], post_pc[0]);
+                assert_eq!(post_crv[1], post_pc[1]);
+            }
+        }
+    }
+}

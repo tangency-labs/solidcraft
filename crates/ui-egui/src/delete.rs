@@ -185,14 +185,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let (deleted, fails) = (list("deleted"), list("would_fail"));
     let shared = shared_occurrences(app, &p.params);
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_delete_confirm"), "delete", crate::i18n::tr_label("Delete"))
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_delete_confirm"), "delete", solidcraft_ui_text::tr_label("Delete"))
         .tone(ui_kit::Tone::Danger)
         .actions("Delete", "Cancel", None)
         .show(ctx, true, |ui| {
             if shared {
                 ui_kit::text(
                     ui,
-                    crate::i18n::tr_label("This child is shared. Deleting it removes it from every copy of its parent."),
+                    solidcraft_ui_text::tr_label("This child is shared. Deleting it removes it from every copy of its parent."),
                     ui_kit::Text::Report("shared", false),
                 );
             }
@@ -202,7 +202,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 if names.is_empty() {
                     continue;
                 }
-                ui_kit::text(ui, crate::i18n::tr_label(heading), ui_kit::Text::Report(key, error));
+                ui_kit::text(ui, solidcraft_ui_text::tr_label(heading), ui_kit::Text::Report(key, error));
                 for name in names.iter().take(MAX_LISTED) {
                     ui_kit::text(ui, &format!("  • {name}"), ui_kit::Text::Report(&format!("{key}:{name}"), error));
                 }
@@ -210,7 +210,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     let more = (names.len() - MAX_LISTED).to_string();
                     ui_kit::text(
                         ui,
-                        &crate::i18n::format("delete.and_more", &[("count", &more)]),
+                        &solidcraft_ui_text::format("delete.and_more", &[("count", &more)]),
                         ui_kit::Text::Report(&format!("{key}:more"), error),
                     );
                 }

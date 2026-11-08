@@ -1,0 +1,12 @@
+id = "surface.unbend_volume"
+upstream = ["source/SMLib/inc/SmUnbendVolume.h", "source/SMLib/src/SmUnbendVolume.cpp"]
+rust_module = "surface::unbend_volume"
+depends_on = ["geom.extent1d", "geom.extent3d", "geom.object", "geom.pseudo_box", "geom.solution_array", "geom.tol", "geom.vector3d", "surface.volume_p1", "topology.database_io"]
+soft_depends_on = ["curve.crv_in_volume", "curve.curve_p4", "curve.curve_p6", "curve.line", "geom.context", "geom.extent2d", "geom.geom_utility_p1", "geom.vector2d", "surface.plane_p1"]
+est_lines = 920
+layer = 24
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "PARTIAL: difftest 1874 cases (374 fixture + 1500 generated), 1808 pass bit-identical, 66 deferred (surface.surface_p8 66: IsCurveInParamDomainSimple -> SmCurve::HasPlaneCrossings -> SmSurface::GlobalCurveIntersect; ReadFromDB base read wired by surface.volume_p2), max_rel_err 0; 30k-seed run clean (30374 cases); --perturb SENSITIVE; co-ports of SmVolume::EvaluatePoint and SmVolume::IsPointInParamDomain replaced by surface.volume_p2's (PR #26); wired: surface.volume_p1 (deferred 39 -> 2), curve.crv_in_volume (its SmVolume::EvaluatePoint stub now calls the co-port: surface.volume_p2 deferred 33 -> 1); component constructor ported as UnbendVolume::create; 29 fns; largest: SmUnbendVolume::Evaluate, SmUnbendVolume::EvaluateSimple, SmUnbendVolume::EvaluateBoundingBoxSimple, SmUnbendVolume::ReadFromDB; cycle back-edges (call into later units; stub or co-port): surface.volume_p2(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit Re-run after wiring PR #118 (surface.surface_p8 and its back-edges, GlobalPointSolve_0 included): 1874 cases, 1874 pass, 0 deferred, 0 failed, max_rel_err 0; green."

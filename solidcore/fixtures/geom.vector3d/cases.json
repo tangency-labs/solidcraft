@@ -1,0 +1,1852 @@
+{
+ "cases": [
+  {
+   "name": "ctor_uninit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1916",
+   "inputs": {
+    "op": "uninitialized",
+    "a": [
+     0.5,
+     1.2,
+     2.2
+    ]
+   }
+  },
+  {
+   "name": "is_initialized_undef",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1917",
+   "inputs": {
+    "op": "is_initialized",
+    "a": [
+     1.23456e-61,
+     1.23456e-61,
+     1.23456e-61
+    ]
+   }
+  },
+  {
+   "name": "is_initialized_ok",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1911",
+   "inputs": {
+    "op": "is_initialized",
+    "a": [
+     0.5,
+     1.2,
+     2.2
+    ]
+   }
+  },
+  {
+   "name": "ctor_array_copy",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1921",
+   "inputs": {
+    "op": "copy",
+    "a": [
+     1,
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "name": "length_squared",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1926",
+   "inputs": {
+    "op": "length_squared",
+    "a": [
+     1,
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "name": "length",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1932",
+   "inputs": {
+    "op": "length",
+    "a": [
+     3,
+     4,
+     0
+    ]
+   }
+  },
+  {
+   "name": "neg",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1937",
+   "inputs": {
+    "op": "neg",
+    "a": [
+     3,
+     4,
+     0
+    ]
+   }
+  },
+  {
+   "name": "add_assign_zero",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1947",
+   "inputs": {
+    "op": "add_assign",
+    "a": [
+     3,
+     4,
+     0
+    ],
+    "b": [
+     -3,
+     -4,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sub_assign",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1953",
+   "inputs": {
+    "op": "sub_assign",
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     -3,
+     -4,
+     0
+    ]
+   }
+  },
+  {
+   "name": "unitize_122",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1959",
+   "inputs": {
+    "op": "unitize",
+    "a": [
+     1,
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "name": "dot_unit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1965",
+   "inputs": {
+    "op": "dot",
+    "a": [
+     0.3333333333333333,
+     0.6666666666666666,
+     0.6666666666666666
+    ],
+    "b": [
+     0.3333333333333333,
+     0.6666666666666666,
+     0.6666666666666666
+    ]
+   }
+  },
+  {
+   "name": "distance",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1973",
+   "inputs": {
+    "op": "distance",
+    "a": [
+     5,
+     1,
+     2
+    ],
+    "b": [
+     1,
+     3,
+     6
+    ]
+   }
+  },
+  {
+   "name": "angle",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1979",
+   "inputs": {
+    "op": "angle",
+    "a": [
+     5,
+     1,
+     2
+    ],
+    "b": [
+     1,
+     3,
+     6
+    ]
+   }
+  },
+  {
+   "name": "ccw_angle",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1986",
+   "inputs": {
+    "op": "ccw_angle",
+    "a": [
+     0,
+     0,
+     1
+    ],
+    "b": [
+     5,
+     1,
+     2
+    ],
+    "c": [
+     1,
+     3,
+     6
+    ]
+   }
+  },
+  {
+   "name": "distance_squared",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1997",
+   "inputs": {
+    "op": "distance_squared",
+    "a": [
+     5,
+     1,
+     2
+    ],
+    "b": [
+     -3,
+     -4,
+     0
+    ]
+   }
+  },
+  {
+   "name": "closer_than",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2000",
+   "inputs": {
+    "op": "closer_than",
+    "a": [
+     5,
+     1,
+     2
+    ],
+    "b": [
+     1,
+     3,
+     6
+    ],
+    "s": 1.0
+   }
+  },
+  {
+   "name": "min_dimension",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2002",
+   "inputs": {
+    "op": "min_dimension",
+    "a": [
+     5,
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "max_dimension",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2005",
+   "inputs": {
+    "op": "max_dimension",
+    "a": [
+     5,
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "add",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2012",
+   "inputs": {
+    "op": "add",
+    "a": [
+     -5,
+     -1,
+     -2
+    ],
+    "b": [
+     5,
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "sub",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2018",
+   "inputs": {
+    "op": "sub",
+    "a": [
+     5,
+     1,
+     2
+    ],
+    "b": [
+     5,
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "mul",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2024",
+   "inputs": {
+    "op": "mul",
+    "a": [
+     5,
+     1,
+     2
+    ],
+    "s": 2.0
+   }
+  },
+  {
+   "name": "mul_assign",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2030",
+   "inputs": {
+    "op": "mul_assign",
+    "a": [
+     10,
+     2,
+     4
+    ],
+    "s": 3.0
+   }
+  },
+  {
+   "name": "div",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2036",
+   "inputs": {
+    "op": "div",
+    "a": [
+     5,
+     1,
+     2
+    ],
+    "s": 2.0
+   }
+  },
+  {
+   "name": "div_assign",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2042",
+   "inputs": {
+    "op": "div_assign",
+    "a": [
+     30,
+     6,
+     12
+    ],
+    "s": 2.0
+   }
+  },
+  {
+   "name": "multiply",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2048",
+   "inputs": {
+    "op": "multiply",
+    "a": [
+     5,
+     1,
+     2
+    ],
+    "b": [
+     1,
+     3,
+     6
+    ]
+   }
+  },
+  {
+   "name": "index_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2061",
+   "inputs": {
+    "op": "index",
+    "a": [
+     5,
+     1,
+     2
+    ],
+    "idx": 0
+   }
+  },
+  {
+   "name": "index_set_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2065",
+   "inputs": {
+    "op": "index_set",
+    "a": [
+     15,
+     3,
+     6
+    ],
+    "s": 7.0,
+    "idx": 1
+   }
+  },
+  {
+   "name": "between",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2101",
+   "inputs": {
+    "op": "between",
+    "a": [
+     0,
+     0,
+     1
+    ],
+    "b": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "from_vec2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2107",
+   "inputs": {
+    "op": "from_vec2",
+    "a": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "is_undef_ok",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2112",
+   "inputs": {
+    "op": "is_undef",
+    "a": [
+     0,
+     1,
+     -1
+    ]
+   }
+  },
+  {
+   "name": "colinear",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2120",
+   "inputs": {
+    "op": "colinear",
+    "a": [
+     1,
+     1,
+     1
+    ],
+    "b": [
+     3,
+     3,
+     3
+    ],
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "d": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "parallel",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2124",
+   "inputs": {
+    "op": "parallel",
+    "a": [
+     1,
+     1,
+     1
+    ],
+    "b": [
+     3,
+     3,
+     3
+    ],
+    "s": 1e-06
+   }
+  },
+  {
+   "name": "perpendicular",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2129",
+   "inputs": {
+    "op": "perpendicular",
+    "a": [
+     1,
+     1,
+     1
+    ],
+    "b": [
+     -3,
+     2,
+     1
+    ],
+    "s": 1e-06
+   }
+  },
+  {
+   "name": "inside_sector",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2133",
+   "inputs": {
+    "op": "inside_sector",
+    "a": [
+     1,
+     1,
+     1
+    ],
+    "b": [
+     -3,
+     2,
+     1
+    ],
+    "c": [
+     0,
+     2,
+     1
+    ],
+    "d": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "triple_product",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2137",
+   "inputs": {
+    "op": "triple_product",
+    "a": [
+     1,
+     1,
+     1
+    ],
+    "b": [
+     0,
+     2,
+     1
+    ],
+    "c": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "unit_ortho_ref",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2142",
+   "inputs": {
+    "op": "unit_ortho",
+    "a": [
+     0,
+     1,
+     0
+    ],
+    "b": [
+     0,
+     2,
+     1
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "project_to_plane",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2155",
+   "inputs": {
+    "op": "project_to_plane",
+    "a": [
+     0,
+     1,
+     0
+    ],
+    "b": [
+     0,
+     0.8944271909999159,
+     0.4472135954999579
+    ]
+   }
+  },
+  {
+   "name": "project_point_to_plane",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2160",
+   "inputs": {
+    "op": "project_point_to_plane",
+    "a": [
+     0,
+     1,
+     0
+    ],
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "c": [
+     0,
+     0.8944271909999159,
+     0.4472135954999579
+    ]
+   }
+  },
+  {
+   "name": "rotate_about_axis",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2167",
+   "inputs": {
+    "op": "rotate_about_axis",
+    "a": [
+     0,
+     1,
+     0
+    ],
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "s": 1.5707963267948966
+   }
+  },
+  {
+   "name": "normal_in_plane",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2179",
+   "inputs": {
+    "op": "normal_in_plane",
+    "a": [
+     0,
+     1,
+     0
+    ],
+    "b": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "unitized_derivative",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2184",
+   "inputs": {
+    "op": "unitized_derivative",
+    "a": [
+     0,
+     1,
+     0
+    ],
+    "b": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "unitized_derivative2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2190",
+   "inputs": {
+    "op": "unitized_derivative2",
+    "a": [
+     0,
+     1,
+     0
+    ],
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "c": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "unitized_derivative3",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2200",
+   "inputs": {
+    "op": "unitized_derivative3",
+    "a": [
+     0,
+     1,
+     0
+    ],
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "d": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "derivative_of_cross",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2214",
+   "inputs": {
+    "op": "derivative_of_cross",
+    "a": [
+     0,
+     1,
+     0
+    ],
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "c": [
+     -1,
+     0,
+     0
+    ],
+    "d": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "solve_two_linear",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2226",
+   "inputs": {
+    "op": "solve_two_linear",
+    "a": [
+     0,
+     3,
+     6
+    ],
+    "b": [
+     5,
+     2,
+     9
+    ]
+   }
+  },
+  {
+   "name": "swap_copy",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2242",
+   "inputs": {
+    "op": "copy",
+    "a": [
+     2,
+     3,
+     1
+    ]
+   }
+  },
+  {
+   "name": "cross",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2251",
+   "inputs": {
+    "op": "cross",
+    "a": [
+     4,
+     1,
+     5
+    ],
+    "b": [
+     2,
+     3,
+     1
+    ]
+   }
+  },
+  {
+   "name": "eq_same",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2257",
+   "inputs": {
+    "op": "eq",
+    "a": [
+     3,
+     6,
+     5
+    ],
+    "b": [
+     3,
+     6,
+     5
+    ]
+   }
+  },
+  {
+   "name": "eq_different",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2261",
+   "inputs": {
+    "op": "eq",
+    "a": [
+     3,
+     6,
+     5
+    ],
+    "b": [
+     3,
+     7,
+     5
+    ]
+   }
+  },
+  {
+   "name": "unitize_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unitize",
+    "a": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "unitize_tiny",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unitize",
+    "a": [
+     1e-13,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "unitize_or_z_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unitize_or_z",
+    "a": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "unitize_near_unit",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unitize",
+    "a": [
+     0.6,
+     0,
+     0.8
+    ]
+   }
+  },
+  {
+   "name": "angle_zero_vec",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "angle",
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "angle_antiparallel",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "angle",
+    "a": [
+     1,
+     2,
+     3
+    ],
+    "b": [
+     -2,
+     -4,
+     -6
+    ]
+   }
+  },
+  {
+   "name": "angle_near_parallel",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "angle",
+    "a": [
+     1,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     1e-09,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ccw_parallel_axis",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "ccw_angle",
+    "a": [
+     0,
+     0,
+     1
+    ],
+    "b": [
+     0,
+     0,
+     5
+    ],
+    "c": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ccw_negative",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "ccw_angle",
+    "a": [
+     0,
+     0,
+     1
+    ],
+    "b": [
+     0,
+     1,
+     0
+    ],
+    "c": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "parallel_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "parallel",
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     0,
+     0
+    ],
+    "s": 0.0001
+   }
+  },
+  {
+   "name": "parallel_anti",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "parallel",
+    "a": [
+     1,
+     0,
+     0
+    ],
+    "b": [
+     -1,
+     0,
+     0
+    ],
+    "s": 0.0001
+   }
+  },
+  {
+   "name": "parallel_not",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "parallel",
+    "a": [
+     1,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     1,
+     0
+    ],
+    "s": 0.0001
+   }
+  },
+  {
+   "name": "perpendicular_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "perpendicular",
+    "a": [
+     1,
+     0,
+     0
+    ],
+    "b": [
+     0,
+     0,
+     0
+    ],
+    "s": 0.0001
+   }
+  },
+  {
+   "name": "inside_sector_degenerate_normal",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "inside_sector",
+    "a": [
+     1,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     0,
+     0
+    ],
+    "c": [
+     2,
+     0,
+     0
+    ],
+    "d": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "inside_sector_same_dir",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "inside_sector",
+    "a": [
+     1,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     0,
+     0
+    ],
+    "c": [
+     0,
+     1,
+     0
+    ],
+    "d": [
+     1,
+     1e-14,
+     0
+    ]
+   }
+  },
+  {
+   "name": "inside_sector_outside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "inside_sector",
+    "a": [
+     0,
+     -1,
+     0
+    ],
+    "b": [
+     1,
+     0,
+     0
+    ],
+    "c": [
+     0,
+     1,
+     0
+    ],
+    "d": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "unit_ortho_none",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unit_ortho",
+    "a": [
+     0,
+     5,
+     0
+    ]
+   }
+  },
+  {
+   "name": "unit_ortho_none_generic",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unit_ortho",
+    "a": [
+     1,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "unit_ortho_parallel_ref",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unit_ortho",
+    "a": [
+     1,
+     2,
+     3
+    ],
+    "b": [
+     2,
+     4,
+     6
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "unit_ortho_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unit_ortho",
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "rotate_about_zero_axis",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "rotate_about_axis",
+    "a": [
+     1,
+     2,
+     3
+    ],
+    "b": [
+     0,
+     0,
+     0
+    ],
+    "s": 0.7
+   }
+  },
+  {
+   "name": "rotate_about_self",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "rotate_about_axis",
+    "a": [
+     0,
+     0,
+     2
+    ],
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "s": 0.7
+   }
+  },
+  {
+   "name": "unitized_derivative_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unitized_derivative",
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "unitized_derivative2_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unitized_derivative2",
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     2,
+     3
+    ],
+    "c": [
+     4,
+     5,
+     6
+    ]
+   }
+  },
+  {
+   "name": "unitized_derivative3_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unitized_derivative3",
+    "a": [
+     1e-13,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     2,
+     3
+    ],
+    "c": [
+     4,
+     5,
+     6
+    ],
+    "d": [
+     7,
+     8,
+     9
+    ]
+   }
+  },
+  {
+   "name": "solve_singular",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "solve_two_linear",
+    "a": [
+     1,
+     2,
+     3
+    ],
+    "b": [
+     2,
+     4,
+     6
+    ]
+   }
+  },
+  {
+   "name": "solve_second_row",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "solve_two_linear",
+    "a": [
+     1e-30,
+     2,
+     3
+    ],
+    "b": [
+     2,
+     1,
+     6
+    ]
+   }
+  },
+  {
+   "name": "index_out_of_range",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "index",
+    "a": [
+     1,
+     2,
+     3
+    ],
+    "idx": 4
+   }
+  },
+  {
+   "name": "index_set_z",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "index_set",
+    "a": [
+     1,
+     2,
+     3
+    ],
+    "s": -9.5,
+    "idx": 2
+   }
+  },
+  {
+   "name": "eq_both_undef",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "a": [
+     1.23456e-61,
+     1.23456e-61,
+     1.23456e-61
+    ],
+    "b": [
+     1.23456e-61,
+     0,
+     1.23456e-61
+    ]
+   }
+  },
+  {
+   "name": "eq_one_undef",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "a": [
+     1.23456e-61,
+     1,
+     2
+    ],
+    "b": [
+     0,
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "eq_tolerance",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "a": [
+     1000,
+     0,
+     0
+    ],
+    "b": [
+     1000.0000000005,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "div_assign_tiny",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "div_assign",
+    "a": [
+     1,
+     2,
+     3
+    ],
+    "s": 1e-13
+   }
+  },
+  {
+   "name": "div_assign_zero_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "div_assign",
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "s": 0.0
+   }
+  },
+  {
+   "name": "div_assign_mixed",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "div_assign",
+    "a": [
+     0,
+     2,
+     3
+    ],
+    "s": 1e-13
+   }
+  },
+  {
+   "name": "div_tiny",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "div",
+    "a": [
+     1,
+     2,
+     3
+    ],
+    "s": 1e-13
+   }
+  },
+  {
+   "name": "is_undef_big",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "is_undef",
+    "a": [
+     1e+19,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "is_undef_undef",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "is_undef",
+    "a": [
+     0,
+     1.23456e-61,
+     0
+    ]
+   }
+  },
+  {
+   "name": "is_zero_edge",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "is_zero",
+    "a": [
+     1e-12,
+     0,
+     0
+    ],
+    "s": 1e-12
+   }
+  },
+  {
+   "name": "is_2d",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "is_2d",
+    "a": [
+     1,
+     2,
+     1.7976931348623157e+308
+    ]
+   }
+  },
+  {
+   "name": "is_2d_not",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "is_2d",
+    "a": [
+     1,
+     2,
+     0
+    ]
+   }
+  },
+  {
+   "name": "from_nl_rational",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "from_nl",
+    "a": [
+     2,
+     4,
+     6
+    ],
+    "s": 2.0
+   }
+  },
+  {
+   "name": "from_nl_nonrational",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "from_nl",
+    "a": [
+     2,
+     4,
+     6
+    ],
+    "s": -1.7976931348623157e+308
+   }
+  },
+  {
+   "name": "from_nl_2d",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "from_nl",
+    "a": [
+     2,
+     4,
+     1.7976931348623157e+308
+    ],
+    "s": 4.0
+   }
+  },
+  {
+   "name": "colinear_degenerate_seg",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "colinear",
+    "a": [
+     1,
+     0,
+     0
+    ],
+    "b": [
+     0,
+     1,
+     0
+    ],
+    "c": [
+     1,
+     1,
+     1
+    ],
+    "d": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "colinear_zero_dir",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "colinear",
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "d": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "colinear_not",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "colinear",
+    "a": [
+     1,
+     0,
+     0
+    ],
+    "b": [
+     0,
+     1,
+     0
+    ],
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "d": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "persp_proj",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "perspective_project_to_plane",
+    "a": [
+     1,
+     2,
+     0
+    ],
+    "b": [
+     0,
+     0,
+     5
+    ],
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "d": [
+     0,
+     0,
+     1
+    ],
+    "e": [
+     0,
+     0,
+     10
+    ]
+   }
+  },
+  {
+   "name": "persp_proj_pt",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "perspective_project_point_to_plane",
+    "a": [
+     1,
+     2,
+     5
+    ],
+    "b": [
+     0,
+     0,
+     0
+    ],
+    "c": [
+     0,
+     0,
+     1
+    ],
+    "d": [
+     0,
+     0,
+     10
+    ]
+   }
+  },
+  {
+   "name": "rot_proj",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "rotate_project_to_plane",
+    "a": [
+     1,
+     2,
+     3
+    ],
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "c": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rot_proj_pt",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "rotate_project_point_to_plane",
+    "a": [
+     1,
+     2,
+     3
+    ],
+    "b": [
+     1,
+     1,
+     1
+    ],
+    "c": [
+     0,
+     0,
+     1
+    ],
+    "d": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "closer_than_exact",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "closer_than",
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     3,
+     4,
+     0
+    ],
+    "s": 5.0
+   }
+  },
+  {
+   "name": "closer_than_axis_reject",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "closer_than",
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     3,
+     0,
+     0
+    ],
+    "s": 2.0
+   }
+  },
+  {
+   "name": "sqrt_neg",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "sqrt",
+    "s": -1.0
+   }
+  },
+  {
+   "name": "sqrt_tiny_neg",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "sqrt",
+    "s": -1e-25
+   }
+  },
+  {
+   "name": "sqrt_neg_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "sqrt",
+    "s": -0.0
+   }
+  },
+  {
+   "name": "sqrt_two",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "sqrt",
+    "s": 2.0
+   }
+  },
+  {
+   "name": "cbrt_neg",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "cbrt",
+    "s": -27.0
+   }
+  },
+  {
+   "name": "cbrt_frac",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "cbrt",
+    "s": 0.3
+   }
+  },
+  {
+   "name": "acos_one",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "acos",
+    "s": 1.0
+   }
+  },
+  {
+   "name": "acos_below_minus_one",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "acos",
+    "s": -1.5
+   }
+  },
+  {
+   "name": "acos_half",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "acos",
+    "s": 0.5
+   }
+  },
+  {
+   "name": "asin_above_one",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "asin",
+    "s": 1.0000000001
+   }
+  },
+  {
+   "name": "asin_minus_one",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "asin",
+    "s": -1.0
+   }
+  },
+  {
+   "name": "asin_small",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "asin",
+    "s": 0.25
+   }
+  }
+ ]
+}

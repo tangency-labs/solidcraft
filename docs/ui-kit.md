@@ -529,7 +529,7 @@ Colours shared with the boards use `dialog_body` (window/popup), `dialog_footer`
 (inspector), `dialog_border`, `dialog_rule`, `control_border`, `form_ink`, `form_dim`
 and `selected_bg`. Additional `nav_*` roles above, plus `nav_field`,
 `nav_viewport` and `nav_dim`, have light/dark defaults in
-`assets/styles/ui/palettes.rs`. They are ordinary `solidcraft-theme/1` colour keys:
+`crates/theme/src/palettes.rs`. They are ordinary `solidcraft-theme/1` colour keys:
 import, export and palette cache identity all include them through `theme_files.rs`.
 Files omitting them retain their base palette, including older exported themes.
 Semantic selection/action ink reuses measured `form_primary`, and the slot-cap notice
@@ -1064,7 +1064,7 @@ of each element is a role read from `Tokens`: `figure_ground`, `figure_line`, `f
 `figure_face_left`, `figure_face_right`, `figure_card`, `figure_accent`, `figure_reference`,
 `figure_axis_x/y/z`, `figure_ok`, `figure_warn`, plus `form_ink`, `form_dim`, `dialog_border`,
 `control_border` and `control_fill` (`docs/design/preferences/tokens.md`). The new tokens, with light
-and dark values, are in `assets/styles/ui/palettes.rs`; theme files cannot override them yet and keep
+and dark values, are in `crates/theme/src/palettes.rs`; theme files cannot override them yet and keep
 the built-in values. The colour vision samples read `axis_z`, `sketch_projected`, `axis_x`, `bend_up`
 and `bend_down`, so they follow the colour vision mode.
 

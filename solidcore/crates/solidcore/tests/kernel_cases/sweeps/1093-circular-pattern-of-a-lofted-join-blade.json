@@ -1,0 +1,439 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b21": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b25": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b29": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b33": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b37": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b41": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b45": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b21"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b22"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b24"
+      ],
+      "params": {
+        "operand": 2
+      }
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b26"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b27"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b28"
+      ],
+      "params": {
+        "operand": 3
+      }
+    },
+    {
+      "inputs": [
+        "b29"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b30"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b30"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b31"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b31"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b32"
+      ],
+      "params": {
+        "operand": 4
+      }
+    },
+    {
+      "inputs": [
+        "b33"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b34"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b34"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b35"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b35"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b36"
+      ],
+      "params": {
+        "operand": 5
+      }
+    },
+    {
+      "inputs": [
+        "b37"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b38"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b38"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b39"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b39"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b40"
+      ],
+      "params": {
+        "operand": 6
+      }
+    },
+    {
+      "inputs": [
+        "b41"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b42"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b42"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b43"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b43"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b44"
+      ],
+      "params": {
+        "operand": 7
+      }
+    },
+    {
+      "inputs": [
+        "b45"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b46"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b46"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b47"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b47"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b48"
+      ],
+      "params": {
+        "operand": 8
+      }
+    },
+    {
+      "inputs": [
+        "b16",
+        "b20",
+        "b24",
+        "b28",
+        "b32",
+        "b36",
+        "b40",
+        "b44",
+        "b48"
+      ],
+      "op": "union_all",
+      "outputs": [
+        "b49"
+      ],
+      "params": {}
+    }
+  ],
+  "case": "1093-circular-pattern-of-a-lofted-join-blade",
+  "expected": {
+    "body_count": 1,
+    "method": "the blade is a ruled loft of two rectangles (a prismatoid): above the disk top z = 5 its section runs from 5.838 x 2.919 to 3 x 1.5; with the section area quadratic in z, V_blade = 35/6 (A(5) + 4 A(22.5) + A(40)) = 353.464. The blades stand 40 mm out on a circle and are far apart, each embedded in the disk (pi 60^2 5 = 56548.7): V = disk + 9 V_blade = 59729.8. One body.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1093",
+      "tangency-labs/solidcraft#1107"
+    ],
+    "volume_mm3": 59729.84563167252,
+    "what": "a tapered lofted blade (6 x 3 root embedded 2 mm into a disk, 3 x 1.5 tip) joined to a disk and patterned 9 times round the axis as joins (31 minutes with eight retries, or \"cavity ownership is ambiguous\")"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 111,
+      "faces": 48,
+      "vertices": 74
+    }
+  },
+  "records": "1093-circular-pattern-of-a-lofted-join-blade.bodies.json.gz",
+  "result": [
+    {
+      "body": "Hub",
+      "made": "b49"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 28569.154771100086,
+      "body_count": 1,
+      "edges": 111,
+      "faces": 48,
+      "vertices": 74,
+      "volume_mm3": 59729.84563128106
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1093",
+    "tangency-labs/solidcraft#1107"
+  ],
+  "traced_ops": [
+    "extrude",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "union_all"
+  ],
+  "ungraded": [],
+  "what": "a tapered lofted blade (6 x 3 root embedded 2 mm into a disk, 3 x 1.5 tip) joined to a disk and patterned 9 times round the axis as joins (31 minutes with eight retries, or \"cavity ownership is ambiguous\")",
+  "why_not": []
+}

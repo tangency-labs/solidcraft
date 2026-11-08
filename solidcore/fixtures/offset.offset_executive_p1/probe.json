@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "name": "probe_replace_empty",
+      "inputs": {
+        "op": "probe",
+        "branch": "replace_empty",
+        "approx_tol": 1e-06
+      }
+    },
+    {
+      "name": "probe_remove_no_merge",
+      "inputs": {
+        "op": "probe",
+        "branch": "remove_no_merge",
+        "approx_tol": 1e-06
+      }
+    },
+    {
+      "name": "probe_remove_empty",
+      "inputs": {
+        "op": "probe",
+        "branch": "remove_empty",
+        "approx_tol": 1e-06
+      }
+    },
+    {
+      "name": "probe_side_wall_null",
+      "inputs": {
+        "op": "probe",
+        "branch": "side_wall_null",
+        "approx_tol": 1e-06
+      }
+    },
+    {
+      "name": "probe_side_wall_unmapped",
+      "inputs": {
+        "op": "probe",
+        "branch": "side_wall_unmapped",
+        "approx_tol": 1e-06
+      }
+    },
+    {
+      "name": "probe_fill_empty",
+      "inputs": {
+        "op": "probe",
+        "branch": "fill_empty",
+        "approx_tol": 1e-06
+      }
+    },
+    {
+      "name": "probe_vertex_null",
+      "inputs": {
+        "op": "probe",
+        "branch": "vertex_null",
+        "approx_tol": 1e-06
+      }
+    },
+    {
+      "name": "probe_vertex_isolated",
+      "inputs": {
+        "op": "probe",
+        "branch": "vertex_isolated",
+        "approx_tol": 1e-06
+      }
+    },
+    {
+      "name": "probe_faceuse_null",
+      "inputs": {
+        "op": "probe",
+        "branch": "faceuse_null",
+        "approx_tol": 1e-06
+      }
+    },
+    {
+      "name": "probe_faceuse_no_surface",
+      "inputs": {
+        "op": "probe",
+        "branch": "faceuse_no_surface",
+        "approx_tol": 1e-06
+      }
+    },
+    {
+      "name": "probe_piecewise_empty",
+      "inputs": {
+        "op": "probe",
+        "branch": "piecewise_empty",
+        "approx_tol": 1e-06
+      }
+    },
+    {
+      "name": "probe_map_plane",
+      "inputs": {
+        "op": "probe",
+        "branch": "map_plane",
+        "approx_tol": 1e-06
+      }
+    },
+    {
+      "name": "probe_edgeuses_unmapped",
+      "inputs": {
+        "op": "probe",
+        "branch": "edgeuses_unmapped",
+        "approx_tol": 1e-06
+      }
+    }
+  ]
+}

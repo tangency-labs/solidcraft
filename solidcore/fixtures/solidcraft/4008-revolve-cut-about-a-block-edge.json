@@ -1,0 +1,154 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/4008",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "A revolve cut about the block's edge was refused on SolidCraft's truck kernel (#4008). The rectangle y 10.4..17.4, z 2..23 in the plane x = 0 is turned 180 degrees about the vertical line through (0, 20) (the block's edge y = 20), from x = 0 through x > 0: the issue's symmetric +-90 degree revolve, turned to start in the sketch plane. Half of the half annulus, radii 2.6..9.6, lies inside the block. 60 and 50 long blocks.",
+ "cases": [
+  {
+   "name": "block_60",
+   "note": "60 x 20 x 25 block.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      60,
+      20,
+      25
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         10.4,
+         2
+        ],
+        [
+         17.4,
+         2
+        ],
+        [
+         17.4,
+         23
+        ],
+        [
+         10.4,
+         23
+        ]
+       ]
+      }
+     ],
+     "plane": "yz",
+     "axis_point": [
+      0,
+      20,
+      0
+     ],
+     "axis_dir": [
+      0,
+      0,
+      1
+     ],
+     "angle_deg": 180
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 28591.466933763015,
+     "tol": 0.01,
+     "formula": "60*20*25 - pi*(9.6^2 - 2.6^2)*21/4 (a quarter annulus of the half turn lies inside the block)"
+    }
+   }
+  },
+  {
+   "name": "block_50",
+   "note": "50 x 20 x 25 block.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      50,
+      20,
+      25
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         10.4,
+         2
+        ],
+        [
+         17.4,
+         2
+        ],
+        [
+         17.4,
+         23
+        ],
+        [
+         10.4,
+         23
+        ]
+       ]
+      }
+     ],
+     "plane": "yz",
+     "axis_point": [
+      0,
+      20,
+      0
+     ],
+     "axis_dir": [
+      0,
+      0,
+      1
+     ],
+     "angle_deg": 180
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 23591.466933763015,
+     "tol": 0.01,
+     "formula": "50*20*25 - pi*(9.6^2 - 2.6^2)*21/4 (a quarter annulus of the half turn lies inside the block)"
+    }
+   }
+  }
+ ]
+}

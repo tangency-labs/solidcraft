@@ -6,7 +6,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use solidcraft_ui_egui::ControlRequest;
+use solidcraft_control::ControlRequest;
 use wasm_bindgen::{JsValue, closure::Closure};
 
 const MAX_PENDING: usize = 256;

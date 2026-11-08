@@ -1,0 +1,2948 @@
+{
+ "cases": [
+  {
+   "name": "cylinder_surface_r_nan",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "NaN",
+     3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_h_nan",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     "NaN",
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rb_nan",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "NaN",
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rt_nan",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     "NaN",
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_h_nan",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     3.0,
+     "NaN"
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_major_nan",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "NaN",
+     1.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_minor_nan",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     "NaN",
+     0
+    ]
+   }
+  },
+  {
+   "name": "box_l_nan",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "NaN",
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_r_nan",
+   "inputs": {
+    "op": "sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "NaN"
+    ]
+   }
+  },
+  {
+   "name": "sphere_no_pole_r_nan",
+   "inputs": {
+    "op": "sphere_no_pole",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "NaN"
+    ]
+   }
+  },
+  {
+   "name": "cylinder_h_nan",
+   "inputs": {
+    "op": "cylinder",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     "NaN"
+    ]
+   }
+  },
+  {
+   "name": "cone_rt_nan",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     "NaN",
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_len_nan",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "NaN",
+     1.0,
+     2.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_outside_nan",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     "NaN",
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_start_nan",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     "NaN",
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_end_nan",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     "NaN"
+    ]
+   }
+  },
+  {
+   "name": "pyramid_len_nan",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "NaN",
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_h_nan",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     "NaN"
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_len_inf",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "inf",
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_wid_inf",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     "inf"
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_r_inf",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "inf",
+     3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_h_inf",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     "inf",
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rb_inf",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "inf",
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rt_inf",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     "inf",
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_h_inf",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     3.0,
+     "inf"
+    ]
+   }
+  },
+  {
+   "name": "box_l_inf",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "inf",
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_r_inf",
+   "inputs": {
+    "op": "sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "inf"
+    ]
+   }
+  },
+  {
+   "name": "sphere_no_pole_r_inf",
+   "inputs": {
+    "op": "sphere_no_pole",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "inf"
+    ]
+   }
+  },
+  {
+   "name": "cylinder_h_inf",
+   "inputs": {
+    "op": "cylinder",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     "inf"
+    ]
+   }
+  },
+  {
+   "name": "cone_rt_inf",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     "inf",
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_len_inf",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "inf",
+     1.0,
+     2.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_outside_inf",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     "inf",
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_start_inf",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     "inf",
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_end_inf",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     "inf"
+    ]
+   }
+  },
+  {
+   "name": "pyramid_len_inf",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "inf",
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_h_inf",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     "inf"
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_len_ninf",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "-inf",
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_wid_ninf",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     "-inf"
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_r_ninf",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "-inf",
+     3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_h_ninf",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     "-inf",
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rb_ninf",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "-inf",
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rt_ninf",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     "-inf",
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_h_ninf",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     3.0,
+     "-inf"
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_major_ninf",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "-inf",
+     1.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_minor_ninf",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     "-inf",
+     0
+    ]
+   }
+  },
+  {
+   "name": "box_l_ninf",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "-inf",
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_r_ninf",
+   "inputs": {
+    "op": "sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "-inf"
+    ]
+   }
+  },
+  {
+   "name": "sphere_no_pole_r_ninf",
+   "inputs": {
+    "op": "sphere_no_pole",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "-inf"
+    ]
+   }
+  },
+  {
+   "name": "cylinder_h_ninf",
+   "inputs": {
+    "op": "cylinder",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     "-inf"
+    ]
+   }
+  },
+  {
+   "name": "cone_rt_ninf",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     "-inf",
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_len_ninf",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "-inf",
+     1.0,
+     2.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_outside_ninf",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     "-inf",
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_start_ninf",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     "-inf",
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_end_ninf",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     "-inf"
+    ]
+   }
+  },
+  {
+   "name": "pyramid_len_ninf",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     "-inf",
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_h_ninf",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     "-inf"
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_len_effzero",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e-12,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_wid_effzero",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     1e-12
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_r_effzero",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e-12,
+     3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_h_effzero",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     1e-12,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rb_effzero",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e-12,
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rt_effzero",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     1e-12,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_h_effzero",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     3.0,
+     1e-12
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_major_effzero",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e-12,
+     1.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_minor_effzero",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     1e-12,
+     0
+    ]
+   }
+  },
+  {
+   "name": "box_l_effzero",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e-12,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_r_effzero",
+   "inputs": {
+    "op": "sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e-12
+    ]
+   }
+  },
+  {
+   "name": "sphere_no_pole_r_effzero",
+   "inputs": {
+    "op": "sphere_no_pole",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e-12
+    ]
+   }
+  },
+  {
+   "name": "cylinder_h_effzero",
+   "inputs": {
+    "op": "cylinder",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1e-12
+    ]
+   }
+  },
+  {
+   "name": "cone_rt_effzero",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1e-12,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_len_effzero",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e-12,
+     1.0,
+     2.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_outside_effzero",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     1e-12,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_start_effzero",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     1e-12,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_end_effzero",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     1e-12
+    ]
+   }
+  },
+  {
+   "name": "pyramid_len_effzero",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e-12,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_h_effzero",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1e-12
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_len_above_effzero",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e-12,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_wid_above_effzero",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     1.0000001e-12
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_r_above_effzero",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e-12,
+     3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_h_above_effzero",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     1.0000001e-12,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rb_above_effzero",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e-12,
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rt_above_effzero",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     1.0000001e-12,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_h_above_effzero",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     3.0,
+     1.0000001e-12
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_major_above_effzero",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e-12,
+     1.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_minor_above_effzero",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     1.0000001e-12,
+     0
+    ]
+   }
+  },
+  {
+   "name": "box_l_above_effzero",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e-12,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_r_above_effzero",
+   "inputs": {
+    "op": "sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e-12
+    ]
+   }
+  },
+  {
+   "name": "cylinder_h_above_effzero",
+   "inputs": {
+    "op": "cylinder",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0000001e-12
+    ]
+   }
+  },
+  {
+   "name": "cone_rt_above_effzero",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e-12,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_len_above_effzero",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e-12,
+     1.0,
+     2.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_outside_above_effzero",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     1.0000001e-12,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_start_above_effzero",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     1.0000001e-12,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_len_above_effzero",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e-12,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_h_above_effzero",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0000001e-12
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_len_huge",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e+18,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_wid_huge",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     1e+18
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_r_huge",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e+18,
+     3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_h_huge",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     1e+18,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rb_huge",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e+18,
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rt_huge",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     1e+18,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_h_huge",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     3.0,
+     1e+18
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_major_huge",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e+18,
+     1.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_minor_huge",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     1e+18,
+     0
+    ]
+   }
+  },
+  {
+   "name": "box_l_huge",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e+18,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_h_huge",
+   "inputs": {
+    "op": "cylinder",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1e+18
+    ]
+   }
+  },
+  {
+   "name": "cone_rt_huge",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1e+18,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_len_huge",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e+18,
+     1.0,
+     2.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_outside_huge",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     1e+18,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_start_huge",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     1e+18,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_end_huge",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     1e+18
+    ]
+   }
+  },
+  {
+   "name": "pyramid_len_huge",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e+18,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_h_huge",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1e+18
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_len_above_big",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e+18,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_wid_above_big",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     1.0000001e+18
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_r_above_big",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e+18,
+     3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_h_above_big",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     1.0000001e+18,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rb_above_big",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e+18,
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rt_above_big",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     1.0000001e+18,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_h_above_big",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     3.0,
+     1.0000001e+18
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_major_above_big",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e+18,
+     1.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_minor_above_big",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     1.0000001e+18,
+     0
+    ]
+   }
+  },
+  {
+   "name": "box_l_above_big",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e+18,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_r_above_big",
+   "inputs": {
+    "op": "sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e+18
+    ]
+   }
+  },
+  {
+   "name": "sphere_no_pole_r_above_big",
+   "inputs": {
+    "op": "sphere_no_pole",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e+18
+    ]
+   }
+  },
+  {
+   "name": "cylinder_h_above_big",
+   "inputs": {
+    "op": "cylinder",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0000001e+18
+    ]
+   }
+  },
+  {
+   "name": "cone_rt_above_big",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e+18,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_len_above_big",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e+18,
+     1.0,
+     2.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_outside_above_big",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     1.0000001e+18,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_start_above_big",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     1.0000001e+18,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_end_above_big",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     1.0000001e+18
+    ]
+   }
+  },
+  {
+   "name": "pyramid_len_above_big",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0000001e+18,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_h_above_big",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0000001e+18
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_len_tiny",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5e-324,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_wid_tiny",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     5e-324
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_r_tiny",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5e-324,
+     3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_h_tiny",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     5e-324,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rb_tiny",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5e-324,
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rt_tiny",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     5e-324,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_h_tiny",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     3.0,
+     5e-324
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_major_tiny",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5e-324,
+     1.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_minor_tiny",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     5e-324,
+     0
+    ]
+   }
+  },
+  {
+   "name": "box_l_tiny",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5e-324,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_r_tiny",
+   "inputs": {
+    "op": "sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5e-324
+    ]
+   }
+  },
+  {
+   "name": "sphere_no_pole_r_tiny",
+   "inputs": {
+    "op": "sphere_no_pole",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5e-324
+    ]
+   }
+  },
+  {
+   "name": "cylinder_h_tiny",
+   "inputs": {
+    "op": "cylinder",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     5e-324
+    ]
+   }
+  },
+  {
+   "name": "cone_rt_tiny",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     5e-324,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_len_tiny",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5e-324,
+     1.0,
+     2.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_outside_tiny",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     5e-324,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_start_tiny",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     5e-324,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_end_tiny",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     5e-324
+    ]
+   }
+  },
+  {
+   "name": "pyramid_len_tiny",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5e-324,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_h_tiny",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     5e-324
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_len_negzero",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -0.0,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_wid_negzero",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     -0.0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_r_negzero",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -0.0,
+     3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_h_negzero",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     -0.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rb_negzero",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -0.0,
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_rt_negzero",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     -0.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_h_negzero",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     3.0,
+     -0.0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_major_negzero",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -0.0,
+     1.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_minor_negzero",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     -0.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "box_l_negzero",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_r_negzero",
+   "inputs": {
+    "op": "sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -0.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_no_pole_r_negzero",
+   "inputs": {
+    "op": "sphere_no_pole",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -0.0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_h_negzero",
+   "inputs": {
+    "op": "cylinder",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     -0.0
+    ]
+   }
+  },
+  {
+   "name": "cone_rt_negzero",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     -0.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_len_negzero",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -0.0,
+     1.0,
+     2.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_outside_negzero",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     -0.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_start_negzero",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     -0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_end_negzero",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     -0.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_len_negzero",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_h_negzero",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     -0.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_apex_bottom",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_apex_top",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     0.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_equal_radii",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_shrinking",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     1,
+     2,
+     3,
+     10.0,
+     2.0,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_far",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     1000000000.0,
+     -1000000000.0,
+     500000000.0,
+     10.0,
+     2.0,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_tiny",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     1e-09,
+     1e-09,
+     1e-09,
+     2e-12,
+     3e-12,
+     1.5e-12
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_huge",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e+17,
+     2e+17,
+     1e+17
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_tiny",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2e-12,
+     2e-12,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_huge",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     1000000000.0,
+     2000000000.0,
+     3000000000.0,
+     1e+17,
+     1e+17,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_flat",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     100.0,
+     1e-11,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_minor_eq_major",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     5.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_minor_gt_major",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     5.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_far",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     100000000.0,
+     100000000.0,
+     -100000000.0,
+     10.0,
+     3.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_tiny",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2e-12,
+     1.5e-12,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_far",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     1000000000.0,
+     1000000000.0,
+     1000000000.0,
+     0.001,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_huge",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e+17,
+     1e+17
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_negative",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -3.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_tiny",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e-11,
+     1e-11
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_nan_origin",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     "NaN",
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_nan_origin",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     "NaN",
+     0.0,
+     1.0,
+     1.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_inf_origin",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     "inf",
+     1.0,
+     2.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_start_below",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     -360.0000001,
+     -300.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_sweep_above",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     360.0000001
+    ]
+   }
+  },
+  {
+   "name": "pyramid_far_tiny",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     10000000000.0,
+     10000000000.0,
+     0.0,
+     1e-08,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_far_tiny_both",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     10000000000.0,
+     10000000000.0,
+     10000000000.0,
+     1e-08,
+     1e-08
+    ]
+   }
+  },
+  {
+   "name": "pyramid_valid",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     1.0,
+     2.0,
+     3.0,
+     4.0,
+     5.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_nan_origin",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     "NaN",
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "cone_both_effzero",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1e-12,
+     1e-12,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "cone_top_zero",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_negative",
+   "inputs": {
+    "op": "sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -3.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_almost_full_turn",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     -360.0,
+     -1e-06
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_start_360_short",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     360.0,
+     450.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_small_sweep",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     0.05
+    ]
+   }
+  },
+  {
+   "name": "sphere_r_6e9",
+   "inputs": {
+    "op": "sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     6000000000.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_no_pole_r_3e8",
+   "inputs": {
+    "op": "sphere_no_pole",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -300000000.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_no_pole_r_3e-4",
+   "inputs": {
+    "op": "sphere_no_pole",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0003
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_far_origin",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     1e+300,
+     0.0,
+     0.0,
+     3.0,
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_radius_max",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.7976931348623157e+308,
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_radii_half_max",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     8.988465674311579e+307,
+     8.988465674311579e+307,
+     0.0
+    ]
+   }
+  }
+ ]
+}
