@@ -382,6 +382,9 @@ mod web {
         keep_track: std::collections::HashMap<u64, Track>,
         /// Every unsaved design's kept copy is current (and the preference is on).
         all_kept: bool,
+        /// A kept copy or recovered work being opened, in stages with progress and Cancel
+        /// (#10198): the answer to come and what follows it ([`Shell::restored`]).
+        restoring: Option<(std::sync::mpsc::Receiver<serde_json::Value>, keep::AfterOpen)>,
     }
 
     impl Shell {
@@ -633,7 +636,7 @@ mod web {
         /// (when it has a file) and Discard.
         fn keep_prompt(&mut self, ctx: &egui::Context) {
             let offered = self.files.keep_offered.borrow().clone();
-            if offered.is_empty() || !self.files.ready.get() {
+            if offered.is_empty() || !self.files.ready.get() || self.restoring.is_some() {
                 return;
             }
             let now = (js_sys::Date::now() / 1000.0) as u64;
@@ -673,24 +676,21 @@ mod web {
                         return;
                     }
                 };
-                self.app.open_path(&copy);
-                if self.app.session.path.as_deref() != Some(copy.as_str()) {
-                    // Not opened (the status says why): it stays offered.
-                    return;
-                }
-                // It is its own design again (saving goes to its file), with its changes unsaved.
-                self.app.session.path = entry.path.clone();
-                self.app.session.doc_mut().name = entry.name.clone();
-                self.app.session.mark_unsaved();
-                self.app.home.open = false;
+                // Finished in `restored` once it is in.
+                let after = keep::AfterOpen::KeptCopy {
+                    opened: copy.clone(),
+                    id: entry.id.clone(),
+                    path: entry.path.clone(),
+                    name: entry.name.clone(),
+                    drop: plan.drop_copy,
+                };
+                self.restore(&copy, after);
+                return;
             }
             if let Some(path) = &plan.open_saved {
                 if vfs::exists(path) {
-                    self.app.open_path(path);
-                    if !keep::is_open(self.app.session.path.as_deref(), path) {
-                        // Not opened (the status says why): the copy stays offered.
-                        return;
-                    }
+                    self.restore(path, keep::AfterOpen::KeptSaved { opened: path.clone(), id: entry.id.clone(), drop: plan.drop_copy });
+                    return;
                 } else {
                     // A file on the computer: the browser asks for access again, in this click.
                     // The copy goes once the file has opened, not before: if access is refused,
@@ -708,8 +708,62 @@ mod web {
                 }
             }
             if plan.drop_copy {
-                self.files.keep_offered.borrow_mut().retain(|e| e.id != entry.id);
-                files::remove_kept(&self.files, &entry.id);
+                self.drop_kept(&entry.id);
+            }
+        }
+
+        fn drop_kept(&self, id: &str) {
+            self.files.keep_offered.borrow_mut().retain(|e| e.id != id);
+            files::remove_kept(&self.files, id);
+        }
+
+        /// Open a kept copy, its saved design or recovered work as any design opens, a few
+        /// features a frame with progress and Cancel (#10198), so a large design doesn't freeze the
+        /// page; `after` follows once it is in ([`Self::restored`]).
+        fn restore(&mut self, path: &str, after: keep::AfterOpen) {
+            self.restoring = Some((self.app.open_path_answered(path), after));
+            self.restored();
+        }
+
+        /// What follows a restore that is in: the design gets back its file and name, and the
+        /// copy or the recovered work it came from goes. One that didn't open (refused or
+        /// cancelled; the status says why) stays offered.
+        fn restored(&mut self) {
+            let Some((rx, _)) = &self.restoring else { return };
+            let reply = match rx.try_recv() {
+                Ok(reply) => reply,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => serde_json::json!({"ok": false}),
+            };
+            let Some((_, after)) = self.restoring.take() else { return };
+            if !keep::opened(&reply, self.app.session.path.as_deref(), after.opened()) {
+                return;
+            }
+            match after {
+                keep::AfterOpen::KeptCopy { id, path, name, drop, .. } => {
+                    // It is its own design again (saving goes to its file), with its changes unsaved.
+                    self.app.session.path = path;
+                    self.app.session.doc_mut().name = name;
+                    self.app.session.mark_unsaved();
+                    self.app.home.open = false;
+                    if drop {
+                        self.drop_kept(&id);
+                    }
+                }
+                keep::AfterOpen::KeptSaved { id, drop, .. } => {
+                    if drop {
+                        self.drop_kept(&id);
+                    }
+                }
+                keep::AfterOpen::Recovery { path, name, .. } => {
+                    // It belongs to its own file again (saving goes there); it is unsaved.
+                    self.app.session.path = path;
+                    self.app.session.doc_mut().name = name;
+                    self.app.session.mark_unsaved();
+                    self.app.home.open = false;
+                    *self.files.recovery.borrow_mut() = None;
+                    files::autosave(&self.files, None);
+                }
             }
         }
 
@@ -756,7 +810,7 @@ mod web {
                             files::pick_from_disk(&self.files, Intent::Open);
                         }
                         if ui_kit::button(ui, "Insert from computer…", ui_kit::Button::Normal)
-                            .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_drawings_hint"))
+                            .backing_on_hover_text(solidcraft_ui_text::tr("web.files.insert_drawings_hint"))
                             .clicked()
                         {
                             files::pick_from_disk(&self.files, Intent::Insert);
@@ -810,7 +864,7 @@ mod web {
                                         let design = solidcraft_engine::io::is_design_path(&e.name);
                                         if !design
                                             && ui_kit::button(ui, "Insert", ui_kit::Button::Small)
-                                                .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_stored_drawings_hint"))
+                                                .backing_on_hover_text(solidcraft_ui_text::tr("web.files.insert_stored_drawings_hint"))
                                                 .clicked()
                                         {
                                             act = Some(("insert", e.name.clone()));
@@ -917,6 +971,9 @@ mod web {
 
         /// Offer the autosave an earlier session left.
         fn recovery_prompt(&mut self, ctx: &egui::Context) {
+            if self.restoring.is_some() {
+                return;
+            }
             let Some((name, path)) = self.files.recovery.borrow().clone() else { return };
             let mut answer = None;
             let _ = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::unique("sc_browser_recovery"), "restore", "Recover unsaved work?")
@@ -941,15 +998,10 @@ mod web {
                         return;
                     }
                 };
-                self.app.open_path(&recovery);
-                if self.app.session.path.as_deref() != Some(recovery.as_str()) {
-                    return;
-                }
-                // It belongs to its own file again (saving goes there); it is unsaved.
-                self.app.session.path = path;
-                self.app.session.doc_mut().name = name;
-                self.app.session.mark_unsaved();
-                self.app.home.open = false;
+                // Finished in `restored` once it is in; until then the prompt stays away.
+                let after = keep::AfterOpen::Recovery { opened: recovery.clone(), path, name };
+                self.restore(&recovery, after);
+                return;
             }
             *self.files.recovery.borrow_mut() = None;
             files::autosave(&self.files, None);
@@ -964,7 +1016,7 @@ mod web {
 
         /// Whether the shell already has the on-demand face the live language needs.
         fn script_font_ready(&self) -> bool {
-            match solidcraft_ui_egui::fonts::web_script_font_kind(solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language)) {
+            match solidcraft_ui_egui::fonts::web_script_font_kind(solidcraft_ui_text::effective_language(&self.app.preferences.language)) {
                 Some("zh") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh"),
                 Some("zh-TW") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh-TW"),
                 Some("ja") => self.cjk_bytes.is_some(),
@@ -1006,7 +1058,7 @@ mod web {
                         false
                     }
                 };
-                let effective = solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language);
+                let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
                 if !installed && solidcraft_ui_egui::fonts::needs_cjk_font(effective) {
                     log::warn!("script font unavailable; showing English for this session");
                 }
@@ -1015,13 +1067,13 @@ mod web {
                 ctx.request_repaint();
             }
             let ready = self.script_font_ready();
-            let effective = solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language);
+            let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
             if self.font.tick(&mut self.app.preferences.language, ready) {
                 self.fetch_font(ctx, solidcraft_ui_egui::fonts::web_script_font_kind(effective).unwrap_or("ja"));
             }
             // The CJK face leads only a CJK UI: its Cyrillic glyphs are full-width, so switching
             // to Ukrainian (or English) must put the Latin face back in front.
-            if solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language) != self.font_language {
+            if solidcraft_ui_text::effective_language(&self.app.preferences.language) != self.font_language {
                 self.apply_fonts(ctx);
             }
         }
@@ -1029,7 +1081,7 @@ mod web {
         /// Set up the UI fonts for the live language, keeping fetched script fonts as fallbacks
         /// (Chinese leads a Chinese UI; see [`solidcraft_ui_egui::fonts::install_web_script_fonts`]).
         fn apply_fonts(&mut self, ctx: &egui::Context) {
-            let effective = solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language);
+            let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
             if self.cjk_bytes.is_none() && self.chinese_bytes.is_none() {
                 solidcraft_ui_egui::fonts::setup_fonts(ctx);
             } else {
@@ -1093,10 +1145,11 @@ mod web {
         }
         fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
             self.linked.tick(&mut self.app, ui.ctx());
+            self.restored();
             UNSAVED.with(|u| u.set(self.asks_before_unload()));
             if self.launch.embed {
                 ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Chrome).edge("embed_header", ui_kit::Edge::Top).show(ui, |ui| {
-                    if ui_kit::button(ui, solidcraft_ui_egui::i18n::tr("web.open_full"), ui_kit::Button::Normal).clicked()
+                    if ui_kit::button(ui, solidcraft_ui_text::tr("web.open_full"), ui_kit::Button::Normal).clicked()
                         && let (Some(window), Some(url)) = (web_sys::window(), &self.full_url)
                     {
                         let _ = window.open_with_url_and_target_and_features(url, "_blank", "noopener");
@@ -1172,6 +1225,7 @@ mod web {
 
     pub fn start() {
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
+        solidcraft_ui_egui::i18n::install();
         wasm_bindgen_futures::spawn_local(async {
             let Some(window) = web_sys::window() else { return };
             let launch = crate::Launch::parse(&query());
@@ -1306,6 +1360,7 @@ mod web {
                             other_tab_prefs,
                             keep_track: Default::default(),
                             all_kept: false,
+                            restoring: None,
                         }))
                     }),
                 )

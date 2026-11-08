@@ -125,7 +125,7 @@ pub(super) fn output_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
             ("render.start", app.tr("cmd.render_start").to_owned(), "render:output:render"),
             (
                 "render.batch",
-                crate::i18n::format("render.batch_all_shots", &[("count", &app.session.doc.render.setups.len().to_string())]),
+                solidcraft_ui_text::format("render.batch_all_shots", &[("count", &app.session.doc.render.setups.len().to_string())]),
                 "render:output:all-shots",
             ),
         ] {

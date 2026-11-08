@@ -18,7 +18,6 @@ assets/
     ui/source/                       # Rust viewport glyphs, markers and navigation
   branding/web/source/og.png          # shared social preview card
   branding/logo/                     # print/web logo files; guide in branding/README.md
-  styles/ui/palettes.rs               # light/dark defaults
   styles/web/loading.css             # web loading/canvas styles
   appearances/library.rs             # built-in visual presets
   materials/library.rs               # physical defaults and colours

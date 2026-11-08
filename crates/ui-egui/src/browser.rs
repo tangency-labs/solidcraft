@@ -148,8 +148,9 @@ use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{BrowserEntry, Document, FeatureKind};
 
-use crate::context_menu::{Item, Target};
-use crate::theme::Tokens;
+use crate::context_menu::Target;
+use crate::ui_kit::Item;
+use solidcraft_theme::Tokens;
 
 use crate::SolveApp;
 
@@ -1362,6 +1363,14 @@ fn render_card(app: &mut SolveApp, ui: &mut egui::Ui) {
     );
     if let Some(rect) = rect {
         crate::scenario::publish_rect("browser:card", rect);
+    }
+    render_appearances(app, ui, rect);
+}
+
+/// Keep the existing appearances companion below either Browser host.
+pub(crate) fn render_appearances(app: &mut SolveApp, ui: &mut egui::Ui, browser: Option<Rect>) {
+    if let Some(rect) = browser {
+        let bounds = crate::shell::panel_bounds(app, ui.available_rect_before_wrap());
         crate::render_workspace::appearances_card(app, ui, crate::ui_kit::Panel::stack_next_bounds(bounds, rect));
     } else {
         crate::shell::register_panel(app, "render:appearances", None, None);
@@ -1384,11 +1393,11 @@ fn browser_collapsed_rail(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::ui_kit::disclosure(ui.painter(), disclosure.center(), false, t.text_dim);
     crate::scenario::publish_handle("left-browser-toggle", disclosure.center());
     crate::scenario::publish_target("browser:header", disclosure);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), crate::i18n::tr("ui.browser_title")));
-    if response.backing_on_hover_text(crate::i18n::tr("ui.browser_expand")).clicked() {
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr("ui.browser_title")));
+    if response.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_expand")).clicked() {
         app.preferences.timeline_left_browser_collapsed = false;
     }
-    let galley = ui.painter().layout_no_wrap(crate::i18n::tr("ui.browser_title").to_owned(), crate::fonts::semibold(t.font_body), t.text);
+    let galley = ui.painter().layout_no_wrap(solidcraft_ui_text::tr("ui.browser_title").to_owned(), crate::fonts::semibold(t.font_body), t.text);
     let title = Rect::from_min_max(rect.min + vec2(0.0, title_top), rect.max);
     ui.painter().add(
         egui::epaint::TextShape::new(title.center() - galley.size() / 2.0, galley, t.text)
@@ -1429,8 +1438,27 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
         t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top() + 1.0, t.toolbar.lerp_to_gamma(t.border, 0.5));
         ui.add_space(t.space_3);
     }
+    rows_contents(app, ui, collapsible && !stacked);
+}
+
+/// Existing Browser content without placement, title or collapse chrome.
+pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
+    sync_reveals(app);
+    let render = crate::render_workspace::active(app);
+    if render {
+        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_compact_tree"), true));
+    }
+    if !crate::render_workspace::browser_mode(app, ui) {
+        rows_contents(app, ui, true);
+    }
+    if render {
+        ui.ctx().data_mut(|data| data.remove::<bool>(egui::Id::unique("sc_compact_tree")));
+    }
+}
+
+fn rows_contents(app: &mut SolveApp, ui: &mut egui::Ui, shrink_height: bool) {
     crate::edit_in_place::browser_strip(app, ui);
-    if collapsible && !stacked {
+    if shrink_height {
         browser_rows_hugging(app, ui);
     } else {
         browser_rows(app, ui);
@@ -1456,7 +1484,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     if collapsible && (response.hovered() || response.has_focus()) {
         crate::ui_kit::panel_header_hover(ui.painter(), rect);
     }
-    let title = crate::i18n::tr("ui.browser_title").to_string();
+    let title = solidcraft_ui_text::tr("ui.browser_title").to_string();
     let kind = if collapsible { egui::Role::Button } else { egui::Role::Label };
     response.widget_info(|| egui::WidgetInfo::labeled(kind, true, &title));
     let galley = ui.painter().layout_no_wrap(title, crate::fonts::semibold(t.font_heading), t.text);
@@ -1468,11 +1496,11 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     }
     let bodies = app.session.model.state().bodies.len();
     let key = if bodies == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" };
-    let count = crate::i18n::format(key, &[("count", &bodies.to_string())]);
+    let count = solidcraft_ui_text::format(key, &[("count", &bodies.to_string())]);
     let galley = ui.painter().layout_no_wrap(count, FontId::proportional(t.font_body), t.text_dim);
     ui.painter().galley(pos2(right - galley.size().x, rect.center().y - galley.size().y / 2.0), galley, t.text_dim);
     if collapsible {
-        let tip = crate::i18n::tr(if collapsed { "ui.browser_expand" } else { "ui.browser_collapse" });
+        let tip = solidcraft_ui_text::tr(if collapsed { "ui.browser_expand" } else { "ui.browser_collapse" });
         if response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(tip).clicked() {
             if stacked {
                 app.preferences.timeline_left_browser_collapsed = !app.preferences.timeline_left_browser_collapsed;
@@ -1569,7 +1597,8 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
     prepare_model(app);
     let mut cache = app.tree.cache.take().unwrap_or_default();
     cache.prepare(app);
-    egui::ScrollArea::vertical()
+    let top = ui.cursor().top();
+    let output = egui::ScrollArea::vertical()
         // The card may animate all the way down to its header.
         .min_scrolled_height(0.0)
         .auto_shrink([false, shrink_height])
@@ -1586,6 +1615,7 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
                 component_rows(app, ui, 0, 0, acts, &mut cache);
             }
         });
+    crate::panel_runtime::report_content_extent(ui, top, output.content_size.y, true);
     app.tree.cache = Some(cache);
 }
 
@@ -2380,7 +2410,7 @@ pub const CANVASES: &str = "c0/canvases";
 
 /// The Canvases folder (reference images) with an eye per canvas.
 fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
-    let canvases: Vec<(u64, String, bool)> = app.session.doc.canvases.iter().map(|c| (c.id, c.name.clone(), c.visible)).collect();
+    let canvases: Vec<(u64, String, bool, bool)> = app.session.doc.canvases.iter().map(|c| (c.id, c.name.clone(), c.visible, c.locked)).collect();
     if canvases.is_empty() {
         return;
     }
@@ -2403,8 +2433,9 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
     if !open {
         return;
     }
-    for (id, name, visible) in canvases {
+    for (id, name, visible, locked) in canvases {
         let selected = app.tree.picked_canvases.contains(&id);
+        let badges: &[&str] = if locked { &["lock"] } else { &[] };
         let r = draw_row(
             ui,
             ui.scope_id().with(("canvas", id)),
@@ -2416,6 +2447,7 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
                 name: true,
                 selected,
                 dim: !visible || !shown,
+                badges,
                 ..Default::default()
             },
         );
@@ -2435,7 +2467,9 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
                 app.tree.picked_canvases.push(id);
             }
         }
-        if r.double {
+        if r.double && locked {
+            app.set_status(solidcraft_ui_text::tr("browser.canvas_locked"), true);
+        } else if r.double {
             app.tree.canvas_panel = Some(CanvasPanel::new(app, id, false));
         }
         if let Some(p) = r.secondary {
@@ -2454,14 +2488,19 @@ pub fn point_cloud_items(app: &SolveApp, id: u64) -> Vec<Item> {
 
 /// The menu of a canvas.
 pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
-    let visible = app.session.doc.canvases.iter().find(|c| c.id == id).is_some_and(|c| c.visible);
+    let canvas = app.session.doc.canvases.iter().find(|c| c.id == id);
+    let visible = canvas.is_some_and(|c| c.visible);
+    // A locked canvas (#12310) is not moved, calibrated or deleted until it is unlocked.
+    let locked = canvas.is_some_and(|c| c.locked);
+    let why = locked.then(|| solidcraft_ui_text::tr("browser.canvas_locked").to_string());
     vec![
-        Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })),
-        Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })),
+        Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })).off_because(why.clone()),
+        Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })).off_because(why.clone()),
         Item::action("canvas.to_sketch", "Canvas to Sketch", "canvas").with(json!({ "canvas": id })),
         Item::sep(),
-        Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })),
+        Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })).off_because(why),
         Item::action("ui.rename", "Rename", "rename").key("F2").with(json!({ "canvas": id })),
+        Item::action("ui.canvasLocked", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "canvas": id, "locked": !locked })),
         Item::sep(),
         Item::action("ui.canvasVisible", "Show/Hide", "eye").key("V").with(json!({ "canvas": id, "visible": !visible })),
     ]
@@ -2593,7 +2632,11 @@ impl Entry {
             row_key: format!("b:{world}"),
             patterns: None,
             // A part the modelling kernel refuses says so (Repair Part is in its menu).
-            label: if b.body.smlib_refused().is_some() { crate::i18n::format("browser.needs_repair", &[("name", &b.name)]) } else { b.name.clone() },
+            label: if b.body.smlib_refused().is_some() {
+                solidcraft_ui_text::format("browser.needs_repair", &[("name", &b.name)])
+            } else {
+                b.name.clone()
+            },
             icon,
             tip: Some(tip),
             visible: app.body_visible(&world),
@@ -2619,9 +2662,9 @@ impl Entry {
             thing: Thing::Sketch(f.id),
             patterns: crate::sketch_pattern_tree::has_patterns(app, f.id).then(|| format!("s:{}/patterns", f.id)),
             label: if lost {
-                crate::i18n::format("browser.sketch_attachment_lost", &[("name", &crate::i18n::tr_name(&f.name))])
+                solidcraft_ui_text::format("browser.sketch_attachment_lost", &[("name", &crate::i18n::tr_name(&f.name))])
             } else if active {
-                crate::i18n::format("browser.sketch_editing", &[("name", &crate::i18n::tr_name(&f.name))])
+                solidcraft_ui_text::format("browser.sketch_editing", &[("name", &crate::i18n::tr_name(&f.name))])
             } else {
                 f.name.clone()
             },
@@ -2985,7 +3028,8 @@ fn folder_level(
         } else {
             &group.label
         };
-        let count = if render && !gopen { crate::i18n::format("render.tree_more", &[("count", &group.count.to_string())]) } else { String::new() };
+        let count =
+            if render && !gopen { solidcraft_ui_text::format("render.tree_more", &[("count", &group.count.to_string())]) } else { String::new() };
         let r = draw_row(
             ui,
             ui.scope_id().with(gkey),
@@ -3091,6 +3135,7 @@ fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, label_left: f
     ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
     let id = ui.scope_id().with(("browser_rename", &e.row_key));
     let response = crate::ui_kit::inline_name(ui, edit_rect, id, &mut rename.text);
+    crate::panel_runtime::register_content_focus(ui.ctx(), &response);
     crate::scenario::publish_handle(&format!("rename:{}", e.key), edit_rect.center());
     let was_focused = rename.focused;
     if !rename.focused {
@@ -3141,10 +3186,25 @@ fn entry_row(
     let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
     let rect = row_rect(ui);
     let revealed = folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b));
-    if !ui.is_rect_visible(rect) && !patterns_open && !revealed {
+    // Features under bodies (#11945): the body row folds open on the features that built it.
+    let built_key = (folder == "bodies"
+        && app.preferences.browser_body_features
+        && !crate::render_workspace::active(app)
+        && matches!(e.sel, Some(Sel::Body { .. })))
+    .then(|| format!("{}/features", e.row_key));
+    let built_open = built_key.as_deref().is_some_and(|key| is_open(app, key, false));
+    if !ui.is_rect_visible(rect) && !patterns_open && !revealed && !built_open {
         ui.allocate_space(rect.size());
         return;
     }
+    let built: Vec<u64> = match &built_key {
+        Some(_) => {
+            prepare_model(app);
+            app.tree.model.as_mut().map(|model| model.body_features(&app.session, &e.key)).unwrap_or_default()
+        }
+        None => Vec::new(),
+    };
+    let built_key = built_key.filter(|_| !built.is_empty());
     let (selected, mark) = lit_row(acts.lit.entry(app, e));
     let visible = e.is_visible(app);
     let locked = match &e.sel {
@@ -3164,7 +3224,7 @@ fn entry_row(
         ui.scope_id().with(("item", &e.row_key)),
         &Row {
             depth,
-            fold: pattern_key.map(|_| patterns_open),
+            fold: pattern_key.map(|_| patterns_open).or(built_key.as_ref().map(|_| built_open)),
             eye: Some(visible),
             icon: e.icon,
             kind_tip: e.tip,
@@ -3196,6 +3256,10 @@ fn entry_row(
         && let Some(key) = pattern_key
     {
         toggle(app, key, start_open);
+    } else if r.fold
+        && let Some(key) = &built_key
+    {
+        toggle(app, key, false);
     }
     if folder == "bodies"
         && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b))
@@ -3266,6 +3330,9 @@ fn entry_row(
     }
     if patterns_open && let Some(Sel::Feature { id }) = &e.sel {
         crate::sketch_pattern_tree::rows(app, ui, *id, depth + 1, "browser", path.map(|path| (comp, path)), !visible || parent_hidden);
+    }
+    if built_open && built_key.is_some() {
+        features::body_rows(app, ui, acts, comp, path.unwrap_or_default(), &e.row_key, &built, depth + 1);
     }
     let Some(resp) = &r.resp else { return };
     // Drag: the selected items of this folder when this one is selected, else just this one.

@@ -45,11 +45,11 @@ use serde_json::{Value, json};
 
 use context::Context;
 
-use crate::i18n::{format as trf, tr};
 use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
+use solidcraft_ui_text::{format as trf, tr};
 
-pub(crate) use panel::{left_inset, owns_keyboard_input, tool_space};
+pub(crate) use panel::{finish_shared, left_inset, owns_keyboard_input, prepare_shared, request_new_chat, shared_content, tool_space};
 pub use panel::{show, tip as panel_tip, toggle, toggle_shortcut};
 
 /// Most entries kept in the conversation; older ones are dropped.
@@ -565,11 +565,11 @@ impl AgentChat {
         job: impl FnOnce() -> std::result::Result<attach::Attachment, String> + Send + 'static,
     ) -> std::result::Result<String, String> {
         let (tx, rx) = std::sync::mpsc::channel();
-        let language = crate::i18n::language();
+        let language = solidcraft_ui_text::language();
         std::thread::Builder::new()
             .name("chat-file".into())
             .spawn(move || {
-                let _language = crate::i18n::scope(language);
+                let _language = solidcraft_ui_text::scope(language);
                 let _ = tx.send(job());
             })
             .map_err(|e| trf("ui.agent_chat_file_error", &[("name", &name), ("error", &e.to_string())]))?;

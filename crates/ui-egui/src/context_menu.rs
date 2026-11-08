@@ -11,7 +11,7 @@
 //! state; [`items`] lists them and [`run_item`] runs one, so the control channel (`ui.menu`,
 //! `ui.menuPick`) and tests reach everything a click does.
 
-use crate::ui_kit::{BackingTooltipExt as _, Container, Surface};
+use crate::ui_kit::{BackingTooltipExt as _, Container, Item, LIST_W, Surface};
 use egui::{Color32, Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -68,6 +68,13 @@ pub enum Target {
     InsertDesign,
     /// Model › Edit Sketch: choose an existing sketch when none is uniquely selected.
     EditSketch,
+    /// Replace Sketch from a design file (#11125): the file's sketches, one of which takes the
+    /// place of sketch `sketch`'s contents.
+    ReplaceSketchFile {
+        sketch: u64,
+        path: String,
+        sketches: Vec<(u64, String)>,
+    },
     /// View › Visual style: the four styles, the current one marked (#8868).
     VisualStyle,
     /// View › Navigation tool: Orbit, Pan, Zoom; the latched one marked (#8868).
@@ -120,88 +127,6 @@ pub enum Target {
     },
 }
 
-/// One menu entry: a command id (run with `params` when given, else started like a toolbar
-/// click) or a `ui.*` action. `-` is a separator, `#…` a section heading.
-#[derive(Clone, Debug, Serialize)]
-pub struct Item {
-    pub id: String,
-    pub label: String,
-    pub shortcut: String,
-    pub enabled: bool,
-    pub icon: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub params: Option<Value>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub children: Vec<Item>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub swatch: Option<[u8; 3]>,
-    /// Why the entry is off: shown on hover, and in the control channel's report.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tip: Option<String>,
-}
-
-impl Item {
-    /// A view action (`ui.*`).
-    pub fn action(id: &str, label: &str, icon: &str) -> Item {
-        act(id, label, icon)
-    }
-    pub fn sep() -> Item {
-        Item {
-            id: "-".into(),
-            label: String::new(),
-            shortcut: String::new(),
-            enabled: false,
-            icon: String::new(),
-            params: None,
-            children: Vec::new(),
-            swatch: None,
-            tip: None,
-        }
-    }
-    pub(crate) fn heading(label: &str) -> Item {
-        Item {
-            id: format!("#{label}"),
-            label: label.into(),
-            shortcut: String::new(),
-            enabled: false,
-            icon: String::new(),
-            params: None,
-            children: Vec::new(),
-            swatch: None,
-            tip: None,
-        }
-    }
-    fn is_sep(&self) -> bool {
-        self.id == "-"
-    }
-    fn is_heading(&self) -> bool {
-        self.id.starts_with('#')
-    }
-    pub fn with(mut self, params: Value) -> Item {
-        self.params = Some(params);
-        self
-    }
-    pub fn on_if(self, enabled: bool) -> Item {
-        self.on(enabled)
-    }
-    pub(crate) fn on(mut self, enabled: bool) -> Item {
-        self.enabled &= enabled;
-        self
-    }
-    /// Off, saying why, when there is a reason.
-    pub(crate) fn off_because(mut self, why: Option<String>) -> Item {
-        if let Some(why) = why {
-            self.enabled = false;
-            self.tip = Some(why);
-        }
-        self
-    }
-    pub fn key(mut self, k: &str) -> Item {
-        self.shortcut = k.into();
-        self
-    }
-}
-
 /// A command entry: label, icon, shortcut and enablement come from the registry.
 pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
     let info = solidcraft_engine::find_command(id).map(|c| c.info(&app.session));
@@ -225,17 +150,7 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
 
 /// A view action (`ui.*`).
 pub(crate) fn act(id: &str, label: &str, icon: &str) -> Item {
-    Item {
-        id: id.into(),
-        label: label.into(),
-        shortcut: String::new(),
-        enabled: true,
-        icon: icon.into(),
-        params: None,
-        children: Vec::new(),
-        swatch: None,
-        tip: None,
-    }
+    Item::action(id, label, icon)
 }
 
 /// Menu state kept between frames. The anchor is `app.viewport.context_menu`.
@@ -466,6 +381,10 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             .collect(),
         Target::NamedView { name } => crate::browser::view_items(app, name),
         Target::InsertDesign => insert_design_items(app),
+        Target::ReplaceSketchFile { sketch, path, sketches } => sketches
+            .iter()
+            .map(|(from, name)| cmd(app, "sketch.replace", name).with(json!({ "sketch": sketch, "from": from, "file": path })))
+            .collect(),
         Target::EditSketch => {
             let items: Vec<Item> = app
                 .session
@@ -878,6 +797,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::sep(),
         act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing),
         act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id })),
+        replace_sketch_item(app, id).on(!editing),
         act("ui.exportDxf", "Export DXF…", "export").with(json!({ "sketch": id })),
         Item::sep(),
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)),
@@ -896,6 +816,41 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     ];
     items.retain(|item| parts || item.id != "component.move_sketches.to_parts");
     items
+}
+
+/// Replace Sketch (#11125): each other sketch of the design, whose contents can take the place
+/// of this one's, then a design file to take a sketch from.
+fn replace_sketch_item(app: &SolveApp, id: u64) -> Item {
+    let mut item = act("ui.replaceSketch", "Replace Sketch", "sketch");
+    let others = app.session.doc.features.iter().filter(|f| f.id != id && matches!(f.kind, FeatureKind::Sketch { .. }));
+    for f in others {
+        item.children.push(cmd(app, "sketch.replace", &f.name).with(json!({ "sketch": id, "from": f.id })));
+    }
+    if !item.children.is_empty() {
+        item.children.push(Item::sep());
+    }
+    item.children.push(act("ui.replaceSketchFromFile", app.tr("ui.replace_sketch.from_file"), "open").with(json!({ "sketch": id })));
+    item
+}
+
+/// Replace Sketch from a file: the design file's sketches to choose from, in a menu at `at`;
+/// a file with one sketch replaces at once.
+fn replace_sketch_from_file(app: &mut SolveApp, sketch: u64, at: Pos2) {
+    app.pick_open_for(&solidcraft_engine::io::DESIGN_EXTS, move |app, path| {
+        let Some(path) = path else { return };
+        let sketches: Vec<(u64, String)> = match solidcraft_engine::io::read_design_file(&path, None::<fn(solidcraft_engine::io::DesignPreview)>) {
+            Ok((doc, _)) => doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| (f.id, f.name.clone())).collect(),
+            Err(e) => {
+                app.set_status(format!("{path}: {e}"), true);
+                return;
+            }
+        };
+        match sketches.as_slice() {
+            [] => app.set_status(app.tr("ui.replace_sketch.no_sketches").to_string(), true),
+            [(from, _)] => drop(app.run("sketch.replace", json!({ "sketch": sketch, "from": from, "file": path }))),
+            _ => open_for(app, at, Target::ReplaceSketchFile { sketch, path, sketches }),
+        }
+    });
 }
 
 /// Construction geometry's row: edit, delete, rename, show or hide; sketch on planes.
@@ -1654,7 +1609,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if inserted.is_ok() {
                 app.fit_view();
                 if p.get("unsaved").and_then(Value::as_bool) == Some(true) {
-                    app.set_status(crate::i18n::format("ui.insert_design.saved_file", &[("name", name)]), false);
+                    app.set_status(solidcraft_ui_text::format("ui.insert_design.saved_file", &[("name", name)]), false);
                 }
             }
         }
@@ -1731,6 +1686,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::browser::redefine_sketch(app, id);
             }
         }
+        // Its entries are in its submenu.
+        "ui.replaceSketch" => {}
+        "ui.replaceSketchFromFile" => {
+            if let Some(id) = id_of(&p, "sketch") {
+                replace_sketch_from_file(app, id, at);
+            }
+        }
         "ui.hideSketch" | "ui.showSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
                 crate::browser::set_sketch_visible(app, id, item.id == "ui.showSketch");
@@ -1801,7 +1763,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.isolateOccurrence" => {
             let _ = app.run("browser.visibility", json!({"visible": true, "paths": [p["path"]], "isolate": true}));
         }
-        "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
+        "ui.canvasVisible" | "ui.canvasLocked" => drop(app.run("canvas.edit", p)),
         "ui.toolbarPin"
         | "ui.toolbarRemove"
         | "ui.toolbarReset"
@@ -1961,7 +1923,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 let calibrate = item.id == "ui.calibrateCanvas";
                 app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, c, calibrate));
                 if calibrate {
-                    app.set_status(crate::i18n::tr("browser.calibrate_click_a"), false);
+                    app.set_status(solidcraft_ui_text::tr("browser.calibrate_click_a"), false);
                 }
             }
         }
@@ -1994,15 +1956,18 @@ fn sketches_to_parts(app: &mut SolveApp, p: Value) {
     let mut why: Vec<String> = Vec::new();
     for kept in out.get("kept").and_then(Value::as_array).into_iter().flatten() {
         let code = kept.get("code").and_then(Value::as_str).unwrap_or_default();
-        let reason = crate::i18n::tr(&format!("browser.sketches_to_parts_{code}")).to_string();
+        let reason = solidcraft_ui_text::tr(&format!("browser.sketches_to_parts_{code}")).to_string();
         if !why.contains(&reason) {
             why.push(reason);
         }
     }
     let message = if why.is_empty() {
-        crate::i18n::format("browser.sketches_to_parts_moved", &[("moved", &count("moved"))])
+        solidcraft_ui_text::format("browser.sketches_to_parts_moved", &[("moved", &count("moved"))])
     } else {
-        crate::i18n::format("browser.sketches_to_parts_result", &[("moved", &count("moved")), ("stayed", &count("stayed")), ("why", &why.join("; "))])
+        solidcraft_ui_text::format(
+            "browser.sketches_to_parts_result",
+            &[("moved", &count("moved")), ("stayed", &count("stayed")), ("why", &why.join("; "))],
+        )
     };
     app.set_status(message, false);
 }
@@ -2324,7 +2289,9 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         | Target::NamedViews
         | Target::ViewGizmo => true,
         Target::Body { name } => crate::open_meshing::session_world(&app.session).body(name).is_some(),
-        Target::Sketch { id } => doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })),
+        Target::Sketch { id } | Target::ReplaceSketchFile { sketch: id, .. } => {
+            doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
+        }
         // Construction geometry, as the browser's Construction folder lists it.
         Target::Plane { id } => doc.feature(*id).is_some_and(|f| {
             matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
@@ -2478,9 +2445,6 @@ fn list_place(c: Pos2, h: f32, screen: Rect) -> Pos2 {
     }
     pos2((c.x - RX - 12.0 - LIST_W).max(screen.left() + 4.0), y)
 }
-
-/// Width of list menus.
-pub const LIST_W: f32 = 250.0;
 
 /// Where a menu of `size` opened at `at` goes: right of and below the point (`gap` away) when it
 /// fits in `screen`, flipped to the left or above it when it would run past that edge, and
@@ -3349,7 +3313,7 @@ mod tests {
         assert!(h.app.cam.back().dist(flat.plane_normal.unwrap()) < 2e-6);
         assert_eq!((h.app.cam.distance, h.app.cam.fov), (before.distance, before.fov));
         assert!(h.app.viewport.context_menu.is_none());
-        assert_eq!(crate::i18n::Locale::for_language("ja").label("Normal to Selection"), "選択アイテムに垂直");
+        assert_eq!(solidcraft_ui_text::Locale::for_language("ja").label("Normal to Selection"), "選択アイテムに垂直");
         // Ctrl+8 and the context menu share Look At, including its repeat-to-flip behavior.
         h.step(&json!({"key":"8","cmd":true})).unwrap();
         h.frames(90);

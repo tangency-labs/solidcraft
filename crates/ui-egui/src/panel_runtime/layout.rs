@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use solidcraft_engine::panels::*;
 
+use super::HostSurfaceStyle;
 use super::interaction::{HostPointerTarget, HostProposalSnapshot, HostResizeEdge};
 
 /// Compatibility constant only; the host never allocates rails.
@@ -279,7 +280,7 @@ pub struct HostMetrics {
 
 impl Default for HostMetrics {
     fn default() -> Self {
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         Self {
             header_height: t.form_header_height,
             content_header_height: 0.0,
@@ -568,6 +569,10 @@ pub struct HostSurfaceAlpha {
 #[derive(Clone, Debug)]
 pub struct HostGeometryPolicy {
     pub surface_alpha: Option<HostSurfaceAlpha>,
+    /// Captured renderer state; never written into a layout envelope.
+    pub surfaces: Option<HostSurfaceStyle>,
+    /// Runtime normalized opacity override; None retains authored theme opacity.
+    pub requested_opacity: Option<f32>,
     pub default_opaque: bool,
     pub effective_surfaces: BTreeMap<SectionId, PanelSurface>,
     pub content: Vec<SideContentMeasure>,
@@ -579,7 +584,9 @@ pub struct HostGeometryPolicy {
 
 impl PartialEq for HostGeometryPolicy {
     fn eq(&self, other: &Self) -> bool {
-        self.surface_alpha == other.surface_alpha
+        self.surfaces == other.surfaces
+            && self.requested_opacity.map(f32::to_bits) == other.requested_opacity.map(f32::to_bits)
+            && self.surface_alpha == other.surface_alpha
             && self.default_opaque == other.default_opaque
             && self.effective_surfaces == other.effective_surfaces
             && self.identity_reservations == other.identity_reservations
@@ -598,6 +605,8 @@ impl Default for HostGeometryPolicy {
     fn default() -> Self {
         Self {
             surface_alpha: None,
+            surfaces: None,
+            requested_opacity: None,
             default_opaque: true,
             effective_surfaces: BTreeMap::new(),
             content: Vec::new(),
@@ -625,6 +634,7 @@ pub struct HostTab {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HostSection {
+    pub contrast: Option<ContrastOutcome>,
     pub paint_alpha: Option<u8>,
     pub section: SectionId,
     pub instance: InstanceId,
@@ -645,7 +655,7 @@ pub struct HostSection {
     pub inline: bool,
     /// Editable inline content is separate from the shared title drag region.
     pub inline_content: Option<LogicalRect>,
-    pub collapse: LogicalRect,
+    pub collapse: Option<LogicalRect>,
     pub close: Option<LogicalRect>,
     pub actions: Vec<(ControlId, LogicalRect)>,
     pub footer: Option<LogicalRect>,
@@ -765,6 +775,9 @@ impl HostLayout {
             }
         }
         self.metrics.validate()?;
+        if self.geometry_policy.requested_opacity.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
+            return Err(error(Rule::Bounds, "invalid requested panel opacity"));
+        }
         if self.geometry_policy.effective_surfaces.len() > MAX_SECTIONS {
             return Err(error(Rule::CollectionLimit, "host geometry policy bound"));
         }
@@ -849,7 +862,7 @@ impl HostLayout {
                 Some(section.header),
                 section.title,
                 Some(section.menu),
-                Some(section.collapse),
+                section.collapse,
                 section.close,
                 section.tab_strip,
                 section.body,
@@ -1162,12 +1175,13 @@ fn append_section(
     outer.validate()?;
     let metrics = out.metrics;
     let spec = service.registry().get(&proposed.instance(instance)?.kind)?;
+    let collapsible = section_collapsible(proposed, service.registry(), section)?;
     let (flow, _) = responsive(section.location.zone(), outer.size, None)?;
     // A single row owns inline controls AND content; no hidden second body.
     let inline = !section.collapsed && flow == Flow::Wide && outer.size.height <= metrics.inline_max_height;
     let header =
         rect(outer.origin.x, outer.origin.y, outer.size.width, if inline { outer.size.height } else { metrics.header_height.min(outer.size.height) });
-    let control_count = spec.header_actions.len() + 2 + usize::from(spec.features.hot_closable);
+    let control_count = spec.header_actions.len() + 1 + usize::from(collapsible) + usize::from(spec.features.hot_closable);
     let extent = metrics.control_extent.min(header.size.width / control_count.max(1) as f32);
     let mut cursor = if out.direction == Direction::Ltr { right(header) } else { header.origin.x };
     let take = |cursor: &mut f32| {
@@ -1176,7 +1190,7 @@ fn append_section(
         rect(x, header.origin.y, extent, header.size.height)
     };
     let close = if spec.features.hot_closable { Some(take(&mut cursor)) } else { None };
-    let collapse = take(&mut cursor);
+    let collapse = collapsible.then(|| take(&mut cursor));
     let menu = take(&mut cursor);
     let mut actions = Vec::new();
     let (heading, inline_content) = if inline {
@@ -1218,7 +1232,7 @@ fn append_section(
     // that same slot. Collapsing never removes access to individual tabs.
     let (title, tab_strip) = if section.tabs.len() > 1 {
         if let Some(heading) = heading {
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let grip_width = metrics.control_extent.min(t.space_10 + t.space_8).min(heading.size.width);
             let grip_x = if out.direction == Direction::Ltr { heading.origin.x } else { right(heading) - grip_width };
             let tabs_x = if out.direction == Direction::Ltr { grip_x + grip_width } else { heading.origin.x };
@@ -1318,7 +1332,9 @@ fn append_section(
         add_control(out, HostPointerTarget::Header { instance: instance.clone() }, title, InputRole::Header, "ui.panel_host.header");
     }
     add_control(out, HostPointerTarget::Menu { instance: instance.clone() }, menu, InputRole::Action, "ui.panel_host.menu");
-    add_control(out, HostPointerTarget::Collapse { instance: instance.clone() }, collapse, InputRole::Action, "ui.panel_host.collapse");
+    if let Some(collapse) = collapse {
+        add_control(out, HostPointerTarget::Collapse { instance: instance.clone() }, collapse, InputRole::Action, "ui.panel_host.collapse");
+    }
     if let Some(close) = close {
         add_control(out, HostPointerTarget::Close { instance: instance.clone() }, close, InputRole::Action, "ui.panel_host.close");
     }
@@ -1340,7 +1356,8 @@ fn append_section(
         Zone::Left => HostResizeEdge::Right,
         _ => HostResizeEdge::Left,
     };
-    if !section.collapsed {
+    let (min, max) = tab_bounds(proposed, service.registry(), section)?;
+    if !section.collapsed && !(section.location.zone() == Zone::Bottom && min.height == max.height) {
         add_control(
             out,
             HostPointerTarget::Resize { section: section.id.clone(), edge },
@@ -1349,8 +1366,14 @@ fn append_section(
             "ui.panel_host.resize",
         );
     }
-    let paint_alpha = policy.surface_alpha.map(|alpha| if section.location.zone() == Zone::Floating { alpha.floating } else { alpha.docked });
+    let floating = section.location.zone() == Zone::Floating;
+    let appearance = policy.surfaces.as_ref().map(|style| style.appearance(surface, floating));
+    let paint_alpha = appearance
+        .map(|appearance| appearance.fill.a())
+        .or_else(|| policy.surface_alpha.map(|alpha| if floating { alpha.floating } else { alpha.docked }));
+    let contrast = appearance.map(|appearance| appearance.contrast.clone());
     out.sections.push(HostSection {
+        contrast,
         paint_alpha,
         section: section.id.clone(),
         instance: instance.clone(),
