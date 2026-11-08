@@ -82,6 +82,7 @@ pub mod materials;
 pub mod mesh;
 pub mod metadata;
 pub mod motion;
+pub mod motion_analysis;
 pub mod motion_play;
 pub mod panels;
 pub mod parameter_sweep;

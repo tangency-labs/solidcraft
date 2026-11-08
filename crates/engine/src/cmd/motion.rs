@@ -159,8 +159,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         "sketch: id|name; joint? with from and to, or study?; index?; samples? (2…500); auto_update?: false to detach. \
          Edits a saved associative trace's driving conditions in one undo step",
     ),
-    CommandSpec::new("motion.plot", "Plot Motion Study", analysis::plot).icon("graph").noundo().params(analysis::PLOT_DOC),
-    CommandSpec::new("motion.interference", "Motion Interference", analysis::interference)
+    CommandSpec::new("motion.plot", "Plot Motion Study", crate::checked!("motion.plot", analysis::plot))
+        .contract(&TypedContract::<crate::schema::motion_analysis::PlotParams>::new())
+        .output(output_schema_for::<crate::schema::motion_analysis::MotionPlot>)
+        .icon("graph")
+        .noundo()
+        .params(analysis::PLOT_DOC),
+    CommandSpec::new("motion.interference", "Motion Interference", crate::checked!("motion.interference", analysis::interference))
+        .contract(&TypedContract::<crate::schema::motion_analysis::InterferenceParams>::new())
+        .output(output_schema_for::<crate::schema::motion_analysis::MotionInterference>)
         .icon("interference")
         .noundo()
         .params(analysis::INTERFERENCE_DOC),
