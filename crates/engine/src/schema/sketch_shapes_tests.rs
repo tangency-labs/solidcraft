@@ -355,3 +355,34 @@ fn rectangles_and_polygons_report_wrong_typed_keys() {
     assert_eq!(message("sketch.rectangle.rounded", json!({"p0": ["w / 2", 0], "p1": [5, 5], "radius": "r"})), None);
     assert_eq!(message("sketch.polygon.edge", json!({"p0": [0, 0], "p1": [5, 0], "sides": 4})), None);
 }
+
+/// The slot replies keep the shape the handlers returned before the schemas: exactly the keys
+/// `curves`, `constraints` and `sketch` of the old `result()` helper, plus the `created` summary
+/// that `Session::execute` adds to every sketch command, and no `param_warnings`. Pinned by hand
+/// from the code on `origin/main`, so it does not depend on the checked path under test.
+#[test]
+fn slot_replies_keep_their_old_shape() {
+    let mut s = session(ParamCheck::Off);
+    for (id, p) in [
+        ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": 4})),
+        ("sketch.slot.overall", json!({"p0": [0, 20], "p1": [10, 20], "width": 4})),
+    ] {
+        let r = run(&mut s, id, p);
+        let o = r.as_object().unwrap_or_else(|| panic!("{id}: {r}"));
+        let mut keys: Vec<&str> = o.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["constraints", "created", "curves", "sketch"], "{id}: {r}");
+        for k in ["curves", "constraints"] {
+            let list = o[k].as_array().unwrap_or_else(|| panic!("{id} {k}: {r}"));
+            assert!(!list.is_empty() && list.iter().all(Value::is_string), "{id} {k}: {r}");
+        }
+        assert_eq!(o["curves"].as_array().map(Vec::len), Some(4), "{id}: {r}");
+        assert_eq!(sorted_keys(&o["sketch"]), Some(vec!["dof", "solved"]), "{id}: {r}");
+        assert_eq!(sorted_keys(&o["created"]), Some(vec!["constraints", "curves", "dimensions", "points"]), "{id}: {r}");
+        assert_eq!(o["created"]["curves"], o["curves"], "{id}: {r}");
+    }
+}
+
+fn sorted_keys(v: &Value) -> Option<Vec<&str>> {
+    v.as_object().map(|m| m.keys().map(String::as_str).collect())
+}
