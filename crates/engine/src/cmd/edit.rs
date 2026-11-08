@@ -8,6 +8,17 @@ use solidcraft_doc::{Feature, FeatureKind};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_values, num, str_};
+use crate::schema::edit::{
+    BrokenFeature, FailingFeature, FeatureInfo, FeatureInput, Inspected, OmittedField, SuppressChanged, TimelineComputeAllParams,
+    TimelineComputeAllResult, TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams, TimelineDependentsResult, TimelineEditParams,
+    TimelineEditResult, TimelineGroupMade, TimelineGroupParams, TimelineGroupRenamed, TimelineInspectParams, TimelineInspectResult,
+    TimelineMarkerResult, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved, TimelineMovedToGroup, TimelineRedefineParams,
+    TimelineRedefined, TimelineRenameGroupParams, TimelineRenameParams, TimelineRenameResult, TimelineReorderManyParams, TimelineReorderParams,
+    TimelineReordered, TimelineReorderedMany, TimelineRollToParams, TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult,
+    TimelineUngroupParams, TimelineUngrouped,
+};
+use crate::schema::select::{PartialPick, SelectClearParams, SelectClearResult, SelectItem, SelectSetParams, SelectSetResult, read_item};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -53,7 +64,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&RESTORE_CHECKPOINT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
         .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included. Restoring or forgetting uses it and every later checkpoint up: take a new one to go back again"),
-    CommandSpec::new("timeline.compute_all", "Compute All", compute_all).at("SOLID", "MODIFY").icon("compute").noundo(),
+    CommandSpec::new("timeline.compute_all", "Compute All", crate::checked!("timeline.compute_all", compute_all))
+        .at("SOLID", "MODIFY")
+        .icon("compute")
+        .noundo()
+        .contract(&COMPUTE_ALL_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineComputeAllResult>),
     CommandSpec::new("timeline.play", "Play History", crate::checked!("timeline.play", play))
         .at("INSPECT", "HISTORY")
         .icon("timeline_play")
@@ -63,64 +79,145 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PLAY_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::TimelinePlayResult>)
         .params("action?: toggle|play|stop (default toggle) → action: validated display request; the connected UI plays from the marker to the end with a half-second pause per rebuilt step. Headless callers only validate the request; no dialog, document edit or animation clock is created"),
-    CommandSpec::new("timeline.delete", "Delete", delete)
+    CommandSpec::new("timeline.delete", "Delete", crate::checked!("timeline.delete", delete))
         .at("SOLID", "MODIFY")
         .icon("delete")
         .key("Delete")
+        .contract(&DELETE_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineDeleteResult>)
         .params("feature: id|name | features: [id|name] | groups: [timeline folder ids] (a folder goes with all its features, joints and nested folders; one undo step; a sketch takes its dependent features with it) → deleted: [feature ids]; joints?: [joint ids]; groups?: [folder ids deleted]; failing?: [{feature, error}] (later features that worked and now fail)"),
-    CommandSpec::new("timeline.rename", "Rename", rename).icon("rename").params("feature: id|name, name (references to it follow)"),
-    CommandSpec::new("timeline.group", "New Feature Folder", group)
+    CommandSpec::new("timeline.rename", "Rename", crate::checked!("timeline.rename", rename))
+        .icon("rename")
+        .contract(&RENAME_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineRenameResult>)
+        .params("feature: id|name, name (references to it follow)"),
+    CommandSpec::new("timeline.group", "New Feature Folder", crate::checked!("timeline.group", group))
         .icon("folder")
         .doc_only()
+        .contract(&GROUP_CONTRACT)
+        .output(output_schema_for::<TimelineGroupMade>)
         .params("name?; features?: [id|name]; joints?: [id|name]; groups?: [folder ids]; parent?: folder id (features and joints leave any other timeline folder)"),
-    CommandSpec::new("timeline.ungroup", "Remove Feature Folders", ungroup).icon("folder")
+    CommandSpec::new("timeline.ungroup", "Remove Feature Folders", crate::checked!("timeline.ungroup", ungroup))
+        .icon("folder")
         .doc_only()
+        .contract(&UNGROUP_CONTRACT)
+        .output(output_schema_for::<TimelineUngrouped>)
         .params("group: id | groups: [ids] (features and joints remain in the timeline)"),
-    CommandSpec::new("timeline.rename_group", "Rename Feature Folder", rename_group).icon("rename").doc_only().params("group: id, name (renames the folder holding features and joints)"),
-    CommandSpec::new("timeline.move_to_group", "Move Features to Folder", move_to_group).icon("folder")
+    CommandSpec::new("timeline.rename_group", "Rename Feature Folder", crate::checked!("timeline.rename_group", rename_group))
+        .icon("rename")
         .doc_only()
+        .contract(&RENAME_GROUP_CONTRACT)
+        .output(output_schema_for::<TimelineGroupRenamed>)
+        .params("group: id, name (renames the folder holding features and joints)"),
+    CommandSpec::new("timeline.move_to_group", "Move Features to Folder", crate::checked!("timeline.move_to_group", move_to_group))
+        .icon("folder")
+        .doc_only()
+        .contract(&MOVE_TO_GROUP_CONTRACT)
+        .output(output_schema_for::<TimelineMovedToGroup>)
         .params("features?: [id|name], joints?: [id|name], groups?: [ids], group?: id (omit or null to move to the timeline root)"),
-    CommandSpec::new("timeline.move_many", "Move Timeline Items", move_many).icon("reorder").params(
+    CommandSpec::new("timeline.move_many", "Move Timeline Items", crate::checked!("timeline.move_many", move_many))
+        .icon("reorder")
+        .contract(&MOVE_MANY_CONTRACT)
+        .output(output_schema_for::<TimelineMoved>)
+        .params(
         "features?: [id|name], groups?: [folder ids], group?: folder id, position: insertion slot, active?: bool (true = the moved contents end up before the history marker, false = behind it; other features keep their state); atomically changes folder membership and moves all selected contents as one block",
     ),
-    CommandSpec::new("timeline.rollback", "Move Timeline Marker", rollback).icon("rollback").params("position: number of features to keep active, or \"end\" (omit = end)"),
-    CommandSpec::new("timeline.roll_to", "Roll History Marker", roll_to).icon("rollback")
+    CommandSpec::new("timeline.rollback", "Move Timeline Marker", crate::checked!("timeline.rollback", rollback))
+        .icon("rollback")
+        .contract(&ROLLBACK_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("position: number of features to keep active, or \"end\" (omit = end)"),
+    CommandSpec::new("timeline.roll_to", "Roll History Marker", crate::checked!("timeline.roll_to", roll_to))
+        .icon("rollback")
+        .contract(&ROLL_TO_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
         .params("position: number of features to keep active, or \"end\" (omit = end) | feature: id|name (the marker goes right after it)"),
-    CommandSpec::new("timeline.reorder", "Reorder Feature", reorder).icon("reorder")
+    CommandSpec::new("timeline.reorder", "Reorder Feature", crate::checked!("timeline.reorder", reorder))
+        .icon("reorder")
+        .contract(&REORDER_CONTRACT)
+        .output(output_schema_for::<TimelineReordered>)
         .params("feature: id|name, position: its new index, active?: bool (true = it ends up before the history marker, false = behind it; other features keep their state); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke → feature, position: its index now, from: its index before, moved: bool, note?: why nothing moved, or that a position past the end meant the last slot"),
-    CommandSpec::new("timeline.reorder_many", "Reorder Features", reorder_many).icon("reorder").params(
+    CommandSpec::new("timeline.reorder_many", "Reorder Features", crate::checked!("timeline.reorder_many", reorder_many))
+        .icon("reorder")
+        .contract(&REORDER_MANY_CONTRACT)
+        .output(output_schema_for::<TimelineReorderedMany>)
+        .params(
         "features: [id|name], position: insertion slot in the current history; selected features keep their relative order; active?: bool (as timeline.reorder's); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke",
     ),
-    CommandSpec::new("timeline.redefine", "Edit Feature", redefine).icon("edit")
+    CommandSpec::new("timeline.redefine", "Edit Feature", crate::checked!("timeline.redefine", redefine))
+        .icon("edit")
+        .contract(&REDEFINE_CONTRACT)
+        .output(output_schema_for::<TimelineRedefined>)
         .params("feature: id|name, command: the feature's command id, params: its parameters (the feature is rebuilt in place) → feature, recomputed, restored, rolled_back: bool (the feature is after the history marker, so the edit is not built yet; `note` then says so), warning?"),
-    CommandSpec::new("timeline.dependents", "Feature Dependents", dependents).icon("graph")
+    CommandSpec::new("timeline.dependents", "Feature Dependents", crate::checked!("timeline.dependents", dependents))
+        .icon("graph")
         .noundo()
+        .contract(&DEPENDENTS_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineDependentsResult>)
         .params("feature: id|name → features deleted with it, and features that would fail without it"),
-    CommandSpec::new("timeline.suppress", "Suppress Feature", suppress).icon("suppress").params(
+    CommandSpec::new("timeline.suppress", "Suppress Feature", crate::checked!("timeline.suppress", suppress))
+        .icon("suppress")
+        .contract(&SUPPRESS_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineSuppressResult>)
+        .params(
         "feature: id|name | features: [id|name] | groups: [timeline folder ids] (every feature and joint in those folders and their nested \
          folders; one undo step), suppressed?: bool (default toggles: features and joints are all \
          suppressed unless all of them already are, then all are unsuppressed) → feature: id (or features: [ids]; groups: [ids] and joints: [ids] when groups are given), suppressed",
     ),
-    CommandSpec::new("timeline.edit", "Edit Feature", edit_feature).icon("edit").params(
+    CommandSpec::new("timeline.edit", "Edit Feature", crate::checked!("timeline.edit", edit_feature))
+        .icon("edit")
+        .contract(&EDIT_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineEditResult>)
+        .params(
         "feature: id|name, set: {fields to change, merged into the feature's definition as timeline.inspect returns it, \
          e.g. {\"extent\": {\"distance\": \"30\"}} (extrude), {\"angle\": \"90 deg\"} (revolve); \
          a dotted key names a nested field ({\"plane.distance\": \"8 mm\"} = {\"plane\": {\"distance\": \"8 mm\"}}); \
          expressions are text, or a number in mm or degrees} → recomputed: features rebuilt, restored: features whose earlier result for the same inputs was reused",
     ),
-    CommandSpec::new("timeline.inspect", "Inspect Feature", inspect_feature).icon("inspect").noundo().params(
+    CommandSpec::new("timeline.inspect", "Inspect Feature", crate::checked!("timeline.inspect", inspect_feature))
+        .icon("inspect")
+        .noundo()
+        .contract(&INSPECT_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineInspectResult>)
+        .params(
         "group: folder id → group, name, parent, features, joints; or feature: id|name → type, definition (the fields timeline.edit's set changes, with their current values), \
          inputs: [{label, param, expression, unit}] (named inputs parameters.change can also set), error, warning",
     ),
-    CommandSpec::new("select.set", "Select", select_set).icon("select")
+    CommandSpec::new("select.set", "Select", crate::checked!("select.set", select_set)).icon("select")
         .noundo()
+        .contract(&SELECT_SET_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>)
         .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool; face/edge: body plus point [x,y,z] in world mm or index (both also accepted); a point uses Measure's pick tolerance, an index supplies a point on the item; invalid partial picks leave the selection unchanged"),
     CommandSpec::new("select.filter", "Selection filter", select_filter).icon("select").noundo().doc_only()
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
-    CommandSpec::new("select.clear", "Clear Selection", select_clear).icon("select").noundo(),
+    CommandSpec::new("select.clear", "Clear Selection", crate::checked!("select.clear", select_clear))
+        .icon("select")
+        .noundo()
+        .contract(&SELECT_CLEAR_CONTRACT)
+        .output(output_schema_for::<SelectClearResult>),
     CommandSpec::new("select.same_look", "Select Same Look", select_same_look).icon("select").noundo().doc_only()
         .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
 ];
 
+const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
+const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
+const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
+const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
+const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
+const ROLLBACK_CONTRACT: TypedContract<TimelineRollbackParams> = TypedContract::new();
+const ROLL_TO_CONTRACT: TypedContract<TimelineRollToParams> = TypedContract::new();
+const DEPENDENTS_CONTRACT: TypedContract<TimelineDependentsParams> = TypedContract::new();
+const SUPPRESS_CONTRACT: TypedContract<TimelineSuppressParams> = TypedContract::new();
+const EDIT_CONTRACT: TypedContract<TimelineEditParams> = TypedContract::new();
+const INSPECT_CONTRACT: TypedContract<TimelineInspectParams> = TypedContract::new();
+const GROUP_CONTRACT: TypedContract<TimelineGroupParams> = TypedContract::new();
+const UNGROUP_CONTRACT: TypedContract<TimelineUngroupParams> = TypedContract::new();
+const RENAME_GROUP_CONTRACT: TypedContract<TimelineRenameGroupParams> = TypedContract::new();
+const MOVE_TO_GROUP_CONTRACT: TypedContract<TimelineMoveToGroupParams> = TypedContract::new();
+const MOVE_MANY_CONTRACT: TypedContract<TimelineMoveManyParams> = TypedContract::new();
+const REORDER_CONTRACT: TypedContract<TimelineReorderParams> = TypedContract::new();
+const REORDER_MANY_CONTRACT: TypedContract<TimelineReorderManyParams> = TypedContract::new();
+const REDEFINE_CONTRACT: TypedContract<TimelineRedefineParams> = TypedContract::new();
 const PLAY_CONTRACT: crate::schema::TypedContract<crate::schema::edit::TimelinePlayParams> = crate::schema::TypedContract::new();
 
 fn play(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -222,7 +319,7 @@ fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
     s.set_validation(validation);
     s.refresh();
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
-    Ok(json!({"features": s.model.results.len(), "errors": errors}))
+    reply("timeline.compute_all", TimelineComputeAllResult { features: s.model.results.len(), errors, param_warnings: Vec::new() })
 }
 
 pub(super) fn feature_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
@@ -269,24 +366,21 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.selection.clear();
     s.refresh();
-    let failing: Vec<Value> = s
+    let failing: Vec<FailingFeature> = s
         .model
         .results
         .iter()
         .filter(|r| worked.contains(&r.id))
-        .filter_map(|r| r.error.as_ref().map(|e| json!({"feature": r.name, "error": e})))
+        .filter_map(|r| r.error.as_ref().map(|e| FailingFeature { feature: r.name.clone(), error: e.clone() }))
         .collect();
-    let mut out = json!({"deleted": gone});
-    if !joints.is_empty() {
-        out["joints"] = json!(joints);
-    }
-    if !folders.is_empty() {
-        out["groups"] = json!(folders);
-    }
-    if !failing.is_empty() {
-        out["failing"] = json!(failing);
-    }
-    Ok(out)
+    let out = TimelineDeleteResult {
+        deleted: gone,
+        joints: (!joints.is_empty()).then_some(joints),
+        groups: (!folders.is_empty()).then(|| folders.into_iter().collect()),
+        failing: (!failing.is_empty()).then_some(failing),
+        param_warnings: Vec::new(),
+    };
+    reply(cmd, out)
 }
 
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
@@ -302,7 +396,7 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
         super::features::check_plane_name(name, cmd)?;
     }
     if name == old {
-        return Ok(json!({"feature": id, "name": name}));
+        return reply(cmd, TimelineRenameResult { feature: id, name: name.to_string(), param_warnings: Vec::new() });
     }
     let names = BTreeMap::from([(old.clone(), name.to_string())]);
     let sketches = BTreeMap::new();
@@ -322,7 +416,7 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
             *n = name.to_string();
         }
     }
-    Ok(json!({"feature": id, "name": name}))
+    reply(cmd, TimelineRenameResult { feature: id, name: name.to_string(), param_warnings: Vec::new() })
 }
 
 fn timeline_group_id(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
@@ -561,7 +655,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(not_contiguous(&folders, broken, cmd));
     }
     s.doc_mut().timeline_groups = folders;
-    Ok(json!({"group": id, "name": name, "parent": parent, "groups": groups}))
+    reply(cmd, TimelineGroupMade { group: id, name, parent, groups, param_warnings: Vec::new() })
 }
 
 fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
@@ -618,7 +712,7 @@ fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
     *s.doc_mut() = next;
-    Ok(json!({"groups": ids}))
+    reply(cmd, TimelineUngrouped { groups: ids, param_warnings: Vec::new() })
 }
 
 fn rename_group(s: &mut Session, p: &Value) -> Result<Value> {
@@ -631,7 +725,7 @@ fn rename_group(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(group) = s.doc_mut().timeline_groups.iter_mut().find(|group| group.id == id) {
         group.name = name.to_string();
     }
-    Ok(json!({"group": id, "name": name}))
+    reply(cmd, TimelineGroupRenamed { group: id, name: name.to_string(), param_warnings: Vec::new() })
 }
 
 fn move_to_group(s: &mut Session, p: &Value) -> Result<Value> {
@@ -668,7 +762,7 @@ fn move_to_group(s: &mut Session, p: &Value) -> Result<Value> {
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
     *s.doc_mut() = next;
-    Ok(json!({"features": features, "joints": joints, "groups": groups, "group": target}))
+    reply(cmd, TimelineMovedToGroup { features, joints, groups, group: target, param_warnings: Vec::new() })
 }
 
 fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
@@ -714,7 +808,7 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
         }
         *s.doc_mut() = next;
     }
-    Ok(json!({"features": ordered, "groups": groups, "group": target, "position": slot}))
+    reply(cmd, TimelineMoved { features: ordered, groups, group: target, position: slot, param_warnings: Vec::new() })
 }
 
 fn rollback(s: &mut Session, p: &Value) -> Result<Value> {
@@ -756,7 +850,7 @@ fn move_marker(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         _ => None,
     };
     s.selection.clear();
-    Ok(json!({"marker": s.doc.marker.unwrap_or(n), "features": n}))
+    reply(cmd, TimelineMarkerResult { marker: s.doc.marker.unwrap_or(n), features: n, param_warnings: Vec::new() })
 }
 
 /// The features named by `feature: id|name` and/or `features: [id|name]` (or one id|name), in
@@ -838,11 +932,12 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
         f.suppressed = want;
     }
     super::joints::suppress_joints(s.doc_mut(), &joints, want);
-    match ids.as_slice() {
-        [id] if groups.is_empty() && p.get("features").is_none_or(Value::is_null) => Ok(json!({"feature": id, "suppressed": want})),
-        _ if groups.is_empty() => Ok(json!({"features": ids, "suppressed": want})),
-        _ => Ok(json!({"features": ids, "joints": joints, "groups": groups, "suppressed": want})),
-    }
+    let changed = match ids.as_slice() {
+        [id] if groups.is_empty() && p.get("features").is_none_or(Value::is_null) => SuppressChanged::One { feature: *id, suppressed: want },
+        _ if groups.is_empty() => SuppressChanged::Features { features: ids, suppressed: want },
+        _ => SuppressChanged::Folders { features: ids, joints, groups, suppressed: want },
+    };
+    reply(cmd, TimelineSuppressResult { changed, param_warnings: Vec::new() })
 }
 
 fn merge(dst: &mut Value, src: &Value, depth: usize) {
@@ -1204,7 +1299,14 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("group").is_some() {
         let id = timeline_group_id(s, p, cmd)?;
         let group = s.doc.timeline_groups.iter().find(|group| group.id == id).ok_or_else(|| bad(cmd, "folder"))?;
-        return Ok(json!({"group": id, "name": group.name, "parent": group.parent, "features": group.features, "joints": group.joints}));
+        let inspected = Inspected::Group {
+            group: id,
+            name: group.name.clone(),
+            parent: group.parent,
+            features: group.features.clone(),
+            joints: group.joints.clone(),
+        };
+        return reply(cmd, TimelineInspectResult { inspected, param_warnings: Vec::new() });
     }
     let id = feature_id(s, p.get("feature"), cmd)?;
     let f = s.doc.feature(id).ok_or_else(|| bad(cmd, "feature"))?;
@@ -1216,27 +1318,39 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
         }
         for (k, why) in heavy_fields(&f.kind) {
             if o.remove(*k).is_some() {
-                omitted.push(json!({"field": k, "what": why}));
+                omitted.push(OmittedField { field: k.to_string(), what: why.to_string() });
             }
         }
     }
-    let inputs: Vec<Value> = f
+    let inputs: Vec<FeatureInput> = f
         .kind
         .inputs()
         .into_iter()
         .enumerate()
-        .map(|(i, (label, e, k))| {
-            json!({"label": label, "param": f.param_names.get(i).filter(|n| !n.is_empty()), "expression": e, "unit": k.default_unit()})
+        .map(|(i, (label, e, k))| FeatureInput {
+            label: label.to_string(),
+            param: f.param_names.get(i).filter(|n| !n.is_empty()).cloned(),
+            expression: e,
+            unit: k.default_unit().to_string(),
         })
         .collect();
     let marker = s.doc.marker.unwrap_or(usize::MAX);
     let rolled_back = s.doc.features.iter().position(|x| x.id == id).is_some_and(|i| i >= marker);
     let r = s.model.result(id);
-    Ok(json!({
-        "id": f.id, "name": f.name, "type": f.kind.kind_key(), "type_name": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": rolled_back,
-        "definition": def, "omitted": omitted, "inputs": inputs,
-        "error": r.and_then(|r| r.error.clone()), "warning": r.and_then(|r| r.warning.clone()),
-    }))
+    let info = FeatureInfo {
+        id: f.id,
+        name: f.name.clone(),
+        kind: f.kind.kind_key().to_string(),
+        type_name: f.kind.type_name().to_string(),
+        suppressed: f.suppressed,
+        rolled_back,
+        definition: def,
+        omitted,
+        inputs,
+        error: r.and_then(|r| r.error.clone()),
+        warning: r.and_then(|r| r.warning.clone()),
+    };
+    reply(cmd, TimelineInspectResult { inspected: Inspected::Feature(Box::new(info)), param_warnings: Vec::new() })
 }
 
 fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1334,27 +1448,17 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
-    Ok(json!({"feature": id, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored}))
+    reply(cmd, TimelineEditResult { feature: id, recomputed: s.model.last_recomputed, restored: s.model.last_restored, param_warnings: Vec::new() })
 }
 
 /// Complete a partial script pick without changing the stored selection type or reinterpreting
 /// an existing index-and-point pair. Unlike Measure, selection keeps the exact face/edge index:
 /// it must not merge a cylinder's patches or a circular rim's arcs into a different item.
 fn selection_item(s: &Session, value: Value) -> Result<Sel> {
-    use solidcore_record::Vec3;
-
-    let kind = value.get("type").and_then(Value::as_str);
-    if !matches!(kind, Some("face" | "edge")) || (value.get("index").is_some() && value.get("point").is_some()) {
-        return serde_json::from_value(value).map_err(|e| bad("select.set", e.to_string()));
-    }
-    let face = kind == Some("face");
-    #[derive(serde::Deserialize)]
-    struct Pick {
-        body: String,
-        index: Option<usize>,
-        point: Option<Vec3>,
-    }
-    let Pick { body, index, point } = serde_json::from_value(value).map_err(|e| bad("select.set", e.to_string()))?;
+    let (face, PartialPick { body, index, point }) = match read_item(value).map_err(|e| bad("select.set", e))? {
+        SelectItem::Exact(sel) => return Ok(sel),
+        SelectItem::Pick { face, pick } => (face, pick),
+    };
     let state = s.world_state()?;
     let b = state.body(&body).ok_or_else(|| bad("select.set", format!("no body `{body}`")))?;
     let missing = || bad("select.set", format!("no {} of `{body}` at the given index or point", if face { "face" } else { "edge" }));
@@ -1429,7 +1533,7 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     s.refresh_display();
-    Ok(json!({"selected": s.selection.len()}))
+    reply("select.set", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
 }
 
 fn select_filter(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -1486,7 +1590,7 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
     s.refresh_display();
-    Ok(json!({"selected": 0}))
+    reply("select.clear", SelectClearResult { selected: 0, param_warnings: Vec::new() })
 }
 
 /// Features that worked in `before` and fail in `after`: (name, error).
@@ -1593,7 +1697,8 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     let active = active_param(p, cmd)?;
     if from == to && active.is_none() {
         let why = capped.map_or_else(|| format!("it is already at position {to}"), |c| format!("{c}, where it already is"));
-        return Ok(json!({"feature": id, "position": to, "from": from, "moved": false, "note": format!("nothing moved: {why}")}));
+        let note = Some(format!("nothing moved: {why}"));
+        return reply(cmd, TimelineReordered { feature: id, position: to, from, moved: false, note, broken: None, param_warnings: Vec::new() });
     }
     let mut next = (*s.doc).clone();
     let f = next.features.remove(from);
@@ -1638,20 +1743,22 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         }
         *s.doc_mut() = next;
     }
-    let mut out = json!({"feature": id, "position": now, "from": from, "moved": now != from});
     // With `active`, a feature left in place may still cross the history marker: say which.
     let stayed = (now == from).then(|| {
         let what = if s.doc.marker == marker { "nothing moved" } else { "only the history marker moved" };
         format!("{what}: {name} is already at position {now}")
     });
     let note: Vec<String> = [capped, stayed].into_iter().flatten().collect();
-    if !note.is_empty() {
-        out["note"] = json!(note.join("; "));
-    }
-    if allow {
-        out["broken"] = broken_json(&broken);
-    }
-    Ok(out)
+    let out = TimelineReordered {
+        feature: id,
+        position: now,
+        from,
+        moved: now != from,
+        note: (!note.is_empty()).then(|| note.join("; ")),
+        broken: allow.then(|| broken_features(&broken)),
+        param_warnings: Vec::new(),
+    };
+    reply(cmd, out)
 }
 
 /// The optional `allow_errors` of a move: make it even when it breaks features that worked.
@@ -1664,8 +1771,8 @@ fn allow_errors(p: &Value, cmd: &str) -> Result<bool> {
 }
 
 /// The features a move broke, as `[{feature, error}]`.
-fn broken_json(broken: &[(String, String)]) -> Value {
-    broken.iter().map(|(feature, error)| json!({"feature": feature, "error": error})).collect()
+fn broken_features(broken: &[(String, String)]) -> Vec<BrokenFeature> {
+    broken.iter().map(|(feature, error)| BrokenFeature { feature: feature.clone(), error: error.clone() }).collect()
 }
 
 /// The optional `active` of a move: whether the moved features end up before the history marker.
@@ -1711,11 +1818,8 @@ fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
         }
         *s.doc_mut() = next;
     }
-    let mut out = json!({"features": ordered, "position": slot.min(s.doc.features.len())});
-    if allow {
-        out["broken"] = broken_json(&broken);
-    }
-    Ok(out)
+    let position = slot.min(s.doc.features.len());
+    reply(cmd, TimelineReorderedMany { features: ordered, position, broken: allow.then(|| broken_features(&broken)), param_warnings: Vec::new() })
 }
 
 /// The reordered design, the moved features in order, and the model the move was checked on
@@ -2265,15 +2369,20 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         if rolled_back { r.get("warning").and_then(Value::as_str).map(str::to_string) } else { s.model.result(id).and_then(|r| r.warning.clone()) };
     // Report the trial's rebuild, plus anything the session still had to compute itself (a kept
     // result its budget dropped); `s.model`'s own counters would only report the reuse (#5694).
-    let mut reply = json!({"feature": id, "recomputed": rebuilt + s.model.last_recomputed, "restored": reused, "rolled_back": rolled_back});
-    if let Some(warning) = warning {
-        reply["warning"] = json!(warning);
-    }
-    if rolled_back {
+    let note = rolled_back.then(|| {
         let name = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
-        reply["note"] = json!(format!("{name} is after the history marker, so it is not built: move the marker past it to build it"));
-    }
-    Ok(reply)
+        format!("{name} is after the history marker, so it is not built: move the marker past it to build it")
+    });
+    let out = TimelineRedefined {
+        feature: id,
+        recomputed: rebuilt + s.model.last_recomputed,
+        restored: reused,
+        rolled_back,
+        warning,
+        note,
+        param_warnings: Vec::new(),
+    };
+    reply(cmd, out)
 }
 
 fn dependents(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2288,7 +2397,7 @@ fn dependents(s: &mut Session, p: &Value) -> Result<Value> {
     after.evaluate(&next);
     let names = |ids: &[u64]| -> Vec<String> { ids.iter().filter(|x| **x != id).filter_map(|x| s.doc.feature(*x).map(|f| f.name.clone())).collect() };
     let broken: Vec<String> = newly_broken_in_history(&s.doc, &s.model, &next, &after).into_iter().map(|(n, _)| n).collect();
-    Ok(json!({"deleted_with_it": names(&gone), "would_fail": broken}))
+    reply(cmd, TimelineDependentsResult { deleted_with_it: names(&gone), would_fail: broken, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

@@ -159,9 +159,9 @@ fn material_reply(cmd: &str, m: &UserMaterial) -> Result<MaterialReply> {
     Ok(out)
 }
 
-/// [`material_reply`] as JSON, for `material.list` (`cmd/inspect.rs`), which isn't converted yet.
-pub(super) fn material_json(m: &UserMaterial) -> Result<Value> {
-    reply("material.list", material_reply("material.list", m)?)
+/// [`material_reply`] for `material.list` (`cmd/inspect.rs`).
+pub(super) fn listed_material(m: &UserMaterial) -> Result<MaterialReply> {
+    material_reply("material.list", m)
 }
 
 fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {

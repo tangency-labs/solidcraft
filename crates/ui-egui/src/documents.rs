@@ -5,6 +5,7 @@
 //! Closing a design with unsaved changes asks first, and so does quitting: one "save changes?"
 //! per design with unsaved changes ([`request_quit`]).
 
+use crate::i18n::LocaleNames as _;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use egui::{FontId, Rect, Sense, pos2, vec2};
@@ -13,8 +14,8 @@ use solidcraft_engine::Session;
 use solidcraft_engine::render::Camera;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit;
+use solidcraft_theme::Tokens;
 
 /// Continue transient shot queues without adopting their document or view into the active tab.
 pub(crate) fn advance_render_batches(app: &mut SolveApp, ctx: &egui::Context) {
@@ -45,6 +46,7 @@ pub struct DocSlot {
     pub(crate) pending_feature_edit: Option<crate::feature_edit::PendingFeatureEdit>,
     pre_sketch_cam: Option<crate::PreSketchView>,
     pre_sketch_component: Option<crate::PreSketchComponent>,
+    pre_edit_component: Option<crate::PreEditComponent>,
     view: DocView,
     occurrence_move: Option<crate::browser::OccMove>,
     reveals: crate::browser::PendingReveals,
@@ -146,6 +148,7 @@ impl DocSlot {
             pending_feature_edit: None,
             pre_sketch_cam: None,
             pre_sketch_component: None,
+            pre_edit_component: None,
             view: DocView::default(),
             occurrence_move: None,
             reveals: Default::default(),
@@ -288,6 +291,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         pending_feature_edit: std::mem::replace(&mut app.pending_feature_edit, slot.pending_feature_edit),
         pre_sketch_cam: std::mem::replace(&mut app.pre_sketch_cam, slot.pre_sketch_cam),
         pre_sketch_component: std::mem::replace(&mut app.pre_sketch_component, slot.pre_sketch_component),
+        pre_edit_component: std::mem::replace(&mut app.pre_edit_component, slot.pre_edit_component),
         view: take_view(app),
         occurrence_move: std::mem::replace(&mut app.tree.occurrence_move, slot.occurrence_move),
         reveals,
@@ -306,6 +310,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     app.tree.picked_components.clear();
     // Preferences the session holds go with the user, not the tab (#680).
     app.session.auto_project = out.session.auto_project;
+    app.session.project_construction = out.session.project_construction;
     app.session.set_validation(out.session.validation());
     // So does the host's pre-command check: every tab is held to it.
     app.session.set_command_check(out.session.command_check());
@@ -870,8 +875,8 @@ fn tab_paths(app: &SolveApp) -> Vec<Option<String>> {
 /// the full name above when the tab cut it short (#5868), and below, that a saved design has
 /// changes not saved yet (`dirty`), which the bullet after a cut name no longer shows (#11408).
 fn tab_tooltip(name: &str, path: Option<&str>, cut: bool, dirty: bool) -> String {
-    let place = path.map_or_else(|| crate::i18n::tr_label("Not saved yet").to_string(), crate::home::friendly_path);
-    let place = if dirty && path.is_some() { format!("{place}\n{}", crate::i18n::tr("document.tab_unsaved_changes")) } else { place };
+    let place = path.map_or_else(|| solidcraft_ui_text::tr_label("Not saved yet").to_string(), crate::home::friendly_path);
+    let place = if dirty && path.is_some() { format!("{place}\n{}", solidcraft_ui_text::tr("document.tab_unsaved_changes")) } else { place };
     if cut { format!("{name}\n{place}") } else { place }
 }
 
@@ -992,10 +997,11 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .map(|(i, (name, dirty))| {
             let shown_name = match &typed {
                 Some(text) if i == selected => text.clone(),
-                _ => crate::i18n::Locale::for_language(&app.preferences.language).given_name(name),
+                _ => solidcraft_ui_text::Locale::for_language(&app.preferences.language).given_name(name),
             };
             let label = format!("{shown_name}{}", if *dirty { " •" } else { "" });
-            let text = ui.painter().layout_no_wrap(label, crate::fonts::semibold(crate::theme::Tokens::get().font_button), t.app_bar_text).size().x;
+            let text =
+                ui.painter().layout_no_wrap(label, crate::fonts::semibold(solidcraft_theme::Tokens::get().font_button), t.app_bar_text).size().x;
             (text + 40.0).clamp(72.0, MAX_FIT)
         })
         .collect();
@@ -1080,12 +1086,12 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         let lit = resp.hovered() || held.is_some_and(|(from, _)| from == i);
         tab_shape(ui.painter(), &t, tr, active, lit || resp.has_focus());
         let ink = if active || lit { t.app_bar_text } else { t.app_bar_text.gamma_multiply(0.7) };
-        let name_display = crate::i18n::Locale::for_language(&app.preferences.language).given_name(name);
+        let name_display = solidcraft_ui_text::Locale::for_language(&app.preferences.language).given_name(name);
         let label = format!("{name_display}{}", if *dirty { " •" } else { "" });
         let font = if active {
-            crate::fonts::semibold(crate::theme::Tokens::get().font_button)
+            crate::fonts::semibold(solidcraft_theme::Tokens::get().font_button)
         } else {
-            FontId::proportional(crate::theme::Tokens::get().font_button)
+            FontId::proportional(solidcraft_theme::Tokens::get().font_button)
         };
         let g = ui.painter().layout_no_wrap(label, font, ink);
         let text_w = (tr.width() - 30.0).max(10.0);
@@ -1121,7 +1127,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             menu = Some((i, ui.ctx().pointer_interact_pos().unwrap_or(tr.left_bottom())));
         }
         // Named apart from a dialog's Close: egui 0.37 names an unnamed widget after its tooltip.
-        xresp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, show_close, crate::i18n::tr("ui.close_tab")));
+        xresp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, show_close, solidcraft_ui_text::tr("ui.close_tab")));
         if xresp.backing_on_hover_text("Close").clicked() {
             shut = Some(i);
         } else if (if held.is_some() { resp } else { resp.backing_on_hover_text(tip) }).clicked() {
@@ -1147,11 +1153,11 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             mr.center(),
             egui::Align2::CENTER_CENTER,
             format!("»{}", n - shown),
-            FontId::proportional(crate::theme::Tokens::get().font_body),
+            FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             t.app_bar_text,
         );
         let id = egui::Id::unique("sc_doc_more");
-        if mresp.clone().backing_on_hover_text(crate::i18n::tr_label("All open designs")).clicked() {
+        if mresp.clone().backing_on_hover_text(solidcraft_ui_text::tr_label("All open designs")).clicked() {
             ui.ctx().data_mut(|d| d.insert_temp(id, !d.get_temp::<bool>(id).unwrap_or(false)));
         }
         if ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
@@ -1185,7 +1191,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 crate::context_menu::menu_frame(ui, |ui| {
                     let mut chosen = None;
                     for (id, label) in items {
-                        let mut item = crate::context_menu::Item::action(id, label, "");
+                        let mut item = crate::ui_kit::Item::action(id, label, "");
                         if id == "ui.closeTab" && i == app.docs.active {
                             item = item.key("Ctrl+W");
                         }
@@ -1286,7 +1292,7 @@ fn renaming_tab(app: &SolveApp) -> bool {
 
 /// Starts editing the selected design's name in its tab, with the name as shown selected.
 fn start_tab_rename(app: &mut SolveApp, name: &str, tab: Rect) {
-    let text = crate::i18n::Locale::for_language(&app.preferences.language).given_name(name);
+    let text = solidcraft_ui_text::Locale::for_language(&app.preferences.language).given_name(name);
     app.menu.rename = Some(crate::context_menu::Rename {
         what: crate::context_menu::RenameWhat::Component(0),
         text,
@@ -1359,7 +1365,7 @@ pub enum Answer {
 
 /// The "save changes?" prompt for a tab being closed, or for each unsaved design when quitting.
 pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
-    let _language = crate::i18n::scope(&app.preferences.language);
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
     quit_step(app);
     // Saved, it asks the Capture Position question first (#9736): that question is the one to
     // answer meanwhile, not this one again.
@@ -1393,10 +1399,10 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     if enter {
         answer = Some(choice);
     }
-    let title = crate::i18n::format("document.save_changes", &[("name", &name_display)]);
+    let title = solidcraft_ui_text::format("document.save_changes", &[("name", &name_display)]);
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_close_prompt"), "status_warning", &title)
         .tone(ui_kit::Tone::Warning)
-        .actions(crate::i18n::tr("ui.save"), crate::i18n::tr("ui.cancel"), Some(crate::i18n::tr("ui.don_t_save")))
+        .actions(solidcraft_ui_text::tr("ui.save"), solidcraft_ui_text::tr("ui.cancel"), Some(solidcraft_ui_text::tr("ui.don_t_save")))
         .secondary_left()
         .selected(match choice {
             Answer::Save => ui_kit::Action::Ok,
@@ -1404,7 +1410,11 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
             Answer::Cancel => ui_kit::Action::Cancel,
         })
         .show(ctx, true, |ui| {
-            ui_kit::text(ui, &crate::i18n::format("document.unsaved_changes", &[("name", &name_display)]), ui_kit::Text::Report("unsaved", false));
+            ui_kit::text(
+                ui,
+                &solidcraft_ui_text::format("document.unsaved_changes", &[("name", &name_display)]),
+                ui_kit::Text::Report("unsaved", false),
+            );
         });
     answer = match action {
         ui_kit::Action::Ok => Some(Answer::Save),
@@ -1705,6 +1715,7 @@ mod tests {
     /// changes not saved yet says so below, since a cut name hides the tab's bullet.
     #[test]
     fn tab_tooltip_says_where_the_design_is_saved() {
+        crate::i18n::install();
         assert_eq!(tab_tooltip("plate", Some("/srv/designs/plate.solidcraft"), false, false), "/srv/designs/plate.solidcraft");
         assert_eq!(tab_tooltip("a-long-name", Some("/srv/a-long-name.solidcraft"), true, false), "a-long-name\n/srv/a-long-name.solidcraft");
         assert_eq!(tab_tooltip("Untitled", None, false, false), "Not saved yet");
@@ -2190,6 +2201,28 @@ mod tests {
         adopt(&mut a, Session::default());
         assert_eq!(a.docs.count(), 1);
         assert!(!a.session.auto_project, "a design adopted over a blank one");
+    }
+
+    /// Projecting references as construction geometry is the user's too (#13142), like
+    /// auto-projection: it holds in new tabs, the tab switched to, after the last tab closes and
+    /// in a design adopted over a blank one, and the preferences file keeps it.
+    #[test]
+    fn project_construction_follows_the_user_across_tabs() {
+        let mut a = app();
+        a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        a.session.project_construction = true;
+        new_design(&mut a);
+        assert!(a.session.project_construction, "a new tab");
+        a.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        switch(&mut a, 0);
+        assert!(a.session.project_construction, "the tab switched to");
+        let prefs: Value = serde_json::from_str(&a.prefs()).unwrap();
+        assert_eq!(prefs["project_construction"], true);
+        close(&mut a, 1, true);
+        close(&mut a, 0, true);
+        assert!(active_is_blank(&a) && a.session.project_construction, "after the last tab closes");
+        adopt(&mut a, Session::default());
+        assert!(a.session.project_construction, "a design adopted over a blank one");
     }
 
     /// The host's pre-command check holds in every tab: new ones, the one switched to, a design

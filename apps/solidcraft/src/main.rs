@@ -282,13 +282,20 @@ impl eframe::App for App {
         let now = std::time::Instant::now();
         if self.prefs_writer.due(ui.input(|i| i.events.iter().any(changes_settings)), now)
             && let Some(storage) = frame.storage_mut()
-            && let Some(wait) = self.prefs_writer.store(storage, self.solve.prefs(), now)
+            && let Ok(prefs) = self.prefs_for_storage(storage)
+            && let Some(wait) = self.prefs_writer.store(storage, prefs, now)
         {
             ui.ctx().request_repaint_after(wait);
         }
     }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        let prefs = self.solve.prefs();
+        let prefs = match self.prefs_for_storage(storage) {
+            Ok(prefs) => prefs,
+            Err(reason) => {
+                log::warn!("Settings were not written: {reason}");
+                return;
+            }
+        };
         storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, prefs.clone());
         self.prefs_writer.written = Some(prefs);
     }
@@ -361,6 +368,14 @@ struct LostWatch {
 }
 
 impl App {
+    fn prefs_for_storage(&self, storage: &dyn eframe::Storage) -> Result<String, String> {
+        self.solve.try_prefs().or_else(|reason| {
+            log::warn!("Panel layout changes were not saved: {reason}");
+            let previous = solidcraft_ui_egui::prefs::stored(|key| storage.get_string(key));
+            self.solve.prefs_with_stored_panel_layout(previous.as_deref())
+        })
+    }
+
     /// The graphics device was lost (#4172): the window can't draw again, so close, keeping
     /// unsaved changes for recovery as a forced quit does (the window can't ask about them), and
     /// start again once closed ([`device_lost::restart`]).
@@ -453,7 +468,7 @@ fn case_variants(exts: &[&str]) -> Vec<String> {
 fn content_ui(app: &mut SolveApp, ui: &mut egui::Ui) {
     let content = ui.ctx().content_rect();
     let above = egui::Rect::from_min_max(ui.max_rect().min, egui::pos2(ui.max_rect().right(), content.top()));
-    ui.painter().rect_filled(above, 0.0, solidcraft_ui_egui::theme::Tokens::get().app_bar);
+    ui.painter().rect_filled(above, 0.0, solidcraft_theme::Tokens::get().app_bar);
     ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| app.ui(ui));
 }
 
@@ -503,7 +518,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             // The groups come from the format registry, so a new format joins this dialog by itself.
             let mut everything = io::formats::open_extensions(true);
             everything.extend(["dxf", "svg"]);
-            dialog = dialog.add_filter(solidcraft_ui_egui::i18n::tr("file.open.drawing_filter"), &case_variants(&everything));
+            dialog = dialog.add_filter(solidcraft_ui_text::tr("file.open.drawing_filter"), &case_variants(&everything));
             for (label, exts) in io::formats::import_filters(true) {
                 dialog = dialog.add_filter(label, &case_variants(&exts));
             }
@@ -930,6 +945,7 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
+    solidcraft_ui_egui::i18n::install();
     // On OCLP-patched Macs, wgpu picks a Metal Shading Language standard that the system's
     // compiler refuses (`invalid value 'metal3.2'`), because the patched OS reports a newer
     // macOS version than the GPU's Metal compiler supports. Re-launching with
@@ -1206,7 +1222,7 @@ fn main() -> eframe::Result {
             mark("viewport pipelines");
             // `--control`/the environment name a port; otherwise the preference (on by default)
             // opens the default one (docs/control-protocol.md).
-            if let Some(listen_on) = solidcraft_engine::control_auth::plan(control_port, app.preferences.agent_control) {
+            if let Some(listen_on) = solidcraft_control::auth::plan(control_port, app.preferences.agent_control) {
                 let rx = control_server::start(listen_on, cc.egui_ctx.clone());
                 app = app.with_control(rx);
             }

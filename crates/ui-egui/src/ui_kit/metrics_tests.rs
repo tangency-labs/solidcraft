@@ -1,7 +1,7 @@
-use crate::theme::Tokens;
 use crate::ui_kit::metrics::dimension;
 use crate::ui_kit::test_support::*;
 use crate::ui_kit::*;
+use solidcraft_theme::Tokens;
 
 use crate::scenario;
 
@@ -60,12 +60,12 @@ fn file_tiles_are_fixed_height_bounded_and_disabled_actions_stay_inert() {
         frame(&ctx, vec![], |ui| {
             ui.set_width(width);
             let tile = FileView::action_tile(ui, "file:new", width, "new", "New design", "Millimetres", true);
-            assert_eq!(tile.rect.height(), crate::theme::Tokens::get().file_tile_height);
+            assert_eq!(tile.rect.height(), solidcraft_theme::Tokens::get().file_tile_height);
             assert!(tile.rect.width() <= width);
             let row = FileView::nav_row(ui, "file:save", "Save", "Ctrl+S", false, false);
             assert!(!row.enabled());
             assert!(!row.clicked());
-            assert_eq!(row.rect.height(), crate::theme::Tokens::get().file_nav_height);
+            assert_eq!(row.rect.height(), solidcraft_theme::Tokens::get().file_nav_height);
         });
     }
 }
@@ -81,9 +81,11 @@ fn file_grid_has_only_between_row_gaps_and_recovery_actions_fit_narrow_widths() 
         FileView::grid(ui, "grid", 240.0, 2, |ui, _, width| {
             rects.push(FileView::action_tile(ui, "tile", width, "new", "New", "Millimetres", true).rect);
         });
-        assert!((rects[1].top() - rects[0].bottom() - crate::theme::Tokens::get().file_grid_gap).abs() < 0.1);
+        assert!((rects[1].top() - rects[0].bottom() - solidcraft_theme::Tokens::get().file_grid_gap).abs() < 0.1);
         assert!(
-            (ui.cursor().top() - before - 2.0 * crate::theme::Tokens::get().file_tile_height - crate::theme::Tokens::get().file_grid_gap).abs() < 0.1
+            (ui.cursor().top() - before - 2.0 * solidcraft_theme::Tokens::get().file_tile_height - solidcraft_theme::Tokens::get().file_grid_gap)
+                .abs()
+                < 0.1
         );
         let (recover, discard) = FileView::recovery_banner(
             ui,
@@ -155,4 +157,13 @@ fn sample_grid_stretches_each_row_without_clipping_long_descriptions() {
     let text_rect = egui::Rect::from_min_size(long.1.pos, long.1.galley.size());
     assert!(cards[1].rect.contains_rect(text_rect));
     assert!(long.0.contains_rect(text_rect), "the complete description must fit its clip");
+}
+
+#[test]
+fn a_tile_taller_than_its_text_area_keeps_the_title_at_the_top() {
+    // #7483: centring a title and a two-row caption taller than the tile put the title's top
+    // above the tile, where it was clipped.
+    let area = egui::Rect::from_min_max(egui::pos2(0.0, 16.0), egui::pos2(100.0, 68.0));
+    assert_eq!(crate::ui_kit::file_view::text_top(area, 40.0), 22.0, "a group that fits is centred");
+    assert_eq!(crate::ui_kit::file_view::text_top(area, 60.0), 16.0, "a taller group starts at the top");
 }

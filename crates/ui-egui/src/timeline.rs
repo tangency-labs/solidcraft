@@ -13,8 +13,8 @@ use solidcraft_engine::doc::{
 use solidcraft_engine::schema::edit::PlaybackAction;
 
 use crate::SolveApp;
-use crate::context_menu::Item;
-use crate::theme::Tokens;
+use crate::ui_kit::Item;
+use solidcraft_theme::Tokens;
 
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
 /// empty design. All orientations reach the same rollback command.
@@ -39,6 +39,19 @@ pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryT
     let _ = app.run_heavy("timeline.roll_to", params);
 }
 
+/// Shared-header actions use the same command availability as History playback.
+pub(crate) fn transport_availability(app: &SolveApp, control: crate::ui_kit::HistoryTransport) -> Result<(), String> {
+    if control == crate::ui_kit::HistoryTransport::Play {
+        if app.timeline_playback.is_some() {
+            return Ok(());
+        }
+        return playback_ready(app);
+    }
+    let command = solidcraft_engine::find_command("timeline.roll_to").ok_or_else(|| solidcraft_ui_text::tr("cmd.timeline_roll_to").to_owned())?;
+    let info = command.info(&app.session);
+    if info.enabled { Ok(()) } else { Err(info.disabled_reason.unwrap_or_else(|| info.label.to_owned())) }
+}
+
 /// A click runs a History control; a right-click offers to show or hide the Play button.
 pub(crate) fn transport_response(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport, response: &egui::Response) {
     if response.clicked() {
@@ -52,14 +65,14 @@ pub(crate) fn transport_response(app: &mut SolveApp, control: crate::ui_kit::His
 
 /// The History controls' menu: shows or hides the Play button, and — when the design marks any
 /// component out of the bar — shows or hides those components' entries (#10393).
-pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::context_menu::Item> {
+pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
     let show = !app.preferences.history_play_button;
-    let label = crate::i18n::tr(if show { "ui.history_play_button_show" } else { "ui.history_play_button_hide" });
-    let mut items = vec![crate::context_menu::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))];
+    let label = solidcraft_ui_text::tr(if show { "ui.history_play_button_show" } else { "ui.history_play_button_hide" });
+    let mut items = vec![crate::ui_kit::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))];
     if app.session.doc.components.iter().any(|c| c.history_hidden) {
         let show_hidden = !app.tree.history_show_hidden;
-        let label = crate::i18n::tr(if show_hidden { "ui.history_show_hidden" } else { "ui.history_hide_hidden" });
-        items.push(crate::context_menu::Item::action("ui.historyShowHidden", label, "eye").with(json!({ "show": show_hidden })));
+        let label = solidcraft_ui_text::tr(if show_hidden { "ui.history_show_hidden" } else { "ui.history_hide_hidden" });
+        items.push(crate::ui_kit::Item::action("ui.historyShowHidden", label, "eye").with(json!({ "show": show_hidden })));
     }
     items
 }
@@ -212,6 +225,36 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
     }
 }
 
+/// The icon a History folder takes from its features when Preferences says so: theirs, when every
+/// feature in it (and in the folders inside it) has the same icon and it holds no joints.
+pub(crate) fn folder_kind_icon(app: &SolveApp, id: u64) -> Option<&'static str> {
+    if !app.preferences.history_folder_kind_icon {
+        return None;
+    }
+    let doc = &app.session.doc;
+    let mut pending = vec![id];
+    let mut seen = std::collections::BTreeSet::new();
+    let mut icon = None;
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let group = doc.timeline_groups.iter().find(|group| group.id == id)?;
+        if !group.joints.is_empty() {
+            return None;
+        }
+        for feature in &group.features {
+            let this = icon_of(&doc.feature(*feature)?.kind);
+            if icon.is_some_and(|icon| icon != this) {
+                return None;
+            }
+            icon = Some(this);
+        }
+        pending.extend(doc.timeline_groups.iter().filter(|child| child.parent == Some(id)).map(|child| child.id));
+    }
+    icon
+}
+
 fn construction_plane_icon(plane: &PlaneRef) -> &'static str {
     match plane {
         PlaneRef::AtAngle { .. } => "plane_angle",
@@ -325,8 +368,8 @@ pub(crate) fn menu_targets(app: &SolveApp, id: u64) -> Vec<u64> {
 /// Delete's label in a feature's menu: how many features it deletes when that is more than one.
 fn delete_label(count: usize) -> String {
     match count {
-        1 => crate::i18n::tr_label("Delete").to_string(),
-        n => crate::i18n::format("timeline.delete_many", &[("count", &n.to_string())]),
+        1 => solidcraft_ui_text::tr_label("Delete").to_string(),
+        n => solidcraft_ui_text::format("timeline.delete_many", &[("count", &n.to_string())]),
     }
 }
 
@@ -363,7 +406,7 @@ fn after_marker(app: &SolveApp, id: u64, index: usize, marker: usize, shown: Opt
         return None;
     }
     let key = if ids.len() == 1 { "timeline.delete_after_marker_one" } else { "timeline.delete_after_marker_other" };
-    Some((crate::i18n::format(key, &[("count", &ids.len().to_string())]), ids))
+    Some((solidcraft_ui_text::format(key, &[("count", &ids.len().to_string())]), ids))
 }
 
 /// The [`after_marker`] entry as a button.
@@ -400,7 +443,7 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::action("ui.groupFeatures", "Group Features", "feature_group")
             .with(json!({ "features": targets, "parent": parent }))
             .off_because(app.session.group_refusal(&targets, parent)),
-        Item::action("timeline.suppress", crate::i18n::tr(suppress), "suppress").with(json!({ "feature": id })),
+        Item::action("timeline.suppress", solidcraft_ui_text::tr(suppress), "suppress").with(json!({ "feature": id })),
         Item::action("timeline.roll_to", "Roll History Marker Here", "rollback").with(json!({ "feature": id })),
         Item::action("ui.findBrowser", "Find in Browser", "list").with(json!({ "feature": id })),
         Item::sep(),
@@ -432,12 +475,12 @@ pub(crate) fn anchor_key(id: u64) -> String {
 
 /// Copy and Paste in a feature's timeline menu. Paste puts the copies at the history marker.
 pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
-    if crate::context_menu::button(ui, crate::i18n::tr_label("Copy"), "copy").clicked() {
+    if crate::context_menu::button(ui, solidcraft_ui_text::tr_label("Copy"), "copy").clicked() {
         let features = menu_targets(app, id);
         let _ = app.run("timeline.copy", json!({ "features": features }));
         ui.close();
     }
-    if crate::context_menu::button_enabled(ui, crate::i18n::tr_label("Paste"), "paste", !app.session.clipboard.is_empty()).clicked() {
+    if crate::context_menu::button_enabled(ui, solidcraft_ui_text::tr_label("Paste"), "paste", !app.session.clipboard.is_empty()).clicked() {
         let _ = app.run("timeline.paste", json!({}));
         ui.close();
     }
@@ -469,11 +512,11 @@ pub(crate) fn status_text(name: &str, ty: &str, error: Option<&str>, warning: Op
     let mut text = format!("{name}  ({ty})");
     if let Some(error) = error {
         text.push('\n');
-        text.push_str(&crate::i18n::format("timeline.feature_error", &[("message", &crate::i18n::tr_diagnostic(error))]));
+        text.push_str(&solidcraft_ui_text::format("timeline.feature_error", &[("message", &crate::i18n::tr_diagnostic(error))]));
     }
     if let Some(warning) = warning {
         text.push('\n');
-        text.push_str(&crate::i18n::format("timeline.feature_warning", &[("message", &crate::i18n::tr_diagnostic(warning))]));
+        text.push_str(&solidcraft_ui_text::format("timeline.feature_warning", &[("message", &crate::i18n::tr_diagnostic(warning))]));
     }
     text
 }
@@ -531,7 +574,7 @@ pub(crate) fn feature_message(app: &SolveApp, id: u64) -> Option<String> {
     let mut text = feature_status_text(&feature.name, feature.kind.type_name(), Some(result));
     if let Some(report) = result.import_report.as_ref().filter(|r| !r.issues.is_empty()) {
         text.push_str("\n\n");
-        text.push_str(crate::i18n::tr("import_report.details"));
+        text.push_str(solidcraft_ui_text::tr("import_report.details"));
         for issue in &report.issues {
             text.push('\n');
             text.push_str(&issue.detail);
@@ -587,10 +630,11 @@ pub(crate) fn import_summary(report: &ImportReport) -> String {
     }
     let parts_of = |kind| parts.get(&kind).map_or(0, std::collections::BTreeSet::len);
     let faces_of = |kind| faces.get(&kind).copied().unwrap_or(0);
-    let counted = |key: &str, n: usize| crate::i18n::format(&format!("{key}_{}", if n == 1 { "one" } else { "other" }), &[("count", &n.to_string())]);
+    let counted =
+        |key: &str, n: usize| solidcraft_ui_text::format(&format!("{key}_{}", if n == 1 { "one" } else { "other" }), &[("count", &n.to_string())]);
     let mut out = Vec::new();
     if report.parts > 1 && report.solids < report.parts {
-        out.push(crate::i18n::format("import_report.solids", &[("solids", &report.solids.to_string()), ("parts", &report.parts.to_string())]));
+        out.push(solidcraft_ui_text::format("import_report.solids", &[("solids", &report.solids.to_string()), ("parts", &report.parts.to_string())]));
     }
     let sentences = [
         ("import_report.not_imported", parts_of(IssueKind::NotImported)),
@@ -606,7 +650,7 @@ pub(crate) fn import_summary(report: &ImportReport) -> String {
     out.extend(sentences.iter().filter(|(_, n)| *n > 0).map(|(key, n)| counted(key, *n)));
     let lost = [IssueKind::NotImported, IssueKind::Refused, IssueKind::ImportedAsSurfaces, IssueKind::FaceLeftOut, IssueKind::OpenBody];
     if lost.iter().any(|k| parts.contains_key(k)) {
-        out.push(crate::i18n::tr("import_report.hint").to_string());
+        out.push(solidcraft_ui_text::tr("import_report.hint").to_string());
     }
     out.join(" ")
 }
@@ -616,7 +660,7 @@ pub(crate) fn message_button(app: &SolveApp, ui: &mut egui::Ui, id: u64) {
     let Some(text) = feature_message(app, id) else { return };
     let failed = app.session.model.result(id).is_some_and(|r| r.error.is_some());
     let label = if failed { "Copy Error Message" } else { "Copy Warning Message" };
-    if crate::context_menu::button(ui, crate::i18n::tr_label(label), "copy").clicked() {
+    if crate::context_menu::button(ui, solidcraft_ui_text::tr_label(label), "copy").clicked() {
         ui.ctx().copy_text(text);
         ui.close();
     }
@@ -740,11 +784,11 @@ fn playback_blocked(app: &SolveApp) -> bool {
 
 fn playback_ready(app: &SolveApp) -> Result<(), String> {
     if app.computing_since().is_some() || playback_blocked(app) {
-        return Err(crate::i18n::tr("ui.history_play_finish_action").into());
+        return Err(solidcraft_ui_text::tr("ui.history_play_finish_action").into());
     }
     let n = app.session.doc.features.len();
     if app.session.doc.marker.unwrap_or(n) >= n {
-        return Err(crate::i18n::tr("ui.history_play_roll_back").into());
+        return Err(solidcraft_ui_text::tr("ui.history_play_roll_back").into());
     }
     Ok(())
 }
@@ -849,14 +893,23 @@ pub(crate) fn floating_rect(available: Rect) -> Rect {
     Container::floating_card(Surface::Panel).bottom_strip_rect(available, 40.0)
 }
 
+/// A folder's Edit Holes item, when it holds holes only: one Hole dialog for all of them.
+pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64) {
+    if crate::hole_folder::holes(app, folder).is_none() {
+        return;
+    }
+    if crate::context_menu::button(ui, "Edit Holes", "hole").clicked() {
+        if let Err(why) = crate::hole_folder::open(app, folder) {
+            app.set_status(why, true);
+        }
+        ui.close();
+    }
+}
+
 fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     let t = Tokens::get();
-    let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
     let r = ui.max_rect();
     let p = ui.painter().clone();
-
-    let n = app.session.doc.features.len();
-    let marker = app.session.doc.marker.unwrap_or(n);
     // Playback controls.
     let mut x = r.left() + t.space_10;
     let grip_rect = Rect::from_center_size(pos2(x + t.space_10 / 2.0, r.center().y), vec2(t.space_10, t.space_16 + t.space_2));
@@ -864,7 +917,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     let grip = crate::ui_kit::panel_grip(&mut grip_ui).rect;
     x += t.space_10 + t.space_8;
     let mut drag_rect = grip;
-    let heading = crate::ui_kit::StripHeading::new(&p, crate::i18n::tr("ui.history_title"));
+    let heading = crate::ui_kit::StripHeading::new(&p, solidcraft_ui_text::tr("ui.history_title"));
     if x + heading.width() + crate::ui_kit::history_transport_width() <= r.right() {
         let title_rect = heading.paint(&p, Rect::from_min_max(pos2(x, r.top()), r.right_bottom()));
         drag_rect = drag_rect.union(title_rect);
@@ -881,6 +934,22 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
         x += t.space_24 + t.space_2;
     }
     x += 14.0;
+    timeline_strip(app, ui, floating, x);
+}
+
+/// The shared host already supplies the title and declared playback controls.
+pub(crate) fn panel_inline(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::browser::sync_reveals(app);
+    timeline_strip(app, ui, true, ui.max_rect().left());
+}
+
+fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32) {
+    let t = Tokens::get();
+    let accent = solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab);
+    let r = ui.max_rect();
+    let p = ui.painter().clone();
+    let n = app.session.doc.features.len();
+    let marker = app.session.doc.marker.unwrap_or(n);
     // The feature that made what is under the cursor or picked in the viewport.
     let from_view = [hovered_feature(app), picked_feature(app)];
     // Long runs of one component's features show as one chip (`timeline_fold`). The bar shows the
@@ -1072,7 +1141,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     reference: false,
                     ink: sketch_state.and_then(|state| state.ink(&t)),
                     // A dragged feature takes the colour of its drop bar.
-                    accent: if drag == Some(Drag::Feature(*id)) { crate::theme::TabAccent::for_tab(&t, "SKETCH") } else { accent },
+                    accent: if drag == Some(Drag::Feature(*id)) { solidcraft_theme::TabAccent::for_tab(&t, "SKETCH") } else { accent },
                 }
                 .paint(&p, br, crate::ui_kit::HistoryStyle::Bottom);
                 if floating && at + 1 == marker {
@@ -1088,7 +1157,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     // Greyed out says only "not shown": say why (#8100).
                     if rolled {
                         tip.push('\n');
-                        tip.push_str(crate::i18n::tr("timeline.feature_rolled_back"));
+                        tip.push_str(solidcraft_ui_text::tr("timeline.feature_rolled_back"));
                     }
                     if let Some(state) = sketch_state {
                         tip.push('\n');
@@ -1098,7 +1167,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                         tip += &format!("\n{ms:.1} ms");
                     }
                     tip.push('\n');
-                    tip.push_str(crate::i18n::tr("timeline.feature_hint"));
+                    tip.push_str(solidcraft_ui_text::tr("timeline.feature_hint"));
                     ui.set_max_width(ui.spacing().tooltip_width);
                     ui.add(egui::Label::new(tip));
                 });
@@ -1139,7 +1208,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                 }
                 crate::ui_kit::history_marker(&p, mr, false, accent);
-                resp.backing_on_hover_text(crate::i18n::tr("ui.history_marker_tip"));
+                resp.backing_on_hover_text(solidcraft_ui_text::tr("ui.history_marker_tip"));
             }
             // The joints at the end belong to the whole design: a bar with its groups that shows one
             // component leaves them out. Without the groups they stay, as they always have.
@@ -1250,6 +1319,38 @@ mod tests {
     use crate::scenario::Harness;
 
     #[test]
+    fn a_folder_of_one_kind_of_feature_takes_its_icon_when_preferences_say_so() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "name": "Block"})).unwrap();
+        for x in [8, 16, 24, 32] {
+            h.app.run("solid.hole", json!({"position": [x, 10, 20], "diameter": 4, "name": format!("H{x}")})).unwrap();
+        }
+        let group = |h: &mut Harness, p: serde_json::Value| h.app.run("timeline.group", p).unwrap()["group"].as_u64().unwrap();
+        let inner = group(&mut h, json!({"name": "Inner", "features": ["H8", "H16"]}));
+        // Holes, and a folder of holes inside: all one kind.
+        let holes = group(&mut h, json!({"name": "Holes", "features": ["H24"], "groups": [inner]}));
+        let mixed = group(&mut h, json!({"name": "Mixed", "features": ["Block"]}));
+        let hole = super::icon_of(&h.app.session.doc.find_feature("H8").unwrap().kind);
+        // Off (the default): every folder keeps the folder icon.
+        assert!(!h.app.preferences.history_folder_kind_icon);
+        assert_eq!(super::folder_kind_icon(&h.app, holes), None);
+        crate::prefs::set(&mut h.app, &json!({"history_folder_kind_icon": true})).unwrap();
+        assert_eq!(super::folder_kind_icon(&h.app, holes), Some(hole));
+        assert_eq!(super::folder_kind_icon(&h.app, inner), Some(hole));
+        assert_eq!(super::folder_kind_icon(&h.app, mixed), Some(super::icon_of(&h.app.session.doc.find_feature("Block").unwrap().kind)));
+        // A box among the holes: back to the folder icon.
+        h.app.run("timeline.group", json!({"name": "Both", "groups": [holes, mixed]})).unwrap();
+        let both = h.app.session.doc.timeline_groups.iter().find(|g| g.name == "Both").unwrap().id;
+        assert_eq!(super::folder_kind_icon(&h.app, both), None);
+        // Both Histories draw it without trouble.
+        for left in [false, true] {
+            h.app.preferences.timeline_left = left;
+            h.frames(3);
+        }
+    }
+
+    #[test]
     fn joint_folder_hides_fifty_joint_tiles_in_both_history_layouts() {
         use crate::scenario::handle_at;
         for left in [false, true] {
@@ -1322,7 +1423,7 @@ mod tests {
         assert!(handle_at("timeline:CopyBox").is_none(), "the hidden copy leaves the bar");
         assert!(handle_at("timeline:PartBox").is_some(), "the rest of the design stays");
         // The History controls' menu shows them anyway, and hides them again (#10393).
-        fn toggle(h: &Harness) -> context_menu::Item {
+        fn toggle(h: &Harness) -> crate::ui_kit::Item {
             let items = context_menu::items(&h.app, &Target::HistoryControls);
             items.into_iter().find(|i| i.id == "ui.historyShowHidden").expect("the bar offers to show hidden entries").clone()
         }
@@ -1365,8 +1466,9 @@ mod tests {
 
     #[test]
     fn history_status_translates_prefixes_and_both_diagnostics() {
+        crate::i18n::install();
         let diagnostic = "there is no body to cut or intersect in component 'Mount'; the tool may overlap 'Plate' in component 'Base' — activate that component or pick the body as a target";
-        let _language = crate::i18n::scope("ja");
+        let _language = solidcraft_ui_text::scope("ja");
         let translated = crate::i18n::tr_diagnostic(diagnostic);
         assert_ne!(translated, diagnostic);
         assert_eq!(
@@ -1379,7 +1481,7 @@ mod tests {
             super::status_text("My feature", "ExtrudeFeature", None, Some("Custom part: 1.25 mm")),
             "My feature  (ExtrudeFeature)\n警告: Custom part: 1.25 mm"
         );
-        let _english = crate::i18n::scope("en");
+        let _english = solidcraft_ui_text::scope("en");
         assert_eq!(super::status_text("Box", "BoxFeature", Some("error"), Some("warning")), "Box  (BoxFeature)\nError: error\nWarning: warning");
     }
 
@@ -1387,8 +1489,9 @@ mod tests {
     /// them, faces counted, no entity numbers or kernel wording (those stay in the details).
     #[test]
     fn an_import_summary_counts_parts_and_faces_in_plain_words() {
+        crate::i18n::install();
         use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
-        let _english = crate::i18n::scope("en");
+        let _english = solidcraft_ui_text::scope("en");
         let issue =
             |kind, item: Option<u64>, faces, detail: &str| ImportIssue { kind, item, part: String::new(), faces, times: 1, detail: detail.into() };
         let report = ImportReport {
@@ -1442,7 +1545,7 @@ mod tests {
             let marker = crate::scenario::rect_of("history:marker").unwrap().center();
             h.call("ui.move", json!({"x": marker.x, "y": marker.y}));
             h.frames(90);
-            let expected = crate::i18n::Locale::for_language("ja").text("ui.history_marker_tip");
+            let expected = solidcraft_ui_text::Locale::for_language("ja").text("ui.history_marker_tip");
             let output = egui::FullOutput { shapes: h.shapes.clone(), ..Default::default() };
             let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|t| t.galley.text()).collect();
             assert!(texts.contains(&expected), "left={left}: {texts:?}");
@@ -1465,8 +1568,8 @@ mod tests {
         h.step(&json!({"click": {"handle": "timeline:First"}, "button": "right"})).unwrap();
         let texts = painted(&h);
         assert!(!texts.iter().any(|t| t == "Suppress Features"), "the English literal is painted in the Japanese UI: {texts:?}");
-        let ja = crate::i18n::Locale::for_language("ja").text("timeline.suppress_features").to_string();
-        let ja_unsuppress = crate::i18n::Locale::for_language("ja").text("timeline.unsuppress_features").to_string();
+        let ja = solidcraft_ui_text::Locale::for_language("ja").text("timeline.suppress_features").to_string();
+        let ja_unsuppress = solidcraft_ui_text::Locale::for_language("ja").text("timeline.unsuppress_features").to_string();
         assert!(texts.contains(&ja), "the item must read {ja}: {texts:?}");
         h.step(&json!({"key": "Escape"})).unwrap();
         // A suppressed feature offers the other way round.
@@ -1480,8 +1583,8 @@ mod tests {
         h.step(&json!({"key": "Escape"})).unwrap();
         // The English wording is the one the menu always showed: the change adds messages, it
         // does not reword the item.
-        assert_eq!(crate::i18n::Locale::for_language("en").text("timeline.suppress_features"), "Suppress Features");
-        assert_eq!(crate::i18n::Locale::for_language("en").text("timeline.unsuppress_features"), "Unsuppress Features");
+        assert_eq!(solidcraft_ui_text::Locale::for_language("en").text("timeline.suppress_features"), "Suppress Features");
+        assert_eq!(solidcraft_ui_text::Locale::for_language("en").text("timeline.unsuppress_features"), "Unsuppress Features");
     }
 
     #[test]
@@ -1635,7 +1738,7 @@ mod tests {
 
     #[test]
     fn playback_shows_each_feature_in_every_history_layout() {
-        for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for (dock, width) in
                 [("bottom", 130.0), ("left", 56.0), ("left", crate::ui_kit::history_width(true)), ("left", 320.0), ("under_browser", 170.0)]
             {
@@ -1794,14 +1897,14 @@ mod tests {
             right_click(&mut h, "history:back");
             assert!(h.app.viewport.context_menu.is_some() && h.app.menu.target == Target::HistoryControls, "{dock} {width}");
             let items = crate::context_menu::items(&h.app, &Target::HistoryControls);
-            assert_eq!(items[0].label, crate::i18n::tr("ui.history_play_button_hide"));
+            assert_eq!(items[0].label, solidcraft_ui_text::tr("ui.history_play_button_hide"));
             crate::context_menu::run_item(&mut h.app, &items[0], egui::Pos2::ZERO);
             assert!(!h.app.preferences.history_play_button);
             h.frames(2);
             assert!(crate::scenario::handle_at("history:play").is_none(), "the four controls again; {dock} {width}");
 
             let items = crate::context_menu::items(&h.app, &Target::HistoryControls);
-            assert_eq!(items[0].label, crate::i18n::tr("ui.history_play_button_show"));
+            assert_eq!(items[0].label, solidcraft_ui_text::tr("ui.history_play_button_show"));
             crate::context_menu::run_item(&mut h.app, &items[0], egui::Pos2::ZERO);
             h.frames(2);
             assert!(crate::scenario::handle_at("history:play").is_some(), "and Play back; {dock} {width}");
@@ -2650,13 +2753,13 @@ mod tests {
     #[test]
     fn both_strips_keep_selection_reorder_marker_and_transport() {
         use crate::scenario::{handle_at, rect_of};
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = two_boxes(false);
             h.app.ui.layout = mode;
             h.settle();
             let viewport = h.app.viewport.rect.unwrap();
-            if mode == crate::shell::LayoutMode::Floating {
-                assert_eq!(rect_of("history:card").unwrap().bottom(), viewport.bottom() - crate::shell::SHELL_GAP);
+            if mode == crate::ui_kit::LayoutMode::Floating {
+                assert_eq!(rect_of("history:card").unwrap().bottom(), viewport.bottom() - crate::ui_kit::SHELL_GAP);
             } else {
                 let strip = rect_of("history:strip").unwrap();
                 assert_eq!(strip.top(), viewport.bottom());
@@ -2716,8 +2819,8 @@ mod tests {
     fn floating_strip_has_only_history_text_and_accents_the_last_done_chip_and_marker() {
         let mut h = two_boxes(false);
         h.app.ui.tab = "SURFACE".into();
-        let t = crate::theme::Tokens::get();
-        let accent = crate::theme::TabAccent::for_tab(&t, "SURFACE");
+        let t = solidcraft_theme::Tokens::get();
+        let accent = solidcraft_theme::TabAccent::for_tab(&t, "SURFACE");
         for marker_position in [None, Some(1), Some(0)] {
             h.app.session.doc_mut().marker = marker_position;
             let marker_index = marker_position.unwrap_or(2);

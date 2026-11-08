@@ -8,8 +8,8 @@ use egui::{Color32, Pos2, Rect, Shape, Stroke, pos2, vec2};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 
 use crate::dialogs::{HoleOpts, Kind};
-use crate::theme::Tokens;
 use crate::ui_kit::FigureSlot;
+use solidcraft_theme::Tokens;
 
 /// A size the section shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

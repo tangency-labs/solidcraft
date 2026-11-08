@@ -6,7 +6,7 @@
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::joints;
 use solidcraft_doc::motion::MotionStudy;
@@ -16,6 +16,7 @@ use solidcraft_geom::Aabb3;
 use super::contact_sweep::{ContactGeometry, Member};
 use super::{drive_with_contact, joint_id, keyed, occurrences, path_world, study_index, traced_point, values_at};
 use crate::params::{bad, bool_, num};
+use crate::schema::motion_analysis::{CollidingPair, MotionInterference, MotionPlot, PlotSeries, PlottedPoint, StudyStop};
 use crate::{EngineError, Result, Session};
 
 pub const PLOT_DOC: &str = "study: id|name; joints?: [id|name] (default: every joint that moves); occurrence? and point? (a point \
@@ -78,8 +79,8 @@ fn step_of(m: &MotionStudy, k: usize, n: usize) -> f64 {
 /// Plays study `m` on a copy of the design in `n` samples, each driven from the one before (so
 /// closed loops follow on their branch, as `motion.play` places them; contact sets stop it only
 /// when `contact`). `each` sees the copy at every sample and answers whether to go on. Returns
-/// where the motion stopped short (all null when it did not).
-fn play(s: &Session, m: &MotionStudy, n: usize, contact: bool, mut each: impl FnMut(&Session, usize) -> Result<bool>) -> Result<Value> {
+/// where the motion stopped short (all `None` when it did not).
+fn play(s: &Session, m: &MotionStudy, n: usize, contact: bool, mut each: impl FnMut(&Session, usize) -> Result<bool>) -> Result<Stopped> {
     let mut t = s.scratch();
     // Played from where the parts are placed: moves only shown are not where joints are solved.
     t.pending_moves.clear();
@@ -91,14 +92,22 @@ fn play(s: &Session, m: &MotionStudy, n: usize, contact: bool, mut each: impl Fn
         let want = values_at(&t, m, step_of(m, k, n));
         let (r, _) = drive_with_contact(&mut t, &want, &given)?;
         let go = each(&t, k)?;
-        if r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() {
-            return Ok(json!({"stopped_at": k, "stopped_by_loop": r["stopped_by_loop"], "stopped_by_contact": r["stopped_by_contact"]}));
+        let (by_loop, by_contact) = (r["stopped_by_loop"].as_object(), r["stopped_by_contact"].as_object());
+        if by_loop.is_some() || by_contact.is_some() {
+            return Ok(Stopped { stop: StudyStop { stopped_at: Some(k), stopped_by_loop: by_loop.cloned() }, by_contact: by_contact.cloned() });
         }
         if !go {
             break;
         }
     }
-    Ok(json!({"stopped_at": null, "stopped_by_loop": null, "stopped_by_contact": null}))
+    Ok(Stopped { stop: StudyStop { stopped_at: None, stopped_by_loop: None }, by_contact: None })
+}
+
+/// Where [`play`] stopped short: the replies' `stopped_at` and `stopped_by_loop`, and the
+/// contact that stopped it (which only a plot reports: interference plays without contact).
+struct Stopped {
+    stop: StudyStop,
+    by_contact: Option<Map<String, Value>>,
 }
 
 /// The derivative of samples `v` spaced `h` apart: central differences inside, second-order
@@ -206,12 +215,9 @@ pub(super) fn plot(s: &mut Session, p: &Value) -> Result<Value> {
     let seconds_per_step = duration.map(|d| d / f64::from(m.steps));
     let h = f64::from(m.steps) / (n - 1) as f64 * seconds_per_step.unwrap_or(1.0);
     let per = if duration.is_some() { "s" } else { "step" };
-    let steps: Vec<f64> = (0..taken).map(|k| step_of(&m, k, n)).collect();
-    let mut out = json!({"study": m.name, "steps": m.steps, "samples": taken, "step": steps});
-    if let Some(sps) = seconds_per_step {
-        out["time"] = steps.iter().map(|st| st * sps).collect();
-    }
-    let joints_out: Vec<Value> = series
+    let step: Vec<f64> = (0..taken).map(|k| step_of(&m, k, n)).collect();
+    let time = seconds_per_step.map(|sps| step.iter().map(|st| st * sps).collect());
+    let joints_out: Vec<PlotSeries> = series
         .iter()
         .zip(values.iter_mut())
         .map(|((id, i), v)| {
@@ -227,13 +233,21 @@ pub(super) fn plot(s: &mut Session, p: &Value) -> Result<Value> {
                     unwrap_degrees(v);
                 }
             }
-            json!({"joint": id, "name": j.map(|j| j.name.clone()), "index": i, "dof": j.and_then(|j| j.kind.dofs().get(*i).copied()),
-                "unit": unit, "velocity_unit": format!("{unit}/{per}"), "acceleration_unit": format!("{unit}/{per}²"),
-                "value": v, "velocity": derivative(v, h), "acceleration": second_derivative(v, h)})
+            PlotSeries {
+                joint: *id,
+                name: j.map(|j| j.name.clone()),
+                index: *i,
+                dof: j.and_then(|j| j.kind.dofs().get(*i).copied()),
+                unit,
+                velocity_unit: format!("{unit}/{per}"),
+                acceleration_unit: format!("{unit}/{per}²"),
+                velocity: derivative(v, h),
+                acceleration: second_derivative(v, h),
+                value: std::mem::take(v),
+            }
         })
         .collect();
-    out["joints"] = json!(joints_out);
-    if let Some((occ, _)) = &point {
+    let followed = point.as_ref().map(|(occ, _)| {
         let axis = |c: usize| -> Vec<f64> { path.iter().map(|q| [q.x, q.y, q.z].get(c).copied().unwrap_or(0.0)).collect() };
         let d: Vec<(Vec<f64>, Vec<f64>)> = (0..3).map(|c| (derivative(&axis(c), h), second_derivative(&axis(c), h))).collect();
         let vec_at = |k: usize, second: bool| -> Vec3 {
@@ -241,16 +255,33 @@ pub(super) fn plot(s: &mut Session, p: &Value) -> Result<Value> {
             Vec3::new(c(0), c(1), c(2))
         };
         let (vel, acc): (Vec<Vec3>, Vec<Vec3>) = (0..path.len()).map(|k| (vec_at(k, false), vec_at(k, true))).unzip();
-        let xyz = |list: &[Vec3]| -> Value { list.iter().map(|v| json!([v.x, v.y, v.z])).collect() };
+        let xyz = |list: &[Vec3]| -> Vec<[f64; 3]> { list.iter().map(|v| [v.x, v.y, v.z]).collect() };
         let name = s.doc.occurrences.iter().find(|o| Some(&o.id) == occ.last()).map_or_else(|| "root".to_string(), |o| o.name.clone());
-        out["point"] = json!({"occurrence": name, "unit": "mm", "velocity_unit": format!("mm/{per}"), "acceleration_unit": format!("mm/{per}²"),
-            "position": xyz(&path), "velocity": xyz(&vel), "acceleration": xyz(&acc),
-            "speed": vel.iter().map(|v| v.len()).collect::<Vec<_>>(), "acceleration_norm": acc.iter().map(|v| v.len()).collect::<Vec<_>>()});
-    }
-    for k in ["stopped_at", "stopped_by_loop", "stopped_by_contact"] {
-        out[k] = stop[k].clone();
-    }
-    Ok(out)
+        PlottedPoint {
+            occurrence: name,
+            unit: "mm",
+            velocity_unit: format!("mm/{per}"),
+            acceleration_unit: format!("mm/{per}²"),
+            position: xyz(&path),
+            velocity: xyz(&vel),
+            acceleration: xyz(&acc),
+            speed: vel.iter().map(|v| v.len()).collect(),
+            acceleration_norm: acc.iter().map(|v| v.len()).collect(),
+        }
+    });
+    let reply = MotionPlot {
+        study: m.name,
+        steps: m.steps,
+        samples: taken,
+        step,
+        time,
+        joints: joints_out,
+        point: followed,
+        stop: stop.stop,
+        stopped_by_contact: stop.by_contact,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// One pair of parts that collides along a study.
@@ -466,7 +497,7 @@ fn interference_within(s: &mut Session, p: &Value, budget: usize, seconds: Optio
     }
     let mut list: Vec<(&(u64, u64), &Collision)> = found.iter().collect();
     list.sort_by_key(|(_, c)| c.samples.first().copied().unwrap_or(usize::MAX));
-    let collisions: Vec<Value> = list
+    let collisions: Vec<CollidingPair> = list
         .iter()
         .map(|(_, c)| {
             let (volume, deepest, not_measured) = match &c.most_volume {
@@ -475,23 +506,36 @@ fn interference_within(s: &mut Session, p: &Value, budget: usize, seconds: Optio
             };
             let first = c.samples.first().map(|k| step_of(&m, *k, n));
             let last = c.samples.last().map(|k| step_of(&m, *k, n));
-            json!({"a": c.names.0, "b": c.names.1, "first_step": first, "last_step": last, "steps": ranges(&m, &c.samples, n),
-                "depth_mm": c.depth, "deepest_step": deepest, "volume_mm3": volume, "not_measured": not_measured})
+            CollidingPair {
+                a: c.names.0.clone(),
+                b: c.names.1.clone(),
+                first_step: first,
+                last_step: last,
+                steps: ranges(&m, &c.samples, n),
+                depth_mm: c.depth,
+                deepest_step: deepest,
+                volume_mm3: volume,
+                not_measured,
+            }
         })
         .collect();
     // A check cut short says nothing about the steps it did not reach, so it is not clear (#7855).
     let clear = collisions.is_empty() && !truncated;
-    let mut out = json!({"study": m.name, "steps": m.steps, "clear": clear, "collisions": collisions,
-        "pairs": geometry.pair_count(), "samples": checked, "truncated": truncated});
-    if truncated {
-        out["checked_to"] = json!(checked.checked_sub(1).map(|k| step_of(&m, k, n)));
-    }
-    if let Some(v) = seconds {
-        out["budget_s"] = json!(v);
-    }
-    out["stopped_at"] = stop["stopped_at"].clone();
-    out["stopped_by_loop"] = stop["stopped_by_loop"].clone();
-    Ok(out)
+    let reply = MotionInterference {
+        study: m.name.clone(),
+        steps: m.steps,
+        clear,
+        collisions,
+        pairs: geometry.pair_count(),
+        samples: checked,
+        truncated,
+        // At least one sample was checked (none is refused above), so this is a step.
+        checked_to: if truncated { checked.checked_sub(1).map(|k| step_of(&m, k, n)) } else { None },
+        budget_s: seconds,
+        stop: stop.stop,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 #[cfg(test)]
