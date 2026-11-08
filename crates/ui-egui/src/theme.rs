@@ -1706,6 +1706,15 @@ impl Tokens {
             k += 0.1;
             t.selected_ink = accent.lerp_to_gamma(toward, k.min(1.0));
         }
+        // A tint that the lift cannot read on (a pale tint over a translucent mid-grey panel):
+        // black or white, whichever reads better.
+        if contrast_ratio(t.selected_ink, t.accent_soft) < 4.5 {
+            t.selected_ink = if contrast_ratio(Color32::BLACK, t.accent_soft) >= contrast_ratio(Color32::WHITE, t.accent_soft) {
+                Color32::BLACK
+            } else {
+                Color32::WHITE
+            };
+        }
         t.on_accent = if contrast_ratio(Color32::BLACK, accent) >= contrast_ratio(Color32::WHITE, accent) { Color32::BLACK } else { Color32::WHITE };
         t.chip = accent;
         t.form_primary = accent;
@@ -2274,6 +2283,10 @@ mod tests {
         for f in crate::theme_files::builtin() {
             bases.push((f.id.clone(), crate::theme_files::resolve(f), f.base.is_dark()));
         }
+        // A dark theme whose panel is a translucent mid grey: a white accent's tint is pale there.
+        let mut translucent = super::Tokens::dark();
+        translucent.panel = egui::Color32::from_rgba_unmultiplied(128, 128, 128, 128);
+        bases.push(("translucent grey".into(), translucent, true));
         let mut accents: Vec<egui::Color32> = ["#3b82f6", "#44d62c", "#14b8a6", "#8b5cf6", "#ec4899", "#ef4444", "#f97316", "#eab308"]
             .iter()
             .filter_map(|h| super::parse_accent(h))
