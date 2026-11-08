@@ -1324,7 +1324,7 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
         let at = |u: f64| e.start + (e.other - e.start) * u;
         let g = e.spline.greville();
         let tips: Vec<Option<Pos2>> = g.iter().zip(&e.spline.radii).map(|(u, r)| proj.to_screen(at(*u) + e.n * *r)).collect();
-        painter.extend(crate::viewport::dashed_line(
+        painter.extend(crate::ui_kit::dashed_line(
             &tips.iter().flatten().copied().collect::<Vec<_>>(),
             painter.clip_rect(),
             Stroke::new(1.0, t.manipulator),
@@ -1588,7 +1588,7 @@ fn measure_components(
         let (at, offset) = if let Some((sa, sb)) = screen {
             let leg = sb - sa;
             if leg.length_sq() > 1.0 {
-                painter.extend(crate::viewport::dashed_line(&[sa, sb], painter.clip_rect(), Stroke::new(1.5, color), 5.0, 3.0));
+                painter.extend(crate::ui_kit::dashed_line(&[sa, sb], painter.clip_rect(), Stroke::new(1.5, color), 5.0, 3.0));
                 let normal = vec2(-leg.y, leg.x).normalized();
                 for p in [sa, sb] {
                     painter.line_segment([p - normal * 3.0, p + normal * 3.0], Stroke::new(1.0, color));
@@ -1709,7 +1709,7 @@ fn taper_handle(
     crate::scenario::publish_handle("taper", es);
     let hot = r.hovered() || r.dragged();
     let col = if hot { t.accent } else { t.manipulator };
-    painter.extend(crate::viewport::dashed_line(&[fs, es], painter.clip_rect(), Stroke::new(1.2, col), 5.0, 3.0));
+    painter.extend(crate::ui_kit::dashed_line(&[fs, es], painter.clip_rect(), Stroke::new(1.2, col), 5.0, 3.0));
     painter.circle(es, if hot { 6.5 } else { 5.0 }, t.overlay, Stroke::new(2.0, col));
     if hot {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);

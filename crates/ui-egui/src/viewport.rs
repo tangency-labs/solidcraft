@@ -391,84 +391,6 @@ pub(crate) fn projected_polygon(pts: &[Pos2], fill: Color32, stroke: Stroke) -> 
     out
 }
 
-/// [`Shape::dashed_line`] for points projected into the viewport, cut to `clip` (grown by two
-/// dash periods, so the cuts lie off screen). epaint makes one shape per dash and steps along in
-/// f32, so a line reaching far off screen made millions of shapes, or never ended: an Extrude
-/// distance of 1e9 mm filled the memory within a second. A line inside the bounds is dashed as
-/// before; a cut one keeps its dashes in phase along the whole line, so they don't crawl as the
-/// view moves.
-pub(crate) fn dashed_line(pts: &[Pos2], clip: Rect, stroke: Stroke, dash: f32, gap: f32) -> Vec<Shape> {
-    let bounds = clip.expand(2.0 * (dash + gap));
-    if pts.iter().all(|p| bounds.contains(*p)) {
-        return Shape::dashed_line(pts, stroke, dash, gap);
-    }
-    let period = f64::from(dash + gap);
-    let mut out = Vec::new();
-    let mut run: Vec<Pos2> = Vec::new();
-    let mut offset = 0.0;
-    let mut flush = |run: &mut Vec<Pos2>, offset: f32| {
-        if run.len() >= 2 && period > 0.0 {
-            out.extend(Shape::dashed_line_with_offset(run, stroke, &[dash], &[gap], offset));
-        }
-        run.clear();
-    };
-    let mut along = 0.0_f64;
-    for w in pts.windows(2) {
-        let (a, b) = (w[0], w[1]);
-        let len = f64::from(a.distance(b));
-        match clip_segment(a, b, bounds).filter(|_| len.is_finite()) {
-            Some((t0, t1)) => {
-                // In f64: a cut a trillion points from `a` is lost in f32.
-                let at = |t: f64| pos2((f64::from(a.x) + f64::from(b.x - a.x) * t) as f32, (f64::from(a.y) + f64::from(b.y - a.y) * t) as f32);
-                let (from, to) = (at(t0), at(t1));
-                if run.is_empty() || t0 > 0.0 {
-                    flush(&mut run, offset);
-                    // How far into its period the pattern is where the run begins: a cut run
-                    // waits for the next dash (the wait is off screen), the line's start begins one.
-                    let phase = (along + len * t0) % period;
-                    offset = if t0 > 0.0 { ((period - phase) % period) as f32 } else { 0.0 };
-                    run.push(from);
-                }
-                run.push(to);
-                if t1 < 1.0 {
-                    flush(&mut run, offset);
-                }
-            }
-            None => flush(&mut run, offset),
-        }
-        if len.is_finite() {
-            along += len;
-        }
-    }
-    flush(&mut run, offset);
-    out
-}
-
-/// The part of segment `a`–`b` inside `r`, as parameters `0 ≤ t0 ≤ t1 ≤ 1` along it; `None` when
-/// it misses `r` or a coordinate is not finite (Liang–Barsky, in f64).
-fn clip_segment(a: Pos2, b: Pos2, r: Rect) -> Option<(f64, f64)> {
-    let (x0, y0, dx, dy) = (f64::from(a.x), f64::from(a.y), f64::from(b.x - a.x), f64::from(b.y - a.y));
-    if ![x0, y0, dx, dy].iter().all(|v| v.is_finite()) {
-        return None;
-    }
-    let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
-    for (p, q) in [(-dx, x0 - f64::from(r.min.x)), (dx, f64::from(r.max.x) - x0), (-dy, y0 - f64::from(r.min.y)), (dy, f64::from(r.max.y) - y0)] {
-        if p == 0.0 {
-            if q < 0.0 {
-                return None;
-            }
-        } else {
-            let t = q / p;
-            if p < 0.0 {
-                t0 = t0.max(t);
-            } else {
-                t1 = t1.min(t);
-            }
-        }
-    }
-    (t0 <= t1).then_some((t0, t1))
-}
-
 /// View directions all round, a few degrees apart, none exactly along an axis.
 #[cfg(test)]
 pub(crate) fn orbit_directions() -> impl Iterator<Item = Vec3> {
@@ -7326,6 +7248,19 @@ fn axis_tips(cam: &Camera, c: Pos2) -> Vec<(&'static str, Vec3, Pos2, f64)> {
         .collect();
     tips.sort_by(|a, b| a.3.total_cmp(&b.3));
     tips
+}
+
+/// The six signed world axes as `cam` poses them, for the navigator figure in Preferences: each
+/// one's screen direction (right and down) and depth along the camera's back.
+pub(crate) fn navigator_axes(cam: &Camera) -> [crate::ui_kit::NavigatorAxis; 6] {
+    let (right, up, back) = cam.basis();
+    let axis = |name: &'static str, d: Vec3| crate::ui_kit::NavigatorAxis {
+        name,
+        direction: d.into(),
+        screen: vec2(d.dot(right) as f32, -d.dot(up) as f32),
+        depth: d.dot(back),
+    };
+    [axis("x", Vec3::X), axis("-x", -Vec3::X), axis("y", Vec3::Y), axis("-y", -Vec3::Y), axis("z", Vec3::Z), axis("-z", -Vec3::Z)]
 }
 
 fn axis_hit(tips: &[(&str, Vec3, Pos2, f64)], p: Pos2) -> Option<usize> {

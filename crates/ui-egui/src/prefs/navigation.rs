@@ -274,10 +274,15 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     });
 }
 
+/// The Signed axes card: the navigator as the default view poses it.
+fn paint_signed_axes(p: &egui::Painter, rect: egui::Rect) {
+    ui_kit::paint_navigation_axes(p, rect, &crate::viewport::navigator_axes(&solidcraft_engine::render::Camera::default()));
+}
+
 fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_section(ui, "navigation_view", app.tr("ui.tab_view"), |ui| {
         let options = [
-            ui_kit::PictureChoice { key: "Signed axes", label: app.tr("prefs.navigation.axes_signed"), figure: ui_kit::paint_navigation_axes },
+            ui_kit::PictureChoice { key: "Signed axes", label: app.tr("prefs.navigation.axes_signed"), figure: paint_signed_axes },
             ui_kit::PictureChoice { key: "Cube", label: app.tr("prefs.navigation.cube_compact"), figure: ui_kit::paint_navigation_cube },
             ui_kit::PictureChoice { key: "Custom", label: crate::i18n::tr_label("Custom"), figure: ui_kit::paint_navigation_custom },
         ];

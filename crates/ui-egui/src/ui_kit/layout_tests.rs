@@ -86,7 +86,13 @@ fn navigation_cards_keep_their_proportions_and_native_targets_at_narrow_widths()
                     190.0,
                     178.0 / 115.0,
                     vec![
-                        PictureChoice { key: "axes", label: "Axes (signed)", figure: paint_navigation_axes },
+                        PictureChoice {
+                            key: "axes",
+                            label: "Axes (signed)",
+                            figure: |p, rect| {
+                                paint_navigation_axes(p, rect, &crate::viewport::navigator_axes(&solidcraft_engine::render::Camera::default()))
+                            },
+                        },
                         PictureChoice { key: "cube", label: "Cube (compact)", figure: paint_navigation_cube },
                     ],
                 ),

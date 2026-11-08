@@ -1,5 +1,6 @@
 //! Dense ports of the common feature forms. Commands and parameter construction stay in dialogs.
 use super::*;
+use crate::dialogs_surface::continuity_row_explained;
 use crate::ui_kit;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
 use solidcraft_engine::kernel::Continuity;
@@ -213,7 +214,7 @@ fn fillet_corner_rows(
     }
     let mut enter = false;
     let mut corner = if patch { Continuity::G2 } else { Continuity::G1 };
-    ui_kit::continuity_row_explained(ui, "ui.corners", "fi_corner", &mut corner, &FILLET_CORNERS.map(|(g, _)| g), &fillet_corner_tip());
+    continuity_row_explained(ui, "ui.corners", "fi_corner", &mut corner, &FILLET_CORNERS.map(|(g, _)| g), &fillet_corner_tip());
     if (corner == Continuity::G2) != patch {
         if corner == Continuity::G2 {
             extra.insert("corner".into(), json!(Continuity::G2.as_str()));

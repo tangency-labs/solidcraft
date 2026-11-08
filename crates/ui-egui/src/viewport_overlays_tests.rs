@@ -1625,31 +1625,6 @@ fn corner_toast_keeps_its_width_beside_a_docked_dialog() {
     }
 }
 
-/// A dashed line reaching far off screen is cut to the view before it is dashed: epaint makes a
-/// shape per dash and steps along in f32, so one a trillion points long made billions of them,
-/// or never finished. A line in view is dashed exactly as before, and a cut one keeps its
-/// dashes in phase with its start.
-#[test]
-fn a_dashed_line_far_off_screen_is_cut_to_the_view() {
-    let view = Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0));
-    let stroke = Stroke::new(1.0, Color32::WHITE);
-    let near = [pos2(100.0, 100.0), pos2(700.0, 400.0), pos2(900.0, 100.0)];
-    assert_eq!(dashed_line(&near, view, stroke, 5.0, 3.0), Shape::dashed_line(&near, stroke, 5.0, 3.0));
-    let far = dashed_line(&[pos2(100.0, 500.0), pos2(1e12, 500.0)], view, stroke, 5.0, 3.0);
-    assert!(!far.is_empty() && far.len() < 250, "{} dashes", far.len());
-    for s in &far {
-        let Shape::LineSegment { points, .. } = s else { panic!("{s:?}") };
-        let periods = (points[0].x - 100.0) / 8.0;
-        assert!((periods - periods.round()).abs() < 1e-3, "a dash starts at {points:?}, off the line's pattern");
-    }
-    let across = dashed_line(&[pos2(-1e12, 500.0), pos2(1e12, 500.0)], view, stroke, 5.0, 3.0);
-    assert!(across.len() < 250, "{} dashes", across.len());
-    assert!(across.iter().any(|s| matches!(s, Shape::LineSegment { points, .. } if (700.0..900.0).contains(&points[0].x))), "the line shows in view");
-    for missing in [[pos2(f32::NAN, 0.0), pos2(10.0, 10.0)], [pos2(f32::INFINITY, 0.0), pos2(10.0, 10.0)], [pos2(-1e9, -1e9), pos2(-1e9, 1e9)]] {
-        assert!(dashed_line(&missing, view, stroke, 5.0, 3.0).is_empty(), "{missing:?}");
-    }
-}
-
 /// Extrude with a distance of 1e9 mm drew the taper handle's dashed line a billion millimetres
 /// long into the viewport: the frame never finished and filled the memory. It now draws at once.
 #[test]
