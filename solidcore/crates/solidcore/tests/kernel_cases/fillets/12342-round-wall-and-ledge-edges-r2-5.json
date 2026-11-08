@@ -1,0 +1,107 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  20.0,
+                  20.0,
+                  -40.0
+                ],
+                [
+                  20.0,
+                  20.0,
+                  2.0
+                ]
+              ],
+              "index": 0
+            },
+            {
+              "at": [
+                [
+                  23.0,
+                  20.0,
+                  -50.0
+                ],
+                [
+                  23.0,
+                  20.0,
+                  -40.0
+                ]
+              ],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              20.0,
+              -19.0
+            ],
+            [
+              23.0,
+              20.0,
+              -45.0
+            ]
+          ],
+          "tolerance": 0.01
+        },
+        "kind": "round",
+        "sizes": [
+          2.5,
+          2.5
+        ]
+      }
+    }
+  ],
+  "case": "12342-round-wall-and-ledge-edges-r2-5",
+  "expected": {
+    "body_count": 1,
+    "method": "the two rounds are apart: the wall's (x 17.5..20 at y = 20) ends on the plane z = -40 over the base, the ledge's (x 20.5..23) on the ledge's top face, and both edges run between faces square to them at their ends. Each takes (1 - pi/4) r^2 per length, over 42 + 10 = 52 mm: 9520 - (1 - pi/4) 6.25 * 52 = 9450.25440310417. The wall's round alone builds as its closed form (R3.5: 9409.587355, R4: 9375.787566). body_count 1",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#12342",
+      "tangency-labs/solidcore#2845"
+    ],
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "volume_mm3": 9450.25440310417,
+    "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. Both edges rounded R2.5, a size that fits each: one closed solid (R3 the same), as each edge alone builds"
+  },
+  "expressible": true,
+  "gallery_note": "R2.5 fits each edge alone and the two together: the rounds end apart on the stepped back face",
+  "operation_expressible": true,
+  "records": "12342-round-wall-and-ledge-edges-r2-5.bodies.json.gz",
+  "result": [
+    {
+      "made": "b2"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#12342",
+    "tangency-labs/solidcore#2845"
+  ],
+  "ungraded": [],
+  "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. Both edges rounded R2.5, a size that fits each: one closed solid (R3 the same), as each edge alone builds",
+  "why_not": []
+}

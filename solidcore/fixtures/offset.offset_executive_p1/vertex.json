@@ -1,0 +1,156 @@
+{
+  "cases": [
+    {
+      "name": "vertex_isolated_origin_semicircle_180",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:394-409",
+      "inputs": {
+        "op": "vertex", "point": [0.0, 0.0, 0.0], "offset_distance": 0.25,
+        "approx_tol": 1e-6, "original_tolerance": 1e-7, "result_tolerance": 3e-6,
+        "samples": [[0.137, 0.219], [0.371, 0.683], [0.823, 0.417], [0.001, 0.997], [0.999, 0.003]]
+      }
+    },
+    {
+      "name": "vertex_isolated_translated_distinct_tolerances",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:288,365,397-400",
+      "inputs": {
+        "op": "vertex", "point": [1.25, -2.5, 3.75], "offset_distance": 0.375,
+        "approx_tol": 7e-6, "original_tolerance": 5e-5, "result_tolerance": 2e-8,
+        "samples": [[0.113, 0.271], [0.337, 0.719], [0.791, 0.443], [0.019, 0.983]]
+      }
+    },
+    {
+      "name": "vertex_isolated_negative_translation",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:365,397-400",
+      "inputs": {
+        "op": "vertex", "point": [-7.0, 3.0, -2.0], "offset_distance": 2.5,
+        "approx_tol": 2e-7, "original_tolerance": 2e-8, "result_tolerance": 9e-5,
+        "samples": [[0.137, 0.219], [0.371, 0.683], [0.823, 0.417], [0.07, 0.91]]
+      }
+    },
+    {
+      "name": "vertex_isolated_small_scale",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:397-400",
+      "inputs": {
+        "op": "vertex", "point": [0.007, -0.009, 0.011], "offset_distance": 0.0001,
+        "approx_tol": 1e-10, "original_tolerance": 1e-11, "result_tolerance": 3e-9,
+        "samples": [[0.113, 0.271], [0.337, 0.719], [0.791, 0.443], [0.991, 0.013]]
+      }
+    },
+    {
+      "name": "vertex_isolated_large_translation",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:365,397-400",
+      "inputs": {
+        "op": "vertex", "point": [1024.0, -2048.0, 4096.0], "offset_distance": 64.0,
+        "approx_tol": 2e-5, "original_tolerance": 2e-6, "result_tolerance": 3e-4,
+        "samples": [[0.137, 0.219], [0.371, 0.683], [0.823, 0.417], [0.017, 0.971]]
+      }
+    },
+    {
+      "name": "vertex_isolated_large_radius",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:397-400",
+      "inputs": {
+        "op": "vertex", "point": [12345.0, -6789.0, 2468.0], "offset_distance": 10000.0,
+        "approx_tol": 0.003, "original_tolerance": 0.0001, "result_tolerance": 0.02,
+        "samples": [[0.113, 0.271], [0.337, 0.719], [0.791, 0.443], [0.031, 0.967]]
+      }
+    },
+    {
+      "name": "vertex_isolated_tiny_translation_and_radius",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:365,397-400",
+      "inputs": {
+        "op": "vertex", "point": [0.00003, -0.00004, 0.00005], "offset_distance": 0.00001,
+        "approx_tol": 1e-11, "original_tolerance": 1e-12, "result_tolerance": 7e-10,
+        "samples": [[0.137, 0.219], [0.371, 0.683], [0.823, 0.417], [0.043, 0.929]]
+      }
+    },
+    {
+      "name": "vertex_isolated_translated_tolerances_swapped",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3258,3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:288",
+      "inputs": {
+        "op": "vertex", "point": [1.25, -2.5, 3.75], "offset_distance": 0.375,
+        "approx_tol": 7e-6, "original_tolerance": 2e-8, "result_tolerance": 5e-5,
+        "samples": [[0.113, 0.271], [0.337, 0.719], [0.791, 0.443], [0.019, 0.983]]
+      }
+    },
+    {
+      "name": "vertex_strut_closed_circle_360",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3277-3355; source/SMLib/src/SmOffsetGeometryCreation.cpp:310-321,367-407",
+      "inputs": {
+        "op": "vertex", "point": [0.0, 0.0, 0.0], "offset_distance": 1.0,
+        "approx_tol": 1e-6, "original_tolerance": 2e-7, "result_tolerance": 5e-6,
+        "strut": {"radius": 0.6, "height": 0.8, "map_mate": false},
+        "samples": [[0.137, 0.219], [0.371, 0.683], [0.823, 0.417], [0.001, 0.997]]
+      }
+    },
+    {
+      "name": "vertex_strut_negative_height_axis_flip",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3344; source/SMLib/src/SmOffsetGeometryCreation.cpp:377-382,405-407",
+      "inputs": {
+        "op": "vertex", "point": [0.0, 0.0, 0.0], "offset_distance": 1.0,
+        "approx_tol": 3e-7, "original_tolerance": 5e-6, "result_tolerance": 2e-7,
+        "strut": {"radius": 0.6, "height": -0.8, "map_mate": false},
+        "samples": [[0.113, 0.271], [0.337, 0.719], [0.791, 0.443], [0.991, 0.013]]
+      }
+    },
+    {
+      "name": "vertex_strut_mate_faceuse_fallback",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3284-3288,3344; source/SMLib/src/SmOffsetGeometryCreation.cpp:367-407",
+      "inputs": {
+        "op": "vertex", "point": [0.0, 0.0, 0.0], "offset_distance": 1.0,
+        "approx_tol": 1e-6, "original_tolerance": 2e-7, "result_tolerance": 5e-6,
+        "strut": {"radius": 0.6, "height": 0.8, "map_mate": true},
+        "samples": [[0.137, 0.219], [0.371, 0.683], [0.823, 0.417], [0.001, 0.997]]
+      }
+    },
+    {
+      "name": "vertex_strut_translated_scaled_circle",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3323-3349; source/SMLib/src/SmOffsetGeometryCreation.cpp:367-407",
+      "inputs": {
+        "op": "vertex", "point": [3.0, -4.0, 5.0], "offset_distance": 2.0,
+        "approx_tol": 2e-6, "original_tolerance": 1e-7, "result_tolerance": 7e-5,
+        "strut": {"radius": 1.2, "height": 1.6, "map_mate": false},
+        "samples": [[0.113, 0.271], [0.337, 0.719], [0.791, 0.443], [0.019, 0.983]]
+      }
+    },
+    {
+      "name": "vertex_strut_small_radius",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3344; source/SMLib/src/SmOffsetGeometryCreation.cpp:367-407",
+      "inputs": {
+        "op": "vertex", "point": [-0.25, 0.5, -0.75], "offset_distance": 0.125,
+        "approx_tol": 1e-8, "original_tolerance": 1e-9, "result_tolerance": 3e-7,
+        "strut": {"radius": 0.075, "height": 0.1, "map_mate": true},
+        "samples": [[0.137, 0.219], [0.371, 0.683], [0.823, 0.417], [0.031, 0.967]]
+      }
+    },
+    {
+      "name": "vertex_strut_radius_filter_no_cap",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3329-3355",
+      "inputs": {
+        "op": "vertex", "point": [1.0, -2.0, 3.0], "offset_distance": 1.0,
+        "approx_tol": 1e-6, "original_tolerance": 1e-7, "result_tolerance": 3e-6,
+        "strut": {"radius": 1.25, "height": 0.0, "map_mate": false},
+        "samples": [[0.137, 0.219], [0.371, 0.683], [0.823, 0.417]]
+      }
+    },
+    {
+      "name": "vertex_strut_center_filter_no_cap",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3329-3355",
+      "inputs": {
+        "op": "vertex", "point": [-1.0, 2.0, -3.0], "offset_distance": 1.0,
+        "approx_tol": 1e-6, "original_tolerance": 3e-6, "result_tolerance": 1e-7,
+        "strut": {"radius": 0.6, "height": 1.5, "map_mate": true},
+        "samples": [[0.113, 0.271], [0.337, 0.719], [0.791, 0.443]]
+      }
+    },
+    {
+      "name": "vertex_strut_translated_negative_height_mate",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3284-3288,3344; source/SMLib/src/SmOffsetGeometryCreation.cpp:377-382,405-407",
+      "inputs": {
+        "op": "vertex", "point": [-8.0, 16.0, -32.0], "offset_distance": 4.0,
+        "approx_tol": 4e-6, "original_tolerance": 9e-5, "result_tolerance": 2e-8,
+        "strut": {"radius": 2.4, "height": -3.2, "map_mate": true},
+        "samples": [[0.137, 0.219], [0.371, 0.683], [0.823, 0.417], [0.043, 0.929]]
+      }
+    }
+  ]
+}

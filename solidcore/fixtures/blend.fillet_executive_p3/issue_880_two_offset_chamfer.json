@@ -1,0 +1,178 @@
+{
+  "cases": [
+    {
+      "name": "issue-880-tilted-cylinder-rim-setbacks-1-2",
+      "upstream_ref": "source/SMLib/inc/SmFilletStandardSolver.h:30 (SmConstantRadiusFS pdOptSecondRadius); source/SMLib/src/SmFilletExecutive.cpp:902 (SetFilletParameters' per-edge set-up)",
+      "note": "tangency-labs/solidcore#880: a cylinder of radius 5 and length 40 from (0, 0, -10) along (1, 0, 2), cut by the box above z = 10; its elliptical rim chamfered with a linear cross section and bevelled corners. Setback 1 on the cut face (leaning along +Z) and 2 down the wall; each side derives the two surface offsets from its own body at the rim's middle.",
+      "inputs": {
+        "two_offset_chamfer": {
+          "radius": 5.0,
+          "height": 40.0,
+          "origin": [
+            0.0,
+            0.0,
+            -10.0
+          ],
+          "x_axis": [
+            0.8944271909999159,
+            0.0,
+            -0.4472135954999579
+          ],
+          "y_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "box_origin": [
+            -50.0,
+            -50.0,
+            10.0
+          ],
+          "box_size": [
+            100.0,
+            100.0,
+            40.0
+          ],
+          "rim_z": 10.0,
+          "setbacks": {
+            "up": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "along_up": 1.0,
+            "other": 2.0
+          }
+        }
+      }
+    },
+    {
+      "name": "issue-880-tilted-cylinder-rim-setbacks-1-1",
+      "upstream_ref": "source/SMLib/inc/SmFilletStandardSolver.h:30 (SmConstantRadiusFS pdOptSecondRadius); source/SMLib/src/SmFilletExecutive.cpp:902 (SetFilletParameters' per-edge set-up)",
+      "note": "tangency-labs/solidcore#880: a cylinder of radius 5 and length 40 from (0, 0, -10) along (1, 0, 2), cut by the box above z = 10; its elliptical rim chamfered with a linear cross section and bevelled corners. Control: equal setbacks, so equal derived offsets.",
+      "inputs": {
+        "two_offset_chamfer": {
+          "radius": 5.0,
+          "height": 40.0,
+          "origin": [
+            0.0,
+            0.0,
+            -10.0
+          ],
+          "x_axis": [
+            0.8944271909999159,
+            0.0,
+            -0.4472135954999579
+          ],
+          "y_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "box_origin": [
+            -50.0,
+            -50.0,
+            10.0
+          ],
+          "box_size": [
+            100.0,
+            100.0,
+            40.0
+          ],
+          "rim_z": 10.0,
+          "setbacks": {
+            "up": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "along_up": 1.0,
+            "other": 1.0
+          }
+        }
+      }
+    },
+    {
+      "name": "issue-880-tilted-cylinder-rim-offsets-1-1",
+      "upstream_ref": "source/SMLib/inc/SmFilletStandardSolver.h:30 (SmConstantRadiusFS pdOptSecondRadius); source/SMLib/src/SmFilletExecutive.cpp:902 (SetFilletParameters' per-edge set-up)",
+      "note": "tangency-labs/solidcore#880: a cylinder of radius 5 and length 40 from (0, 0, -10) along (1, 0, 2), cut by the box above z = 10; its elliptical rim chamfered with a linear cross section and bevelled corners. Control: equal surface offsets 1 given as plain numbers.",
+      "inputs": {
+        "two_offset_chamfer": {
+          "radius": 5.0,
+          "height": 40.0,
+          "origin": [
+            0.0,
+            0.0,
+            -10.0
+          ],
+          "x_axis": [
+            0.8944271909999159,
+            0.0,
+            -0.4472135954999579
+          ],
+          "y_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "box_origin": [
+            -50.0,
+            -50.0,
+            10.0
+          ],
+          "box_size": [
+            100.0,
+            100.0,
+            40.0
+          ],
+          "rim_z": 10.0,
+          "offsets": [
+            1.0,
+            1.0
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue-880-tilted-cylinder-rim-offsets-1-2",
+      "upstream_ref": "source/SMLib/inc/SmFilletStandardSolver.h:30 (SmConstantRadiusFS pdOptSecondRadius); source/SMLib/src/SmFilletExecutive.cpp:902 (SetFilletParameters' per-edge set-up)",
+      "note": "tangency-labs/solidcore#880: a cylinder of radius 5 and length 40 from (0, 0, -10) along (1, 0, 2), cut by the box above z = 10; its elliptical rim chamfered with a linear cross section and bevelled corners. Unequal surface offsets 1 and 2 given as plain numbers (1 on the blend edge use's face).",
+      "inputs": {
+        "two_offset_chamfer": {
+          "radius": 5.0,
+          "height": 40.0,
+          "origin": [
+            0.0,
+            0.0,
+            -10.0
+          ],
+          "x_axis": [
+            0.8944271909999159,
+            0.0,
+            -0.4472135954999579
+          ],
+          "y_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "box_origin": [
+            -50.0,
+            -50.0,
+            10.0
+          ],
+          "box_size": [
+            100.0,
+            100.0,
+            40.0
+          ],
+          "rim_z": 10.0,
+          "offsets": [
+            1.0,
+            2.0
+          ]
+        }
+      }
+    }
+  ]
+}
