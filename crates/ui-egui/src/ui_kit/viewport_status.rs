@@ -1,7 +1,7 @@
 //! Persistent viewport status content. The caller owns items and dispatches returned actions.
 use super::{Button, Container, Surface};
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{fonts::RichTextExt as _, scenario, theme::Tokens};
+use crate::{fonts::RichTextExt as _, theme::Tokens};
 use egui::{Id, Rect, Response, RichText, Ui, vec2};
 
 /// Shape and outline communicate the kind independently of colour.
@@ -175,8 +175,8 @@ fn icon_action(ui: &mut Ui, item: &StatusItem, part: &str, icon: &str, label: &s
         crate::icons::paint_icon(ui.painter(), glyph, icon, 1.0);
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
-    scenario::publish_target(&target(item, part), response.rect);
-    scenario::publish_target(&target(item, &format!("{part}_glyph")), glyph);
+    solidcraft_ui_registry::publish_target(&target(item, part), response.rect);
+    solidcraft_ui_registry::publish_target(&target(item, &format!("{part}_glyph")), glyph);
     response.backing_on_hover_text(hint)
 }
 
@@ -210,13 +210,13 @@ pub(crate) fn viewport_status_item(ui: &mut Ui, item: &StatusItem, state: &mut S
                 let (disc_rect, _) = ui.allocate_exact_size(vec2(disc_size, disc_size), egui::Sense::hover());
                 ui.painter().circle_filled(disc_rect.center(), disc_rect.width() / 2.0, disc);
                 crate::icons::paint_icon(ui.painter(), disc_rect.shrink(t.space_3), item.kind.icon(), 1.0);
-                scenario::publish_target(&target(item, "icon"), disc_rect);
+                solidcraft_ui_registry::publish_target(&target(item, "icon"), disc_rect);
                 let name = ui.label(RichText::new(&item.name).size(t.font_label).semibold().color(t.text));
-                scenario::publish_target(&target(item, "name"), name.rect);
+                solidcraft_ui_registry::publish_target(&target(item, "name"), name.rect);
                 if !item.setting.is_empty() {
                     let text = RichText::new(&item.setting).monospace().size(t.font_small).color(t.text_dim);
                     let response = if item.editable { super::button(ui, text, Button::Ghost) } else { ui.label(text) };
-                    scenario::publish_target(&target(item, "setting"), response.rect);
+                    solidcraft_ui_registry::publish_target(&target(item, "setting"), response.rect);
                     if item.editable {
                         state.focus_ids.push(response.id);
                     }
@@ -256,7 +256,7 @@ pub(crate) fn viewport_status_item(ui: &mut Ui, item: &StatusItem, state: &mut S
     if focus.has_focus() {
         ui.painter().rect_stroke(response.rect.expand(t.space_3), frame.corner_radius, ui.visuals().selection.stroke, egui::StrokeKind::Outside);
     }
-    scenario::publish_target(&target(item, "item"), response.rect);
+    solidcraft_ui_registry::publish_target(&target(item, "item"), response.rect);
     (response.rect, action)
 }
 
@@ -299,8 +299,8 @@ pub(crate) fn viewport_status_row(
                 }
             });
         });
-    scenario::publish_rect("viewport_status:row", row.response.rect);
-    scenario::publish_count("viewport_status:count", items.len() as f64);
+    solidcraft_ui_registry::publish_rect("viewport_status:row", row.response.rect);
+    solidcraft_ui_registry::publish_count("viewport_status:count", items.len() as f64);
     if state.return_pending && state.return_focus.is_none_or(|id| !state.focus_ids.contains(&id)) {
         state.return_pending = false;
         state.return_focus = None;
@@ -383,7 +383,10 @@ pub(crate) fn viewport_status_summary(
                         if attention {
                             let dot = egui::pos2(x + t.space_3, rect.center().y);
                             ui.painter().circle_filled(dot, t.space_3, t.warning);
-                            scenario::publish_target("viewport_status:summary:attention", Rect::from_center_size(dot, vec2(t.space_6, t.space_6)));
+                            solidcraft_ui_registry::publish_target(
+                                "viewport_status:summary:attention",
+                                Rect::from_center_size(dot, vec2(t.space_6, t.space_6)),
+                            );
                             x += t.space_12;
                         }
                         let chevron = Rect::from_center_size(egui::pos2(x + t.space_12, rect.center().y), vec2(t.space_16, t.space_16));
@@ -397,8 +400,8 @@ pub(crate) fn viewport_status_summary(
                             &[("name", &latest.name), ("count", &items.len().saturating_sub(1).to_string())],
                         );
                         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label.as_str()));
-                        scenario::publish_target("viewport_status:summary", rect);
-                        scenario::publish_target(&target(latest, "summary"), rect);
+                        solidcraft_ui_registry::publish_target("viewport_status:summary", rect);
+                        solidcraft_ui_registry::publish_target(&target(latest, "summary"), rect);
                         response
                     },
                     |ui| {
@@ -414,13 +417,13 @@ pub(crate) fn viewport_status_summary(
                                     };
                                     ui.painter().circle_filled(icon.center(), (icon.width() - t.space_4) / 2.0, disc);
                                     crate::icons::paint_icon(ui.painter(), icon.shrink(t.space_4), item.kind.icon(), 1.0);
-                                    scenario::publish_target(&target(item, "icon"), icon);
+                                    solidcraft_ui_registry::publish_target(&target(item, "icon"), icon);
                                     let name = ui.label(RichText::new(&item.name).semibold().size(t.font_label));
-                                    scenario::publish_target(&target(item, "name"), name.rect);
+                                    solidcraft_ui_registry::publish_target(&target(item, "name"), name.rect);
                                     let setting = RichText::new(&item.setting).monospace().size(t.font_small).color(t.text_dim);
                                     if item.editable {
                                         let response = super::button(ui, setting, Button::Ghost);
-                                        scenario::publish_target(&target(item, "setting"), response.rect);
+                                        solidcraft_ui_registry::publish_target(&target(item, "setting"), response.rect);
                                         state.focus_ids.push(response.id);
                                         if response.clicked() {
                                             actions.push(StatusAction::Edit(item.id.clone()));
@@ -428,7 +431,7 @@ pub(crate) fn viewport_status_summary(
                                         }
                                     } else {
                                         let response = ui.label(setting);
-                                        scenario::publish_target(&target(item, "setting"), response.rect);
+                                        solidcraft_ui_registry::publish_target(&target(item, "setting"), response.rect);
                                     }
                                     if item.has_key {
                                         let label = crate::i18n::format("ui.viewport_status_key", &[("name", &item.name)]);
@@ -481,8 +484,8 @@ pub(crate) fn viewport_status_summary(
                 }
             });
         });
-    scenario::publish_rect("viewport_status:row", row.response.rect);
-    scenario::publish_count("viewport_status:count", items.len() as f64);
+    solidcraft_ui_registry::publish_rect("viewport_status:row", row.response.rect);
+    solidcraft_ui_registry::publish_count("viewport_status:count", items.len() as f64);
     if let Some(id) = state.open_key.clone() {
         show_card(ctx, free, row.response.rect.left_bottom(), row.response.rect, &id, state, &mut key_contents);
     } else {
@@ -519,7 +522,7 @@ fn show_card(
                 card.show_frame(ui, frame, free, |ui| contents(ui, id));
             },
         );
-    scenario::publish_target("viewport_status:card", result.response.rect);
+    solidcraft_ui_registry::publish_target("viewport_status:card", result.response.rect);
     if state.opened_frame != Some(ctx.cumulative_frame_nr())
         && !popup_was_open
         && !egui::Popup::is_any_open(ctx)

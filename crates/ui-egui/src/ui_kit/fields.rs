@@ -4,9 +4,9 @@ use super::{
     metrics::*,
     text::paint_text,
 };
+use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
-use crate::{scenario, theme::Tokens};
 use egui::{Response, RichText, Ui, vec2};
 
 /// One alignment policy for every kit text input. Align the galley itself rather than
@@ -86,7 +86,7 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
         ));
         let sign = if delta > 0 { "+1" } else { "−1" };
         arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, format!("{} {sign}", crate::i18n::tr_label(&row))));
-        scenario::publish_handle(&format!("dialog:{row} {name}"), half.center());
+        solidcraft_ui_registry::publish_handle(&format!("dialog:{row} {name}"), half.center());
         if let (true, true, Some(next)) = (enabled, arrow.clicked(), next) {
             *value = next;
         }
@@ -357,10 +357,10 @@ fn searchable_dropdown_with(
         if search.has_focus() {
             crate::prefs_search::note_key_sink(ui.ctx());
         }
-        scenario::publish_handle(&format!("dialog:{row} search"), search.rect.center());
+        solidcraft_ui_registry::publish_handle(&format!("dialog:{row} search"), search.rect.center());
         if let Some(custom) = custom {
             let response = ui.selectable_label(false, custom);
-            scenario::publish_handle(&format!("dialog:{row} file"), response.rect.center());
+            solidcraft_ui_registry::publish_handle(&format!("dialog:{row} file"), response.rect.center());
             if response.clicked() {
                 chosen = Some(filter.trim().to_owned());
                 ui.close();
@@ -377,7 +377,7 @@ fn searchable_dropdown_with(
                 for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
                     let response = ui.selectable_label(current == option.label, option.label);
                     if let Some(handle) = option.handle {
-                        scenario::publish_handle(handle, response.rect.center());
+                        solidcraft_ui_registry::publish_handle(handle, response.rect.center());
                     }
                     if response.clicked() {
                         chosen = Some(option.value.to_owned());
@@ -487,7 +487,7 @@ pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResp
         })
         .inner;
     publish(ui, &response, egui::Role::ComboBox);
-    scenario::publish_target(p.handles, response.rect);
+    solidcraft_ui_registry::publish_target(p.handles, response.rect);
     egui::InnerResponse::new(picked, response)
 }
 
@@ -513,7 +513,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
             .desired_width(f32::INFINITY),
     );
     t.input_bevel(ui, &search);
-    scenario::publish_target(&format!("{}:search", p.handles), search.rect);
+    solidcraft_ui_registry::publish_target(&format!("{}:search", p.handles), search.rect);
     // Asked until it has it: over a modal window egui drops the request of the opening's first frame.
     if !ui.data(|data| data.get_temp::<bool>(focused_id)).unwrap_or(false) {
         if search.has_focus() {
@@ -601,7 +601,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
             search_heading(ui, crate::i18n::tr("ui.agent_chat_custom_heading"), t.space_16);
             let text = crate::i18n::format("ui.agent_chat_model_custom", &[("model", &compact(model, SEARCH_LABEL_CAP))]);
             let row = search_row(ui, &text, false);
-            scenario::publish_target(&format!("{}:custom", p.handles), row.rect);
+            solidcraft_ui_registry::publish_target(&format!("{}:custom", p.handles), row.rect);
             if row.clicked() {
                 picked = Some(Picked::Custom(model.to_owned()));
             }
@@ -621,14 +621,14 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
                             SearchRow::Heading(group) => search_heading(ui, group, row_height),
                             SearchRow::Group { name, count, open } => {
                                 let response = search_group_row(ui, name, *count, *open);
-                                scenario::publish_target(&format!("{}:group:{}", p.handles, name), response.rect);
+                                solidcraft_ui_registry::publish_target(&format!("{}:group:{}", p.handles, name), response.rect);
                                 if response.clicked() {
                                     toggled = Some(((*name).to_owned(), !*open));
                                 }
                             }
                             SearchRow::Choice(choice) => {
                                 let response = search_row(ui, &compact(choice.label, SEARCH_LABEL_CAP), choice.value == p.current_value);
-                                scenario::publish_target(&format!("{}:{}", p.handles, choice.value), response.rect);
+                                solidcraft_ui_registry::publish_target(&format!("{}:{}", p.handles, choice.value), response.rect);
                                 let response = if choice.tip.is_empty() {
                                     response
                                 } else {
@@ -850,7 +850,7 @@ pub(crate) fn dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&
     dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
             let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
-            scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
+            solidcraft_ui_registry::publish_target(&format!("dialog:{row}:{option}"), response.rect);
         }
     })
 }
@@ -864,7 +864,7 @@ pub(crate) fn dropdown_icons(ui: &mut Ui, id: &str, selected: &mut usize, option
         for (index, (text, icon)) in options.iter().enumerate() {
             let response = ui.selectable_label(*selected == index, dropdown_icon_text(text));
             paint_dropdown_icon(ui, response.rect, icon);
-            scenario::publish_target(&format!("dialog:{row}:{text}"), response.rect);
+            solidcraft_ui_registry::publish_target(&format!("dialog:{row}:{text}"), response.rect);
             if response.clicked() {
                 *selected = index;
             }
@@ -890,7 +890,7 @@ fn paint_dropdown_icon(ui: &Ui, rect: egui::Rect, icon: &str) {
         vec2(t.space_16, t.space_16),
     );
     crate::icons::paint_ink(ui.painter(), rect, icon, t.form_ink);
-    scenario::publish_rect(&format!("dialog:dropdown_icon:{icon}"), rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:dropdown_icon:{icon}"), rect);
 }
 
 /// [`dropdown`] whose options each show a picture beside them while hovered, painted by `preview`
@@ -902,10 +902,10 @@ pub(crate) fn dropdown_previews(ui: &mut Ui, id: &str, selected: &mut usize, opt
     dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
             let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
-            scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
+            solidcraft_ui_registry::publish_target(&format!("dialog:{row}:{option}"), response.rect);
             Container::tooltip_ui(&response, |ui| {
                 preview(ui, index);
-                scenario::publish_rect(&format!("dialog:preview:{row}:{option}"), ui.min_rect());
+                solidcraft_ui_registry::publish_rect(&format!("dialog:preview:{row}:{option}"), ui.min_rect());
             });
         }
     })
@@ -921,7 +921,7 @@ pub(crate) fn dropdown_picked(ui: &mut Ui, id: &str, selected: &mut usize, optio
         for (index, option) in options.iter().enumerate() {
             let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
             picked |= response.clicked();
-            scenario::publish_handle(&format!("dialog:{row}:{option}"), response.rect.center());
+            solidcraft_ui_registry::publish_handle(&format!("dialog:{row}:{option}"), response.rect.center());
         }
     });
     picked
@@ -1106,9 +1106,9 @@ pub(crate) fn selection_field(ui: &mut Ui, text: &str, options: Selection) -> Re
         false,
     );
     publish(ui, &response, egui::Role::Button);
-    scenario::publish_rect(&format!("dialog:field:{}", label(ui)), rect);
-    scenario::publish_count(&format!("dialog:selection:{}:filled", label(ui)), f64::from(filled));
-    scenario::publish_count(&format!("dialog:selection:{}:active", label(ui)), f64::from(active));
+    solidcraft_ui_registry::publish_rect(&format!("dialog:field:{}", label(ui)), rect);
+    solidcraft_ui_registry::publish_count(&format!("dialog:selection:{}:filled", label(ui)), f64::from(filled));
+    solidcraft_ui_registry::publish_count(&format!("dialog:selection:{}:active", label(ui)), f64::from(active));
     response
 }
 
@@ -1159,7 +1159,7 @@ pub(crate) fn number_pair<T: egui::emath::Numeric>(
 /// Locale-aware variable-radius position editor. Tokens: `scope control/font tokens`.
 pub(crate) fn fraction_field(ui: &mut Ui, value: &mut f64) -> Response {
     let response = ui.add(egui::DragValue::new(value).speed(0.01).range(0.01..=0.99).fixed_decimals(2).custom_parser(crate::prefs::parse_number));
-    scenario::publish_target(&format!("dialog:fraction:{}", label(ui)), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("dialog:fraction:{}", label(ui)), response.rect);
     response
 }
 
@@ -1534,8 +1534,8 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
         ui.painter().circle(center, t.space_8, fill, egui::Stroke::new(t.space_2, if off { t.form_dim } else { primary }));
         publish(ui, &response, egui::Role::Slider);
         response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), value.to_f64(), crate::i18n::tr_label(label(ui))));
-        scenario::publish_rect(&format!("dialog:slider_track:{}", label(ui)), slider);
-        scenario::publish_target(&format!("dialog:slider:{}", label(ui)), response.rect);
+        solidcraft_ui_registry::publish_rect(&format!("dialog:slider_track:{}", label(ui)), slider);
+        solidcraft_ui_registry::publish_target(&format!("dialog:slider:{}", label(ui)), response.rect);
         response
     })
 }
@@ -1602,7 +1602,7 @@ fn scalar_field_impl(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusi
     if !plain {
         Tokens::get().input_bevel(ui, &response);
     }
-    scenario::publish_target(&format!("dialog:scalar:{}", label(ui)), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("dialog:scalar:{}", label(ui)), response.rect);
     response
 }
 
@@ -1611,7 +1611,7 @@ fn scalar_field_impl(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusi
 pub(crate) fn length_field(ui: &mut Ui, value: &mut f64, units: &str, decimals: u8) -> Response {
     let response = ui.add(length_drag(value, units, decimals));
     Tokens::get().input_bevel(ui, &response);
-    scenario::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
     response
 }
 
@@ -1625,7 +1625,7 @@ pub(crate) fn bounded_length_field(
     speed: f64,
 ) -> Response {
     let response = ui.add(length_drag(value, units, decimals).range(range).speed(speed));
-    scenario::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
     response
 }
 
@@ -1646,7 +1646,7 @@ pub(crate) fn angle_field(ui: &mut Ui, value: &mut f64) -> Response {
         ui.data_mut(|d| d.insert_temp(set, shown));
     }
     Tokens::get().input_bevel(ui, &response);
-    scenario::publish_target(&format!("dialog:angle:{}", label(ui)), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("dialog:angle:{}", label(ui)), response.rect);
     response
 }
 
@@ -1758,7 +1758,7 @@ pub(crate) fn vector3_field(ui: &mut Ui, values: &mut [f64; 3], range: std::ops:
             ui.spacing_mut().interact_size.x = width;
             ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
             let response = number_field(ui, value, range.clone(), 0.01, suffix);
-            scenario::publish_target(&format!("dialog:vector:{label}:{axis}"), response.rect);
+            solidcraft_ui_registry::publish_target(&format!("dialog:vector:{label}:{axis}"), response.rect);
             changed |= response.changed();
         }
     });
@@ -1931,8 +1931,8 @@ pub(crate) fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     let button = egui::Rect::from_min_max(egui::pos2(split, rect.top()), rect.max);
     t.secondary_vline(ui.painter(), split, rect.y_range(), t.dialog_rule);
     let library = super::icon_button_at(ui, button, "chevron", "Library");
-    scenario::publish_handle("dialog:menu:Library", button.center());
-    scenario::publish_rect("dialog:menu:Library", button);
+    solidcraft_ui_registry::publish_handle("dialog:menu:Library", button.center());
+    solidcraft_ui_registry::publish_rect("dialog:menu:Library", button);
     let popup = Container::new(ui.ctx(), Surface::Popup).menu(&library);
     let open = popup.is_open();
     popup.show(|ui| super::scope(ui, menu));

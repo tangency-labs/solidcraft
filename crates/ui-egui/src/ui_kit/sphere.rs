@@ -1,6 +1,6 @@
 //! Small deterministic material previews; no textures, jobs or graphics device.
+use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{scenario, theme::Tokens};
 use egui::{Color32, Mesh, Rect, Response, Sense, Ui, pos2, vec2};
 use std::{collections::VecDeque, sync::Arc};
 
@@ -171,8 +171,8 @@ pub fn sphere_thumbnail(ui: &mut Ui, id: &str, sphere: Sphere, size: f32) -> Res
     let side = f32::from(sphere.key(size).side);
     let (rect, response) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
     paint_sphere(ui, rect, sphere);
-    scenario::publish_rect(id, rect);
-    scenario::publish_handle(id, rect.center());
+    solidcraft_ui_registry::publish_rect(id, rect);
+    solidcraft_ui_registry::publish_handle(id, rect.center());
     response
 }
 
@@ -221,16 +221,16 @@ pub(crate) fn sphere_preview_with_source<R>(
                 );
                 source_ui.set_clip_rect(ui.clip_rect().intersect(source_rect));
                 let source = source(&mut source_ui);
-                scenario::publish_rect(&format!("{id}:chip:0"), source.rect.intersect(source_rect));
+                solidcraft_ui_registry::publish_rect(&format!("{id}:chip:0"), source.rect.intersect(source_rect));
                 let mut usage_ui = ui.new_child(
                     egui::UiBuilder::new().id_salt("sample_usage").max_rect(usage_rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
                 );
                 usage_ui.set_clip_rect(ui.clip_rect().intersect(usage_rect));
                 let response = super::workspace_chip(&mut usage_ui, usage);
-                scenario::publish_rect(&format!("{id}:chip:1"), response.rect.intersect(usage_rect));
+                solidcraft_ui_registry::publish_rect(&format!("{id}:chip:1"), response.rect.intersect(usage_rect));
             });
             let response = ui.vertical(action);
-            scenario::publish_target(&format!("{id}:replace"), response.response.rect);
+            solidcraft_ui_registry::publish_target(&format!("{id}:replace"), response.response.rect);
             response.inner
         });
         row.inner
@@ -291,11 +291,11 @@ impl SphereTile<'_> {
         job.wrap.break_anywhere = false;
         let galley = ui.painter().layout_job(job);
         let label_pos = pos2(label.center().x - galley.rect.center().x, label.top() - galley.rect.top());
-        scenario::publish_rect(&format!("{}:label", self.id), label);
-        scenario::publish_rect(&format!("{}:galley", self.id), galley.rect.translate(label_pos.to_vec2()));
+        solidcraft_ui_registry::publish_rect(&format!("{}:label", self.id), label);
+        solidcraft_ui_registry::publish_rect(&format!("{}:galley", self.id), galley.rect.translate(label_pos.to_vec2()));
         ui.painter().with_clip_rect(ui.clip_rect().intersect(label)).galley(label_pos, galley, t.form_ink);
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), self.selected, self.name));
-        scenario::publish_target(self.id, rect);
+        solidcraft_ui_registry::publish_target(self.id, rect);
         let mut tip = egui::Tooltip::for_enabled(&response);
         tip.popup = tip.popup.frame(super::Container::new(ui.ctx(), super::Surface::Toast).tooltip_frame(ui.ctx()));
         crate::ui_kit::Container::show_tooltip(response.id, tip, |ui| {

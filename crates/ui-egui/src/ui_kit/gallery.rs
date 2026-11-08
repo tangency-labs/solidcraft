@@ -1,8 +1,8 @@
 //! Table-driven layout/paint references in both themes. No window or GPU required.
 use super::preferences_figures::{ThemeSample, paint_theme_thumbnail};
 use super::*;
+use crate::theme::Tokens;
 use crate::ui_kit::{Container, Surface};
-use crate::{scenario, theme::Tokens};
 use egui::{Ui, vec2};
 use solidcraft_engine::kernel::Continuity;
 
@@ -512,7 +512,7 @@ const ELEMENTS: &[Element] = &[
     element!("catalog_footer_height", |ui, _| {
         let expected = catalog_footer_height(ui);
         catalog_footer(ui, "Click to apply to the selection.");
-        assert_eq!(crate::scenario::rect_of("catalog:footer").unwrap().height(), expected);
+        assert_eq!(solidcraft_ui_registry::rect_of("catalog:footer").unwrap().height(), expected);
     }),
     element!("catalog_footer_with_tip", |ui, _| {
         catalog_footer_with_tip(ui, "Click to apply to the selection.", "Paint and drag assignment are not supported yet.");
@@ -1922,7 +1922,7 @@ const ELEMENTS: &[Element] = &[
         let (rect, response) = ui.allocate_exact_size(vec2(t.form_button_height * 3.0, t.form_button_height * 2.0), egui::Sense::click());
         ui.painter().add(persistent_button_shape(ui, &response, rect));
         ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Selected", crate::fonts::semibold(t.font_label), t.selected_ink);
-        scenario::publish_target("gallery:persistent_button", rect);
+        solidcraft_ui_registry::publish_target("gallery:persistent_button", rect);
     }),
     element!("native_button_focus", "gallery:native_button_focus", Some("gallery:native_button_focus"), |ui, _| {
         let t = Tokens::get();
@@ -1930,7 +1930,7 @@ const ELEMENTS: &[Element] = &[
         response.request_focus();
         ui.painter().rect_filled(rect, t.radius_sm, t.control_fill);
         ui.painter().add(native_button_focus(ui, &response, rect));
-        scenario::publish_target("gallery:native_button_focus", rect);
+        solidcraft_ui_registry::publish_target("gallery:native_button_focus", rect);
     }),
     element!("button", "dialog:row:Gallery", Some("dialog:button:Gallery:Add"), |ui, _| {
         row(ui, "Gallery", |ui| {
@@ -2094,7 +2094,7 @@ fn example(ui: &mut Ui, element: &Element) -> (&'static str, Option<&'static str
         // actual shadow bounds as part of the gallery sample, keeping the paint guard strict.
         ui.expand_to_include_rect(rect + Menu::frame().shadow.margin());
     }
-    scenario::publish_rect("gallery:allocation", rect);
+    solidcraft_ui_registry::publish_rect("gallery:allocation", rect);
     (element.rect, element.handle)
 }
 
@@ -2109,11 +2109,11 @@ fn every_element_has_geometry_and_stays_in_its_allocation_in_both_themes() {
             ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
             for pass in 0..3 {
                 let events = if element.name.starts_with("checkbox_hovered") && pass > 0 {
-                    vec![egui::Event::PointerMoved(scenario::rect_of("gallery:allocation").expect("hover allocation").center())]
+                    vec![egui::Event::PointerMoved(solidcraft_ui_registry::rect_of("gallery:allocation").expect("hover allocation").center())]
                 } else {
                     vec![]
                 };
-                scenario::clear_handles();
+                solidcraft_ui_registry::clear_handles();
                 let mut allocation = egui::Rect::NOTHING;
                 let mut published = ("", None);
                 let mut output = ctx.run_ui(
@@ -2135,12 +2135,12 @@ fn every_element_has_geometry_and_stays_in_its_allocation_in_both_themes() {
                     },
                 );
                 output.textures_delta.clear();
-                let rect = scenario::rect_of(published.0).unwrap_or_else(|| panic!("{name}: missing {}", published.0));
+                let rect = solidcraft_ui_registry::rect_of(published.0).unwrap_or_else(|| panic!("{name}: missing {}", published.0));
                 assert!(rect.is_finite() && rect.is_positive(), "{name}: {rect:?}");
                 assert!(allocation.expand(1.0).contains_rect(rect), "{name}: {rect:?} outside {allocation:?}");
                 if let Some(handle) = published.1 {
                     assert!(
-                        rect.contains(scenario::handle_at(handle).unwrap_or_else(|| panic!("{name}: missing {handle}"))),
+                        rect.contains(solidcraft_ui_registry::handle_at(handle).unwrap_or_else(|| panic!("{name}: missing {handle}"))),
                         "{name}: handle outside {rect:?}"
                     );
                 }
@@ -2180,26 +2180,27 @@ fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() 
             super::test_support::frame(&ctx, vec![], &mut draw);
         }
         for (index, (_, label)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
-            let trigger = scenario::handle_at("dialog:Visual style").unwrap();
+            let trigger = solidcraft_ui_registry::handle_at("dialog:Visual style").unwrap();
             super::test_support::frame(&ctx, super::test_support::pointer(trigger, true), &mut draw);
             super::test_support::frame(&ctx, super::test_support::pointer(trigger, false), &mut draw);
             super::test_support::frame(&ctx, vec![], &mut draw);
             for (option, (_, name)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
-                let rect = scenario::rect_of(&format!("dialog:Visual style:{name}")).unwrap();
+                let rect = solidcraft_ui_registry::rect_of(&format!("dialog:Visual style:{name}")).unwrap();
                 let icon = crate::navigation_bar::visual_style_icon(option as u8);
-                let painted = scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
-                let owner = if option == sample.borrow().selected { scenario::rect_of("dialog:widget:Visual style").unwrap() } else { rect };
+                let painted = solidcraft_ui_registry::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
+                let owner =
+                    if option == sample.borrow().selected { solidcraft_ui_registry::rect_of("dialog:widget:Visual style").unwrap() } else { rect };
                 assert!(owner.contains_rect(painted), "{name}: its real icon is in its option or selected trigger");
             }
-            let option = scenario::handle_at(&format!("dialog:Visual style:{label}")).unwrap();
+            let option = solidcraft_ui_registry::handle_at(&format!("dialog:Visual style:{label}")).unwrap();
             super::test_support::frame(&ctx, super::test_support::pointer(option, true), &mut draw);
             super::test_support::frame(&ctx, super::test_support::pointer(option, false), &mut draw);
             super::test_support::frame(&ctx, vec![], &mut draw);
             assert_eq!(sample.borrow().selected, index, "the specimen edits the real selection index");
             let icon = crate::navigation_bar::visual_style_icon(index as u8);
-            let trigger = scenario::rect_of("dialog:widget:Visual style").unwrap();
-            assert!(trigger.contains_rect(scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap()));
-            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_none(), "the native popup closes after selection");
+            let trigger = solidcraft_ui_registry::rect_of("dialog:widget:Visual style").unwrap();
+            assert!(trigger.contains_rect(solidcraft_ui_registry::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap()));
+            assert!(solidcraft_ui_registry::handle_at("dialog:Visual style:Wireframe").is_none(), "the native popup closes after selection");
         }
     }
     crate::theme::set_dark(previous);
@@ -2214,7 +2215,7 @@ fn apply_does_not_submit_and_obeys_validation() {
             action = footer(ui, "OK", "Cancel", enabled, Footer { apply: Some("Apply"), ..Default::default() });
         };
         super::test_support::frame(&ctx, vec![], &mut draw);
-        let at = scenario::handle_at("dialog:apply").unwrap();
+        let at = solidcraft_ui_registry::handle_at("dialog:apply").unwrap();
         super::test_support::frame(&ctx, super::test_support::pointer(at, true), &mut draw);
         super::test_support::frame(&ctx, super::test_support::pointer(at, false), &mut draw);
         assert_eq!(action, if enabled { Action::Apply } else { Action::None });
@@ -2229,7 +2230,7 @@ fn picked_item_remove_and_paired_values_have_independent_targets() {
         removed = list_row(ui, "point-1", "Point 1").clicked();
     };
     super::test_support::frame(&ctx, vec![], &mut draw);
-    let at = scenario::handle_at("dialog:list:point-1:remove").unwrap();
+    let at = solidcraft_ui_registry::handle_at("dialog:list:point-1:remove").unwrap();
     super::test_support::frame(&ctx, super::test_support::pointer(at, true), &mut draw);
     super::test_support::frame(&ctx, super::test_support::pointer(at, false), &mut draw);
     assert!(removed);
@@ -2240,9 +2241,9 @@ fn picked_item_remove_and_paired_values_have_independent_targets() {
         value_pair(ui, "Position", [&mut x, &mut y], ["X", "Y"], None);
     };
     super::test_support::frame(&ctx, vec![], &mut draw);
-    let row = scenario::rect_of("dialog:row:Position").unwrap();
-    let first = scenario::handle_at("dialog:X").unwrap();
-    let second = scenario::handle_at("dialog:Y").unwrap();
+    let row = solidcraft_ui_registry::rect_of("dialog:row:Position").unwrap();
+    let first = solidcraft_ui_registry::handle_at("dialog:X").unwrap();
+    let second = solidcraft_ui_registry::handle_at("dialog:Y").unwrap();
     assert_eq!(row.height(), Tokens::get().control_height);
     assert!(row.contains(first) && row.contains(second) && first.x < second.x);
     super::test_support::frame(&ctx, super::test_support::pointer(second, true), &mut draw);
@@ -2269,12 +2270,12 @@ fn gallery_rows_share_a_label_column_after_measurement_in_both_themes() {
                 });
             });
         }
-        let first = scenario::rect_of("dialog:control:Edges").unwrap();
-        let second = scenario::rect_of("dialog:control:Counterbore depth").unwrap();
+        let first = solidcraft_ui_registry::rect_of("dialog:control:Edges").unwrap();
+        let second = solidcraft_ui_registry::rect_of("dialog:control:Counterbore depth").unwrap();
         assert_eq!(first.left(), second.left());
         assert_eq!(first.height(), Tokens::get().control_height);
         assert_eq!(second.height(), Tokens::get().control_height);
-        let width = scenario::rect_of("dialog:label:Edges").unwrap().width();
+        let width = solidcraft_ui_registry::rect_of("dialog:label:Edges").unwrap().width();
         assert!(width >= Tokens::get().form_label_width && width <= Tokens::get().form_label_width * 1.6);
     }
     crate::theme::set_dark(previous);
@@ -2295,14 +2296,14 @@ fn compound_row_actions_preserve_the_original_field_handle() {
                         field(ui, &mut value);
                     },
                 );
-                expected = scenario::handle_at("dialog:Mid Radius");
+                expected = solidcraft_ui_registry::handle_at("dialog:Mid Radius");
                 button(ui, "×", Button::Small);
             });
         });
     });
-    assert_eq!(scenario::handle_at("dialog:Mid Radius"), expected);
+    assert_eq!(solidcraft_ui_registry::handle_at("dialog:Mid Radius"), expected);
     assert!(expected.is_some());
-    assert_ne!(scenario::handle_at("dialog:button:Mid Radius:×"), expected);
+    assert_ne!(solidcraft_ui_registry::handle_at("dialog:button:Mid Radius:×"), expected);
 }
 
 #[test]
@@ -2326,7 +2327,7 @@ fn emphasis_and_compact_modes_keep_independent_actions_in_both_themes() {
         };
         super::test_support::frame(&ctx, vec![], &mut draw);
         for handle in ["dialog:Bold", "dialog:Italic", "dialog:Alignment:Long translated centre"] {
-            let at = scenario::handle_at(handle).unwrap();
+            let at = solidcraft_ui_registry::handle_at(handle).unwrap();
             super::test_support::frame(&ctx, super::test_support::pointer(at, true), &mut draw);
             super::test_support::frame(&ctx, super::test_support::pointer(at, false), &mut draw);
         }
@@ -2359,8 +2360,8 @@ fn table_cells_keep_alignment_fixed_rows_editing_and_action_targets() {
                                 });
                                 row.cell(|ui| {
                                     let response = cell_editor(ui, ui.scope_id().with("expression"), value, "Expression", false);
-                                    scenario::publish_handle(&format!("gallery:cell:{name}"), response.rect.center());
-                                    scenario::publish_rect(&format!("gallery:cell:{name}"), response.rect);
+                                    solidcraft_ui_registry::publish_handle(&format!("gallery:cell:{name}"), response.rect.center());
+                                    solidcraft_ui_registry::publish_rect(&format!("gallery:cell:{name}"), response.rect);
                                 });
                                 row.cell(|ui| {
                                     if button(ui, "Delete", Button::Small).clicked() {
@@ -2376,18 +2377,18 @@ fn table_cells_keep_alignment_fixed_rows_editing_and_action_targets() {
         for _ in 0..3 {
             super::test_support::frame(&ctx, vec![], &mut draw);
         }
-        let first_rect = scenario::rect_of("gallery:cell:Width").unwrap();
-        let second_rect = scenario::rect_of("gallery:cell:Height").unwrap();
-        let header = scenario::rect_of("dialog:column:cells:Expression").unwrap();
+        let first_rect = solidcraft_ui_registry::rect_of("gallery:cell:Width").unwrap();
+        let second_rect = solidcraft_ui_registry::rect_of("gallery:cell:Height").unwrap();
+        let header = solidcraft_ui_registry::rect_of("dialog:column:cells:Expression").unwrap();
         assert_eq!(first_rect.left(), header.left());
         assert_eq!(second_rect.left(), header.left());
         assert_eq!(first_rect.height(), Tokens::get().control_height);
         assert_eq!(second_rect.height(), Tokens::get().control_height);
-        let at = scenario::handle_at("gallery:cell:Height").unwrap();
+        let at = solidcraft_ui_registry::handle_at("gallery:cell:Height").unwrap();
         super::test_support::frame(&ctx, super::test_support::pointer(at, true), &mut draw);
         super::test_support::frame(&ctx, super::test_support::pointer(at, false), &mut draw);
         super::test_support::frame(&ctx, vec![egui::Event::Text("x".into())], &mut draw);
-        let delete = scenario::handle_at("dialog:button:Actions:Delete").unwrap();
+        let delete = solidcraft_ui_registry::handle_at("dialog:button:Actions:Delete").unwrap();
         super::test_support::frame(&ctx, super::test_support::pointer(delete, true), &mut draw);
         super::test_support::frame(&ctx, super::test_support::pointer(delete, false), &mut draw);
         assert_eq!(first, "10 mm");
@@ -2418,7 +2419,7 @@ fn popup_suggestions_and_selectable_lists_keep_click_selection() {
         for _ in 0..3 {
             super::test_support::frame(&ctx, vec![], &mut draw);
         }
-        let at = scenario::handle_at("dialog:suggestion:1").unwrap();
+        let at = solidcraft_ui_registry::handle_at("dialog:suggestion:1").unwrap();
         super::test_support::frame(&ctx, super::test_support::pointer(at, true), &mut draw);
         super::test_support::frame(&ctx, super::test_support::pointer(at, false), &mut draw);
         assert_eq!(selected, Some(1));
@@ -2431,7 +2432,7 @@ fn popup_suggestions_and_selectable_lists_keep_click_selection() {
             });
         };
         super::test_support::frame(&ctx, vec![], &mut draw);
-        let at = scenario::handle_at("dialog:list:preset").unwrap();
+        let at = solidcraft_ui_registry::handle_at("dialog:list:preset").unwrap();
         super::test_support::frame(&ctx, super::test_support::pointer(at, true), &mut draw);
         super::test_support::frame(&ctx, super::test_support::pointer(at, false), &mut draw);
         assert!(picked);
@@ -2681,7 +2682,7 @@ fn command_search_board_in_both_themes() {
             let mut textures = HashMap::new();
             let mut image = None;
             for _ in 0..3 {
-                scenario::clear_handles();
+                solidcraft_ui_registry::clear_handles();
                 let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), focused: true, ..Default::default() }, |ui| {
                     ui.painter().rect_filled(bounds, 0.0, Tokens::get().panel);
                     crate::shortcut_box::show(&mut app, ui.ctx());
@@ -2690,25 +2691,25 @@ fn command_search_board_in_both_themes() {
                 output.textures_delta.clear();
                 image = Some(raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures));
             }
-            let popup = scenario::rect_of("ribbon:search_popup").unwrap();
-            let field = scenario::rect_of("shortcut:search").unwrap();
+            let popup = solidcraft_ui_registry::rect_of("ribbon:search_popup").unwrap();
+            let field = solidcraft_ui_registry::rect_of("shortcut:search").unwrap();
             assert_eq!(field.height(), 40.0);
             assert_eq!(field.width(), 520.0);
             assert_eq!(popup.width(), 520.0);
             assert_eq!(popup.top(), field.bottom() + Tokens::get().space_6);
             assert_eq!(popup.x_range(), field.x_range());
-            let footer = scenario::rect_of("ribbon:search_footer").unwrap();
+            let footer = solidcraft_ui_registry::rect_of("ribbon:search_footer").unwrap();
             assert_eq!(footer, egui::Rect::from_min_max(egui::pos2(popup.left(), footer.top()), popup.right_bottom()));
             assert!(bounds.contains_rect(popup), "{state}: {popup:?}");
             match state {
                 "matches" => {
-                    assert!(scenario::handle_at("menu:solid.fillet").is_some());
-                    assert_eq!(scenario::rect_of("menu:solid.fillet").unwrap().height(), 38.0);
-                    assert!(scenario::handle_at("menu:search:design:0").is_some());
+                    assert!(solidcraft_ui_registry::handle_at("menu:solid.fillet").is_some());
+                    assert_eq!(solidcraft_ui_registry::rect_of("menu:solid.fillet").unwrap().height(), 38.0);
+                    assert!(solidcraft_ui_registry::handle_at("menu:search:design:0").is_some());
                 }
-                "command" => assert!(scenario::rect_of("dialog:note:command_parameters").is_some()),
-                "invalid" => assert!(scenario::rect_of("dialog:report:command_parameters").is_some()),
-                "no-match" => assert!(scenario::rect_of("dialog:report:search_no_match").is_some()),
+                "command" => assert!(solidcraft_ui_registry::rect_of("dialog:note:command_parameters").is_some()),
+                "invalid" => assert!(solidcraft_ui_registry::rect_of("dialog:report:command_parameters").is_some()),
+                "no-match" => assert!(solidcraft_ui_registry::rect_of("dialog:report:search_no_match").is_some()),
                 _ => {}
             }
             let image = image.unwrap();
@@ -2913,7 +2914,7 @@ fn command_search_ribbon_transition_clips_content_in_both_themes() {
                 app.ui.palette_open = false;
                 app.sbox.text.clear();
             }
-            scenario::clear_handles();
+            solidcraft_ui_registry::clear_handles();
             let mut output = ctx.run_ui(
                 egui::RawInput { screen_rect: Some(bounds), time: Some(f64::from(frame) / 60.0), focused: true, ..Default::default() },
                 |ui| {
@@ -2923,12 +2924,12 @@ fn command_search_ribbon_transition_clips_content_in_both_themes() {
             );
             textures_update(&mut textures, &output.textures_delta);
             output.textures_delta.clear();
-            let field = scenario::rect_of("ribbon:search").unwrap();
+            let field = solidcraft_ui_registry::rect_of("ribbon:search").unwrap();
             if frame == 2 {
                 closed = field;
             }
             if (3..14).contains(&frame) {
-                let sheet = scenario::rect_of("ribbon:search_popup").unwrap();
+                let sheet = solidcraft_ui_registry::rect_of("ribbon:search_popup").unwrap();
                 assert!(sheet.top() > field.bottom() && sheet.top() <= field.bottom() + Tokens::get().space_6);
                 // Actual result text is painted with the unfolding sheet's clip,
                 // rather than relying on a smaller background hiding overflow.
@@ -3021,7 +3022,7 @@ fn file_view_application_evidence_in_both_themes_and_widths() {
                 textures_update(&mut textures, &output.textures_delta);
                 if frame == 5 {
                     assert!(app.home.open);
-                    let page = scenario::rect_of("home:page").expect("actual File view allocation");
+                    let page = solidcraft_ui_registry::rect_of("home:page").expect("actual File view allocation");
                     assert!(bounds.contains_rect(page));
                     raster(&ctx, output.shapes.clone(), output.pixels_per_point, bounds, &textures)
                         .save(output_dir.join(format!("file-{name}-{}.png", if dark { "dark" } else { "light" })))

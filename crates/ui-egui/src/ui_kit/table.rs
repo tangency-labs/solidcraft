@@ -1,8 +1,8 @@
 //! Dense editable tables. Geometry and typography share the form label-column tokens.
 use super::metrics::*;
+use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
-use crate::{scenario, theme::Tokens};
 use egui::{Response, Ui, vec2};
 
 /// A column's minimum width is a multiple of the measured form label column.
@@ -78,8 +78,8 @@ pub(crate) fn table_custom<R>(ui: &mut Ui, id: &str, columns: &[Column<'_>], emp
             result
         },
     );
-    scenario::publish_rect(&format!("dialog:table:{id}:viewport"), output.inner_rect);
-    scenario::publish_count(&format!("dialog:table:{id}:content_width"), f64::from(output.content_size.x));
+    solidcraft_ui_registry::publish_rect(&format!("dialog:table:{id}:viewport"), output.inner_rect);
+    solidcraft_ui_registry::publish_count(&format!("dialog:table:{id}:content_width"), f64::from(output.content_size.x));
     // The nested horizontal ScrollArea consumes vertical scroll targets too. Request the
     // reveal here so it reaches the card's vertical scroller, only after an explicit action.
     if let Some(rect) = reveal {
@@ -165,7 +165,7 @@ impl Table<'_> {
                     }
                 },
             );
-            scenario::publish_rect(&format!("dialog:column:{}:{}", self.id, column.label), cell);
+            solidcraft_ui_registry::publish_rect(&format!("dialog:column:{}:{}", self.id, column.label), cell);
             left = cell.right() + t.space_8;
         }
         ui.painter().hline(rect.x_range(), rect.bottom(), t.tertiary_border(t.dialog_rule));
@@ -217,8 +217,8 @@ impl Table<'_> {
             false,
         );
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
-        scenario::publish_handle(&format!("dialog:table:{}:add", self.id), rect.center());
-        scenario::publish_rect(&format!("dialog:table:{}:add", self.id), rect);
+        solidcraft_ui_registry::publish_handle(&format!("dialog:table:{}:add", self.id), rect.center());
+        solidcraft_ui_registry::publish_rect(&format!("dialog:table:{}:add", self.id), rect);
         response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(crate::i18n::tr_label(tooltip))
     }
 
@@ -232,7 +232,7 @@ impl Table<'_> {
             ui.painter().rect_filled(rect, t.control_radius, if selected { t.selected_bg } else { t.hover });
         }
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, key));
-        scenario::publish_rect(&format!("dialog:table:{}:{key}", self.id), rect);
+        solidcraft_ui_registry::publish_rect(&format!("dialog:table:{}:{key}", self.id), rect);
         let ppp = ui.ctx().pixels_per_point().max(0.5);
         let left = (rect.left() * ppp).round() / ppp + t.space_8;
         ui.push_id((&self.id, key), |ui| {
@@ -267,7 +267,7 @@ impl TableRow<'_> {
         let width = self.widths.get(self.column).copied().unwrap_or(0.0);
         let label = self.columns.get(self.column).map_or("", |c| c.label);
         let rect = egui::Rect::from_min_size(egui::pos2(self.left, self.rect.top()), vec2(width, self.rect.height()));
-        scenario::publish_rect(&format!("{}:cell:{label}", self.id), rect);
+        solidcraft_ui_registry::publish_rect(&format!("{}:cell:{label}", self.id), rect);
         self.column += 1;
         self.left += width + Tokens::get().space_8;
         self.ui
@@ -413,8 +413,8 @@ pub(crate) fn removable_header(ui: &mut Ui, label: &str) -> bool {
         return false;
     }
     let response = super::actions::icon_button_colored(ui, button, "close", "Remove the column", Some(t.form_error));
-    scenario::publish_handle(&format!("dialog:button:{label}:×"), button.center());
-    scenario::publish_rect(&format!("dialog:button:{label}:×"), button);
+    solidcraft_ui_registry::publish_handle(&format!("dialog:button:{label}:×"), button.center());
+    solidcraft_ui_registry::publish_rect(&format!("dialog:button:{label}:×"), button);
     response.clicked()
 }
 
@@ -427,8 +427,8 @@ pub(crate) fn bin_button(ui: &mut Ui, tooltip: &str) -> Response {
         [("Actions", "Delete"), ("Actions", "×"), (super::layout::label(ui), crate::i18n::tr_label("Delete")), (super::layout::label(ui), "×")]
     {
         let key = format!("dialog:button:{row}:{label}");
-        scenario::publish_handle(&key, rect.center());
-        scenario::publish_rect(&key, rect);
+        solidcraft_ui_registry::publish_handle(&key, rect.center());
+        solidcraft_ui_registry::publish_rect(&key, rect);
     }
     response
 }
@@ -447,8 +447,8 @@ pub(crate) fn plus_header<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> Opt
             ui.painter().vline(x, rect.y_range(), egui::Stroke::new(t.space_2, t.form_primary));
         }
     }
-    scenario::publish_handle("dialog:menu:Add Column", rect.center());
-    scenario::publish_rect("dialog:menu:Add Column", rect);
+    solidcraft_ui_registry::publish_handle("dialog:menu:Add Column", rect.center());
+    solidcraft_ui_registry::publish_rect("dialog:menu:Add Column", rect);
     let popup = Container::new(ui.ctx(), Surface::Popup).menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
     let open = popup.is_open();
     let result = popup.show(|ui| super::scope(ui, add)).map(|r| r.inner);
@@ -467,8 +467,8 @@ pub(crate) fn active_pill(ui: &mut Ui) {
     ui.painter().rect(rect, t.radius_xl, t.control_fill, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
     super::text::paint_text(ui, rect.shrink2(vec2(t.space_8, 0.0)), label, crate::fonts::semibold(t.font_small), t.form_primary, false);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
-    scenario::publish_handle(&format!("dialog:inline:{label}"), rect.center());
-    scenario::publish_rect(&format!("dialog:inline:{label}"), rect);
+    solidcraft_ui_registry::publish_handle(&format!("dialog:inline:{label}"), rect.center());
+    solidcraft_ui_registry::publish_rect(&format!("dialog:inline:{label}"), rect);
 }
 
 #[cfg(test)]

@@ -84,7 +84,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
     icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
     let show_clear = !value.is_empty();
     let clear_side = if show_clear { height } else { super::CommandSearch::key(ui, r.right_center() - vec2(t.space_6, 0.0), "Ctrl F") + t.space_12 };
-    crate::scenario::publish_rect("prefs:search:frame", r);
+    solidcraft_ui_registry::publish_rect("prefs:search:frame", r);
     let editor =
         Rect::from_min_max(pos2((icon.right() + t.space_6).min(r.right()), r.top()), pos2((r.right() - clear_side).max(icon.right()), r.bottom()));
     let response = ui
@@ -110,7 +110,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
         let clear_rect = Rect::from_center_size(pos2(r.right() - height * 0.5, r.center().y), vec2(height, height));
         let clear = ui.push_id(id.with("clear"), |ui| super::quiet_icon_button_at(ui, clear_rect, "close", "Clear")).inner;
         if id == egui::Id::unique("prefs_search") {
-            crate::scenario::publish_handle("prefs:search:clear", clear_rect.center());
+            solidcraft_ui_registry::publish_handle("prefs:search:clear", clear_rect.center());
         }
         if clear.clicked() {
             value.clear();

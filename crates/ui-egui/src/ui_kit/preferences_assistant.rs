@@ -1,7 +1,7 @@
 //! Shared concise choice cards and the agent-pointer settings specimen.
 use super::{metrics::dimension, text::paint_text};
+use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{scenario, theme::Tokens};
 use egui::{FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 
 /// One concise choice with its full meaning available to keyboard users and on hover.
@@ -119,7 +119,7 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
         if let Some(icon) = choice.icon {
             let cue = Rect::from_min_size(at, vec2(t.space_14, t.space_14));
             crate::icons::paint_icon(ui.painter(), cue, icon, 1.0);
-            scenario::publish_rect(&format!("{}:icon", choice.key), cue);
+            solidcraft_ui_registry::publish_rect(&format!("{}:icon", choice.key), cue);
             at.x += icon_width;
         }
         let summary_at = pos2(rect.left() + t.space_12, at.y + title_galley.size().y + t.space_6);
@@ -136,7 +136,7 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::Role::RadioButton, ui.is_enabled(), selected, format!("{}: {}", choice.title, choice.detail))
     });
-    scenario::publish_target(choice.key, rect);
+    solidcraft_ui_registry::publish_target(choice.key, rect);
     response.backing_on_hover_text(choice.detail).on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 

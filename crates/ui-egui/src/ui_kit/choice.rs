@@ -5,9 +5,9 @@ use super::{
     metrics::*,
     text::paint_text,
 };
+use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
-use crate::{scenario, theme::Tokens};
 use egui::{Ui, vec2};
 
 /// Text segments retain mixed states and optional compact clipping instead of dropdown fallback.
@@ -194,11 +194,11 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         );
         t.button_bevel_with_radius(ui, &response, on, rounding);
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, segment_enabled, on, *text));
-        scenario::publish_target(&format!("dialog:{}:{option}", label(ui)), segment);
+        solidcraft_ui_registry::publish_target(&format!("dialog:{}:{option}", label(ui)), segment);
         if let Some(target) = targets.get(index) {
             let visible = segment.intersect(ui.clip_rect());
             if visible.is_positive() {
-                scenario::publish_target(target, visible);
+                solidcraft_ui_registry::publish_target(target, visible);
             }
         }
         let response =
@@ -216,7 +216,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
             egui::StrokeKind::Inside,
         );
     }
-    scenario::publish_target_as(&format!("dialog:{}", label(ui)), &format!("dialog:segments:{}", label(ui)), rect);
+    solidcraft_ui_registry::publish_target_as(&format!("dialog:{}", label(ui)), &format!("dialog:segments:{}", label(ui)), rect);
     clicked
 }
 
@@ -280,8 +280,8 @@ pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[Icon
         }
         t.button_bevel_with_radius(ui, &response, on, rounding);
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), on, option.key));
-        scenario::publish_handle(&format!("dialog:{}:{}", label(ui), option.key), segment.center());
-        scenario::publish_target(option.key, segment);
+        solidcraft_ui_registry::publish_handle(&format!("dialog:{}:{}", label(ui), option.key), segment.center());
+        solidcraft_ui_registry::publish_target(option.key, segment);
         let response = response.backing_on_hover_text(&option.tip);
         if response.clicked() {
             *selected = index;
@@ -291,7 +291,7 @@ pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[Icon
     if !catalog && t.borders.bevel.is_none() {
         ui.painter().rect_stroke(rect, t.control_radius, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
     }
-    scenario::publish_target_as(&format!("dialog:{}", label(ui)), &format!("dialog:segments:{}", label(ui)), rect);
+    solidcraft_ui_registry::publish_target_as(&format!("dialog:{}", label(ui)), &format!("dialog:segments:{}", label(ui)), rect);
     clicked
 }
 
@@ -316,7 +316,7 @@ pub(crate) fn checkbox_grid(ui: &mut Ui, items: &mut [(&str, &mut bool)], column
                 let text_rect = egui::Rect::from_min_max(egui::pos2((square.right() + t.space_6).min(rect.right()), rect.top()), rect.max);
                 paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_body), t.form_ink, false);
                 response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), **value, translated));
-                scenario::publish_target_as(&format!("dialog:{label}"), &format!("dialog:checkbox:{label}"), rect);
+                solidcraft_ui_registry::publish_target_as(&format!("dialog:{label}"), &format!("dialog:checkbox:{label}"), rect);
             }
         });
     }
@@ -344,7 +344,7 @@ pub(crate) fn checkbox_row(ui: &mut egui::Ui, key: &str, label: &str, on: bool) 
         .with_clip_rect(ui.clip_rect().intersect(egui::Rect::from_min_max(rect.min, egui::pos2(square.left() - t.space_6, rect.bottom()))));
     painter.text(rect.left_center(), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(t.font_label), t.form_ink);
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), on, label));
-    crate::scenario::publish_target(&format!("sketch_palette:toggle:{key}"), rect);
+    solidcraft_ui_registry::publish_target(&format!("sketch_palette:toggle:{key}"), rect);
     response.backing_on_hover_text(label).clicked()
 }
 
@@ -364,7 +364,7 @@ pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool, bol
             response = response.backing_on_disabled_hover_text(crate::i18n::tr("sketch_text.no_bold"));
         }
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled() && enabled, *value, crate::i18n::tr(id)));
-        scenario::publish_target_as(&format!("dialog:{key}"), &format!("dialog:emphasis:{key}"), response.rect);
+        solidcraft_ui_registry::publish_target_as(&format!("dialog:{key}"), &format!("dialog:emphasis:{key}"), response.rect);
     }
 }
 
@@ -398,7 +398,7 @@ pub(crate) fn tool_choices<'a>(ui: &mut Ui, label: &str, current: &str, choices:
             );
             crate::icons::paint_icon(ui.painter(), response.rect.shrink(t.space_6), choice.icon, f32::from(t.icon.a()) / 255.0);
             t.button_bevel(ui, &response, on);
-            scenario::publish_target(&format!("sketch_palette:feature:{}", choice.key), response.rect);
+            solidcraft_ui_registry::publish_target(&format!("sketch_palette:feature:{}", choice.key), response.rect);
             response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, enabled, on, choice.label));
             if response.backing_on_hover_text(choice.label).clicked() && enabled {
                 start = Some(choice.key);
@@ -418,11 +418,11 @@ pub(crate) fn toggle_icon(ui: &mut Ui, row: &str, label: &str, selected: &mut bo
     crate::icons::paint_icon(ui.painter(), response.rect.shrink(t.space_3), icon, f32::from(t.icon.a()) / 255.0);
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, *selected, crate::i18n::tr_label(label)));
     t.button_bevel(ui, &response, *selected);
-    crate::scenario::publish_handle(&format!("dialog:{row}:{label}"), response.rect.center());
+    solidcraft_ui_registry::publish_handle(&format!("dialog:{row}:{label}"), response.rect.center());
     if response.clone().backing_on_hover_text(crate::i18n::tr_label(label)).clicked() {
         *selected = !*selected;
     }
-    scenario::publish_rect(&format!("dialog:{row}:{label}"), response.rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:{row}:{label}"), response.rect);
     response
 }
 
@@ -435,7 +435,7 @@ mod tests;
 pub(crate) fn list_picker(ui: &mut Ui, key: &str, text: &str, selected: bool) -> egui::Response {
     let response =
         ui.add_sized(egui::vec2(super::metrics::dimension(ui.available_width()), super::row_height()), egui::Button::selectable(selected, text));
-    crate::scenario::publish_target(&format!("dialog:list:{key}"), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), response.rect);
     response
 }
 
@@ -458,7 +458,7 @@ pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) ->
         );
         crate::prefs_search::remember(ui, text, response.rect);
         crate::prefs_search::follow(ui, text, response.rect);
-        crate::scenario::publish_target(&format!("dialog:list:{key}"), response.rect);
+        solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), response.rect);
         return response;
     }
     if super::layout::in_catalog(ui) {
@@ -475,13 +475,13 @@ pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) ->
             false,
         );
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, text));
-        crate::scenario::publish_target(&format!("dialog:list:{key}"), rect);
+        solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), rect);
         return response;
     }
     let width = (ui.painter().layout_no_wrap(text.to_owned(), crate::fonts::semibold(t.font_label), t.text).size().x + t.space_24)
         .clamp(t.control_height * 2.0, t.form_card_width);
     let response = ui.add_sized(vec2(width, super::row_height()), egui::Button::selectable(selected, text).truncate());
-    crate::scenario::publish_target(&format!("dialog:list:{key}"), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), response.rect);
     response
 }
 
@@ -558,7 +558,7 @@ pub(crate) fn thumbnail_choice(ui: &mut Ui, key: &str, text: &str, state: Thumbn
     if state.modified {
         let dot = egui::pos2(rect.right() - t.space_6, rect.top() + t.space_6);
         ui.painter().circle_filled(dot, t.space_3, t.warning);
-        crate::scenario::publish_rect(&format!("dialog:list:{key}:modified"), egui::Rect::from_center_size(dot, vec2(t.space_6, t.space_6)));
+        solidcraft_ui_registry::publish_rect(&format!("dialog:list:{key}:modified"), egui::Rect::from_center_size(dot, vec2(t.space_6, t.space_6)));
     }
     if let Some(progress) = state.progress {
         let center = thumb.center();
@@ -573,10 +573,10 @@ pub(crate) fn thumbnail_choice(ui: &mut Ui, key: &str, text: &str, state: Thumbn
             })
             .collect();
         ui.painter().add(egui::Shape::line(points, egui::Stroke::new(t.space_2, accent.ink)));
-        crate::scenario::publish_rect(&format!("dialog:list:{key}:progress"), thumb);
+        solidcraft_ui_registry::publish_rect(&format!("dialog:list:{key}:progress"), thumb);
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), state.selected, text));
-    crate::scenario::publish_target(&format!("dialog:list:{key}"), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), response.rect);
     response.backing_on_hover_text(text)
 }
 
@@ -745,7 +745,7 @@ pub(crate) fn popup_list(
                         // Tip the full name first: long identifiers still clip inside a capped popup.
                         let tip = if option.detail.is_empty() { option.text.to_owned() } else { format!("{}\n{}", option.text, option.detail) };
                         let response = response.backing_on_hover_text(tip);
-                        crate::scenario::publish_handle(&format!("dialog:suggestion:{index}"), response.rect.center());
+                        solidcraft_ui_registry::publish_handle(&format!("dialog:suggestion:{index}"), response.rect.center());
                         if response.clicked() {
                             chosen = Some(index);
                         }
@@ -759,7 +759,7 @@ pub(crate) fn popup_list(
             })
         });
     });
-    crate::scenario::publish_rect("dialog:suggestions", area.response.rect);
+    solidcraft_ui_registry::publish_rect("dialog:suggestions", area.response.rect);
     ctx.data_mut(|d| d.insert_temp(id.with("rows"), rows));
     chosen
 }

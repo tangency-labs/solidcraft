@@ -245,7 +245,7 @@ pub(crate) fn assistant_approval<R>(ui: &mut Ui, title: &str, body: impl FnOnce(
                 .inner
         },
     );
-    crate::scenario::publish_rect("assistant:approval", output.response.rect);
+    solidcraft_ui_registry::publish_rect("assistant:approval", output.response.rect);
     output
 }
 

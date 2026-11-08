@@ -65,6 +65,6 @@ impl ReviewAndApply<'_> {
             });
         }
         let ack = checkbox(ui, self.acknowledgement, acknowledged);
-        crate::scenario::publish_target("render:review:acknowledge", ack.rect);
+        solidcraft_ui_registry::publish_target("render:review:acknowledge", ack.rect);
     }
 }

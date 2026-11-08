@@ -1,6 +1,6 @@
 //! Shared theme browser vocabulary: toggle segments, slots, marked cards and scroll viewport.
 use super::*;
-use crate::{scenario, theme::Tokens};
+use crate::theme::Tokens;
 use egui::{Align2, Color32, FontId, Painter, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -192,7 +192,7 @@ pub(crate) fn theme_segments(ui: &mut Ui, key: &str, options: &[ThemeSegment<'_>
         crate::prefs_search::follow(ui, option.label, r);
         let visible = r.intersect(ui.clip_rect());
         if visible.is_positive() {
-            scenario::publish_target(&format!("prefs:theme_{key}:{index}"), visible);
+            solidcraft_ui_registry::publish_target(&format!("prefs:theme_{key}:{index}"), visible);
         }
         if response.clicked() {
             clicked = Some(index);
@@ -239,7 +239,7 @@ pub(crate) fn theme_toolbar<L, R>(
     let b = trailing(&mut right);
     let height = if stacked { left_height + gap + right.min_size().y } else { left_height.max(right.min_size().y) };
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-    scenario::publish_rect(&format!("prefs:theme_toolbar:{key}"), rect);
+    solidcraft_ui_registry::publish_rect(&format!("prefs:theme_toolbar:{key}"), rect);
     (a, b)
 }
 
@@ -400,7 +400,7 @@ pub(crate) fn theme_empty(ui: &mut Ui, message: &str, clear: &str, reset: impl F
                 reset();
             }
         });
-        scenario::publish_rect("prefs:theme_empty", ui.min_rect());
+        solidcraft_ui_registry::publish_rect("prefs:theme_empty", ui.min_rect());
     });
 }
 
@@ -532,7 +532,7 @@ pub(crate) fn theme_browser(ui: &mut Ui, id: &str, count: usize, grid: bool, rev
             }
             let label = crate::i18n::tr(if left { "prefs.appearance.previous_themes" } else { "prefs.appearance.next_themes" });
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
-            scenario::publish_target(if left { "prefs:theme_previous" } else { "prefs:theme_next" }, arrow);
+            solidcraft_ui_registry::publish_target(if left { "prefs:theme_previous" } else { "prefs:theme_next" }, arrow);
             if response.clicked() {
                 // A screenful: the cards that fit in view, at least one (#11434).
                 let page = (r.width() / stride).floor().max(1.0) * stride;
@@ -544,6 +544,6 @@ pub(crate) fn theme_browser(ui: &mut Ui, id: &str, count: usize, grid: bool, rev
             ui.ctx().request_repaint();
         }
         ui.data_mut(|d| d.insert_temp(key, offset));
-        scenario::publish_rect("prefs:theme_viewport", r);
+        solidcraft_ui_registry::publish_rect("prefs:theme_viewport", r);
     });
 }

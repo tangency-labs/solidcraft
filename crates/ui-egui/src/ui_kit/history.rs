@@ -239,7 +239,7 @@ impl HistoryTransport {
     pub fn show(self, ui: &mut egui::Ui, rect: Rect, playing: bool) -> egui::Response {
         let t = Tokens::get();
         let response = ui.interact(rect, ui.scope_id().with(("history_transport", self.id())), egui::Sense::click());
-        crate::scenario::publish_target(&format!("history:{}", self.id()), rect);
+        solidcraft_ui_registry::publish_target(&format!("history:{}", self.id()), rect);
         if response.hovered() {
             ui.painter().rect_filled(rect, t.radius_sm, t.hover);
         }
@@ -399,9 +399,9 @@ pub(crate) fn history_seam(ui: &mut egui::Ui, card: Rect, names: bool) -> Histor
             ui.label(egui::RichText::new(crate::i18n::tr("ui.history_edge_hint")).size(t.font_small).color(t.text_dim));
         });
     }
-    crate::scenario::publish_handle("history:names", seam.pill.center());
-    crate::scenario::publish_rect("history:seam", seam.edge);
-    crate::scenario::publish_rect("history:handle", seam.pill);
+    solidcraft_ui_registry::publish_handle("history:names", seam.pill.center());
+    solidcraft_ui_registry::publish_rect("history:seam", seam.edge);
+    solidcraft_ui_registry::publish_rect("history:handle", seam.pill);
     // egui's click response includes Enter and Space for a focused button.
     HistorySeamResponse {
         toggle: button.clicked() || edge.double_clicked(),

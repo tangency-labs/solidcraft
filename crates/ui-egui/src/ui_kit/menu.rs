@@ -362,7 +362,7 @@ impl<'a> MenuItem<'a> {
         let galley = painter.layout_job(job);
         painter.galley(pos2(left, r.center().y - galley.size().y / 2.0), galley, ink);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
-        crate::scenario::publish_target(&format!("menu:{}", self.id), r);
+        solidcraft_ui_registry::publish_target(&format!("menu:{}", self.id), r);
         if enabled && response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
@@ -408,7 +408,7 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
                     if item.enabled { Sense::click() } else { Sense::hover() },
                 );
                 for handle in [format!("menu:{}", item.id), format!("workspace:menu:{slug}")] {
-                    crate::scenario::publish_target(&handle, r);
+                    solidcraft_ui_registry::publish_target(&handle, r);
                 }
                 if current || (item.enabled && (resp.hovered() || key_row == Some(k))) {
                     ui.painter().rect_filled(r, t.control_radius.saturating_sub(1), soft);
@@ -497,7 +497,7 @@ pub(crate) fn rename_menu(ui: &mut Ui, value: &mut String, focused: &mut bool) -
             let id = egui::Id::unique("sc_rename_text");
             let response = ui.add(super::fields::text_input(egui::TextEdit::singleline(value).id(id)).desired_width(ui.available_width()));
             t.input_bevel(ui, &response);
-            crate::scenario::publish_target("rename:name", response.rect);
+            solidcraft_ui_registry::publish_target("rename:name", response.rect);
             if !*focused {
                 if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
                     state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
