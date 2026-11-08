@@ -687,6 +687,17 @@ impl JsonSchema for DirectionParam {
     }
 }
 
+keyword_param!(
+    /// A revolve's `direction`, which the handlers read only for `symmetric` (ignoring case); the
+    /// other words they ignore are left out, so a caller who means a turn the other way (a
+    /// negative angle) is told.
+    RevolveDirection,
+    "direction",
+    &["symmetric", "one_side", "positive"],
+    "symmetric, one_side or positive",
+    "symmetric: the same as `symmetric: true`. one_side and positive: one side, the default. Matching ignores case."
+);
+
 /// The `extent` keyword: only `through_all` (ignoring case) is meaningful.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExtentKeyword;
@@ -1190,6 +1201,18 @@ impl JsonSchema for PlaneOrFace {
     }
 }
 
+/// What `construct::model_axis_param` says about `v`, an edge or face of the model
+/// (`cmd::is_model_axis`), before it looks anything up, or `None`: a reference of another kind
+/// has no axis to give.
+fn model_axis_problem(v: &Value) -> Option<String> {
+    use crate::cmd::GeoForm;
+    use solidcraft_doc::construct::GeoRef;
+    geo_problem(v).or_else(|| match crate::cmd::geo_form(v) {
+        Ok(GeoForm::Face(_) | GeoForm::Edge(_) | GeoForm::Saved(GeoRef::Face { .. } | GeoRef::Edge { .. })) => None,
+        _ => Some(solidcraft_doc::construct::MODEL_AXIS_REFS.to_string()),
+    })
+}
+
 /// The line `construct.plane.at_angle` turns about, as `features::axis_line` reads it: an edge or
 /// face of the model (as `construct::model_axis_param` reads it), else X, Y, Z, a construction
 /// axis's name or `{origin?, dir}`. Kept as given, for the handler. Whether a picked edge or face
@@ -1199,14 +1222,9 @@ pub struct AxisLine(pub Value);
 
 impl<'de> Deserialize<'de> for AxisLine {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use crate::cmd::GeoForm;
-        use solidcraft_doc::construct::GeoRef;
         let v = Value::deserialize(d)?;
         let problem = if crate::cmd::is_model_axis(&v) {
-            geo_problem(&v).or_else(|| match crate::cmd::geo_form(&v) {
-                Ok(GeoForm::Face(_) | GeoForm::Edge(_) | GeoForm::Saved(GeoRef::Face { .. } | GeoRef::Edge { .. })) => None,
-                _ => Some(solidcraft_doc::construct::MODEL_AXIS_REFS.to_string()),
-            })
+            model_axis_problem(&v)
         } else {
             match &v {
                 Value::String(_) => None,
@@ -1237,6 +1255,89 @@ impl JsonSchema for AxisLine {
                     "properties": {"origin": point, "dir": point},
                     "required": ["dir"],
                     "not": {"anyOf": [{"required": ["edge"]}, {"required": ["face"]}, saved]}
+                },
+                picked_at("face", &point),
+                picked_at("edge", &point),
+                {"type": "object", "properties": {"type": {"enum": ["edge", "face"]}}, "required": ["type"]}
+            ]
+        })
+    }
+}
+
+/// What `features::axis_param` says when `axis` has none of its forms (missing, `null`, a
+/// number, a list or a boolean).
+const REVOLVE_AXIS_FORMS: &str =
+    "`axis` must be a sketch line id, x, y (sketch axes), X, Y, Z, a construction axis, {origin, dir} or {edge|face: [x,y,z]}";
+
+/// The axis a revolve turns about, as `features::axis_param` reads it: an edge or round face of
+/// the model (as `construct::model_axis_param` reads it), `{type: world, axis: X|Y|Z}`,
+/// `{origin?, dir}`, or text: X, Y or Z (the world's axes), x or y (the sketch's), a construction
+/// axis's name or a sketch line's id. Kept as given, for the handler. Whether text names a line or
+/// an axis, whether the origin's expressions evaluate, and whether a picked edge or face has an
+/// axis are the handler's to check, with the design.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RevolveAxis(pub Value);
+
+impl<'de> Deserialize<'de> for RevolveAxis {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        // In the handler's order: a model axis first, then `{type: world}`, then `{origin, dir}`
+        // (the origin before the direction), then text.
+        let problem = if crate::cmd::is_model_axis(&v) {
+            model_axis_problem(&v)
+        } else {
+            match &v {
+                Value::String(_) => None,
+                Value::Object(o) if o.get("type").and_then(Value::as_str) == Some("world") => {
+                    let axis = o.get("axis").and_then(Value::as_str);
+                    (!matches!(axis, Some("X" | "Y" | "Z"))).then(|| whole("world axis requires `axis` to be X, Y or Z"))
+                }
+                Value::Object(o) => {
+                    if o.get("origin").is_some_and(|origin| PointExpr3::deserialize(origin).is_err()) {
+                        Some(whole("`origin` must be a point [x, y, z] of numbers or length expressions"))
+                    } else {
+                        match o.get("dir") {
+                            None => Some(whole("axis needs `dir`")),
+                            // Any direction of numbers, as the handler takes it: a zero one is the
+                            // kernel's to refuse.
+                            Some(dir) => params::vec3(dir).is_none().then(|| whole("axis `dir` must be a direction [x, y, z] of numbers")),
+                        }
+                    }
+                }
+                _ => Some(whole(REVOLVE_AXIS_FORMS)),
+            }
+        };
+        match problem {
+            Some(why) => Err(D::Error::custom(why)),
+            None => Ok(RevolveAxis(v)),
+        }
+    }
+}
+
+impl JsonSchema for RevolveAxis {
+    fn schema_name() -> Cow<'static, str> {
+        "RevolveAxis".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        let origin = generator.subschema_for::<PointExpr3>();
+        let saved = json!({"required": ["type"], "properties": {"type": {"enum": ["edge", "face"]}}});
+        let world = json!({"required": ["type"], "properties": {"type": {"enum": ["world"]}}});
+        json_schema!({
+            "description": "The axis to turn about: a sketch line's id, x or y (the sketch's axes), X, Y or Z (the world's), a construction axis's name (followed when it is edited), {\"type\": \"world\", \"axis\": \"X\", \"Y\" or \"Z\"} (as timeline.inspect gives it), {\"origin\"?: [x, y, z] of numbers in mm or length expressions (default: the origin), \"dir\": [x, y, z]}, or a straight or circular edge, or a cylinder, cone or torus face, of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on it, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), whose axis the revolve follows as the model changes.",
+            "anyOf": [
+                {"type": "string"},
+                {
+                    "type": "object",
+                    "properties": {"type": {"enum": ["world"]}, "axis": {"enum": ["X", "Y", "Z"]}},
+                    "required": ["type", "axis"],
+                    "not": {"anyOf": [{"required": ["edge"]}, {"required": ["face"]}]}
+                },
+                {
+                    "type": "object",
+                    "properties": {"origin": origin, "dir": point},
+                    "required": ["dir"],
+                    "not": {"anyOf": [{"required": ["edge"]}, {"required": ["face"]}, saved, world]}
                 },
                 picked_at("face", &point),
                 picked_at("edge", &point),

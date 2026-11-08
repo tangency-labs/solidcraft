@@ -16,6 +16,7 @@ use super::features::{add_feature, axis_param, check_expr, extent_param, feature
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec3};
 use crate::schema::features::FeatureResult;
 use crate::schema::surface::{FairParams, OffsetParams, ReverseNormalParams, StitchParams, ThickenParams, UnstitchParams, UntrimParams};
+use crate::schema::surface_profile::{SurfaceExtrudeParams, SurfaceRevolveParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -26,6 +27,8 @@ const THICKEN_CONTRACT: TypedContract<ThickenParams> = TypedContract::new();
 const OFFSET_CONTRACT: TypedContract<OffsetParams> = TypedContract::new();
 const UNTRIM_CONTRACT: TypedContract<UntrimParams> = TypedContract::new();
 const FAIR_CONTRACT: TypedContract<FairParams> = TypedContract::new();
+const SURFACE_EXTRUDE_CONTRACT: TypedContract<SurfaceExtrudeParams> = TypedContract::new();
+const SURFACE_REVOLVE_CONTRACT: TypedContract<SurfaceRevolveParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.patch", "Patch", patch)
@@ -52,13 +55,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SURFACE", "MODIFY")
         .icon("surface_trim")
         .params("body: surface name; plane: XY|XZ|YZ|plane name|{origin, normal} or tool: {body, point} (a face, its surface extended) or curves: {sketch, curves?: [curve ids] (chains of curves meeting end to end; default every curve), direction?: normal|[x,y,z] (swept onto the surface along the sketch's normal, the default, or this direction)}; keep: [x,y,z] (a point on the side to keep) or [[x,y,z], ...] (points on the regions to keep: the pieces that hang together once cut). Mutual trim: with: another surface (one face each; leave out plane, tool and curves), keep_with: [x,y,z] or [[x,y,z], ...] (what to keep of it); each is cut where the other's surface (extended) meets it; extend?: bool (a surface that stops short of the other is extended to meet it); stitch?: bool (the kept pieces sewn into `body`; `with` is then gone)"),
-    CommandSpec::new("surface.extrude", "Surface Extrude", surface_extrude)
+    CommandSpec::new("surface.extrude", "Surface Extrude", crate::checked!("surface.extrude", surface_extrude))
         .at("SURFACE", "CREATE")
         .icon("surface_extrude")
+        .contract(&SURFACE_EXTRUDE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch?: id|name; curves?: [curve ids] (open or closed chains of curves meeting end to end) and/or profiles? (their boundaries; the default when no curves are given); distance: expr; direction?: positive|negative|symmetric (symmetric: distance is the total, split evenly around the start plane, as solid.extrude); convention?: total_distance|legacy_per_side (as solid.extrude; default total_distance; legacy_per_side: the distance on each side, as older symmetric surface extrudes keep); distance2?: expr; start_offset?: expr; name?, body_name? (a surface body: walls only, no caps)"),
-    CommandSpec::new("surface.revolve", "Surface Revolve", surface_revolve)
+    CommandSpec::new("surface.revolve", "Surface Revolve", crate::checked!("surface.revolve", surface_revolve))
         .at("SURFACE", "CREATE")
         .icon("surface_revolve")
+        .contract(&SURFACE_REVOLVE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
     CommandSpec::new("surface.sweep", "Surface Sweep", surface_sweep)
         .at("SURFACE", "CREATE")
