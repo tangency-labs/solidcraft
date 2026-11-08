@@ -120,7 +120,7 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: icon_svg::Resolved, look: Look
     let px = (side * ppp).round().clamp(8.0, 512.0) as u32;
     let cache = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::unique("sc_icon_cache"), Cache::default).clone());
     let Ok(mut entries) = cache.0.lock() else { return };
-    let palette = crate::theme::Tokens::get().icon_palette;
+    let palette = icon_svg::theme_palette(crate::theme::is_dark());
     if entries.palette != palette {
         entries.textures.clear();
         entries.palette = palette;
@@ -174,7 +174,7 @@ mod tests {
                 "name":"Switch","base":if dark {"dark"} else {"light"},
                 "icon_palette":{"solid":["#c0d0e0","#668899",stroke]}}))
             .unwrap();
-            let _restore = theme::scoped_tokens(crate::theme_files::resolve(&file));
+            let _restore = theme::scoped_file(&file);
             let draw = |ui: &mut egui::Ui| {
                 let r = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(64.0, 64.0));
                 paint_icon(ui.painter(), r, "extrude", 1.0);

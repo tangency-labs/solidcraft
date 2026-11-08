@@ -121,7 +121,7 @@ struct PreparedTheme {
     file: crate::theme_files::ThemeFile,
     raw: Option<BTreeMap<String, serde_json::Value>>,
     values: BTreeMap<String, crate::theme_files::OptionValue>,
-    base: Custom,
+    base: FilePalette,
     enabled: bool,
     fade_ms: f32,
 }
@@ -260,7 +260,7 @@ pub(crate) fn prepare_tabs(
     file: Option<&crate::theme_files::ThemeFile>,
     raw: Option<&BTreeMap<String, serde_json::Value>>,
     values: impl FnOnce() -> BTreeMap<String, crate::theme_files::OptionValue>,
-) -> Option<Custom> {
+) -> Option<FilePalette> {
     ctx.data_mut(|data| {
         let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE));
         let same = match (&state.prepared, file) {
@@ -277,7 +277,11 @@ pub(crate) fn prepare_tabs(
                     state.blur.radius = crate::theme_options::blur_radius(file, &values, crate::theme_options::Availability::Available);
                 }
                 let (enabled, fade_ms) = crate::theme_options::tab_settings(file, &values);
-                let base = Custom { dark: file.base.is_dark(), tokens: crate::theme_files::resolve_with(file, &values) };
+                let base = FilePalette {
+                    dark: file.base.is_dark(),
+                    tokens: crate::theme_files::resolve_with(file, &values),
+                    icons: crate::theme_files::resolve_icon_palette(file, &values),
+                };
                 PreparedTheme { file: file.clone(), raw: raw.cloned(), values, base, enabled, fade_ms }
             });
             state.environment = None;
@@ -569,6 +573,40 @@ pub fn set_custom(custom: Option<Custom>) -> bool {
         CUSTOM_GENERATION.with(|generation| generation.set(generation.get().wrapping_add(1)));
     }
     changed
+}
+
+/// A theme file as the theme system applies it: its palette for its base (dark or light), and the icon palette it
+/// gives the icon renderer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FilePalette {
+    pub dark: bool,
+    pub tokens: Tokens,
+    pub icons: Option<crate::icon_svg::Palette>,
+}
+
+/// Apply a theme file's palettes ([`set_custom`] and the icon renderer's), or the built-in ones (`None`). Returns
+/// whether that changed anything (the visuals follow on the next [`apply`]).
+pub fn set_file_palette(file: Option<FilePalette>) -> bool {
+    let tokens = set_custom(file.map(|f| Custom { dark: f.dark, tokens: f.tokens }));
+    let icons = crate::icon_svg::set_theme_palette(file.and_then(|f| f.icons.map(|icons| (f.dark, icons))));
+    tokens | icons
+}
+
+/// Isolated tests draw with a theme file's palettes, restored even when an assertion fails.
+#[cfg(test)]
+pub(crate) fn scoped_file(file: &crate::theme_files::ThemeFile) -> impl Drop {
+    struct Restore(Option<Custom>, Option<(bool, crate::icon_svg::Palette)>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            set_custom(self.0);
+            crate::icon_svg::set_theme_palette(self.1);
+        }
+    }
+    let restore = Restore(CUSTOM.get(), crate::icon_svg::theme_palette_state());
+    let values = BTreeMap::new();
+    let tokens = crate::theme_files::resolve_with(file, &values);
+    set_file_palette(Some(FilePalette { dark: is_dark(), tokens, icons: crate::theme_files::resolve_icon_palette(file, &values) }));
+    restore
 }
 
 /// Draw the logo in the theme's accent (`true`) or its own logo colours. Returns whether that
@@ -1414,8 +1452,6 @@ pub struct Tokens {
     pub continuity: [Color32; 4],
     pub analysis: AnalysisColors,
     pub icons: IconColors,
-    /// Optional SVG display roles and semantic ramps from the active theme file.
-    pub icon_palette: Option<crate::icon_svg::Palette>,
     /// The SolidCraft mark on the application bar: light, mid and dark faces (the gaps between
     /// them show the bar).
     pub logo: [Color32; 3],
@@ -1805,9 +1841,13 @@ mod tests {
         let file = crate::theme_files::tab_fixture(base);
         let values = crate::theme_files::effective_values(&file, &overrides).0;
         let (enabled, fade_ms) = crate::theme_options::tab_settings(&file, &values);
-        let base = Custom { dark: file.base.is_dark(), tokens: crate::theme_files::resolve_with(&file, &values) };
+        let base = FilePalette {
+            dark: file.base.is_dark(),
+            tokens: crate::theme_files::resolve_with(&file, &values),
+            icons: crate::theme_files::resolve_icon_palette(&file, &values),
+        };
         set_dark(base.dark);
-        set_custom(Some(base));
+        set_file_palette(Some(base));
         set_vision(ColorVision::Off);
         set_viewport_dark(None);
         set_viewport_background(None);
@@ -1950,7 +1990,7 @@ mod tests {
                 crate::theme_files::effective_values(file, &saved).0
             });
             set_dark(file.base.is_dark());
-            set_custom(custom);
+            set_file_palette(custom);
         };
         let publish = || ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE)).publish("SKETCH", 1.0));
         set_vision(ColorVision::Off);
@@ -2263,7 +2303,7 @@ mod tests {
                     let saved = enabled.map(|enabled| BTreeMap::from([("tab_colours".into(), OptionValue::Bool(enabled))])).unwrap_or_default();
                     crate::theme_files::effective_values(file, &saved).0
                 });
-                set_custom(custom)
+                set_file_palette(custom)
             };
             let publish = |tab: &str, time| {
                 ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| TabAccent::publish(tab, false, false, ui.ctx()))

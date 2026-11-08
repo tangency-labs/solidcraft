@@ -439,6 +439,29 @@ pub struct Palette {
     pub(crate) accents: [Option<[[u8; 3]; 3]>; ACCENT_NAMES.len() + 1],
 }
 
+thread_local! {
+    /// The applied theme file's icon palette and whether its base is dark, per UI thread like the theme's tokens
+    /// (`theme::set_file_palette`). `None`: the built-in artwork colours of `palette.toml`.
+    static THEME_PALETTE: std::cell::Cell<Option<(bool, Palette)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Draw with a theme file's icon palette on its base (`Some((dark, palette))`), or with the built-in colours (`None`).
+/// Returns whether that changed anything.
+pub fn set_theme_palette(palette: Option<(bool, Palette)>) -> bool {
+    THEME_PALETTE.replace(palette) != palette
+}
+
+/// The icon palette state as [`set_theme_palette`] last set it, for tests that restore it.
+#[cfg(test)]
+pub(crate) fn theme_palette_state() -> Option<(bool, Palette)> {
+    THEME_PALETTE.get()
+}
+
+/// The applied theme file's icon palette for a dark or light drawing, or `None` when the theme is not for that base.
+pub fn theme_palette(dark: bool) -> Option<Palette> {
+    THEME_PALETTE.get().filter(|(base, _)| *base == dark).map(|(_, palette)| palette)
+}
+
 impl Palette {
     fn rgb(self, role: usize, accent: Option<usize>) -> Option<[u8; 3]> {
         let name = ROLE_NAMES.get(role)?;
@@ -474,7 +497,7 @@ pub struct Look {
 
 impl Look {
     pub fn themed(dark: bool, accent: Option<usize>, vision: crate::theme::ColorVision) -> Self {
-        Self { dark, accent, vision, palette: crate::theme::Tokens::themed(dark, vision).icon_palette }
+        Self { dark, accent, vision, palette: theme_palette(dark) }
     }
 
     fn rgb(self, role: usize) -> [u8; 3] {
@@ -851,8 +874,7 @@ mod tests {
     #[test]
     fn shipped_icon_palettes_preserve_alpha_shading_and_colour_vision_overrides() {
         for file in crate::theme_files::builtin() {
-            let tokens = crate::theme_files::resolve(file);
-            let palette = tokens.icon_palette.expect("shipped icon palette");
+            let palette = crate::theme_files::resolve_icon_palette(file, &Default::default()).expect("shipped icon palette");
             // Two colours can't make a pale/medium/strong ramp three distinct shades (1-bit, 1-bit Dark).
             for ramp in palette.accents.into_iter().flatten().filter(|_| !crate::theme_files::is_two_colour(&file.id)) {
                 // Ordered faces stay visibly distinct without changing accepted paths.

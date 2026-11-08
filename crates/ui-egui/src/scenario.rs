@@ -1083,7 +1083,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
             "theme_colors" => {
                 // Read the applied tokens after the scenario frame, not the source theme file.
                 let tokens = crate::theme::Tokens::get();
-                let resolved = crate::theme_files::export("Scenario", crate::theme_files::Base::Dark, &tokens);
+                let resolved = crate::theme_files::export("Scenario", crate::theme_files::Base::Dark, &tokens, None);
                 for (key, want) in v.as_object().into_iter().flatten() {
                     if resolved["colors"][key] != *want {
                         return Err(format!("theme colour {key}: got {}, want {want}", resolved["colors"][key]));

@@ -2379,7 +2379,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     // Custom Day/Night palettes still need native OS appearance notifications. Fixing
     // the native window to the slot's tone can stop those notifications on macOS.
     let follows_system = app.preferences.theme == "system" && followed_theme(&app.preferences, &app.prefs_window.follow).is_none();
-    if crate::theme::set_custom(custom) {
+    if crate::theme::set_file_palette(custom) {
         app.styled = false;
     }
     sync_window_theme(app, ctx, follows_system);
@@ -3663,7 +3663,12 @@ fn export_theme_file(file: &crate::theme_files::ThemeFile) -> serde_json::Value 
     if !file.options.is_empty() || !file.overlays.is_empty() || !file.tabs.is_empty() || file.needs_newer() {
         crate::theme_files::export_file(file)
     } else {
-        crate::theme_files::export(&file.name, file.base, &crate::theme_files::resolve(file))
+        crate::theme_files::export(
+            &file.name,
+            file.base,
+            &crate::theme_files::resolve(file),
+            crate::theme_files::resolve_icon_palette(file, &Default::default()),
+        )
     }
 }
 
@@ -3935,8 +3940,8 @@ fn theme_file(app: &SolveApp, id: &str, system_dark: bool) -> serde_json::Value 
     let id = if id == "system" { theme_picker::slot_id(&app.preferences, system_dark) } else { id };
     match find(id, &app.preferences.custom_themes) {
         Some(f) => export_theme_file(f),
-        None if id == "dark" => export("Dark", Base::Dark, &crate::theme::Tokens::dark()),
-        None => export("Light", Base::Light, &crate::theme::Tokens::light()),
+        None if id == "dark" => export("Dark", Base::Dark, &crate::theme::Tokens::dark(), None),
+        None => export("Light", Base::Light, &crate::theme::Tokens::light(), None),
     }
 }
 
