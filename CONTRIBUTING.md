@@ -32,8 +32,9 @@ including the dialogs and tools for these features.
 solidcore's open PRs were re-opened here on `moved/solidcore-N` branches in tangency-labs, so
 contributors without write access can't push to them. To update one:
 
-1. `git fetch https://github.com/tangency-labs/solidcraft moved/solidcore-N`
-2. Push that branch to your fork with your changes on top.
+1. `git fetch https://github.com/tangency-labs/solidcraft moved/solidcore-N:moved/solidcore-N`, then
+   `git switch moved/solidcore-N`.
+2. Commit your changes on it and push it to your fork: `git push <your-fork> moved/solidcore-N`.
 3. Open a PR against `kernel` that says "Replaces #M" (M is the moved PR's number). The moved one
    gets closed.
 
