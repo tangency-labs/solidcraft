@@ -1369,11 +1369,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             Ok(()) => ok(json!({"custom_titlebar": app.custom_titlebar, "maximized": ctx.input(|i| i.viewport().maximized)})),
             Err(e) => err(e),
         },
-        "ui.resize" => {
-            let (Some(w), Some(h)) = (f("width"), f("height")) else { return err("missing width/height") };
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w.clamp(320.0, 8192.0) as f32, h.clamp(240.0, 8192.0) as f32)));
-            ok(Value::Null)
-        }
+        "ui.resize" => wrap(solidcraft_control::window::resize(ctx, p)),
         "ui.screenshot" => match s("path").map(vfs::check) {
             Some(Err(e)) => err(e),
             _ => Outcome::Screenshot { path: s("path").map(str::to_string) },
@@ -1541,16 +1537,8 @@ pub fn save_screenshot(image: &egui::ColorImage, path: Option<&str>) -> Value {
 /// [`vfs`] like every other save: the disk natively, a download or browser storage in the web
 /// app (#7192).
 pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(), String> {
-    let [w, h] = image.size;
-    let mut buf = Vec::with_capacity(w * h * 4);
-    for c in &image.pixels {
-        buf.extend_from_slice(&c.to_array());
-    }
-    let img = image::RgbaImage::from_raw(w as u32, h as u32, buf).ok_or("bad image")?;
-    let format = image::ImageFormat::from_path(path).map_err(|e| e.to_string())?;
-    let mut bytes = std::io::Cursor::new(Vec::new());
-    img.write_to(&mut bytes, format).map_err(|e| e.to_string())?;
-    vfs::write(path, bytes.get_ref()).map_err(|e| e.to_string())
+    let bytes = solidcraft_control::screenshot::encode(image, path)?;
+    vfs::write(path, &bytes).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -2473,7 +2461,7 @@ mod tests {
                 *counts.entry(img.get_pixel(x, 0).0).or_insert(0) += 1;
             }
             let top = counts.into_iter().max_by_key(|(_, n)| *n).map(|(c, _)| c).unwrap();
-            let want = if dark { crate::theme::Tokens::dark() } else { crate::theme::Tokens::light() }.viewport_top;
+            let want = if dark { solidcraft_theme::Tokens::dark() } else { solidcraft_theme::Tokens::light() }.viewport_top;
             let near = top.iter().zip([want.r(), want.g(), want.b()]).all(|(a, b)| a.abs_diff(b) <= 2);
             assert!(near, "{theme}: the render's top row is {top:?}, the view's background {want:?}");
         }

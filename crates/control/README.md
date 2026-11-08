@@ -18,4 +18,8 @@ from an `App` value the app defines. No app types and no engine.
 | `auth::ClientToken::explain_error(error)` | A refusal with the token file named and whether it is stale; never the token |
 | `auth::plan`, `auth::Listen`, `auth::bind_with_fallback`, `auth::PORT_TRIES` | Where a launch listens; a loopback listener on the first free port |
 | `auth::tokens_match`, `auth::remove_token_file`, `auth::TokenFile`, `auth::pid_path`, `auth::MIN_TOKEN_LEN` | Constant-time compare and token file housekeeping |
-| `Effect` | What a request still running does when it finishes: reads only, writes a file, or changes; `when_done()` says it |
+| `Effect` | What a request still running does when it finishes: reads only, writes a file, or changes; `when_done(document)` says it |
+| `server::Hub`, `server::Protocol`, `server::Summary`, `server::Waits`, `server::new_token` | The loopback JSON-lines server behind the token (desktop only); the app says what its requests mean |
+| `ControlRequest`, `ControlResponse`, `DocumentWatch`, `DOCUMENT_WATCH` | A request as the window gets it; the document id and revision subscribed connections wait on |
+| `screenshot::Shots`, `screenshot::encode` | `ui.screenshot`: frames asked for, taken when the view settles, saved and answered, or refused when hidden, cancelled or late |
+| `window::resize`, `window::hidden` | `ui.resize` over `egui::Context`; whether the window presents frames |

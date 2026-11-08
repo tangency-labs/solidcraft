@@ -1144,7 +1144,7 @@ fn leaving_a_tab_refuses_admitted_commands_animations_and_screenshots() {
         // Capture a request already waiting for a frame, as well as a queued command.
         let screenshot = app.control_held.pop_back().unwrap();
         app.run_control(&ctx, screenshot);
-        assert_eq!(app.pending_shots.len(), 1);
+        assert_eq!(app.shots.pending.len(), 1);
         if animate {
             app.drain_control(&ctx);
             assert!(app.agent.busy(), "the command is waiting on cursor animation");
@@ -1160,8 +1160,8 @@ fn leaving_a_tab_refuses_admitted_commands_animations_and_screenshots() {
             assert!(response["error"].as_str().is_some_and(|e| e.contains("document tab was left")));
         }
         assert!(Arc::ptr_eq(&app.session.doc, &other));
-        assert!(app.session.undo.is_empty() && app.pending_shots.is_empty());
-        assert!(app.queued_shots.is_empty(), "a cancelled screenshot must not capture the incoming tab");
+        assert!(app.session.undo.is_empty() && app.shots.pending.is_empty());
+        assert!(app.shots.queued.is_empty(), "a cancelled screenshot must not capture the incoming tab");
         crate::documents::switch(&mut app, 0);
         assert!(app.session.doc.features.is_empty() && app.session.undo.is_empty());
         // Adopting into a blank tab replaces the document and clears its old conversation.

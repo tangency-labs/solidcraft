@@ -1,6 +1,6 @@
 [package]
 name = "solidcraft-control"
-description = "The control channel any app may share: the per-launch token and its files, and what a request still running does"
+description = "The control channel any app may share: token files, the loopback server, its requests, and the window's own ui.screenshot and ui.resize"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,6 +11,10 @@ workspace = true
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The window's own requests (`ui.screenshot`, `ui.resize`) go through egui.
+egui = { workspace = true }
+# Screenshots are saved in the format their path names.
+image = { workspace = true }
 
 # The loopback server is for desktop apps; the web app is driven through the page instead.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

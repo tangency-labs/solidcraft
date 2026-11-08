@@ -4311,7 +4311,7 @@ mod header_report_tests {
     }
 
     fn captured_frame(h: &mut crate::scenario::Harness) {
-        let token = h.app.shot_token;
+        let token = h.app.shots.token;
         crate::issue_report::receive(&mut h.app, token, std::sync::Arc::new(egui::ColorImage::new([2, 2], vec![Color32::GREEN; 4])));
         h.frames(3);
     }
