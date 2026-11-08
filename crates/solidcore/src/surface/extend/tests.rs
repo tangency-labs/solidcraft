@@ -2683,6 +2683,256 @@ fn tangent_past_one_mirror_step_leaves_no_sliver_span() {
     );
 }
 
+/// (#3093) Tangent asked a little more than two ranges of a degree 1 side: the second step's
+/// reflection falls 4.4e-16 off the joint knot the first step left, which is within the knot
+/// fixup's merge scale (1.2e-8). Mirrored there it made a span of 4.4e-16 that the fixup
+/// merges, leaving the end knot repeated past `p + 1`. The reflection is put on the knot, so
+/// every span of the extension is at least the merge scale, the end knot has `p + 1` copies and
+/// it is the ask to within that scale.
+#[test]
+fn tangent_reflecting_within_the_merge_scale_of_a_knot_leaves_no_sliver_span() {
+    let s = parabola();
+    let SurfaceKind::BSpline(b) = s.kind() else {
+        panic!()
+    };
+    let net = b.gw_nurb().unwrap().clone();
+    let source = Local::of(&net, BoxSide::VMax).unwrap();
+    let least = source.least_step().unwrap();
+    // two ranges and an ulp: the second step is 1 + 4.4e-16 long, its reflection 4.4e-16 off
+    // the knot 1 the first step left
+    let e = 2.0 * source.range().unwrap() + 2.0 * f64::EPSILON;
+    let g = source.extended(Continuity::Tangent, e).unwrap().unwrap();
+    let mut gaps = g
+        .knots
+        .windows(2)
+        .map(|w| w[1] - w[0])
+        .filter(|&gap| gap > 0.0);
+    assert!(gaps.all(|gap| gap >= least), "{:?}", g.knots);
+    let end = g.end().unwrap();
+    let copies = g.knots.iter().filter(|&&x| x == end).count();
+    assert_eq!(copies, g.p + 1, "{:?}", g.knots);
+    // the reflection snapped onto the knot: the end is the ask to within the merge scale
+    let asked = source.end().unwrap() + e;
+    assert!(
+        (end - asked).abs() <= merge_scale(0.0, end),
+        "{:?}",
+        g.knots
+    );
+}
+
+/// A degree 1 side `v` over `[0, 10]` with a curved net across (the issue's extrusion: a quadratic
+/// in u extruded 10 along z).
+fn tall_extrusion() -> Surface {
+    let row = |x: f64, y: f64| vec![[x, y, 0.0, 1.0], [x, y, 10.0, 1.0]];
+    spline(
+        &[row(0.0, 0.0), row(0.5, 0.0), row(1.0, 1.0)],
+        2,
+        1,
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 10.0, 10.0],
+        false,
+    )
+}
+
+/// The result's end knot has `p + 1` copies and no span is below the merge scale.
+fn assert_clamped_and_no_sliver(g: &Local) {
+    let end = g.end().unwrap();
+    let copies = g.knots.iter().filter(|&&x| x == end).count();
+    assert_eq!(copies, g.p + 1, "{:?}", g.knots);
+    let scale = merge_scale(g.start().unwrap(), end);
+    let mut gaps = g
+        .knots
+        .windows(2)
+        .map(|w| w[1] - w[0])
+        .filter(|&gap| gap > 0.0);
+    assert!(gaps.all(|gap| gap >= scale), "{:?}", g.knots);
+}
+
+/// (#3093) The issue's extrusion, extended 20 past each v side of its face `[0, 10]`: the low
+/// side's solved extension is 20 + 3.6e-15 (the knots `[-20.000000000000004 .. 30.0]`), whose
+/// second mirror step reflects 3.6e-15 off the joint knot. Tangent and Curvature both leave each
+/// end knot at `p + 1` copies and no span below the merge scale.
+#[test]
+fn the_issues_extrusion_extends_20_past_both_v_sides_with_clamped_ends() {
+    let s = tall_extrusion();
+    let SurfaceKind::BSpline(b) = s.kind() else {
+        panic!()
+    };
+    let net = b.gw_nurb().unwrap().clone();
+    for side in [BoxSide::VMin, BoxSide::VMax] {
+        let source = Local::of(&net, side).unwrap();
+        for e in [20.0, 20.0 + 3.6e-15, 20.0 - 3.6e-15] {
+            for how in [Continuity::Tangent, Continuity::Curvature] {
+                let g = source.extended(how, e).unwrap().unwrap();
+                assert_clamped_and_no_sliver(&g);
+                let reach = g.end().unwrap() - source.end().unwrap();
+                assert!(
+                    (reach - e).abs() <= merge_scale(0.0, g.end().unwrap()),
+                    "{side:?} {how:?} {e}: {:?}",
+                    g.knots
+                );
+            }
+        }
+    }
+}
+
+/// Curvature across the last Bezier span `h` of a multi-span quadratic: asks just below, at and
+/// just above `h` meet their reach and keep clamped ends; asks within the merge scale below `h`
+/// are the one extension at `h` (the reflection on the knot `c`, where `b - (b - c)` can miss
+/// `c` by an ulp), so the extension is continuous in `e`.
+#[test]
+fn curvature_across_the_last_span_is_continuous_in_the_ask() {
+    let row = |x: f64, y: f64| vec![[x, y, 0.0, 1.0], [x, y, 1.0, 1.0]];
+    let s = spline(
+        &[row(0.0, 0.0), row(0.3, 0.0), row(0.7, 0.5), row(1.0, 1.0)],
+        2,
+        1,
+        &[0.0, 0.0, 0.0, 0.3, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 1.0, 1.0],
+        false,
+    );
+    let SurfaceKind::BSpline(b) = s.kind() else {
+        panic!()
+    };
+    let net = b.gw_nurb().unwrap().clone();
+    let source = Local::of(&net, BoxSide::UMax).unwrap();
+    let h = source.end().unwrap() - source.before_end(0).unwrap();
+    let make = |e: f64| source.extended(Continuity::Curvature, e).unwrap().unwrap();
+    for e in [0.9 * h, 1.1 * h] {
+        let g = make(e);
+        assert_clamped_and_no_sliver(&g);
+        let reach = g.end().unwrap() - source.end().unwrap();
+        assert!((reach - e).abs() <= 1e-12, "{e}: {:?}", g.knots);
+    }
+    // within the merge scale of the knot: below it the step snaps onto the knot, the extension
+    // the one at `h`; above it the remainder under a least step is split off and the ask met
+    let at = make(h);
+    for e in [h * (1.0 - 1e-12), h - 1e-15] {
+        let g = make(e);
+        assert_eq!(g.knots, at.knots, "{e}");
+        assert_eq!(g.rows, at.rows, "{e}");
+    }
+    for e in [h * (1.0 + 1e-12), h + 1e-15] {
+        let g = make(e);
+        assert_clamped_and_no_sliver(&g);
+        let reach = g.end().unwrap() - source.end().unwrap();
+        assert!((reach - e).abs() <= 1e-12, "{e}: {:?}", g.knots);
+    }
+    assert_clamped_and_no_sliver(&at);
+}
+
+/// A quadratic with a knot at 0.3 along u, extruded 1 along z.
+fn multi_span_quadratic() -> Surface {
+    let row = |x: f64, y: f64| vec![[x, y, 0.0, 1.0], [x, y, 1.0, 1.0]];
+    spline(
+        &[row(0.0, 0.0), row(0.3, 0.0), row(0.7, 0.5), row(1.0, 1.0)],
+        2,
+        1,
+        &[0.0, 0.0, 0.0, 0.3, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 1.0, 1.0],
+        false,
+    )
+}
+
+/// The snap window is the fixup's merge scale (1.2e-8 in parameter): a Tangent step reflecting
+/// 1e-9 off the knot 0.3 is the step that reflects on it, bit for bit; one reflecting 2e-8 off
+/// it is untouched, the mirror of its own reflection point, which becomes a knot.
+#[test]
+fn a_reflection_inside_the_merge_scale_snaps_and_one_outside_is_untouched() {
+    let s = multi_span_quadratic();
+    let SurfaceKind::BSpline(b) = s.kind() else {
+        panic!()
+    };
+    let net = b.gw_nurb().unwrap().clone();
+    let source = Local::of(&net, BoxSide::UMax).unwrap();
+    let end = source.end().unwrap();
+    let on = source
+        .extended(Continuity::Tangent, end - 0.3)
+        .unwrap()
+        .unwrap();
+    // above the knot: the snapped step is the longer one, the extension the step on the knot
+    let e = end - (0.3 + 1e-9);
+    let g = source.extended(Continuity::Tangent, e).unwrap().unwrap();
+    assert_eq!(g.knots, on.knots);
+    assert_eq!(g.rows, on.rows);
+    // below it: the snapped step is the shorter one and leaves a remainder under a least
+    // step, split off so the extension reaches the ask
+    let e = end - (0.3 - 1e-9);
+    let g = source.extended(Continuity::Tangent, e).unwrap().unwrap();
+    assert_clamped_and_no_sliver(&g);
+    assert!((g.end().unwrap() - end - e).abs() <= merge_scale(0.0, g.end().unwrap()));
+    for delta in [2e-8, -2e-8] {
+        let e = end - (0.3 + delta);
+        let g = source.extended(Continuity::Tangent, e).unwrap().unwrap();
+        let direct = source.mirrored(end - e, false).unwrap();
+        assert_eq!(g.knots, direct.knots, "{delta}");
+        assert_eq!(g.rows, direct.rows, "{delta}");
+        assert_ne!(g.knots, on.knots, "{delta}");
+    }
+}
+
+/// A snapped step that leaves a remainder shorter than the least step is split in two when it
+/// can be, and refused naming the length reached when it cannot: an extension is never short.
+#[test]
+fn a_snapped_step_leaves_no_short_remainder() {
+    let s = multi_span_quadratic();
+    let SurfaceKind::BSpline(b) = s.kind() else {
+        panic!()
+    };
+    let net = b.gw_nurb().unwrap().clone();
+    let source = Local::of(&net, BoxSide::UMax).unwrap();
+    let least = source.least_step().unwrap();
+    let end = source.end().unwrap();
+    // the first step (the whole piece, 1.0) reflects on the start; the ask is half a least
+    // step more: split in two, the end the ask
+    let e = source.range().unwrap() + 0.5 * least;
+    let g = source.extended(Continuity::Tangent, e).unwrap().unwrap();
+    assert!((g.end().unwrap() - end - e).abs() <= merge_scale(0.0, g.end().unwrap()));
+    // the second step of an ask 1.0 + 0.7 + 0.5 least: the whole piece [0, 2] is not yet
+    // reached by 0.7 (it reflects 0.3 beside the knot 1.3 mirrored): never short
+    let e = 0.7 + 0.5 * least;
+    match source.extended(Continuity::Tangent, e) {
+        Ok(Some(g)) => assert!(
+            g.end().unwrap() - end >= e - merge_scale(0.0, g.end().unwrap()),
+            "{:?}",
+            g.knots
+        ),
+        Err(SolidError::ExtendRefused {
+            refusal: ExtendRefusal::NotExact,
+            distance: Some(w),
+            ..
+        }) => assert!(source.extended(Continuity::Tangent, w).unwrap().is_some()),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The length solve at an ask whose reflection is within the snap window of a knot: the issue's
+/// extrusion (rulings 10 long) extended 20 + 1e-9 past its high side. It meets the length
+/// within the contract, or is refused naming a length that works: never Ok short.
+#[test]
+fn the_length_solve_at_a_snapped_ask_meets_the_length_or_names_one_that_works() {
+    let kk = k();
+    let s = tall_extrusion();
+    let d0 = dom(&s);
+    for d in [20.0 + 1e-9, 20.0 + 1e-8, 20.0 + 3e-8] {
+        match s.extended_by_distance(&kk, &d0, BoxSide::VMax, Continuity::Tangent, d) {
+            Ok(Some(e)) => meets(&e, d),
+            Err(SolidError::ExtendRefused {
+                refusal: ExtendRefusal::NotExact,
+                distance: Some(w),
+                ..
+            }) => {
+                let e = s
+                    .extended_by_distance(&kk, &d0, BoxSide::VMax, Continuity::Tangent, w)
+                    .unwrap()
+                    .unwrap();
+                meets(&e, w);
+            }
+            other => panic!("{d}: {other:?}"),
+        }
+    }
+}
+
 /// A ball patch's side is reported met only when its measured length is within the
 /// bisection's stop of the length it was solved to: one the bisection left short (out of
 /// tries) is not, nor one whose measure is too coarse to say; at the least step, a length
