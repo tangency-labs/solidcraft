@@ -6749,33 +6749,58 @@ fn a_mirror_or_a_join_into_a_sheet_refuses_its_flat_pattern_naming_the_feature()
 /// the round the body has, and a flange made after it keeps it.
 #[test]
 fn a_fillet_on_a_sheet_corner_is_an_arc_of_its_outline_kept_by_a_later_flange() {
-    // The lines and arcs on the DXF's OUTLINE layer.
+    // The lines and arcs on the DXF's OUTLINE layer, and their length.
     let outline = |s: &mut Session| {
         let dxf = run(s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or("").replace("\r\n", "\n");
         let codes: Vec<&str> = dxf.lines().map(str::trim).collect();
-        let (mut kind, mut lines, mut arcs) = ("", 0, 0);
+        // Each entity's kind, layer and numbers by group code.
+        let mut entities: Vec<(String, String, std::collections::HashMap<String, f64>)> = Vec::new();
         for pair in codes.chunks(2) {
-            match pair {
-                ["0", k] => kind = *k,
-                ["8", "OUTLINE"] if kind == "LINE" => lines += 1,
-                ["8", "OUTLINE"] if kind == "ARC" => arcs += 1,
+            match (pair, entities.last_mut()) {
+                (["0", kind], _) => entities.push((kind.to_string(), String::new(), Default::default())),
+                (["8", layer], Some(e)) => e.1 = layer.to_string(),
+                ([code, v], Some(e)) => {
+                    if let Ok(v) = v.parse::<f64>() {
+                        e.2.insert(code.to_string(), v);
+                    }
+                }
                 _ => {}
             }
         }
-        (lines, arcs)
+        let (mut lines, mut arcs, mut length) = (0, 0, 0.0);
+        for (kind, _, n) in entities.iter().filter(|e| e.1 == "OUTLINE") {
+            let at = |code: &str| n.get(code).copied().unwrap_or(f64::NAN);
+            match kind.as_str() {
+                "LINE" => (lines, length) = (lines + 1, length + (at("11") - at("10")).hypot(at("21") - at("20"))),
+                "ARC" => (arcs, length) = (arcs + 1, length + at("40") * (at("51") - at("50")).rem_euclid(360.0).to_radians()),
+                _ => {}
+            }
+        }
+        (lines, arcs, length)
     };
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     let out = run(&mut s, "solid.fillet", json!({"edges": [[100, 60, 1.25]], "radius": 10}));
     assert!(out["warning"].as_str().is_none_or(str::is_empty), "{out}");
-    assert_eq!(outline(&mut s), (4, 1));
+    // 2 (100 + 60) less the corner's two 10s, plus its quarter circle.
+    let (lines, arcs, length) = outline(&mut s);
+    assert!(lines == 4 && arcs == 1 && (length - (300.0 + 5.0 * PI)).abs() < 1e-6, "{lines} lines, {arcs} arcs, {length} long");
     // The plate less the corner's 10 x 10 square, but for its quarter circle, through 2.5.
     let want = (100.0 * 60.0 - (100.0 - 25.0 * PI)) * 2.5;
     assert!(rel(volume(&mut s), want) < 1e-9, "{} vs {want}", volume(&mut s));
-    // Along the front edge, the flange adds a side split at most where the zone meets the panels.
+    // A 20 mm flange along the front edge (R 2.5, K 0.44: BA = π/2·(2.5 + 0.44·2.5) = 1.8π). Its
+    // outside is at the edge, so the plate's flat part ends R + T = 5 in, the zone is 1.8π wide and
+    // the leg's flat part 20 − 5 = 15 long: the flat is 100 x (55 + 1.8π + 15), the round still on
+    // its far corner. Each side runs straight on across the zone, so the join leaves the OUTLINE 4
+    // lines and the arc, 2 (100 + 70 + 1.8π) − 20 + 5π long. The body is the plate's 55 less the
+    // round, the bend's quarter ring between radii 2.5 and 5 and the 15 of leg, 100 long and 2.5
+    // thick: 2.5 (5500 − 100 + 25π) + 100 π/4 (5² − 2.5²) + 2.5·1500 = 17250 + 531.25π, which is
+    // the flat's 2.5 (6900 + 205π) and the bend's θ·T²·(½ − K) per mm, 18.75π.
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
-    let (lines, arcs) = outline(&mut s);
-    assert!((4..=8).contains(&lines) && arcs == 1, "{lines} lines, {arcs} arcs");
+    let (lines, arcs, length) = outline(&mut s);
+    assert!(lines == 4 && arcs == 1 && (length - (320.0 + 8.6 * PI)).abs() < 1e-6, "{lines} lines, {arcs} arcs, {length} long");
+    let want = 17250.0 + 531.25 * PI;
+    assert!(rel(volume(&mut s), want) < 1e-9, "{} vs {want}", volume(&mut s));
     assert!(flat_exports(&mut s).into_iter().all(|r| r.is_ok()));
 }
 
@@ -7015,7 +7040,10 @@ fn a_cut_grazing_a_bend_near_its_edge_takes_every_fiber_it_meets_and_one_clear_o
             // From the base, 20 x (15 - 5) x 2.5. In the bend, the fiber turned phi from the base
             // meets the slot where its inside end, on radius 2.5, comes within 5 - y0 of the plane
             // through the axis square to y: 2.5 sin phi <= 5 - y0. So 20 along the bend of the
-            // sector up to that phi, between radii 2.5 and 5.
+            // sector up to that phi, between radii 2.5 and 5. That is what the sheet loses, not
+            // what the tool meets: the tool itself takes 20 ∫₀^0.1 (√(25 - u²) - √(6.25 - u²)) du
+            // = 5.001 of the bend, but the sheet keeps the cut square in its flat, so refolded it
+            // loses the whole fibers, 7.502.
             let phi = ((5.0 - y0) / 2.5).asin();
             let want = 20.0 * 10.0 * 2.5 + 20.0 * phi / 2.0 * (5.0 * 5.0 - 2.5 * 2.5);
             assert!((v0 - volume(&mut s) - want).abs() < 1e-6, "{} vs {want}", v0 - volume(&mut s));
