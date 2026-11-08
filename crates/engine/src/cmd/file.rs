@@ -23,6 +23,8 @@ use solidcraft_io::Format;
 use super::CommandSpec;
 use super::print_face;
 use crate::params::{bad, bool_, num, str_, string_list};
+use crate::schema::slicers::{SlicerInfo, SlicersParams, SlicersResult};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -109,8 +111,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("mesh_export")
         .noundo()
         .params("consent: bool (required: true only once the user has agreed to upload the model to Printables' servers; it stays there for 30 minutes and opening it needs a Printables sign-in); bodies?: [names] (default: the selected bodies); format?: 3mf|stl (default 3mf, in millimetres) → uploads the bodies to EasyPrint, Printables' slicer in the browser, and opens it in the browser. 100 MB at most. Works in the desktop app and the browser build; the CLI has no way to upload yet"),
-    CommandSpec::new("file.slicers", "Installed Slicers", slicers).icon("export")
+    CommandSpec::new("file.slicers", "Installed Slicers", crate::checked!("file.slicers", slicers))
+        .icon("export")
         .noundo()
+        .contract(&SLICERS_CONTRACT)
+        .output(output_schema_for::<SlicersResult>)
         .params("→ the slicers found on this machine: [{id, name, program, icon?}]; pass an id, a name or the program path as file.send_to_slicer's or file.save_mesh's `slicer`"),
 ];
 
@@ -126,6 +131,7 @@ const EXPORT_STEP_CONTRACT: crate::schema::TypedContract<crate::schema::file::Ex
 const EXPORT_STL_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
 const EXPORT_3MF_CONTRACT: crate::schema::TypedContract<crate::schema::file::Export3mfParams> = crate::schema::TypedContract::new();
 const EXPORT_OBJ_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
+const SLICERS_CONTRACT: TypedContract<SlicersParams> = TypedContract::new();
 const EXPORT_URDF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportUrdfParams> = crate::schema::TypedContract::new();
 
 fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
@@ -1200,11 +1206,16 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn slicers(_: &mut Session, _: &Value) -> Result<Value> {
-    let list: Vec<Value> = crate::slicers::detect()
+    let slicers = crate::slicers::detect()
         .iter()
-        .map(|d| json!({"id": d.id, "name": d.name, "program": d.command.first(), "icon": d.icon.as_ref().map(|i| i.path().to_string_lossy().into_owned())}))
+        .map(|d| SlicerInfo {
+            id: d.id.clone(),
+            name: d.name.clone(),
+            program: d.command.first().cloned(),
+            icon: d.icon.as_ref().map(|i| i.path().to_string_lossy().into_owned()),
+        })
         .collect();
-    Ok(json!({ "slicers": list }))
+    serde_json::to_value(SlicersResult { slicers, param_warnings: Vec::new() }).map_err(|e| bad("file.slicers", e.to_string()))
 }
 
 fn recovery_dir(p: &Value, cmd: &str) -> Result<std::path::PathBuf> {
