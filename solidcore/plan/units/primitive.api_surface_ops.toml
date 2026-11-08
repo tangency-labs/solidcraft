@@ -1,0 +1,12 @@
+id = "primitive.api_surface_ops"
+upstream = ["source/SM_API/src/SmApiSurfaces.cpp", "source/SM_API/src/SmApiCurves.cpp"]
+rust_module = "primitive::api_surface_ops"
+depends_on = ["intersect.surface_drop_lib_p1", "nlib.srf_fit", "nurbs.b_spline_surface_p1", "primitive.api_curves", "surface.surface_p1", "surface.surface_p11"]
+soft_depends_on = ["geom.tol", "surface.surface_p2"]
+est_lines = 200
+layer = 50
+tests = ["SM_API_test:TestSmCreateSurface", "SM_API_test:TestSmCreateSurfaceFromCornerPoints", "SM_API_test:TestSmCreateSurfaceFromOrderedPoints", "SM_API_test:TestSmCreateOffsetSurface", "SM_API_test:TestSmDropCurveToSrf", "SM_API_test:TestSmLiftUVCurve"]
+status = "green"
+claimed_by = "fixer-3 (PR #1538)"
+claimed_at = "2026-10-29T00:00:00Z"
+notes = "NOT IN callgraph/units.json: wrapper-only SM_API functions (1.0.1 parity batch 3, surfaces): SmApiCreateSurface, SmApiCreateSurfaceFromCornerPoints, SmApiCreateOffsetSurface (SmApiSurfaces.cpp), SmApiCreateSurfaceFromOrderedPoints (SmApiSurfaces.cpp:174, completion: SmBSplineSurface::ApproximatePoints, owned by no unit, at nurbs::b_spline_surface_n_lib::approx over the green N_FitSrfLstSqApprox; its pdOptTolerance branch is not ported, follow-up: N_FitSrfApproxTol, N_FitSrfLstSqKnots, N_FitSrfApproxRemoveKnots, N_FitSrfRemovalBoundary, N_GetClosestPtOnSrf, N_CFuncFromKnots, N_Pts2dGetMaxExtent, about 2.6k upstream lines, reached only from SmBSplineSurface::RebuildSurface (unused_functions.txt) and prog_test, never from the SM_API), SmApiDropCurveToSrf, SmApiLiftUVCurveFromSrf (SmApiCurves.cpp); every callee is ported (SmBSplineSurface::CreateCanonical, CreateBilinearSurface, the virtual CreateOffsetSurface, DropAndTrimCurve, LiftCurve). Input surfaces and curves are made by the SM_API constructors on both sides, including the upstream offset-collapse inputs (the first face surface of SmApiCreateSphere, the SmApiCreateTorus surface) and the 5x7 SmApiCreateSurfaceFromOrderedPoints grid of TestSmSurfaces.cpp:136/:593 and TestSmIntersectors.cpp:163; generated ordered-points cases run on their own seed stream (ordered*). Status set by the gate."

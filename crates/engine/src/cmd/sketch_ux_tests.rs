@@ -397,6 +397,68 @@ fn tangent_at_a_joint_adds_only_the_tangent() {
     }
 }
 
+/// Tangent on a line's end and a circle the end already touches tangentially, as for two curves
+/// (`constrain`): what already holds moves nothing. With both fixed the tangent removes no degree
+/// of freedom, so it is kept and reported as redundant, or refused with `if_redundant: "refuse"`,
+/// leaving the sketch as it was.
+#[test]
+fn tangent_at_an_end_that_already_holds_is_redundant() {
+    let touching = |fixed: bool| {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[5, 3], [20, 3]]}));
+        run(&mut s, "sketch.circle.center", json!({"center": [20, 8], "radius": 5}));
+        if fixed {
+            run(&mut s, "sketch.constraint.fix", json!({"entities": ["l1", "c1"], "fixed": true}));
+        }
+        s
+    };
+    for (a, b) in [("l1.end", "c1"), ("c1", "l1.end")] {
+        let mut s = touching(false);
+        let (line, circle) = (snap(&s, "l1"), snap(&s, "c1"));
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert!(same(&snap(&s, "l1"), &line) && same(&snap(&s, "c1"), &circle), "{a}, {b}: something moved");
+        assert!(r.get("redundant").is_none(), "{a}, {b}: free, so not redundant: {r}");
+
+        let mut s = touching(true);
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert_eq!(r["redundant"], true, "{a}, {b}: {r}");
+        // Fixed entities are held, not constrained, so no constraint is listed.
+        assert!(r["determined_by"].is_array(), "{a}, {b}: {r}");
+        assert_eq!(r["constraints"].as_array().map(Vec::len), Some(2), "{a}, {b}: {r}");
+
+        let mut s = touching(true);
+        let count = sketch(&s).constraints.len();
+        let e = s.execute("sketch.constraint.tangent", &json!({"a": a, "b": b, "if_redundant": "refuse"})).unwrap_err().to_string();
+        assert!(e.contains("already determined by"), "{a}, {b}: {e}");
+        assert_eq!(sketch(&s).constraints.len(), count, "{a}, {b}: nothing added");
+    }
+}
+
+/// The same with free curves whose own constraints already decide it: circle c2 is concentric
+/// with c1 and equal to it, the line is tangent to c2 and its end lies on c2. Tangent on that end
+/// and c1 adds the end on c1 and the tangent, and names what determines the tangent: at the end
+/// it says the line is square to the radius there, so the shared centre and the tangent on c2
+/// decide it, and the equal radius does not.
+#[test]
+fn tangent_at_an_end_names_the_constraints_that_determine_it() {
+    for (a, b) in [("l1.end", "c1"), ("c1", "l1.end")] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[5, 3], [20, 3]]}));
+        run(&mut s, "sketch.circle.center", json!({"center": [20, 8], "radius": 5}));
+        run(&mut s, "sketch.circle.center", json!({"center": [40, 30], "radius": 2}));
+        let mut id = |cmd: &str, p: Value| run(&mut s, cmd, p)["constraint"].as_str().unwrap_or_default().to_string();
+        let concentric = id("sketch.constraint.concentric", json!({"a": "c1", "b": "c2"}));
+        id("sketch.constraint.equal", json!({"a": "c1", "b": "c2"}));
+        let tangent = id("sketch.constraint.tangent", json!({"a": "l1", "b": "c2"}));
+        id("sketch.constraint.coincident", json!({"a": "l1.end", "b": "c2"}));
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert_eq!(r["redundant"], true, "{a}, {b}: {r}");
+        assert_eq!(r["constraints"].as_array().map(Vec::len), Some(2), "{a}, {b}: {r}");
+        let by = json!([format!("{concentric} (Concentric)"), format!("{tangent} (Tangent)")]);
+        assert_eq!(r["determined_by"], by, "{a}, {b}: {r}");
+    }
+}
+
 #[test]
 fn a_fixed_second_pick_makes_the_first_move() {
     let mut s = line_and_circle();

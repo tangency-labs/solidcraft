@@ -101,7 +101,7 @@ impl PanelController for FixtureController {
             actions: if self.editor {
                 ["apply", "cancel", "finish"]
                     .into_iter()
-                    .map(|id| RuntimeAction { id: ControlId(id.into()), label: id.into(), enabled: true, disabled_reason: None })
+                    .map(|id| RuntimeAction { id: ControlId(id.into()), label: id.into(), enabled: true, disabled_reason: None, pressed: None })
                     .collect()
             } else {
                 Vec::new()

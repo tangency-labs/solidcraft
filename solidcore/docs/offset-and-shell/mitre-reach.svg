@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="580" viewBox="0 0 1000 580">
+  <title>mitre-reach</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L1000 0 L1000 580 L0 580 Z" fill="#ffffff"/>
+    <path d="M130 300 L450 300 L310 542.5 L130 542.5 Z" fill="#f0f0f0"/>
+    <path d="M450 300 L620 300" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 4"/>
+    <path d="M450 300 L450 240" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 4"/>
+    <path d="M450 300 L502 330" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 4"/>
+    <path d="M450 300 L554 240" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 4"/>
+    <path d="M554 300 L554 205" fill="none" stroke="#999999" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 3"/>
+    <path d="M450 240 L450 205" fill="none" stroke="#999999" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 3"/>
+    <path d="M614 240 L614 205" fill="none" stroke="#999999" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 3"/>
+    <path d="M130 300 L450 300" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M450 300 L310 542.5" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M130 240 L450 240" fill="none" stroke="#555555" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M450 240 L614 240" fill="none" stroke="#555555" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="8 4"/>
+    <path d="M554 240 L379.5 542" fill="none" stroke="#555555" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M430 334.6 L427.1 332.8 L424.3 330.6 L421.7 328.3 L419.4 325.7 L417.2 322.9 L415.4 320 L413.7 316.9 L412.4 313.7 L411.4 310.4 L410.6 306.9 L410.2 303.5 L410 300" fill="none" stroke="#000000" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M450 212 L554 212" fill="none" stroke="#000000" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M554 212 L614 212" fill="none" stroke="#000000" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 40 45)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">The mitre: the neighbours&apos; offsets meet on the extended surface</tspan></text>
+    <text transform="matrix(1 0 0 1 492 202)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">r</tspan></text>
+    <text transform="matrix(1 0 0 1 580 202)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">d</tspan></text>
+    <text transform="matrix(1 0 0 1 200 325)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">F</tspan></text>
+    <text transform="matrix(1 0 0 1 385 455)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">G</tspan></text>
+    <text transform="matrix(1 0 0 1 395 330)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">α</tspan></text>
+    <text transform="matrix(1 0 0 1 456 278)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">d</tspan></text>
+    <text transform="matrix(1 0 0 1 480 348)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">d</tspan></text>
+    <text transform="matrix(1 0 0 1 140 230)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">offset of F by d</tspan></text>
+    <text transform="matrix(1 0 0 1 395 535)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">offset of G by d</tspan></text>
+    <text transform="matrix(1 0 0 1 562 265)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">M: the offsets meet</tspan></text>
+    <text transform="matrix(1 0 0 1 625 244)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">F&apos;s offset, extended</tspan></text>
+    <text transform="matrix(1 0 0 1 625 305)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">F&apos;s tangent plane</tspan></text>
+    <text transform="matrix(1 0 0 1 560 420)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">r = β (n_G · m), β = (d_G − c d_F) / (1 − c²), c = n_F · n_G</tspan></text>
+    <text transform="matrix(1 0 0 1 560 440)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">equal offsets: r = d cot(α/2), α the solid&apos;s sector angle</tspan></text>
+    <text transform="matrix(1 0 0 1 560 470)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">F&apos;s surface is extended by the largest r along its edges</tspan></text>
+    <text transform="matrix(1 0 0 1 560 490)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">and corners, plus one offset d, so M lies inside the extension</tspan></text>
+  </g>
+</svg>

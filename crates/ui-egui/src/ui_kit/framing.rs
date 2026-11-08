@@ -1,6 +1,6 @@
 //! Shared aspect choices and camera composition guides; no document or command authority.
-use crate::{scenario, theme::Tokens};
 use egui::{Rect, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) struct AspectTile<'a> {
     pub id: &'a str,
@@ -12,7 +12,7 @@ pub(crate) struct AspectTile<'a> {
 /// Three-column compact illustrated choices, using the same control surface as other choices.
 pub(crate) fn aspect_grid(ui: &mut Ui, tiles: &[AspectTile<'_>]) -> Option<usize> {
     let t = Tokens::get();
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     let mut clicked = None;
     for (row, tiles) in tiles.chunks(3).enumerate() {
         ui.columns(3, |columns| {
@@ -48,7 +48,7 @@ pub(crate) fn aspect_grid(ui: &mut Ui, tiles: &[AspectTile<'_>]) -> Option<usize
                     ink,
                 );
                 response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), tile.selected, tile.label));
-                scenario::publish_target(tile.id, rect);
+                solidcraft_ui_registry::publish_target(tile.id, rect);
                 if response.clicked() {
                     clicked = Some(row * 3 + column);
                 }
