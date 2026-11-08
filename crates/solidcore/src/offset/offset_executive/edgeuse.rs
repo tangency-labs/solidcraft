@@ -990,6 +990,11 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
         vertex::point(self.brep(arena), v)
     }
 
+    fn vertex_tolerance(&self, v: Handle) -> Result<f64> {
+        let (arena, v) = v.vertex()?;
+        vertex::tolerance(self.brep(arena), v)
+    }
+
     fn set_vertex_point(&mut self, _k: &Kernel, v: Handle, point: Point3) -> Result<()> {
         let (arena, v) = v.vertex()?;
         self.with_env(arena, |b, env| {
@@ -1414,4 +1419,94 @@ pub(super) fn mate(
         Some(offset_use(other_offset_edgeuse)),
         mark_type,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::attribute::ObjectKey;
+    use crate::primitive::api_primitives::create_box;
+    use crate::topology::topology::NotifyRecords;
+
+    fn dummy_key(entity: EntityRef) -> ObjectRef {
+        let idx = match entity {
+            EntityRef::Brep(i) => i.index(),
+            EntityRef::Region(i) => i.index(),
+            EntityRef::Shell(i) => i.index(),
+            EntityRef::Face(i) => i.index(),
+            EntityRef::Faceuse(i) => i.index(),
+            EntityRef::Loop(i) => i.index(),
+            EntityRef::Loopuse(i) => i.index(),
+            EntityRef::Edge(i) => i.index(),
+            EntityRef::Edgeuse(i) => i.index(),
+            EntityRef::Vertex(i) => i.index(),
+            EntityRef::Vertexuse(i) => i.index(),
+        };
+        ObjectRef {
+            key: ObjectKey(u64::from(idx) + 1),
+            type_code: 0,
+        }
+    }
+
+    #[test]
+    fn shared_vertex_move_refused_when_exceeding_incident_edge_tolerance() -> Result<()> {
+        let mut k = Kernel::default();
+        let mut original = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0)?;
+        let mut offset = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0)?;
+
+        // Pick a corner vertex of `offset` and one of its 3 incident edges (`self_e`).
+        // Even if `self_e` has a wide tolerance (`0.05`), moving the shared corner vertex
+        // by `0.2` pulls it away from the other two tight-tolerance (`1e-5`) incident
+        // edges past `tau_inc + max(tau_v, tau_self, tau_inc) = 1e-5 + 0.05 = 0.05001`,
+        // so `verify_vertex_move_on_incident_edges` must refuse the move.
+        let v_id = crate::topology::brep::p1::vertices(&offset, None)?[0];
+        let v_pt = offset.vertex(v_id)?.point;
+        let inc_edges = vertex::edges(&offset, v_id, None)?;
+        assert_eq!(inc_edges.len(), 3);
+        let self_e = inc_edges[0];
+
+        let mut records = NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut backend = EdgeBrep {
+            kernel: &k,
+            original: &mut original,
+            offset: &mut offset,
+            curves: Vec::new(),
+            surfaces: Vec::new(),
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            original_key_of: &dummy_key,
+            offset_key_of: &dummy_key,
+            marks: MarkSource::Records,
+        };
+
+        let v_h = Handle::topology(Arena::Offset, EntityRef::Vertex(v_id));
+        let self_h = Handle::topology(Arena::Offset, EntityRef::Edge(self_e));
+
+        // Within tolerance (`0.01 <= 1e-5 + 0.05`): accepted.
+        OffsetGeometryCreation::verify_vertex_move_on_incident_edges(
+            &k,
+            &mut backend,
+            Some(v_h),
+            v_pt + Point3::new(0.01, 0.0, 0.0),
+            self_h,
+            0.05,
+            None,
+        )?;
+
+        // Beyond incident edge endpoint bound (`0.2 > 1e-5 + 0.05`): refused with `SM_ERR`.
+        let err = OffsetGeometryCreation::verify_vertex_move_on_incident_edges(
+            &k,
+            &mut backend,
+            Some(v_h),
+            v_pt + Point3::new(0.2, 0.0, 0.0),
+            self_h,
+            0.05,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(err.sm_status(), Some(1001));
+        Ok(())
+    }
 }

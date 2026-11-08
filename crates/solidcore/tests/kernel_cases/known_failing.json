@@ -74,10 +74,5 @@
     "issue": "tangency-labs/solidcore#2849",
     "reason": "the Mixed corner's chamfer face stands 7.2e-4 out of the front face y = 0 (its bilinear Coons patch bulges past the plane), past the case's 4e-5 box",
     "fails": "volume 9383.450962465247 (rig 9383.4506602363)"
-  },
-  {
-    "case": "shell/cov-shell-again-open-at-an-inner-wall-of-a-shelled-box",
-    "issue": "tangency-labs/solidcore#2954",
-    "reason": "step 9 (solid.shell): SMLib shell: operation: SMLib failed (status 1001)"
   }
 ]

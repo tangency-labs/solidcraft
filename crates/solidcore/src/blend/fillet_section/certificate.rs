@@ -65,7 +65,7 @@
 use super::definition_box::{definition_partials_over_box, GnDefFace, GnDefs};
 use super::form::{binom, gn_form_normalized, GnSectionFormT};
 use super::interval::{cmax, cmin, round_down, round_up, Ivl};
-use super::series::{GnScalar, Ser, Trunc, VSer, MAX_E, MAX_S, TAYLOR, V3};
+use super::series::{v_hull, GnScalar, Ser, Trunc, VSer, MAX_E, MAX_S, TAYLOR, V3, VZ};
 use super::station::{
     ders_basis, gn_evaluate, gn_evaluate_vn, gn_jacobian, gn_solve_station_counted, gn_top_jets,
     knot, smax, solve4, span, GnStation, GnSystem, Nurbs, Partials,
@@ -166,11 +166,6 @@ fn at1<T: Copy>(v: &[T], i: usize, zero: T) -> T {
 }
 
 const IZ: Ivl = Ivl::new(0.0, 0.0);
-const VZ: V3<Ivl> = V3 {
-    x: IZ,
-    y: IZ,
-    z: IZ,
-};
 
 /// `sm_CurveDerivsOver`: the derivatives `D[0..=ld]` of the curve's polynomial piece
 /// `piece` (the span of the knots it starts at; `None`: each piece `s` covers) for every
@@ -283,9 +278,7 @@ pub fn curve_derivs_over(
             if first {
                 *r = *c;
             } else {
-                r.x = r.x.hull(c.x);
-                r.y = r.y.hull(c.y);
-                r.z = r.z.hull(c.z);
+                *r = v_hull(*r, *c);
             }
         }
         first = false;
@@ -802,13 +795,7 @@ pub fn nurbs_partials_over_box(
 pub(crate) fn partials_hull(mut h: Partials<Ivl>, p: &Partials<Ivl>, lk: usize) -> Partials<Ivl> {
     for a in 0..=lk {
         for b in 0..=(lk - a) {
-            let (x, y) = (h.at(a, b), p.at(a, b));
-            let v = V3 {
-                x: x.x.hull(y.x),
-                y: x.y.hull(y.y),
-                z: x.z.hull(y.z),
-            };
-            h.set(a, b, v);
+            h.set(a, b, v_hull(h.at(a, b), p.at(a, b)));
         }
     }
     h

@@ -636,6 +636,8 @@ pub trait OffsetBrep<O>: ProtoGeometry<O> {
     fn edge_create_trimmed_nurbs_curve(&mut self, k: &Kernel, edge: O) -> Result<Option<O>>;
     /// `SmVertex::GetPoint` (`topology::vertex::point`).
     fn vertex_point(&self, vertex: O) -> Result<Point3>;
+    /// `SmVertex::GetTolerance` (`topology::vertex::tolerance`).
+    fn vertex_tolerance(&self, vertex: O) -> Result<f64>;
     /// `SmVertex::SetPoint` (`topology::vertex::set_point`).
     fn set_vertex_point(&mut self, k: &Kernel, vertex: O, point: Point3) -> Result<()>;
     /// `SmVertex::IsLaminaVertex` (`topology::vertex::is_lamina_vertex`).
@@ -1105,6 +1107,35 @@ fn b_spline_part(c: &Curve) -> Result<Option<BSplineCurve>> {
         CurveKind::Line(l) => Some(l.base_with_nurb()?.into_owned()),
         CurveKind::Ellipse(e) => Some(e.base().clone()),
         CurveKind::Hyperbola(h) => Some(h.base().clone()),
+        CurveKind::Parabola(p) => Some(p.base().clone()),
+        _ => None,
+    })
+}
+
+/// Like [`b_spline_part`], materialising the rational NURB on a clone when an analytic
+/// conic (`Ellipse`, `Hyperbola`, `Parabola`) has cleared its lazy NURB (e.g. after
+/// [`Curve::trim`]).
+fn b_spline_with_nurb(k: &Kernel, c: &Curve) -> Result<Option<BSplineCurve>> {
+    Ok(match c.kind() {
+        CurveKind::BSpline(b) => Some(b.clone()),
+        CurveKind::Line(l) => Some(l.base_with_nurb()?.into_owned()),
+        CurveKind::Ellipse(e) if e.base().gw_nurb().is_none() => {
+            let mut made = e.clone();
+            made.make_nurb(k)?;
+            Some(made.base().clone())
+        }
+        CurveKind::Ellipse(e) => Some(e.base().clone()),
+        CurveKind::Hyperbola(h) if h.base().gw_nurb().is_none() => {
+            let mut made = h.clone();
+            made.make_nurb(None)?;
+            Some(made.base().clone())
+        }
+        CurveKind::Hyperbola(h) => Some(h.base().clone()),
+        CurveKind::Parabola(p) if p.base().gw_nurb().is_none() => {
+            let mut made = p.clone();
+            made.make_nurb(None)?;
+            Some(made.base().clone())
+        }
         CurveKind::Parabola(p) => Some(p.base().clone()),
         _ => None,
     })
@@ -4671,8 +4702,33 @@ impl OffsetGeometryCreation {
                 rail2 = b_spline_of(brep, h)?;
             }
         }
-
-        // When not given an OffsetEdgeuse - make a Rail1Curve by approximating OrigEU->UVTrimCurve Offset
+        if shell_tangent_gap {
+            if let (Some(off), Some(other_off)) = (offset_edgeuse, other_offset_edgeuse) {
+                let cl_pv = center_line.evaluate(k, edge_ivl.evaluate(0.5), 1, true, true)?;
+                let cl_tan = cl_pv
+                    .get(1)
+                    .copied()
+                    .ok_or(dangling("centre line tangent"))?;
+                self.reconcile_shell_tangent_rails(
+                    k,
+                    brep,
+                    executive,
+                    [
+                        ShellTangentInput {
+                            orig_eu: original_edgeuse,
+                            off_eu: off,
+                            rail: &mut rail1,
+                        },
+                        ShellTangentInput {
+                            orig_eu: other_original_edgeuse,
+                            off_eu: other_off,
+                            rail: &mut rail2,
+                        },
+                    ],
+                    cl_tan,
+                )?;
+            }
+        }
         if rail1.is_none() {
             // make temporary copy of the OrigEU->UVTrimCurve trimmed to sEdgeIvl
             let uv = brep
@@ -4883,6 +4939,14 @@ impl OffsetGeometryCreation {
         if rail1.degree()? > 2 || rail2.degree()? > 2 {
             // make rail1/rail2/centerLine curves compatible i.e. share a common knotVector
             // (the static routine edits the NURB part of the centre line, whatever its kind)
+            if shell_tangent_gap {
+                if let Some(mut made_cl) = b_spline_with_nurb(k, &center_line)? {
+                    made_cl.edit_parameterization(&rail1.natural_interval())?;
+                    if let Some(cl_slot) = b_spline_part_mut(&mut center_line)? {
+                        *cl_slot = made_cl;
+                    }
+                }
+            }
             let cl_part =
                 b_spline_part_mut(&mut center_line)?.ok_or(dangling("centre line kind"))?;
             let mut curves = [rail1, rail2, cl_part.clone()];
@@ -4920,6 +4984,9 @@ impl OffsetGeometryCreation {
                         &rail2,
                         SurfParamType::U,
                     )?);
+                    if shell_tangent_gap {
+                        out.closing_wall = true;
+                    }
                 }
             }
         } // end one face is a shell face check
@@ -5076,6 +5143,675 @@ impl OffsetGeometryCreation {
         // all done
         Ok(out)
     }
+
+    /// Inspects one offset side of a deferred shell-tangent gap, returning `Ok(None)` when the
+    /// edge has unsettled vertices or degenerates within its zone/edge tolerance (which acts
+    /// as a no-op in `reconcile_shell_tangent_rails`, leaving the original `edgeuse_offset`
+    /// curve and step-wall rail intact), or its endpoint match status and certified endpoint
+    /// margins (`tau_e + tau_v` floored by the pre-`Fix_TolSizes` meeting tolerance).
+    fn prepare_shell_tangent_side<O: ClassObject + SolutionObject>(
+        &self,
+        k: &Kernel,
+        brep: &impl OffsetBrep<O>,
+        orig_eu: O,
+        off_eu: O,
+    ) -> Result<Option<ShellTangentPrepared<O>>> {
+        let edge = brep.edgeuse_edge(off_eu)?.ok_or(dangling("off edge"))?;
+        let v1 = brep.edgeuse_vertex(off_eu)?;
+        let mate = brep.edgeuse_mate(off_eu)?;
+        let v2 = mate.map(|m| brep.edgeuse_vertex(m)).transpose()?.flatten();
+        let p1 = v1.map(|v| brep.vertex_point(v)).transpose()?;
+        let p2 = v2.map(|v| brep.vertex_point(v)).transpose()?;
+        let (Some(p1), Some(p2)) = (p1, p2) else {
+            return Ok(None);
+        };
+        // `docs/validity-and-tolerances.md` §4 (Edge test 7) & §5.1: an edge is at least
+        // its tube radius `tau_e` and two points within the body's zone tolerance are one
+        // point.
+        let tol = brep.edge_tolerance(edge)?;
+        let min_len = tol.max(brep.brep_tolerance(edge)?);
+        if (p1 - p2).length() <= min_len {
+            return Ok(None);
+        }
+        let tv1 = v1
+            .map(|v| brep.vertex_tolerance(v))
+            .transpose()?
+            .unwrap_or(0.0)
+            .max(tol);
+        let tv2 = v2
+            .map(|v| brep.vertex_tolerance(v))
+            .transpose()?
+            .unwrap_or(0.0)
+            .max(tol);
+        // `docs/validity-and-tolerances.md` §4 (Edge tests 16, 17) & §5.1:
+        // `|C(t_end) - P_v| <= tau_e + tau_v`, floored by the pre-`Fix_TolSizes`
+        // offset edge meeting tolerance `10 * max(tau_e, this_approx_tol_3d)`
+        // (`extend_trim_edges` / `is_step_across_edge`).
+        let meet_tol = 10.0 * max2(tol, self.this_approx_tol_3d);
+        let margin1 = (tol + tv1).max(meet_tol);
+        let margin2 = (tol + tv2).max(meet_tol);
+        let matched = if let Some(ch) = brep.edge_curve(edge)? {
+            let cv = curve_of(brep, ch)?;
+            let ivl = brep.edge_interval(edge)?;
+            let e0 = cv.evaluate_point(k, ivl.min())?;
+            let e1 = cv.evaluate_point(k, ivl.max())?;
+            ((p1 - e0).length() <= margin1 && (p2 - e1).length() <= margin2)
+                || ((p1 - e1).length() <= margin1 && (p2 - e0).length() <= margin2)
+        } else {
+            false
+        };
+        Ok(Some(ShellTangentPrepared {
+            orig_eu,
+            off_eu,
+            edge,
+            v1,
+            v2,
+            p1,
+            p2,
+            tol,
+            matched,
+            margin1,
+            margin2,
+        }))
+    }
+
+    /// Validates a pre-existing matched rail's interval against its edge's stored interval,
+    /// or materializes the rail when the edge's curve is analytic without a pre-built NURBS
+    /// slot.
+    fn ensure_matched_shell_tangent_rail<O: ClassObject>(
+        k: &Kernel,
+        brep: &impl OffsetBrep<O>,
+        side: &ShellTangentPrepared<O>,
+        rail: &mut Option<BSplineCurve>,
+    ) -> Result<()> {
+        if let Some(r) = rail.as_ref() {
+            let e_ivl = brep.edge_interval(side.edge)?;
+            let r_ivl = r.natural_interval();
+            if r_ivl.is_init()
+                || r_ivl.length() <= EFF_ZERO_PARAM
+                || !r_ivl.is_value_on_boundary(e_ivl.min(), EFF_ZERO).0
+                || !r_ivl.is_value_on_boundary(e_ivl.max(), EFF_ZERO).0
+            {
+                return Err(sm_err(OP_EDGEUSE));
+            }
+        } else {
+            let (_, r, _, _) = Self::derive_shell_tangent_curve_and_rail(
+                k,
+                brep,
+                side.edge,
+                side.p1,
+                side.p2,
+                side.margin1,
+                side.margin2,
+            )?;
+            *rail = Some(r);
+        }
+        Ok(())
+    }
+
+    /// Rebuilds the 3D curve, certified UV trim, and step-wall rail for an unmatched side of
+    /// a shell-tangent gap.
+    fn rebuild_shell_tangent_side<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &mut impl OffsetExecutive<O>,
+        side: &ShellTangentPrepared<O>,
+    ) -> Result<ShellTangentRebuilt> {
+        let (curve, rail, start, end) = Self::derive_shell_tangent_curve_and_rail(
+            k,
+            brep,
+            side.edge,
+            side.p1,
+            side.p2,
+            side.margin1,
+            side.margin2,
+        )?;
+        let uv =
+            Self::drop_curve_onto_extended_face(k, brep, executive, side.off_eu, &curve, side.tol)?;
+        Ok(ShellTangentRebuilt {
+            curve,
+            uv,
+            rail,
+            start,
+            end,
+        })
+    }
+
+    /// Normalizes both step-wall rails onto `[0, 1]` oriented along `cl_tan`.
+    fn normalize_shell_tangent_rails(
+        rail1: &mut Option<BSplineCurve>,
+        rail2: &mut Option<BSplineCurve>,
+        cl_tan: Vec3,
+    ) -> Result<()> {
+        if let (Some(r1), Some(r2)) = (rail1.as_mut(), rail2.as_mut()) {
+            for r in [r1, r2] {
+                r.edit_parameterization(&Extent1d::from_min_max(0.0, 1.0))?;
+                let r_pv = r.evaluate(0.5, 1, true, true)?;
+                let r_tan = r_pv.get(1).copied().ok_or(dangling("rail tangent"))?;
+                if r_tan.dot(cl_tan) < 0.0 {
+                    let nat = r.natural_interval();
+                    r.reverse_parameterization(&nat)?;
+                    r.edit_parameterization(&Extent1d::from_min_max(0.0, 1.0))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Reconciles the boundary curves, UV trims, and step-wall rails across a deferred
+    /// shell-tangent gap (`shell_tangent_gap`), replacing only an offset edge whose
+    /// curve does not already span its settled vertices within the certified endpoint
+    /// bound `tau_e + tau_v` (`docs/validity-and-tolerances.md` §4 Edge 16–17, §5.1).
+    fn reconcile_shell_tangent_rails<O: ClassObject + SolutionObject>(
+        &self,
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &mut impl OffsetExecutive<O>,
+        [in1, in2]: [ShellTangentInput<'_, O>; 2],
+        cl_tan: Vec3,
+    ) -> Result<()> {
+        let Some(s1) = self.prepare_shell_tangent_side(k, brep, in1.orig_eu, in1.off_eu)? else {
+            return Ok(());
+        };
+        let Some(s2) = self.prepare_shell_tangent_side(k, brep, in2.orig_eu, in2.off_eu)? else {
+            return Ok(());
+        };
+        if s1.matched && s2.matched {
+            return Ok(());
+        }
+        if s1.matched {
+            Self::ensure_matched_shell_tangent_rail(k, brep, &s1, in1.rail)?;
+        }
+        if s2.matched {
+            Self::ensure_matched_shell_tangent_rail(k, brep, &s2, in2.rail)?;
+        }
+
+        let work1 = if s1.matched {
+            None
+        } else {
+            Some(Self::rebuild_shell_tangent_side(k, brep, executive, &s1)?)
+        };
+        let work2 = if s2.matched {
+            None
+        } else {
+            Some(Self::rebuild_shell_tangent_side(k, brep, executive, &s2)?)
+        };
+
+        // Before `replace_edge_curves` updates any shared vertex position, verify that
+        // every other incident edge at each moved vertex remains within `tau_inc + tau_v`.
+        let partner_for_1 = work2.as_ref().map(|w| s2.as_partner(w));
+        let partner_for_2 = work1.as_ref().map(|w| s1.as_partner(w));
+        for (side, work, partner) in [
+            (&s1, work1.as_ref(), partner_for_1),
+            (&s2, work2.as_ref(), partner_for_2),
+        ] {
+            if let Some(w) = work {
+                for (v, pt) in [(side.v1, w.start), (side.v2, w.end)] {
+                    Self::verify_vertex_move_on_incident_edges(
+                        k, brep, v, pt, side.edge, side.tol, partner,
+                    )?;
+                }
+            }
+        }
+
+        for (side, work, rail_out) in [(&s1, work1, &mut *in1.rail), (&s2, work2, &mut *in2.rail)] {
+            if let Some(w) = work {
+                let h_c = store_curve(brep, w.curve)?;
+                let h_uv = store_curve(brep, w.uv)?;
+                self.replace_edge_curves(
+                    k,
+                    brep,
+                    side.off_eu,
+                    Some(h_c),
+                    Some(h_uv),
+                    Some(side.orig_eu),
+                )?;
+                *rail_out = Some(w.rail);
+            }
+        }
+
+        Self::normalize_shell_tangent_rails(in1.rail, in2.rail, cl_tan)
+    }
+
+    /// Derives a trimmed 3D curve and `[0, 1]` B-spline rail between `q1` and `q2` from
+    /// `e`'s boundary curve, certifying endpoint and interior deviations against
+    /// `(margin1, margin2)` directly from control nets without point sampling.
+    fn derive_shell_tangent_curve_and_rail<O: ClassObject>(
+        k: &Kernel,
+        brep: &impl OffsetBrep<O>,
+        e: O,
+        q1: Point3,
+        q2: Point3,
+        margin1: f64,
+        margin2: f64,
+    ) -> Result<(Curve, BSplineCurve, Point3, Point3)> {
+        let Some(ch) = brep.edge_curve(e)? else {
+            let line = BSplineCurve::create_line_segment(3, q1, q2)?;
+            let mut r = line.clone();
+            r.edit_parameterization(&Extent1d::from_min_max(0.0, 1.0))?;
+            return Ok((Curve::from(line), r, q1, q2));
+        };
+        let cv = curve_of(brep, ch)?;
+        if let Some((pt, dir, eps_line)) = exact_collinear_line(cv) {
+            let dir_u = dir.unitize_or_z();
+            let s1 = pt + (q1 - pt).dot(dir_u) * dir_u;
+            let s2 = pt + (q2 - pt).dot(dir_u) * dir_u;
+            let d1 = (q1 - s1).length();
+            let d2 = (q2 - s2).length();
+            if d1 + eps_line > margin1 || d2 + eps_line > margin2 || (s1 - s2).length() <= EFF_ZERO
+            {
+                return Err(sm_err(OP_EDGEUSE));
+            }
+            let line = BSplineCurve::create_line_segment(3, s1, s2)?;
+            let mut r = line.clone();
+            r.edit_parameterization(&Extent1d::from_min_max(0.0, 1.0))?;
+            return Ok((Curve::from(line), r, s1, s2));
+        }
+
+        let nat = cv.natural_interval();
+        let dp1 = cv.drop_point(k, &nat, q1, None, margin1, None, SolverOperation::Minimize)?;
+        let dp2 = cv.drop_point(k, &nat, q2, None, margin2, None, SolverOperation::Minimize)?;
+        if !dp1.success
+            || !dp2.success
+            || dp1.distance > margin1
+            || dp2.distance > margin2
+            || (dp1.parameter - dp2.parameter).abs() <= EFF_ZERO_PARAM
+        {
+            return Err(sm_err(OP_EDGEUSE));
+        }
+        let t1 = dp1.parameter;
+        let t2 = dp2.parameter;
+        let mut trimmed_cv = cv.copy(k)?;
+        let mut ivl = Extent1d::from_min_max(t1.min(t2), t1.max(t2));
+        trimmed_cv.trim(k, &mut ivl, TrimMode::Notify)?;
+        if t1 > t2 {
+            trimmed_cv.reverse_parameterization(k, &ivl)?;
+        }
+        match trimmed_cv.kind_mut() {
+            CurveKind::Ellipse(e) if e.base().gw_nurb().is_none() => e.make_nurb(k)?,
+            CurveKind::Hyperbola(h) if h.base().gw_nurb().is_none() => h.make_nurb(None)?,
+            CurveKind::Parabola(p) if p.base().gw_nurb().is_none() => p.make_nurb(None)?,
+            _ => {}
+        }
+        let trimmed_ivl = trimmed_cv.natural_interval();
+        let c_start = trimmed_cv.evaluate_point(k, trimmed_ivl.min())?;
+        let c_end = trimmed_cv.evaluate_point(k, trimmed_ivl.max())?;
+        if (c_start - q1).length() > margin1 || (c_end - q2).length() > margin2 {
+            return Err(sm_err(OP_EDGEUSE));
+        }
+        let src_bs = b_spline_with_nurb(k, &trimmed_cv)?.ok_or_else(|| sm_err(OP_EDGEUSE))?;
+        let mut b_spline = src_bs.clone();
+        b_spline.edit_parameterization(&Extent1d::from_min_max(0.0, 1.0))?;
+        if !is_exact_unit_reparameterization(&src_bs, &b_spline) {
+            return Err(sm_err(OP_EDGEUSE));
+        }
+        Ok((trimmed_cv, b_spline, c_start, c_end))
+    }
+
+    /// Projects `c3` onto the extended surface of `eu`'s owning face within `tol`
+    /// (`executive.get_create_extended_surface` + `Surface::drop_curve`), requiring a
+    /// certified 3D bound `<= tol` on `||ext_s(uvc(t)) - c3(t)||` over `c3`'s full interval
+    /// ([`crate::surface::surface::exact_pieces::certified_lift`]).
+    fn drop_curve_onto_extended_face<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &mut impl OffsetExecutive<O>,
+        eu: O,
+        c3: &Curve,
+        tol: f64,
+    ) -> Result<Curve> {
+        if !(tol.is_finite() && tol > 0.0) {
+            return Err(SolidError::Unsupported {
+                operation: OP_EDGEUSE,
+                reason: "shell-tangent UV lift requires a positive finite tolerance",
+            });
+        }
+        let face = brep.edgeuse_face(eu)?.ok_or(dangling("face"))?;
+        let surf_h = brep.face_surface(face)?.ok_or(dangling("surf"))?;
+        let (ext_surf_h, ext_dom) = executive.get_create_extended_surface(k, brep, surf_h)?;
+        let raw_ext_s = surface_of(brep, ext_surf_h)?;
+        if crate::surface::surface::exact_pieces::surface_uses_approximate_net(raw_ext_s) {
+            return Err(SolidError::Unsupported {
+                operation: OP_EDGEUSE,
+                reason: crate::surface::surface::exact_pieces::APPROXIMATE_NET_REASON,
+            });
+        }
+        let ext_s = raw_ext_s.clone_for_evaluation()?;
+        let c3_ivl = c3.natural_interval();
+        let dropped =
+            ext_s.drop_curve::<NoObject>(k, &ext_dom, c3, &c3_ivl, tol, false, None, true)?;
+        let drop_dev = dropped.max_drop_to_surf.hypot(dropped.max_approx_dev);
+        if dropped.uv_curves.is_empty() || !drop_dev.is_finite() || drop_dev > tol {
+            return Err(SolidError::Unsupported {
+                operation: OP_EDGEUSE,
+                reason: "a UV curve's lift is farther than the tolerance from its 3D curve",
+            });
+        }
+        let uvc = if dropped.uv_curves.len() == 1 {
+            let candidate = dropped
+                .uv_curves
+                .into_iter()
+                .next()
+                .ok_or_else(|| sm_err(OP_EDGEUSE))?;
+            let uv_ivl = candidate.natural_interval();
+            if !uv_ivl.is_value_on_boundary(c3_ivl.min(), EFF_ZERO).0
+                || !uv_ivl.is_value_on_boundary(c3_ivl.max(), EFF_ZERO).0
+            {
+                return Err(sm_err(OP_EDGEUSE));
+            }
+            candidate
+        } else {
+            // When extending a bounded surface (e.g. a half-cylinder) closes it into a
+            // periodic surface, an edge along that periodic seam drops to two full-interval
+            // UV seam branches (`u_min` and `u_max`, or `v_min` and `v_max`). Select the
+            // full-interval branch on `eu`'s side of the face using its existing UV trim
+            // curve (`extend_trim_edges`, `extended_sides_keeping_parameters`).
+            let edge = brep.edgeuse_edge(eu)?.ok_or(dangling("edge"))?;
+            let orig_uv_h = brep
+                .edgeuse_uv_trim_curve(eu)?
+                .ok_or_else(|| sm_err(OP_EDGEUSE))?;
+            let orig_mid = curve_of(brep, orig_uv_h)?
+                .evaluate_point(k, brep.edge_interval(edge)?.evaluate(0.5))?;
+            let mut best_idx: Option<usize> = None;
+            let mut min_dist = BIG_DOUBLE;
+            for (idx, cand) in dropped.uv_curves.iter().enumerate() {
+                let uv_ivl = cand.natural_interval();
+                if !uv_ivl.is_value_on_boundary(c3_ivl.min(), EFF_ZERO).0
+                    || !uv_ivl.is_value_on_boundary(c3_ivl.max(), EFF_ZERO).0
+                {
+                    continue;
+                }
+                let sols: SolutionArray<NoObject> = cand.global_point_solve(
+                    k,
+                    &uv_ivl,
+                    SolverOperation::Minimize,
+                    orig_mid,
+                    EFF_ZERO_SQRT,
+                    SolutionRequested::Single,
+                    &GlobalPointSolveOptions::default(),
+                )?;
+                if let Some(sol) = sols.get(0) {
+                    if sol.start.solution_value < min_dist {
+                        min_dist = sol.start.solution_value;
+                        best_idx = Some(idx);
+                    }
+                }
+            }
+            let best_idx = best_idx.ok_or_else(|| sm_err(OP_EDGEUSE))?;
+            dropped
+                .uv_curves
+                .into_iter()
+                .nth(best_idx)
+                .ok_or_else(|| sm_err(OP_EDGEUSE))?
+        };
+        crate::surface::surface::exact_pieces::certified_lift(k, &ext_s, &uvc, c3, c3_ivl, tol)?;
+        Ok(uvc)
+    }
+
+    /// Verifies that moving `opt_v` to `moved_pt` keeps every other incident edge's
+    /// endpoint at `opt_v` within `tau_inc + tau_v` (`AssertValid` Edge tests 16–17,
+    /// with `tau_v >= max(tau_self, tau_inc)` after `Fix_TolSizes`,
+    /// `docs/validity-and-tolerances.md` §5.1).
+    pub(crate) fn verify_vertex_move_on_incident_edges<O: ClassObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        opt_v: Option<O>,
+        moved_pt: Point3,
+        self_edge: O,
+        self_tol: f64,
+        partner_rebuilt: Option<RebuiltPartnerEdge<O>>,
+    ) -> Result<()> {
+        let Some(v) = opt_v else {
+            return Ok(());
+        };
+        let cur_pt = brep.vertex_point(v)?;
+        let raw_v_tol = brep.vertex_tolerance(v)?;
+        for inc_e in brep.vertex_edges(v)? {
+            if inc_e == self_edge {
+                continue;
+            }
+            if let Some(p) = partner_rebuilt {
+                if inc_e == p.edge {
+                    let eff_v_tol = raw_v_tol.max(self_tol).max(p.tol);
+                    if p.v1 == Some(v) && (moved_pt - p.start).length() > p.tol + eff_v_tol {
+                        return Err(sm_err(OP_EDGEUSE));
+                    }
+                    if p.v2 == Some(v) && (moved_pt - p.end).length() > p.tol + eff_v_tol {
+                        return Err(sm_err(OP_EDGEUSE));
+                    }
+                    continue;
+                }
+            }
+            if (moved_pt - cur_pt).length() <= EFF_ZERO || brep.edge_curve(inc_e)?.is_none() {
+                continue;
+            }
+            let inc_tol = brep.edge_tolerance(inc_e)?;
+            let eff_v_tol = raw_v_tol.max(self_tol).max(inc_tol);
+            let bound = inc_tol + eff_v_tol;
+            for inc_eu in brep.edge_edgeuses(inc_e)? {
+                if brep.edgeuse_vertex(inc_eu)? == Some(v) {
+                    let end_pt =
+                        edgeuse_normalized_evaluate(k, brep, inc_eu, 0.0, false, false, false)?;
+                    if (cur_pt - end_pt).length() <= bound && (moved_pt - end_pt).length() > bound {
+                        return Err(sm_err(OP_EDGEUSE));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Input edgeuses and rail slot for one side of `reconcile_shell_tangent_rails`.
+struct ShellTangentInput<'a, O> {
+    orig_eu: O,
+    off_eu: O,
+    rail: &'a mut Option<BSplineCurve>,
+}
+
+/// Settled endpoint data and endpoint-match margins for one side of a shell-tangent gap.
+struct ShellTangentPrepared<O> {
+    orig_eu: O,
+    off_eu: O,
+    edge: O,
+    v1: Option<O>,
+    v2: Option<O>,
+    p1: Point3,
+    p2: Point3,
+    tol: f64,
+    matched: bool,
+    margin1: f64,
+    margin2: f64,
+}
+
+impl<O: Copy> ShellTangentPrepared<O> {
+    fn as_partner(&self, rebuilt: &ShellTangentRebuilt) -> RebuiltPartnerEdge<O> {
+        RebuiltPartnerEdge {
+            edge: self.edge,
+            tol: self.tol,
+            v1: self.v1,
+            start: rebuilt.start,
+            v2: self.v2,
+            end: rebuilt.end,
+        }
+    }
+}
+
+/// Rebuilt 3D curve, certified UV trim, and step-wall rail for one side of a shell-tangent gap.
+struct ShellTangentRebuilt {
+    curve: Curve,
+    uv: Curve,
+    rail: BSplineCurve,
+    start: Point3,
+    end: Point3,
+}
+
+/// Candidate rebuilt partner rail endpoints checked before mutating shared vertices.
+#[derive(Clone, Copy)]
+pub(crate) struct RebuiltPartnerEdge<O> {
+    edge: O,
+    tol: f64,
+    v1: Option<O>,
+    start: Point3,
+    v2: Option<O>,
+    end: Point3,
+}
+
+/// Returns `(origin, direction, eps_line)` when `cv` is an exact line (`eps_line = 0`) or a
+/// 3D positive-weight B-spline whose control polygon is collinear to machine precision,
+/// bounding `sup_t dist(cv(t), line(origin, direction)) <= eps_line` in outward-rounded [`Ivl`]
+/// arithmetic via NURBS convex-hull containment and convexity of Euclidean point-to-line
+/// distance. Curved conics and non-collinear B-splines return `None`.
+fn exact_collinear_line(cv: &Curve) -> Option<(Point3, Vec3, f64)> {
+    use crate::blend::fillet_section::interval::Ivl;
+    use crate::blend::fillet_section::series::{v_sub, V3};
+
+    if cv.dim() != 3 {
+        return None;
+    }
+    match cv.kind() {
+        CurveKind::Line(l) => {
+            let (pt, dir) = l.is_line();
+            (dir.length() > EFF_ZERO).then_some((pt, dir, 0.0))
+        }
+        CurveKind::BSpline(bs) => {
+            let nurb = bs.gw_nurb()?;
+            let cpts = nurb.cpts();
+            if cpts.len() < 2 {
+                return None;
+            }
+            let rational = nurb.is_rational();
+            let to_ivl_pt = |cp: &crate::nurbs::math::CPoint| -> Option<V3<Ivl>> {
+                if rational {
+                    if !(cp.w.is_finite() && cp.w > 0.0) {
+                        return None;
+                    }
+                    let inv_w = Ivl::from(1.0) / Ivl::from(cp.w);
+                    Some(V3 {
+                        x: Ivl::from(cp.x) * inv_w,
+                        y: Ivl::from(cp.y) * inv_w,
+                        z: Ivl::from(cp.z) * inv_w,
+                    })
+                } else {
+                    Some(V3 {
+                        x: Ivl::from(cp.x),
+                        y: Ivl::from(cp.y),
+                        z: Ivl::from(cp.z),
+                    })
+                }
+            };
+            let p0 = to_ivl_pt(cpts.first()?)?;
+            let pn = to_ivl_pt(cpts.last()?)?;
+            let d_ivl = v_sub(pn, p0);
+            let d_len = (d_ivl.x * d_ivl.x + d_ivl.y * d_ivl.y + d_ivl.z * d_ivl.z).sqrt();
+            if !(d_len.lo.is_finite() && d_len.lo > EFF_ZERO) {
+                return None;
+            }
+            let scale = 1.0 + p0.x.mag().max(p0.y.mag()).max(p0.z.mag()).max(d_len.hi);
+            let mut eps_line = 0.0_f64;
+            for cp in cpts.iter().skip(1).take(cpts.len().saturating_sub(2)) {
+                let pi = to_ivl_pt(cp)?;
+                let rel = v_sub(pi, p0);
+                let cr = V3 {
+                    x: rel.y * d_ivl.z - rel.z * d_ivl.y,
+                    y: rel.z * d_ivl.x - rel.x * d_ivl.z,
+                    z: rel.x * d_ivl.y - rel.y * d_ivl.x,
+                };
+                let cr_norm_hi = (cr.x * cr.x + cr.y * cr.y + cr.z * cr.z).sqrt().hi;
+                let dist_hi = (Ivl::from(cr_norm_hi) / d_len).hi;
+                if !dist_hi.is_finite() {
+                    return None;
+                }
+                eps_line = eps_line.max(dist_hi);
+            }
+            if eps_line > EFF_ZERO * scale {
+                return None;
+            }
+            let pt0 = cpts.first()?.to_euclid();
+            let ptn = cpts.last()?.to_euclid();
+            let dir = ptn - pt0;
+            if dir.length() <= EFF_ZERO {
+                return None;
+            }
+            Some((pt0, dir, eps_line + 2.0 * f64::EPSILON * scale))
+        }
+        _ => None,
+    }
+}
+
+/// Verifies directly on the NURBS nets that `unit` on `[0, 1]` is an affine knot
+/// reparameterization of `src` with identical degree, rationality, and homogeneous control
+/// points (so both curves trace the exact same 3D locus by affine invariance of B-spline basis
+/// functions, without point sampling).
+fn is_exact_unit_reparameterization(src: &BSplineCurve, unit: &BSplineCurve) -> bool {
+    use crate::blend::fillet_section::interval::Ivl;
+
+    let (Some(n1), Some(n2)) = (src.gw_nurb(), unit.gw_nurb()) else {
+        return false;
+    };
+    if n1.degree() != n2.degree()
+        || n1.is_rational() != n2.is_rational()
+        || n1.cpts().len() != n2.cpts().len()
+    {
+        return false;
+    }
+    for (c1, c2) in n1.cpts().iter().zip(n2.cpts().iter()) {
+        if c1.x.to_bits() != c2.x.to_bits()
+            || c1.y.to_bits() != c2.y.to_bits()
+            || c1.z.to_bits() != c2.z.to_bits()
+            || c1.w.to_bits() != c2.w.to_bits()
+        {
+            return false;
+        }
+    }
+    let (u1, u2) = (n1.knots(), n2.knots());
+    let Some(m) = u1.len().checked_sub(1) else {
+        return false;
+    };
+    let p = n1.degree();
+    if u1.len() != u2.len() || 2_usize.saturating_mul(p).saturating_add(1) > u1.len() {
+        return false;
+    }
+    if u2.windows(2).any(|w| match (w.first(), w.get(1)) {
+        (Some(&a), Some(&b)) => !(a.is_finite() && b.is_finite() && a <= b),
+        _ => true,
+    }) {
+        return false;
+    }
+    let (Some(&first), Some(&last), Some(&u2_first), Some(&u2_last)) =
+        (u1.first(), u1.last(), u2.first(), u2.last())
+    else {
+        return false;
+    };
+    if u1
+        .iter()
+        .zip(u2.iter())
+        .all(|(k1, k2)| k1.to_bits() == k2.to_bits())
+    {
+        return u2_first.abs() <= EFF_ZERO && (u2_last - 1.0).abs() <= EFF_ZERO;
+    }
+    let span = Ivl::from(last) - Ivl::from(first);
+    if !(span.lo.is_finite() && span.lo > EFF_ZERO_PARAM) {
+        return false;
+    }
+    for (idx, (&k1, &k2)) in u1.iter().zip(u2.iter()).enumerate() {
+        if idx <= p {
+            if k2 != 0.0 {
+                return false;
+            }
+        } else if idx >= m.saturating_sub(p) {
+            if k2 != 1.0 {
+                return false;
+            }
+        } else {
+            let ideal = (Ivl::from(k1) - Ivl::from(first)) / span;
+            let pad = 4.0 * f64::EPSILON;
+            if k2 < ideal.lo - pad || k2 > ideal.hi + pad {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 // ---- the local-operation variant --------------------------------------------------------------
@@ -5396,5 +6132,87 @@ mod tests {
         d.deviations.push(0.5);
         d.reset();
         assert!(d.curves_3d.is_empty() && d.deviations.is_empty());
+    }
+
+    #[test]
+    fn exact_collinear_line_and_unit_reparameterization_use_control_nets_not_samples() {
+        use crate::curve::line::Line;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::CPoint;
+
+        // 1. Exact `Line` and collinear 3D B-spline pass `exact_collinear_line`.
+        let seg = Curve::from(Line::from_points(
+            Point3::new(1.0, 2.0, 3.0),
+            Point3::new(5.0, -2.0, 7.0),
+            3,
+        ));
+        let (pt, dir, eps) = exact_collinear_line(&seg).expect("exact line");
+        assert_eq!(eps, 0.0);
+        assert!((pt - Point3::new(1.0, 2.0, 3.0)).length() < 1e-15);
+        assert!(dir.length() > 1.0);
+
+        let collinear_bs = Curve::from(BSplineCurve::from_nurb(
+            NlCurve::new(
+                vec![
+                    CPoint::new(0.0, 0.0, 0.0, 1.0),
+                    CPoint::new(2.0, 4.0, 6.0, 2.0), // Euclidean `(1, 2, 3)`
+                    CPoint::new(3.0, 6.0, 9.0, 1.0), // Euclidean `(3, 6, 9)`
+                ],
+                2,
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            true,
+        ));
+        let (_, _, eps_bs) = exact_collinear_line(&collinear_bs).expect("collinear rational net");
+        assert!(eps_bs <= 1e-11);
+
+        // 2. A shallow quadratic arc of sagitta `5e-5` (strictly below `10 * tau_e = 1e-4`
+        //    where `cv.is_line(k, 10, line_tol)` previously collapsed it into a straight chord!)
+        //    is rejected by `exact_collinear_line` so its curved geometry is preserved, and its
+        //    `[0, 1]` knot reparameterization passes `is_exact_unit_reparameterization`.
+        let shallow_arc_bs = BSplineCurve::from_nurb(
+            NlCurve::new(
+                vec![
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                    CPoint::new(2.5, 5e-5, 0.0, NOW),
+                    CPoint::new(7.5, 5e-5, 0.0, NOW),
+                    CPoint::new(10.0, 0.0, 0.0, NOW),
+                ],
+                2,
+                vec![2.0, 2.0, 2.0, 5.5, 9.0, 9.0, 9.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        );
+        assert!(exact_collinear_line(&Curve::from(shallow_arc_bs.clone())).is_none());
+        let mut unit_bs = shallow_arc_bs.clone();
+        unit_bs
+            .edit_parameterization(&Extent1d::from_min_max(0.0, 1.0))
+            .unwrap();
+        assert!(is_exact_unit_reparameterization(&shallow_arc_bs, &unit_bs));
+
+        // Perturbing an interior knot or control point invalidates the affine equivalence.
+        let perturbed = BSplineCurve::from_nurb(
+            NlCurve::new(
+                vec![
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                    CPoint::new(2.5, 5e-5, 0.0, NOW),
+                    CPoint::new(7.5, 5e-5, 0.0, NOW),
+                    CPoint::new(10.0, 0.0, 0.0, NOW),
+                ],
+                2,
+                vec![0.0, 0.0, 0.0, 0.6, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        );
+        assert!(!is_exact_unit_reparameterization(
+            &shallow_arc_bs,
+            &perturbed
+        ));
     }
 }

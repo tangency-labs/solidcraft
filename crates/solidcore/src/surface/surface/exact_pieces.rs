@@ -29,24 +29,31 @@
 use crate::blend::fillet_section::certificate::{
     curve_derivs_over, nurbs_partials_over_piece, partials_hull, NurbsCurve,
 };
-use crate::blend::fillet_section::interval::Ivl;
-use crate::blend::fillet_section::series::V3;
+use crate::blend::fillet_section::interval::{cmax, cmin, Ivl};
+use crate::blend::fillet_section::offset_box::{
+    offset_crossed_knot_jumps, offset_partials_over_parts,
+};
+use crate::blend::fillet_section::series::{v_add, v_hull, v_scale, v_sub, V3, VZ};
 use crate::blend::fillet_section::station::{as_b_spline, knot, span, Nurbs, Partials};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
-use crate::geom::extent2d::Extent2d;
+use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
 use crate::geom::solution_array::SolutionObject;
 use crate::geom::tol::ScaledZero as _;
 use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 use crate::kernel::Kernel;
-use crate::math::{EFF_ZERO, EFF_ZERO_SQRT};
+use crate::math::{Point2, EFF_ZERO, EFF_ZERO_SQRT};
+use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm};
+use crate::nurbs::math::{NOW, NOZ};
 use crate::surface::implicit::{curve_lies_on, AnalyticSupport, Implicit};
 use crate::surface::surface::p1::SurfaceIntersectContext;
 use crate::surface::surface::p4::NoObject;
-use crate::surface::surface::{Surface, SurfaceIntersection};
+use crate::surface::surface::{Surface, SurfaceIntersection, SurfaceKind};
+use std::borrow::Cow;
 
 /// The operation [`SurfaceIntersection::clip_exact_curves`] names in its errors.
 pub const OP: &str = "surface::surface::SurfaceIntersection::clip_exact_curves";
@@ -512,176 +519,29 @@ const LIFT_MAX_PARTS: usize = 1 << 16;
 const fn lift_not_certified() -> SolidError {
     SolidError::Unsupported {
         operation: OP,
-        reason: "a UV curve's lift is not certified within the tolerance of its exact \
-                 intersection curve",
+        reason: "a UV curve's lift is not certified within the tolerance of its 3D curve",
     }
 }
 
-/// An upper bound, enclosed, on `|S(uv(t)) - C(t)|` over `ivl`: `S` is `surface`'s net
-/// ([`as_b_spline`], [`Nurbs::of`]; past its knots, the analytic continuation of its end
-/// spans, as [`Nurbs`] evaluates), `uv` a UV curve on it and `C` the 3D `curve`, both in
-/// the same parameter. `ivl` is cut at the inner knots of `uv` and `C`, so each part lies
-/// on one polynomial piece of both, and each part is enclosed ([`lift_over`]) and halved
-/// until its bound is at most `tol`. The bound returned is the largest part's.
-///
-/// # Errors
-///
-/// [`SolidError::Unsupported`] for a surface without a net, a curve not of a B-spline
-/// kind, a lift proved farther than `tol` at a part's middle, or a part still above `tol`
-/// after [`LIFT_MAX_DEPTH`] halvings or past [`LIFT_MAX_PARTS`] parts;
-/// [`SolidError::PortInvariant`] for an empty `ivl`; those of the enclosures.
-fn certified_lift(
-    k: &Kernel,
-    surface: &Surface,
-    uv: &Curve,
-    curve: &Curve,
-    ivl: Extent1d,
-    tol: f64,
-) -> Result<f64> {
-    let (lo, hi) = (ivl.min(), ivl.max());
-    let has_length = lo < hi;
-    if !has_length {
-        return Err(SolidError::port_invariant(
-            OP,
-            "an exact intersection piece over an empty interval",
-        ));
-    }
-    let bs = as_b_spline(k, surface)?.ok_or(SolidError::Unsupported {
+/// The refusal of a lift proved strictly farther than `tol` from its 3D curve.
+const fn lift_too_far() -> SolidError {
+    SolidError::Unsupported {
         operation: OP,
-        reason: "a UV curve on a surface without a NURBS net",
-    })?;
-    let net = Nurbs::of(&bs)?;
-    let (uvn, cn) = (nurbs_curve_of(uv)?, nurbs_curve_of(curve)?);
-    let mut cuts = vec![lo, hi];
-    cuts.extend(uvn.u.iter().chain(&cn.u).filter(|&&t| t > lo && t < hi));
-    cuts.sort_by(f64::total_cmp);
-    cuts.dedup();
-    let mut todo: Vec<(f64, f64, usize)> = cuts
-        .windows(2)
-        .rev()
-        .filter_map(|w| match *w {
-            [a, b] => Some((a, b, 0)),
-            _ => None,
-        })
-        .collect();
-    let (mut parts, mut worst) = (0_usize, 0.0_f64);
-    while let Some((a, b, depth)) = todo.pop() {
-        parts += 1;
-        if parts > LIFT_MAX_PARTS {
-            return Err(lift_not_certified());
-        }
-        let part = lift_over(&net, &uvn, &cn, a, b)?;
-        if part.bound <= tol {
-            worst = worst.max(part.bound);
-            continue;
-        }
-        if part.at_middle > tol {
-            return Err(SolidError::Unsupported {
-                operation: OP,
-                reason: "a UV curve's lift is farther than the tolerance from its exact \
-                         intersection curve",
-            });
-        }
-        let m = 0.5 * (a + b);
-        let halves = m > a && m < b;
-        if depth >= LIFT_MAX_DEPTH || !halves {
-            return Err(lift_not_certified());
-        }
-        todo.push((m, b, depth + 1));
-        todo.push((a, m, depth + 1));
+        reason: "a UV curve's lift is farther than the tolerance from its 3D curve",
     }
-    Ok(worst)
 }
 
-/// A part's enclosure ([`lift_over`]): the bound on the lift's distance over the part,
+/// The refusal of a surface whose B-spline net is only an approximation of its definition.
+pub(crate) const APPROXIMATE_NET_REASON: &str =
+    "a UV curve on a surface whose NURBS net is an approximation";
+
+const IZ: Ivl = Ivl::new(0.0, 0.0);
+
+/// A part's enclosure ([`certified_lift`]): the bound on the lift's distance over the part,
 /// and a proved lower bound on it at the part's middle.
 struct LiftPart {
     bound: f64,
     at_middle: f64,
-}
-
-/// `g(t) = S(uv(t)) - C(t)` over `[a, b]` (inside one polynomial piece of `uv` and of `C`,
-/// [`certified_lift`]), enclosed in rounded intervals with `m` the middle and `r` the
-/// half-width. Where the box `uv([a, b])` crosses no inner knot line of the net, `g` is
-/// `C^2` there and its second-order Taylor form holds: `g(t)` is in
-/// `g(m) + g'(m) [-r, r] + g''([a, b]) [0, r^2] / 2`, with
-/// `g'' = S_uu u'^2 + 2 S_uv u'v' + S_vv v'^2 + S_u u'' + S_v v'' - C''`. Where it crosses
-/// one (a circle's net has `C^0` double knots), `g` is continuous and `C^1` on each side,
-/// and its mean-value form holds: `g(t)` is in `g(m) + g'([a, b]) [-r, r]`, with each
-/// partial enclosed piece by piece and hulled ([`net_partials`]). The bound is the norm of
-/// the enclosure's magnitudes, rounded up.
-///
-/// # Errors
-///
-/// [`SolidError::PortInvariant`] for a missing derivative; those of
-/// [`curve_derivs_over`], [`net_partials`] and [`net_parts`].
-fn lift_over(net: &Nurbs, uvn: &NurbsCurve, cn: &NurbsCurve, a: f64, b: f64) -> Result<LiftPart> {
-    let m = 0.5 * (a + b);
-    let t = Ivl::new(a, b);
-    let dt = t - Ivl::from(m);
-    let r = Ivl::from(dt.mag());
-    let missing = || SolidError::port_invariant(OP, "a curve's derivative over a part is missing");
-    let uv_t = curve_derivs_over(uvn, t, 2, None)?;
-    let c_t = curve_derivs_over(cn, t, 2, None)?;
-    let uv_m = curve_derivs_over(uvn, Ivl::from(m), 1, None)?;
-    let c_m = curve_derivs_over(cn, Ivl::from(m), 1, None)?;
-    let at = |v: &[V3<Ivl>], i: usize| v.get(i).copied().ok_or_else(missing);
-    let (w0, w1, w2) = (at(&uv_t, 0)?, at(&uv_t, 1)?, at(&uv_t, 2)?);
-    let (c1, c2) = (at(&c_t, 1)?, at(&c_t, 2)?);
-    let (wm0, wm1) = (at(&uv_m, 0)?, at(&uv_m, 1)?);
-    let (cm0, cm1) = (at(&c_m, 0)?, at(&c_m, 1)?);
-    let pu = net_parts(&net.u, net.p, net.nu, w0.x)?;
-    let pv = net_parts(&net.v, net.q, net.nv, w0.y)?;
-    let (g, g_m) = if one_piece(&pu) && one_piece(&pv) {
-        let s_t = net_partials(net, &pu, &pv, 2)?;
-        // uv(m) lies in uv([a, b]), so on the same pieces: each one's polynomial is the
-        // net there
-        let pm = |parts: &[(f64, f64, usize)], x: Ivl| -> Vec<(f64, f64, usize)> {
-            parts.iter().map(|&(_, _, s)| (x.lo, x.hi, s)).collect()
-        };
-        let s_m = net_partials(net, &pm(&pu, wm0.x), &pm(&pv, wm0.y), 1)?;
-        let g_m = v_sub(s_m.at(0, 0), cm0);
-        let dg_m = v_sub(
-            v_add(v_scale(s_m.at(1, 0), wm1.x), v_scale(s_m.at(0, 1), wm1.y)),
-            cm1,
-        );
-        let (u1, v1) = (w1.x, w1.y);
-        let two = Ivl::from(2.0);
-        let ddg = v_sub(
-            v_add(
-                v_add(
-                    v_add(
-                        v_scale(s_t.at(2, 0), u1 * u1),
-                        v_scale(s_t.at(1, 1), two * u1 * v1),
-                    ),
-                    v_scale(s_t.at(0, 2), v1 * v1),
-                ),
-                v_add(v_scale(s_t.at(1, 0), w2.x), v_scale(s_t.at(0, 1), w2.y)),
-            ),
-            c2,
-        );
-        let half_r2 = Ivl::new(0.0, (r * r * Ivl::from(0.5)).hi);
-        let g = v_add(v_add(g_m, v_scale(dg_m, dt)), v_scale(ddg, half_r2));
-        (g, g_m)
-    } else {
-        let s_t = net_partials(net, &pu, &pv, 1)?;
-        let s_m = net_partials(
-            net,
-            &net_parts(&net.u, net.p, net.nu, wm0.x)?,
-            &net_parts(&net.v, net.q, net.nv, wm0.y)?,
-            0,
-        )?;
-        let g_m = v_sub(s_m.at(0, 0), cm0);
-        let dg = v_sub(
-            v_add(v_scale(s_t.at(1, 0), w1.x), v_scale(s_t.at(0, 1), w1.y)),
-            c1,
-        );
-        (v_add(g_m, v_scale(dg, dt)), g_m)
-    };
-    Ok(LiftPart {
-        bound: norm_above(g),
-        at_middle: norm_below(g_m),
-    })
 }
 
 /// Whether the parts of one direction of a box ([`net_parts`]) are on one piece of the
@@ -765,45 +625,18 @@ fn net_partials(
     out.ok_or_else(|| SolidError::port_invariant(OP, "a box of a UV curve without parts"))
 }
 
-/// The NURBS data of `curve`, a B-spline kind (as [`on_implicit`] takes it).
-fn nurbs_curve_of(curve: &Curve) -> Result<NurbsCurve> {
-    match curve.kind() {
-        CurveKind::BSpline(b) => NurbsCurve::of(b),
-        CurveKind::Line(l) => NurbsCurve::of(&*l.base_with_nurb()?),
-        CurveKind::Ellipse(e) => NurbsCurve::of(e.base()),
-        CurveKind::Hyperbola(h) => NurbsCurve::of(h.base()),
-        CurveKind::Parabola(p) => NurbsCurve::of(p.base()),
-        _ => Err(SolidError::Unsupported {
-            operation: OP,
-            reason: "a curve of an exact intersection piece that is not of a B-spline kind",
-        }),
-    }
-}
-
-/// `a + b`, componentwise.
-fn v_add(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
-    V3 {
-        x: a.x + b.x,
-        y: a.y + b.y,
-        z: a.z + b.z,
-    }
-}
-
-/// `a - b`, componentwise.
-fn v_sub(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
-    V3 {
-        x: a.x - b.x,
-        y: a.y - b.y,
-        z: a.z - b.z,
-    }
-}
-
-/// `a s`, componentwise.
-fn v_scale(a: V3<Ivl>, s: Ivl) -> V3<Ivl> {
-    V3 {
-        x: a.x * s,
-        y: a.y * s,
-        z: a.z * s,
+/// Converts only `nurbs_partials_over_piece`'s wide-box non-positive-weight `SM_ERR` into
+/// `Ok(None)` so the caller subdivides the span; all other errors (`PortInvariant`,
+/// `Unsupported`, `Cancelled`, `Unported`) propagate untouched.
+fn partials_or_subdivide(r: Result<Partials<Ivl>>) -> Result<Option<Partials<Ivl>>> {
+    match r {
+        Ok(p) => Ok(Some(p)),
+        Err(SolidError::Upstream {
+            operation: "blend::fillet_section::certificate",
+            code: crate::error::SM_ERR,
+            ..
+        }) => Ok(None),
+        Err(e) => Err(e),
     }
 }
 
@@ -824,6 +657,1393 @@ fn norm_below(v: V3<Ivl>) -> f64 {
         return 0.0;
     }
     s.sqrt().lo
+}
+
+fn clamp_ivl(x: Ivl, lo: f64, hi: f64) -> Ivl {
+    if x.lo.is_nan() || x.hi.is_nan() {
+        return Ivl::whole();
+    }
+    Ivl::new(cmax(cmin(x.lo, hi), lo), cmax(cmin(x.hi, hi), lo))
+}
+
+fn ivl_inside(x: Ivl, lo: f64, hi: f64) -> bool {
+    x.lo >= lo && x.hi <= hi
+}
+
+fn ivl_disjoint(x: Ivl, lo: f64, hi: f64) -> bool {
+    x.hi < lo || x.lo > hi
+}
+
+/// Returns `true` when `s` (or an `OffsetSurface` base / extended base within nesting
+/// depth 4) evaluates a procedural definition whose B-spline net is only a positional
+/// approximation (`ProceduralBlend`, `ProceduralSweep`), so net-derivative bounds do not
+/// bound the definition's derivatives. Iterative (`stack`): no recursion.
+pub(crate) fn surface_uses_approximate_net(s: &Surface) -> bool {
+    let mut stack = vec![(s, 0_usize)];
+    while let Some((cur, depth)) = stack.pop() {
+        if depth > 4 || cur.procedural_sweep().is_some() {
+            return true;
+        }
+        match cur.kind() {
+            SurfaceKind::ProceduralBlend(_) => return true,
+            SurfaceKind::OffsetSurface(off) => {
+                stack.push((off.base_surface(), depth + 1));
+                let ext_approx = off.with_extended_base_surface(|e| {
+                    e.is_some_and(|es| {
+                        depth + 1 > 4
+                            || es.procedural_sweep().is_some()
+                            || matches!(
+                                es.kind(),
+                                SurfaceKind::ProceduralBlend(_) | SurfaceKind::OffsetSurface(_)
+                            )
+                    })
+                });
+                if ext_approx {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Returns the exact rational B-spline representation of `s` when `s`'s point and
+/// derivative evaluations equal that NURBS net's everywhere on its natural domain (`eps = 0`),
+/// or `None` when `s` has no exact NURBS representation (`ProceduralBlend`,
+/// `ProceduralSweep`, power-basis `BSplineSurfaceForm::Polynomial`, `WR-713` asymmetric
+/// unbounded inside-out `Cone`, `OffsetSurface`, `CurveBounded`, `Step`, `SrfInVolume`).
+pub(crate) fn exact_nurbs_surface<'a>(
+    k: &Kernel,
+    s: &'a Surface,
+) -> Result<Option<Cow<'a, BSplineSurface>>> {
+    if s.procedural_sweep().is_some() || matches!(s.kind(), SurfaceKind::ProceduralBlend(_)) {
+        return Ok(None);
+    }
+    if let SurfaceKind::Cone(c) = s.kind_with_nurb(k)? {
+        if !c.rev.is_bounded()? && c.inside_out && !k.fixes.cone_unbounded_parameterized_as_nurb {
+            let step_ivl = c.rev.anal_uv_domain.v_interval();
+            let nurb_dom = c.rev.base().natural_uv_domain();
+            let nurb_ivl = if c.rev.swap_uv {
+                nurb_dom.u_interval()
+            } else {
+                nurb_dom.v_interval()
+            };
+            if nurb_ivl.min().to_bits() != (-step_ivl.max()).to_bits()
+                || nurb_ivl.max().to_bits() != (-step_ivl.min()).to_bits()
+            {
+                return Ok(None);
+            }
+        }
+    }
+    Ok(as_b_spline(k, s)?.filter(|b| b.form() != BSplineSurfaceForm::Polynomial))
+}
+
+/// Builds a [`NurbsCurve`] directly from `bs.gw_nurb()`'s raw homogeneous `CPoint`s
+/// (along with its natural domain, whether out-of-bounds clamping applies, and its 2D
+/// control-polygon bounding box on `natural_interval()`), avoiding `control_polygon()`'s
+/// `(wx / w) * w` rational round-trip rounding loss.
+pub(crate) fn exact_nurbs_curve_data(
+    bs: &BSplineCurve,
+    is_2d: bool,
+) -> Result<(NurbsCurve, Extent1d, bool, Point2, Point2)> {
+    let bad = || SolidError::Unsupported {
+        operation: OP,
+        reason: "a B-spline curve without a valid positive-weight NURBS net",
+    };
+    let nurb = bs.gw_nurb().ok_or_else(bad)?;
+    let p = nurb.degree();
+    let cpts = nurb.cpts();
+    let n = cpts.len();
+    let u = nurb.knots().to_vec();
+    if p < 1 || n <= p || u.len() != n.checked_add(p + 1).ok_or_else(bad)? {
+        return Err(bad());
+    }
+    if u.iter().any(|k| !k.is_finite()) {
+        return Err(bad());
+    }
+    for (&a, &b) in u.iter().zip(u.iter().skip(1)) {
+        if b < a {
+            return Err(bad());
+        }
+    }
+    let u0 = *u.get(p).ok_or_else(bad)?;
+    let um = *u.get(n).ok_or_else(bad)?;
+    if u0 >= um {
+        return Err(bad());
+    }
+
+    let rational = nurb.is_rational();
+    let mut pw = Vec::new();
+    let (mut u_min, mut u_max) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut v_min, mut v_max) = (f64::INFINITY, f64::NEG_INFINITY);
+    for cp in cpts {
+        if (cp.w != NOW) != rational {
+            return Err(bad());
+        }
+        let w = if rational { cp.w } else { 1.0 };
+        let z = if is_2d || cp.z == NOZ { 0.0 } else { cp.z };
+        if !(w.is_finite() && w > 0.0 && cp.x.is_finite() && cp.y.is_finite() && z.is_finite()) {
+            return Err(bad());
+        }
+        let (ux, vy) = if rational {
+            (
+                Ivl::from(cp.x) / Ivl::from(w),
+                Ivl::from(cp.y) / Ivl::from(w),
+            )
+        } else {
+            (Ivl::from(cp.x), Ivl::from(cp.y))
+        };
+        if !(ux.lo.is_finite() && ux.hi.is_finite() && vy.lo.is_finite() && vy.hi.is_finite()) {
+            return Err(bad());
+        }
+        u_min = u_min.min(ux.lo);
+        u_max = u_max.max(ux.hi);
+        v_min = v_min.min(vy.lo);
+        v_max = v_max.max(vy.hi);
+        pw.extend_from_slice(&[cp.x, cp.y, z, w]);
+    }
+    if !(u_min <= u_max && v_min <= v_max) {
+        return Err(bad());
+    }
+    Ok((
+        NurbsCurve { p, n, u, pw },
+        bs.natural_interval(),
+        !bs.is_out_of_bounds_enabled(),
+        Point2::new(u_min, v_min),
+        Point2::new(u_max, v_max),
+    ))
+}
+
+fn scale_exact_zero(v: V3<Ivl>, s: Ivl) -> V3<Ivl> {
+    if s.lo.is_finite() && s.hi.is_finite() {
+        let comp = |c: Ivl| {
+            if c.lo == 0.0 && c.hi == 0.0 {
+                IZ
+            } else {
+                c * s
+            }
+        };
+        V3 {
+            x: comp(v.x),
+            y: comp(v.y),
+            z: comp(v.z),
+        }
+    } else {
+        v_scale(v, s)
+    }
+}
+
+fn add_exact_zero(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
+    let comp = |ac: Ivl, bc: Ivl| {
+        if bc.lo == 0.0 && bc.hi == 0.0 {
+            ac
+        } else if ac.lo == 0.0 && ac.hi == 0.0 {
+            bc
+        } else {
+            ac + bc
+        }
+    };
+    V3 {
+        x: comp(a.x, b.x),
+        y: comp(a.y, b.y),
+        z: comp(a.z, b.z),
+    }
+}
+
+enum LineStepMode {
+    Unbounded {
+        inside_out: bool,
+    },
+    ZeroLength,
+    Bounded {
+        n_min: f64,
+        n_max: f64,
+        n_len: Ivl,
+        a_min: f64,
+        a_len: Ivl,
+        inside_out: bool,
+    },
+}
+
+struct LineEval {
+    p0: V3<Ivl>,
+    dir: V3<Ivl>,
+    scale: Ivl,
+    d1: V3<Ivl>,
+    mode: LineStepMode,
+}
+
+impl LineEval {
+    fn of(l: &crate::curve::line::Line, is_2d: bool) -> Result<Self> {
+        let bad = || SolidError::Unsupported {
+            operation: OP,
+            reason: "a line curve with non-finite or degenerate parameterization",
+        };
+        let pt = l.line_point();
+        let v = l.line_vector();
+        let sc = l.line_scale();
+        let pz = if is_2d || pt.z == NOZ { 0.0 } else { pt.z };
+        let vz = if is_2d || v.z == NOZ { 0.0 } else { v.z };
+        if !(pt.x.is_finite()
+            && pt.y.is_finite()
+            && pz.is_finite()
+            && v.x.is_finite()
+            && v.y.is_finite()
+            && vz.is_finite()
+            && sc.is_finite())
+        {
+            return Err(bad());
+        }
+        let p0 = V3 {
+            x: Ivl::from(pt.x),
+            y: Ivl::from(pt.y),
+            z: Ivl::from(pz),
+        };
+        let dir = V3 {
+            x: Ivl::from(v.x),
+            y: Ivl::from(v.y),
+            z: Ivl::from(vz),
+        };
+        let scale = Ivl::from(sc);
+        let (mode, dstep_dt) = if l.is_bounded() {
+            let nurb_ivl = l.natural_interval();
+            if !(nurb_ivl.min().is_finite() && nurb_ivl.max().is_finite()) {
+                return Err(bad());
+            }
+            if crate::geom::tol::is_zero(nurb_ivl.length()) {
+                (LineStepMode::ZeroLength, Ivl::from(1.0))
+            } else {
+                let n_len = Ivl::from(nurb_ivl.max()) - Ivl::from(nurb_ivl.min());
+                if !n_len.is_positive() {
+                    return Err(bad());
+                }
+                let anal_ivl = l.step_interval();
+                if !(anal_ivl.min().is_finite() && anal_ivl.max().is_finite()) {
+                    return Err(bad());
+                }
+                let a_len = Ivl::from(anal_ivl.max()) - Ivl::from(anal_ivl.min());
+                let rate = a_len / n_len;
+                if !(rate.lo.is_finite() && rate.hi.is_finite()) {
+                    return Err(bad());
+                }
+                let deriv = if l.inside_out() { IZ - rate } else { rate };
+                (
+                    LineStepMode::Bounded {
+                        n_min: nurb_ivl.min(),
+                        n_max: nurb_ivl.max(),
+                        n_len,
+                        a_min: anal_ivl.min(),
+                        a_len,
+                        inside_out: l.inside_out(),
+                    },
+                    deriv,
+                )
+            }
+        } else {
+            let inside_out = l.inside_out();
+            (
+                LineStepMode::Unbounded { inside_out },
+                Ivl::from(if inside_out { -1.0 } else { 1.0 }),
+            )
+        };
+        let d1 = scale_exact_zero(dir, dstep_dt * scale);
+        Ok(Self {
+            p0,
+            dir,
+            scale,
+            d1,
+            mode,
+        })
+    }
+
+    fn eval_point(&self, t: Ivl) -> V3<Ivl> {
+        let step = match self.mode {
+            LineStepMode::Unbounded { inside_out } => {
+                if inside_out {
+                    IZ - t
+                } else {
+                    t
+                }
+            }
+            LineStepMode::ZeroLength => t,
+            LineStepMode::Bounded {
+                n_min,
+                n_max,
+                n_len,
+                a_min,
+                a_len,
+                inside_out,
+            } => {
+                let num = if inside_out {
+                    Ivl::from(n_max) - t
+                } else {
+                    t - Ivl::from(n_min)
+                };
+                Ivl::from(a_min) + (num / n_len) * a_len
+            }
+        };
+        add_exact_zero(self.p0, scale_exact_zero(self.dir, step * self.scale))
+    }
+}
+
+enum LiftCurve {
+    Line(LineEval),
+    Nurbs {
+        nc: NurbsCurve,
+        dom: Extent1d,
+        clamp_to_dom: bool,
+        is_2d: bool,
+        uv_min: Point2,
+        uv_max: Point2,
+    },
+}
+
+impl LiftCurve {
+    fn of(curve: &Curve, lo: f64, hi: f64, is_2d: bool) -> Result<Self> {
+        if let CurveKind::Line(l) = curve.kind() {
+            return Ok(Self::Line(LineEval::of(l, is_2d)?));
+        }
+        let bs = match curve.kind() {
+            CurveKind::BSpline(b) => b,
+            CurveKind::Ellipse(e) => e.base(),
+            CurveKind::Hyperbola(h) => h.base(),
+            CurveKind::Parabola(p) => p.base(),
+            _ => {
+                return Err(SolidError::Unsupported {
+                    operation: OP,
+                    reason: "a curve that is not of a line or B-spline kind",
+                });
+            }
+        };
+        let (nc, dom, clamp_to_dom, uv_min, uv_max) = exact_nurbs_curve_data(bs, is_2d)?;
+        let active_lo = if clamp_to_dom {
+            cmax(lo, dom.min())
+        } else {
+            lo
+        };
+        let active_hi = if clamp_to_dom {
+            cmin(hi, dom.max())
+        } else {
+            hi
+        };
+        let mut s = nc.p + 1;
+        while s < nc.n {
+            let Some(&kv) = nc.u.get(s) else {
+                break;
+            };
+            let mut end = s + 1;
+            while end < nc.n && nc.u.get(end) == Some(&kv) {
+                end += 1;
+            }
+            if end - s > nc.p && kv > active_lo && kv < active_hi {
+                return Err(SolidError::Unsupported {
+                    operation: OP,
+                    reason: "a curve across an interior knot where its net is not continuous",
+                });
+            }
+            s = end;
+        }
+        Ok(Self::Nurbs {
+            nc,
+            dom,
+            clamp_to_dom,
+            is_2d,
+            uv_min,
+            uv_max,
+        })
+    }
+
+    fn push_cuts(&self, lo: f64, hi: f64, cuts: &mut Vec<f64>) {
+        if let Self::Nurbs { nc, dom, .. } = self {
+            for bnd in [dom.min(), dom.max()] {
+                if bnd > lo && bnd < hi {
+                    cuts.push(bnd);
+                }
+            }
+            cuts.extend(nc.u.iter().copied().filter(|&t| t > lo && t < hi));
+        }
+    }
+
+    fn uv_bounds(&self, lo: f64, hi: f64) -> Result<(Point2, Point2)> {
+        let p_bounds = |p: V3<Ivl>| -> Result<(Point2, Point2)> {
+            if !(p.x.lo.is_finite()
+                && p.x.hi.is_finite()
+                && p.y.lo.is_finite()
+                && p.y.hi.is_finite())
+            {
+                return Err(lift_not_certified());
+            }
+            Ok((Point2::new(p.x.lo, p.y.lo), Point2::new(p.x.hi, p.y.hi)))
+        };
+        match self {
+            Self::Line(le) => p_bounds(le.eval_point(Ivl::new(lo, hi))),
+            Self::Nurbs {
+                dom,
+                clamp_to_dom,
+                uv_min,
+                uv_max,
+                ..
+            } => {
+                if *clamp_to_dom || (lo >= dom.min() && hi <= dom.max()) {
+                    Ok((*uv_min, *uv_max))
+                } else {
+                    let [p, _, _] = self.derivs(Ivl::new(lo, hi), 0)?;
+                    p_bounds(p)
+                }
+            }
+        }
+    }
+
+    fn derivs(&self, t: Ivl, order: usize) -> Result<[V3<Ivl>; 3]> {
+        let missing =
+            || SolidError::port_invariant(OP, "a curve's derivative over a part is missing");
+        match self {
+            Self::Line(le) => Ok([le.eval_point(t), le.d1, VZ]),
+            Self::Nurbs {
+                nc,
+                dom,
+                clamp_to_dom,
+                is_2d,
+                uv_min,
+                uv_max,
+            } => {
+                let clamp_hull = |p: V3<Ivl>, in_hull: bool| -> V3<Ivl> {
+                    if *is_2d {
+                        if in_hull {
+                            V3 {
+                                x: clamp_ivl(p.x, uv_min.x, uv_max.x),
+                                y: clamp_ivl(p.y, uv_min.y, uv_max.y),
+                                z: IZ,
+                            }
+                        } else {
+                            V3 {
+                                x: p.x,
+                                y: p.y,
+                                z: IZ,
+                            }
+                        }
+                    } else {
+                        p
+                    }
+                };
+                if *clamp_to_dom && (t.hi <= dom.min() || t.lo >= dom.max()) {
+                    let bnd = if t.hi <= dom.min() {
+                        dom.min()
+                    } else {
+                        dom.max()
+                    };
+                    let d = curve_derivs_over(nc, Ivl::from(bnd), 0, None)?;
+                    let d0 = d.first().copied().ok_or_else(missing)?;
+                    return Ok([clamp_hull(d0, true), VZ, VZ]);
+                }
+                let (tc, in_hull) = if *clamp_to_dom {
+                    (clamp_ivl(t, dom.min(), dom.max()), true)
+                } else {
+                    (t, ivl_inside(t, dom.min(), dom.max()))
+                };
+                let d = curve_derivs_over(nc, tc, order, None)?;
+                let d0 = d.first().copied().ok_or_else(missing)?;
+                let d1 = if order >= 1 {
+                    d.get(1).copied().ok_or_else(missing)?
+                } else {
+                    VZ
+                };
+                let d2 = if order >= 2 {
+                    d.get(2).copied().ok_or_else(missing)?
+                } else {
+                    VZ
+                };
+                Ok([clamp_hull(d0, in_hull), d1, d2])
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum NurbsOobMode {
+    /// `BSplineSurface::evaluate_point` evaluates end knot spans past `dom` without clamping.
+    ExtrapolateEndSpans,
+    /// `Cone::evaluate_point` wraps its sweep coordinate via `polar` outside `dom`, while its
+    /// linear generator coordinate extrapolates when `linear_oob` and clamps otherwise.
+    Cone { swap_uv: bool, linear_oob: bool },
+}
+
+#[derive(Clone, Copy)]
+struct OffsetDomCfg {
+    allow_ext: bool,
+    periodic: [bool; 2],
+    singularities: u32,
+}
+
+enum LiftSurface {
+    Plane {
+        origin: V3<Ivl>,
+        su: V3<Ivl>,
+        sv: V3<Ivl>,
+        step_dom: Extent2d,
+        oob: bool,
+    },
+    Nurbs {
+        net: Nurbs,
+        dom: Extent2d,
+        oob_mode: NurbsOobMode,
+    },
+    Offset {
+        d: Ivl,
+        base_net: Nurbs,
+        base_dom: Extent2d,
+        cfg: OffsetDomCfg,
+        ext: Option<(Nurbs, Extent2d)>,
+    },
+}
+
+struct CurveSpanEval {
+    w0: V3<Ivl>,
+    w1: V3<Ivl>,
+    w2: V3<Ivl>,
+    wm0: V3<Ivl>,
+    wm1: V3<Ivl>,
+    c0: V3<Ivl>,
+    c1: V3<Ivl>,
+    c2: V3<Ivl>,
+    cm0: V3<Ivl>,
+    cm1: V3<Ivl>,
+    dt: Ivl,
+    half_r2: Ivl,
+}
+
+fn second_order_taylor(
+    s_t: &Partials<Ivl>,
+    s_m: &Partials<Ivl>,
+    ev: &CurveSpanEval,
+) -> (V3<Ivl>, V3<Ivl>) {
+    let g_m = v_sub(s_m.at(0, 0), ev.cm0);
+    let dg_m = v_sub(
+        v_add(
+            v_scale(s_m.at(1, 0), ev.wm1.x),
+            v_scale(s_m.at(0, 1), ev.wm1.y),
+        ),
+        ev.cm1,
+    );
+    let (u1, v1) = (ev.w1.x, ev.w1.y);
+    let two = Ivl::from(2.0);
+    let ddg = v_sub(
+        v_add(
+            v_add(
+                v_add(
+                    v_scale(s_t.at(2, 0), u1 * u1),
+                    v_scale(s_t.at(1, 1), two * u1 * v1),
+                ),
+                v_scale(s_t.at(0, 2), v1 * v1),
+            ),
+            v_add(
+                v_scale(s_t.at(1, 0), ev.w2.x),
+                v_scale(s_t.at(0, 1), ev.w2.y),
+            ),
+        ),
+        ev.c2,
+    );
+    let g = v_add(v_add(g_m, v_scale(dg_m, ev.dt)), v_scale(ddg, ev.half_r2));
+    (g, g_m)
+}
+
+fn clamp_singular_uv(mut ux: Ivl, mut vy: Ivl, dom: &Extent2d, singularities: u32) -> (Ivl, Ivl) {
+    let (u0, u1) = (dom.min().x, dom.max().x);
+    let (v0, v1) = (dom.min().y, dom.max().y);
+    if (singularities & SS_UMIN) != 0 {
+        ux = Ivl::new(cmax(ux.lo, u0), cmax(ux.hi, u0));
+    }
+    if (singularities & SS_VMIN) != 0 {
+        vy = Ivl::new(cmax(vy.lo, v0), cmax(vy.hi, v0));
+    }
+    if (singularities & SS_UMAX) != 0 {
+        ux = Ivl::new(cmin(ux.lo, u1), cmin(ux.hi, u1));
+    }
+    if (singularities & SS_VMAX) != 0 {
+        vy = Ivl::new(cmin(vy.lo, v1), cmin(vy.hi, v1));
+    }
+    (ux, vy)
+}
+
+fn periodic_or_in_dom_parts(
+    knots: &[f64],
+    p: usize,
+    n: usize,
+    x: Ivl,
+    dmin: f64,
+    dmax: f64,
+    is_periodic: bool,
+) -> Result<Option<Vec<(f64, f64, usize)>>> {
+    if ivl_inside(x, dmin, dmax) {
+        return net_parts(knots, p, n, x).map(Some);
+    }
+    if !is_periodic {
+        return Ok(None);
+    }
+    let len = dmax - dmin;
+    if !(len > 0.0 && x.hi - x.lo < len && x.lo >= dmin - len && x.hi <= dmax + len) {
+        return Ok(None);
+    }
+    let mut parts = Vec::new();
+    if x.lo < dmin {
+        let w_lo = cmax(
+            (Ivl::from(dmax) + (Ivl::from(x.lo) - Ivl::from(dmin))).lo,
+            dmin,
+        );
+        let w_hi = if x.hi < dmin {
+            cmin(
+                (Ivl::from(dmax) + (Ivl::from(x.hi) - Ivl::from(dmin))).hi,
+                dmax,
+            )
+        } else {
+            dmax
+        };
+        if w_lo <= w_hi {
+            parts.extend(net_parts(knots, p, n, Ivl::new(w_lo, w_hi))?);
+        }
+    }
+    let in_lo = cmax(x.lo, dmin);
+    let in_hi = cmin(x.hi, dmax);
+    if in_lo <= in_hi && x.hi >= dmin && x.lo <= dmax {
+        parts.extend(net_parts(knots, p, n, Ivl::new(in_lo, in_hi))?);
+    }
+    if x.hi > dmax {
+        let w_lo = if x.lo > dmax {
+            cmax(
+                (Ivl::from(dmin) + (Ivl::from(x.lo) - Ivl::from(dmax))).lo,
+                dmin,
+            )
+        } else {
+            dmin
+        };
+        let w_hi = cmin(
+            (Ivl::from(dmin) + (Ivl::from(x.hi) - Ivl::from(dmax))).hi,
+            dmax,
+        );
+        if w_lo <= w_hi {
+            parts.extend(net_parts(knots, p, n, Ivl::new(w_lo, w_hi))?);
+        }
+    }
+    Ok((!parts.is_empty()).then_some(parts))
+}
+
+fn eval_offset_allow_ext_oob(
+    net: &Nurbs,
+    d: Ivl,
+    dom: &Extent2d,
+    cfg: OffsetDomCfg,
+    ev: &CurveSpanEval,
+) -> Result<LiftPart> {
+    let (ux, vy) = clamp_singular_uv(ev.w0.x, ev.w0.y, dom, cfg.singularities);
+    let (umx, umy) = clamp_singular_uv(ev.wm0.x, ev.wm0.y, dom, cfg.singularities);
+    if let (Some(pu), Some(pv), Some(pum), Some(pvm)) = (
+        periodic_or_in_dom_parts(
+            &net.u,
+            net.p,
+            net.nu,
+            ux,
+            dom.min().x,
+            dom.max().x,
+            cfg.periodic[0],
+        )?,
+        periodic_or_in_dom_parts(
+            &net.v,
+            net.q,
+            net.nv,
+            vy,
+            dom.min().y,
+            dom.max().y,
+            cfg.periodic[1],
+        )?,
+        periodic_or_in_dom_parts(
+            &net.u,
+            net.p,
+            net.nu,
+            umx,
+            dom.min().x,
+            dom.max().x,
+            cfg.periodic[0],
+        )?,
+        periodic_or_in_dom_parts(
+            &net.v,
+            net.q,
+            net.nv,
+            umy,
+            dom.min().y,
+            dom.max().y,
+            cfg.periodic[1],
+        )?,
+    ) {
+        let Some(s_m) = partials_or_subdivide(offset_partials_over_parts(net, d, &pum, &pvm, 0))?
+        else {
+            return Ok(LiftPart {
+                bound: f64::INFINITY,
+                at_middle: 0.0,
+            });
+        };
+        let g_m = v_sub(s_m.at(0, 0), ev.cm0);
+        let bound = partials_or_subdivide(offset_partials_over_parts(net, d, &pu, &pv, 0))?
+            .map_or(f64::INFINITY, |s_t| norm_above(v_sub(s_t.at(0, 0), ev.c0)));
+        return Ok(LiftPart {
+            bound,
+            at_middle: norm_below(g_m),
+        });
+    }
+    if (!cfg.periodic[0] && ivl_disjoint(umx, dom.min().x, dom.max().x))
+        || (!cfg.periodic[1] && ivl_disjoint(umy, dom.min().y, dom.max().y))
+    {
+        return Err(lift_not_certified());
+    }
+    let umx_c = clamp_ivl(umx, dom.min().x, dom.max().x);
+    let umy_c = clamp_ivl(umy, dom.min().y, dom.max().y);
+    let pum = net_parts(&net.u, net.p, net.nu, umx_c)?;
+    let pvm = net_parts(&net.v, net.q, net.nv, umy_c)?;
+    let at_mid = partials_or_subdivide(offset_partials_over_parts(net, d, &pum, &pvm, 0))?
+        .map_or(0.0, |s_m| norm_below(v_sub(s_m.at(0, 0), ev.cm0)));
+    Ok(LiftPart {
+        bound: f64::INFINITY,
+        at_middle: at_mid,
+    })
+}
+
+fn eval_offset_on_net(
+    net: &Nurbs,
+    d: Ivl,
+    dom: &Extent2d,
+    cfg: OffsetDomCfg,
+    ev: &CurveSpanEval,
+) -> Result<LiftPart> {
+    let (ux, vy) = (ev.w0.x, ev.w0.y);
+    let (umx, umy) = (ev.wm0.x, ev.wm0.y);
+    let in_dom =
+        ivl_inside(ux, dom.min().x, dom.max().x) && ivl_inside(vy, dom.min().y, dom.max().y);
+    if !in_dom {
+        if cfg.allow_ext {
+            return eval_offset_allow_ext_oob(net, d, dom, cfg, ev);
+        }
+        let ux_c = clamp_ivl(ux, dom.min().x, dom.max().x);
+        let vy_c = clamp_ivl(vy, dom.min().y, dom.max().y);
+        let umx_c = clamp_ivl(umx, dom.min().x, dom.max().x);
+        let umy_c = clamp_ivl(umy, dom.min().y, dom.max().y);
+        let pu = net_parts(&net.u, net.p, net.nu, ux_c)?;
+        let pv = net_parts(&net.v, net.q, net.nv, vy_c)?;
+        let pum = net_parts(&net.u, net.p, net.nu, umx_c)?;
+        let pvm = net_parts(&net.v, net.q, net.nv, umy_c)?;
+        let Some(s_m) = partials_or_subdivide(offset_partials_over_parts(net, d, &pum, &pvm, 0))?
+        else {
+            return Ok(LiftPart {
+                bound: f64::INFINITY,
+                at_middle: 0.0,
+            });
+        };
+        let g_m = v_sub(s_m.at(0, 0), ev.cm0);
+        let bound = partials_or_subdivide(offset_partials_over_parts(net, d, &pu, &pv, 0))?
+            .map_or(f64::INFINITY, |s_t| norm_above(v_sub(s_t.at(0, 0), ev.c0)));
+        return Ok(LiftPart {
+            bound,
+            at_middle: norm_below(g_m),
+        });
+    }
+
+    let pu = net_parts(&net.u, net.p, net.nu, ux)?;
+    let pv = net_parts(&net.v, net.q, net.nv, vy)?;
+    if let ([(_, _, ku)], [(_, _, kv)]) = (pu.as_slice(), pv.as_slice()) {
+        let Some(s_m) = partials_or_subdivide(offset_partials_over_parts(
+            net,
+            d,
+            &[(umx.lo, umx.hi, *ku)],
+            &[(umy.lo, umy.hi, *kv)],
+            1,
+        ))?
+        else {
+            return Ok(LiftPart {
+                bound: f64::INFINITY,
+                at_middle: 0.0,
+            });
+        };
+        let g_m = v_sub(s_m.at(0, 0), ev.cm0);
+        let bound = partials_or_subdivide(offset_partials_over_parts(net, d, &pu, &pv, 2))?
+            .map_or(f64::INFINITY, |s_t| {
+                norm_above(second_order_taylor(&s_t, &s_m, ev).0)
+            });
+        return Ok(LiftPart {
+            bound,
+            at_middle: norm_below(g_m),
+        });
+    }
+
+    let pum = net_parts(&net.u, net.p, net.nu, umx)?;
+    let pvm = net_parts(&net.v, net.q, net.nv, umy)?;
+    let Some(s_m) = partials_or_subdivide(offset_partials_over_parts(net, d, &pum, &pvm, 0))?
+    else {
+        return Ok(LiftPart {
+            bound: f64::INFINITY,
+            at_middle: 0.0,
+        });
+    };
+    let g_m = v_sub(s_m.at(0, 0), ev.cm0);
+    let mono_u = ev.w1.x.lo > 0.0 || ev.w1.x.hi < 0.0;
+    let mono_v = ev.w1.y.lo > 0.0 || ev.w1.y.hi < 0.0;
+    let jump_opt = match offset_crossed_knot_jumps(net, d, &pu, &pv, mono_u, mono_v) {
+        Ok(j) => Some(j),
+        Err(SolidError::Upstream {
+            operation: "blend::fillet_section::certificate",
+            code: crate::error::SM_ERR,
+            ..
+        }) => None,
+        Err(e) => return Err(e),
+    };
+    let bound = match jump_opt {
+        Some(Some(jump)) => partials_or_subdivide(offset_partials_over_parts(net, d, &pu, &pv, 1))?
+            .map_or(f64::INFINITY, |s_t| {
+                let dg = v_sub(
+                    v_add(
+                        v_scale(s_t.at(1, 0), ev.w1.x),
+                        v_scale(s_t.at(0, 1), ev.w1.y),
+                    ),
+                    ev.c1,
+                );
+                norm_above(v_add(v_add(g_m, v_scale(dg, ev.dt)), jump))
+            }),
+        Some(None) => partials_or_subdivide(offset_partials_over_parts(net, d, &pu, &pv, 0))?
+            .map_or(f64::INFINITY, |s_t| norm_above(v_sub(s_t.at(0, 0), ev.c0))),
+        None => f64::INFINITY,
+    };
+    Ok(LiftPart {
+        bound,
+        at_middle: norm_below(g_m),
+    })
+}
+
+fn lift_plane_surface(pl: &crate::surface::plane::Plane) -> Result<LiftSurface> {
+    let o = pl.position().origin();
+    let ax = pl.position().x_axis();
+    let ay = pl.position().y_axis();
+    let sc = pl.uv_scale();
+    if !(o.x.is_finite()
+        && o.y.is_finite()
+        && o.z.is_finite()
+        && ax.x.is_finite()
+        && ax.y.is_finite()
+        && ax.z.is_finite()
+        && ay.x.is_finite()
+        && ay.y.is_finite()
+        && ay.z.is_finite()
+        && sc.x.is_finite()
+        && sc.y.is_finite())
+    {
+        return Err(SolidError::Unsupported {
+            operation: OP,
+            reason: "a plane surface with non-finite frame or scale",
+        });
+    }
+    let sx = Ivl::from(sc.x);
+    let sy = Ivl::from(sc.y);
+    Ok(LiftSurface::Plane {
+        origin: V3 {
+            x: Ivl::from(o.x),
+            y: Ivl::from(o.y),
+            z: Ivl::from(o.z),
+        },
+        su: V3 {
+            x: sx * Ivl::from(ax.x),
+            y: sx * Ivl::from(ax.y),
+            z: sx * Ivl::from(ax.z),
+        },
+        sv: V3 {
+            x: sy * Ivl::from(ay.x),
+            y: sy * Ivl::from(ay.y),
+            z: sy * Ivl::from(ay.z),
+        },
+        step_dom: pl.step_uv_domain(),
+        oob: pl.is_out_of_bounds_enabled(),
+    })
+}
+
+fn lift_offset_surface(
+    k: &Kernel,
+    surface: &Surface,
+    off: &crate::surface::offset_surface::OffsetSurface,
+    uv_min: Point2,
+    uv_max: Point2,
+) -> Result<LiftSurface> {
+    let unsupported_base = || SolidError::Unsupported {
+        operation: OP,
+        reason: "an offset surface without an exact NURBS base net",
+    };
+    if off.allow_extension() {
+        for corner in [
+            uv_min,
+            Point2::new(uv_min.x, uv_max.y),
+            Point2::new(uv_max.x, uv_min.y),
+            uv_max,
+        ] {
+            let _ = surface.evaluate_point(k, corner);
+        }
+    }
+    let (base, d) = if let SurfaceKind::OffsetSurface(inner) = off.base_surface().kind() {
+        if matches!(inner.base_surface().kind(), SurfaceKind::OffsetSurface(_)) {
+            return Err(unsupported_base());
+        }
+        (
+            inner.base_surface(),
+            Ivl::from(off.offset_distance()) + Ivl::from(inner.offset_distance()),
+        )
+    } else {
+        (off.base_surface(), Ivl::from(off.offset_distance()))
+    };
+    if !(d.lo.is_finite() && d.hi.is_finite()) {
+        return Err(unsupported_base());
+    }
+    if surface_uses_approximate_net(base) {
+        return Err(SolidError::Unsupported {
+            operation: OP,
+            reason: APPROXIMATE_NET_REASON,
+        });
+    }
+    let base_dom = base.natural_uv_domain_with_nurb(k)?;
+    let bs_base = exact_nurbs_surface(k, base)?.ok_or_else(unsupported_base)?;
+    let base_net = Nurbs::of(&bs_base).map_err(|e| match e {
+        SolidError::Upstream { .. } => unsupported_base(),
+        other => other,
+    })?;
+    let ext_srf = off
+        .with_extended_base_surface(|e| e.map(Surface::clone_for_evaluation))
+        .transpose()?;
+    let ext = match ext_srf {
+        Some(e_srf) => {
+            if surface_uses_approximate_net(&e_srf) {
+                return Err(SolidError::Unsupported {
+                    operation: OP,
+                    reason: APPROXIMATE_NET_REASON,
+                });
+            }
+            let bs_ext = exact_nurbs_surface(k, &e_srf)?.ok_or_else(unsupported_base)?;
+            let ext_net = Nurbs::of(&bs_ext).map_err(|e| match e {
+                SolidError::Upstream { .. } => unsupported_base(),
+                other => other,
+            })?;
+            let ext_dom = e_srf.natural_uv_domain_with_nurb(k)?;
+            Some((ext_net, ext_dom))
+        }
+        None => None,
+    };
+    let [pu, pv] = off.is_periodic();
+    Ok(LiftSurface::Offset {
+        d,
+        base_net,
+        base_dom,
+        cfg: OffsetDomCfg {
+            allow_ext: off.allow_extension(),
+            periodic: [pu != 0, pv != 0],
+            singularities: off.singularities(),
+        },
+        ext,
+    })
+}
+
+fn eval_plane_part(
+    origin: V3<Ivl>,
+    su: V3<Ivl>,
+    sv: V3<Ivl>,
+    step_dom: &Extent2d,
+    oob: bool,
+    ev: &CurveSpanEval,
+) -> LiftPart {
+    let (ux, vy) = (ev.w0.x, ev.w0.y);
+    let (umx, umy) = (ev.wm0.x, ev.wm0.y);
+    let in_dom = ivl_inside(ux, step_dom.min().x, step_dom.max().x)
+        && ivl_inside(vy, step_dom.min().y, step_dom.max().y);
+    if oob || in_dom {
+        let s_m_0 = v_add(origin, v_add(v_scale(su, umx), v_scale(sv, umy)));
+        let g_m = v_sub(s_m_0, ev.cm0);
+        let dg_m = v_sub(v_add(v_scale(su, ev.wm1.x), v_scale(sv, ev.wm1.y)), ev.cm1);
+        let ddg = v_sub(v_add(v_scale(su, ev.w2.x), v_scale(sv, ev.w2.y)), ev.c2);
+        let g = v_add(v_add(g_m, v_scale(dg_m, ev.dt)), v_scale(ddg, ev.half_r2));
+        LiftPart {
+            bound: norm_above(g),
+            at_middle: norm_below(g_m),
+        }
+    } else {
+        let umx_c = clamp_ivl(umx, step_dom.min().x, step_dom.max().x);
+        let umy_c = clamp_ivl(umy, step_dom.min().y, step_dom.max().y);
+        let s_m_0 = v_add(origin, v_add(v_scale(su, umx_c), v_scale(sv, umy_c)));
+        let g_m = v_sub(s_m_0, ev.cm0);
+        let su_eff = if ux.hi <= step_dom.min().x || ux.lo >= step_dom.max().x {
+            VZ
+        } else {
+            v_hull(su, VZ)
+        };
+        let sv_eff = if vy.hi <= step_dom.min().y || vy.lo >= step_dom.max().y {
+            VZ
+        } else {
+            v_hull(sv, VZ)
+        };
+        let dg = v_sub(
+            v_add(v_scale(su_eff, ev.w1.x), v_scale(sv_eff, ev.w1.y)),
+            ev.c1,
+        );
+        LiftPart {
+            bound: norm_above(v_add(g_m, v_scale(dg, ev.dt))),
+            at_middle: norm_below(g_m),
+        }
+    }
+}
+
+fn eval_nurbs_part(
+    net: &Nurbs,
+    dom: &Extent2d,
+    oob_mode: NurbsOobMode,
+    ev: &CurveSpanEval,
+) -> Result<LiftPart> {
+    let (ux, vy) = (ev.w0.x, ev.w0.y);
+    let (umx, umy) = (ev.wm0.x, ev.wm0.y);
+    let in_u = ivl_inside(ux, dom.min().x, dom.max().x);
+    let in_v = ivl_inside(vy, dom.min().y, dom.max().y);
+    if !(in_u && in_v) {
+        if let NurbsOobMode::Cone {
+            swap_uv,
+            linear_oob,
+        } = oob_mode
+        {
+            let (sweep_in, sweep_mid, smin, smax) = if swap_uv {
+                (in_v, umy, dom.min().y, dom.max().y)
+            } else {
+                (in_u, umx, dom.min().x, dom.max().x)
+            };
+            if !sweep_in {
+                if ivl_disjoint(sweep_mid, smin, smax) {
+                    return Err(lift_not_certified());
+                }
+                let umx_c = clamp_ivl(umx, dom.min().x, dom.max().x);
+                let umy_c = clamp_ivl(umy, dom.min().y, dom.max().y);
+                let pum = net_parts(&net.u, net.p, net.nu, umx_c)?;
+                let pvm = net_parts(&net.v, net.q, net.nv, umy_c)?;
+                let at_mid = partials_or_subdivide(net_partials(net, &pum, &pvm, 0))?
+                    .map_or(0.0, |s_m| norm_below(v_sub(s_m.at(0, 0), ev.cm0)));
+                return Ok(LiftPart {
+                    bound: f64::INFINITY,
+                    at_middle: at_mid,
+                });
+            }
+            if !linear_oob {
+                let ux_c = clamp_ivl(ux, dom.min().x, dom.max().x);
+                let vy_c = clamp_ivl(vy, dom.min().y, dom.max().y);
+                let umx_c = clamp_ivl(umx, dom.min().x, dom.max().x);
+                let umy_c = clamp_ivl(umy, dom.min().y, dom.max().y);
+                let pu = net_parts(&net.u, net.p, net.nu, ux_c)?;
+                let pv = net_parts(&net.v, net.q, net.nv, vy_c)?;
+                let pum = net_parts(&net.u, net.p, net.nu, umx_c)?;
+                let pvm = net_parts(&net.v, net.q, net.nv, umy_c)?;
+                let Some(s_m) = partials_or_subdivide(net_partials(net, &pum, &pvm, 0))? else {
+                    return Ok(LiftPart {
+                        bound: f64::INFINITY,
+                        at_middle: 0.0,
+                    });
+                };
+                let g_m = v_sub(s_m.at(0, 0), ev.cm0);
+                let bound = partials_or_subdivide(net_partials(net, &pu, &pv, 1))?.map_or(
+                    f64::INFINITY,
+                    |s_t| {
+                        let su = if ux.hi <= dom.min().x || ux.lo >= dom.max().x {
+                            VZ
+                        } else if in_u {
+                            s_t.at(1, 0)
+                        } else {
+                            v_hull(s_t.at(1, 0), VZ)
+                        };
+                        let sv = if vy.hi <= dom.min().y || vy.lo >= dom.max().y {
+                            VZ
+                        } else if in_v {
+                            s_t.at(0, 1)
+                        } else {
+                            v_hull(s_t.at(0, 1), VZ)
+                        };
+                        let dg = v_sub(v_add(v_scale(su, ev.w1.x), v_scale(sv, ev.w1.y)), ev.c1);
+                        norm_above(v_add(g_m, v_scale(dg, ev.dt)))
+                    },
+                );
+                return Ok(LiftPart {
+                    bound,
+                    at_middle: norm_below(g_m),
+                });
+            }
+        }
+    }
+
+    let pu = net_parts(&net.u, net.p, net.nu, ux)?;
+    let pv = net_parts(&net.v, net.q, net.nv, vy)?;
+    if one_piece(&pu) && one_piece(&pv) {
+        let pm = |parts: &[(f64, f64, usize)], x: Ivl| -> Vec<(f64, f64, usize)> {
+            parts.iter().map(|&(_, _, s)| (x.lo, x.hi, s)).collect()
+        };
+        let Some(s_m) = partials_or_subdivide(net_partials(net, &pm(&pu, umx), &pm(&pv, umy), 1))?
+        else {
+            return Ok(LiftPart {
+                bound: f64::INFINITY,
+                at_middle: 0.0,
+            });
+        };
+        let g_m = v_sub(s_m.at(0, 0), ev.cm0);
+        let bound = partials_or_subdivide(net_partials(net, &pu, &pv, 2))?
+            .map_or(f64::INFINITY, |s_t| {
+                norm_above(second_order_taylor(&s_t, &s_m, ev).0)
+            });
+        Ok(LiftPart {
+            bound,
+            at_middle: norm_below(g_m),
+        })
+    } else {
+        let pum = net_parts(&net.u, net.p, net.nu, umx)?;
+        let pvm = net_parts(&net.v, net.q, net.nv, umy)?;
+        let Some(s_m) = partials_or_subdivide(net_partials(net, &pum, &pvm, 0))? else {
+            return Ok(LiftPart {
+                bound: f64::INFINITY,
+                at_middle: 0.0,
+            });
+        };
+        let g_m = v_sub(s_m.at(0, 0), ev.cm0);
+        let bound =
+            partials_or_subdivide(net_partials(net, &pu, &pv, 1))?.map_or(f64::INFINITY, |s_t| {
+                let dg = v_sub(
+                    v_add(
+                        v_scale(s_t.at(1, 0), ev.w1.x),
+                        v_scale(s_t.at(0, 1), ev.w1.y),
+                    ),
+                    ev.c1,
+                );
+                norm_above(v_add(g_m, v_scale(dg, ev.dt)))
+            });
+        Ok(LiftPart {
+            bound,
+            at_middle: norm_below(g_m),
+        })
+    }
+}
+
+fn eval_offset_part(
+    d: Ivl,
+    base_net: &Nurbs,
+    base_dom: &Extent2d,
+    cfg: OffsetDomCfg,
+    ext: Option<&(Nurbs, Extent2d)>,
+    ev: &CurveSpanEval,
+) -> Result<LiftPart> {
+    let (ux, vy) = (ev.w0.x, ev.w0.y);
+    let (umx, umy) = (ev.wm0.x, ev.wm0.y);
+    let in_base = ivl_inside(ux, base_dom.min().x, base_dom.max().x)
+        && ivl_inside(vy, base_dom.min().y, base_dom.max().y);
+    if in_base {
+        return eval_offset_on_net(base_net, d, base_dom, cfg, ev);
+    }
+    if let Some((ext_net, ext_dom)) = ext {
+        let outside_base = ivl_disjoint(ux, base_dom.min().x, base_dom.max().x)
+            || ivl_disjoint(vy, base_dom.min().y, base_dom.max().y);
+        if outside_base {
+            return eval_offset_on_net(ext_net, d, ext_dom, cfg, ev);
+        }
+        let part_ext = eval_offset_on_net(ext_net, d, ext_dom, cfg, ev)?;
+        let ux_b = clamp_ivl(ux, base_dom.min().x, base_dom.max().x);
+        let vy_b = clamp_ivl(vy, base_dom.min().y, base_dom.max().y);
+        let pu_b = net_parts(&base_net.u, base_net.p, base_net.nu, ux_b)?;
+        let pv_b = net_parts(&base_net.v, base_net.q, base_net.nv, vy_b)?;
+        let bound_base =
+            partials_or_subdivide(offset_partials_over_parts(base_net, d, &pu_b, &pv_b, 0))?
+                .map_or(f64::INFINITY, |qb| norm_above(v_sub(qb.at(0, 0), ev.c0)));
+        let mid_in_base = ivl_inside(umx, base_dom.min().x, base_dom.max().x)
+            && ivl_inside(umy, base_dom.min().y, base_dom.max().y);
+        let mid_out_base = ivl_disjoint(umx, base_dom.min().x, base_dom.max().x)
+            || ivl_disjoint(umy, base_dom.min().y, base_dom.max().y);
+        let at_mid = if mid_in_base {
+            let pum = net_parts(&base_net.u, base_net.p, base_net.nu, umx)?;
+            let pvm = net_parts(&base_net.v, base_net.q, base_net.nv, umy)?;
+            partials_or_subdivide(offset_partials_over_parts(base_net, d, &pum, &pvm, 0))?
+                .map_or(0.0, |q| norm_below(v_sub(q.at(0, 0), ev.cm0)))
+        } else if mid_out_base {
+            part_ext.at_middle
+        } else {
+            0.0
+        };
+        return Ok(LiftPart {
+            bound: cmax(part_ext.bound, bound_base),
+            at_middle: at_mid,
+        });
+    }
+    eval_offset_on_net(base_net, d, base_dom, cfg, ev)
+}
+
+impl LiftSurface {
+    fn of(k: &Kernel, surface: &Surface, uv_min: Point2, uv_max: Point2) -> Result<Self> {
+        if surface_uses_approximate_net(surface) {
+            return Err(SolidError::Unsupported {
+                operation: OP,
+                reason: APPROXIMATE_NET_REASON,
+            });
+        }
+        if let SurfaceKind::Plane(pl) = surface.kind() {
+            return lift_plane_surface(pl);
+        }
+        if let SurfaceKind::OffsetSurface(off) = surface.kind() {
+            return lift_offset_surface(k, surface, off, uv_min, uv_max);
+        }
+        let unsupported_srf = || SolidError::Unsupported {
+            operation: OP,
+            reason: "a UV curve on a surface without an exact lift enclosure",
+        };
+        let bs = exact_nurbs_surface(k, surface)?.ok_or_else(unsupported_srf)?;
+        let net = Nurbs::of(&bs).map_err(|e| match e {
+            SolidError::Upstream { .. } => unsupported_srf(),
+            other => other,
+        })?;
+        let dom = surface.natural_uv_domain_with_nurb(k)?;
+        let oob_mode = match surface.kind() {
+            SurfaceKind::Cone(c) => NurbsOobMode::Cone {
+                swap_uv: c.rev().swap_uv,
+                linear_oob: c.rev().is_out_of_bounds_enabled(),
+            },
+            _ => NurbsOobMode::ExtrapolateEndSpans,
+        };
+        Ok(Self::Nurbs { net, dom, oob_mode })
+    }
+
+    fn lift_part(&self, ev: &CurveSpanEval) -> Result<LiftPart> {
+        match self {
+            Self::Plane {
+                origin,
+                su,
+                sv,
+                step_dom,
+                oob,
+            } => Ok(eval_plane_part(*origin, *su, *sv, step_dom, *oob, ev)),
+            Self::Nurbs { net, dom, oob_mode } => eval_nurbs_part(net, dom, *oob_mode, ev),
+            Self::Offset {
+                d,
+                base_net,
+                base_dom,
+                cfg,
+                ext,
+            } => eval_offset_part(*d, base_net, base_dom, *cfg, ext.as_ref(), ev),
+        }
+    }
+}
+
+/// An upper bound, enclosed in outward-rounded [`Ivl`] arithmetic, on
+/// `sup_{t in ivl} |surface(uv(t)) - curve(t)|` (`docs/definitions-and-certificates.md`
+/// §4.4, §7.5).
+///
+/// Supports analytic planes, surfaces with an exact NURBS net ([`exact_nurbs_surface`],
+/// including cones and cylinders with periodic/clamped domain semantics), and procedural
+/// [`OffsetSurface`](crate::surface::offset_surface::OffsetSurface)s over an exact base
+/// ([`offset_partials_over_parts`], [`offset_crossed_knot_jumps`]), paired with line,
+/// conic or B-spline UV and 3D curves. `ivl` is cut at the domain bounds and inner knots
+/// of `uv` and `curve`, so each part lies on one polynomial piece of both, and each part
+/// is enclosed and halved until its bound is at most `tol`. Returns the largest certified
+/// part bound over `ivl`.
+///
+/// # Errors
+///
+/// [`SolidError::Unsupported`] for a surface whose NURBS net is only an approximation
+/// (`ProceduralBlend`, `ProceduralSweep`), an unsupported surface or curve kind, a
+/// non-finite or negative `tol`, a lift proved farther than `tol` at an endpoint or a
+/// part's middle, or a part still above `tol` after [`LIFT_MAX_DEPTH`] halvings or past
+/// [`LIFT_MAX_PARTS`] parts; [`SolidError::PortInvariant`] for an empty or non-finite
+/// `ivl`; those of the enclosures.
+pub(crate) fn certified_lift(
+    k: &Kernel,
+    surface: &Surface,
+    uv: &Curve,
+    curve: &Curve,
+    ivl: Extent1d,
+    tol: f64,
+) -> Result<f64> {
+    let (lo, hi) = (ivl.min(), ivl.max());
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return Err(SolidError::port_invariant(
+            OP,
+            "a UV curve lift over an empty or non-finite interval",
+        ));
+    }
+    if !(tol.is_finite() && tol >= 0.0) {
+        return Err(SolidError::Unsupported {
+            operation: OP,
+            reason: "a UV curve lift tolerance that is negative or non-finite",
+        });
+    }
+    let uv_c = LiftCurve::of(uv, lo, hi, true)?;
+    let c3_c = LiftCurve::of(curve, lo, hi, false)?;
+    let (uv_min, uv_max) = uv_c.uv_bounds(lo, hi)?;
+    let srf = LiftSurface::of(k, surface, uv_min, uv_max)?;
+
+    let eval_span = |a: f64, b: f64| -> Result<LiftPart> {
+        let m = 0.5 * (a + b);
+        let t = Ivl::new(a, b);
+        let dt = t - Ivl::from(m);
+        let r = Ivl::from(dt.mag());
+        let half_r2 = Ivl::new(0.0, (r * r * Ivl::from(0.5)).hi);
+        let [w0, w1, w2] = uv_c.derivs(t, 2)?;
+        let [c0, c1, c2] = c3_c.derivs(t, 2)?;
+        let [wm0, wm1, _] = uv_c.derivs(Ivl::from(m), 1)?;
+        let [cm0, cm1, _] = c3_c.derivs(Ivl::from(m), 1)?;
+        srf.lift_part(&CurveSpanEval {
+            w0,
+            w1,
+            w2,
+            wm0,
+            wm1,
+            c0,
+            c1,
+            c2,
+            cm0,
+            cm1,
+            dt,
+            half_r2,
+        })
+    };
+
+    for end_t in [lo, hi] {
+        let end_part = eval_span(end_t, end_t)?;
+        if end_part.at_middle > tol {
+            return Err(lift_too_far());
+        }
+    }
+
+    let mut cuts = vec![lo, hi];
+    uv_c.push_cuts(lo, hi, &mut cuts);
+    c3_c.push_cuts(lo, hi, &mut cuts);
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup();
+    let mut todo: Vec<(f64, f64, usize)> = cuts
+        .windows(2)
+        .rev()
+        .filter_map(|w| match *w {
+            [a, b] => Some((a, b, 0)),
+            _ => None,
+        })
+        .collect();
+    let (mut parts, mut worst) = (0_usize, 0.0_f64);
+    while let Some((a, b, depth)) = todo.pop() {
+        parts += 1;
+        if parts > LIFT_MAX_PARTS {
+            return Err(lift_not_certified());
+        }
+        let part = eval_span(a, b)?;
+        if part.bound <= tol {
+            worst = worst.max(part.bound);
+            continue;
+        }
+        if part.at_middle > tol {
+            return Err(lift_too_far());
+        }
+        let m = 0.5 * (a + b);
+        let halves = m > a && m < b;
+        if depth >= LIFT_MAX_DEPTH || !halves {
+            return Err(lift_not_certified());
+        }
+        todo.push((m, b, depth + 1));
+        todo.push((a, m, depth + 1));
+    }
+    Ok(worst)
 }
 
 #[cfg(test)]
@@ -1331,7 +2551,7 @@ mod tests {
         let (sphere, plane) = sphere_and_plane(&k);
         let (mut ssi, d1, d2) = intersect(&k, &sphere, &plane);
         // the plane's own B-spline net: the same points, no analytic kind
-        let crate::surface::surface::SurfaceKind::Plane(p) = plane.kind() else {
+        let SurfaceKind::Plane(p) = plane.kind() else {
             panic!("a plane")
         };
         let nurbs = Surface::from(p.base().clone());
@@ -1339,5 +2559,437 @@ mod tests {
             .clip_exact_curves(&k, &sphere, &d1, &nurbs, &d2, 1e-6)
             .unwrap_err();
         assert!(matches!(err, SolidError::Unsupported { operation: OP, .. }));
+    }
+
+    #[test]
+    fn certified_lift_checks_supremum_on_plane_bspline_and_offset() {
+        use crate::curve::line::Line;
+        use crate::math::Point3;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
+
+        let k = Kernel::default();
+        let tol = 1e-5;
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let uvc = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.5, NOZ),
+            Point3::new(1.0, 0.5, NOZ),
+            2,
+        ));
+
+        // 1. Plane z = 0 with cubic `c3(t) = (t, 0.5, (9/4) * peak * 3 t (1 - t)^2)`:
+        //    peaks at `t = 1/3` (`peak`), while `g(0) = 0`, `g(0.5) = (27/32) * peak`, `g(1) = 0`.
+        let make_bumped_line = |peak: f64| -> Curve {
+            let z1 = 2.25 * peak;
+            let pw = vec![
+                CPoint::new(0.0, 0.5, 0.0, NOW),
+                CPoint::new(1.0 / 3.0, 0.5, z1, NOW),
+                CPoint::new(2.0 / 3.0, 0.5, 0.0, NOW),
+                CPoint::new(1.0, 0.5, 0.0, NOW),
+            ];
+            let nl = NlCurve::new(pw, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
+            Curve::from(BSplineCurve::from_nurb(nl, 3, false))
+        };
+        let plane = Surface::from(Plane::create_canonical(&Axis2Placement::IDENTITY).unwrap());
+        let bound_ok =
+            certified_lift(&k, &plane, &uvc, &make_bumped_line(0.9 * tol), ivl, tol).unwrap();
+        assert!((0.9 * tol..=tol).contains(&bound_ok), "{bound_ok}");
+        let bumped_over = make_bumped_line(1.1 * tol);
+        // Endpoints and midpoint are all strictly below `tol` (`0`, `0.928 * tol`, `0`),
+        // yet the supremum at `t = 1/3` is `1.1 * tol > tol`.
+        assert!(bumped_over.evaluate_point(&k, 0.5).unwrap().z < tol);
+        let err_over = certified_lift(&k, &plane, &uvc, &bumped_over, ivl, tol).unwrap_err();
+        assert!(matches!(
+            err_over,
+            SolidError::Unsupported { operation: OP, .. }
+        ));
+
+        // 2. Curved quadratic B-spline surface `S(u, v) = (u, v, 0.5 u^2)` (`u, v in [0, 1]`)
+        //    and 3. procedural `OffsetSurface` at distance `d = 0.4` over `S`.
+        let srf_cpts = vec![
+            vec![
+                CPoint::new(0.0, 0.0, 0.0, NOW),
+                CPoint::new(0.0, 1.0, 0.0, NOW),
+            ],
+            vec![
+                CPoint::new(0.5, 0.0, 0.0, NOW),
+                CPoint::new(0.5, 1.0, 0.0, NOW),
+            ],
+            vec![
+                CPoint::new(1.0, 0.0, 0.5, NOW),
+                CPoint::new(1.0, 1.0, 0.5, NOW),
+            ],
+        ];
+        let nl_srf = NlSurface::new(
+            srf_cpts,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let curved_srf = Surface::from(BSplineSurface::from_nurb(nl_srf, false));
+        let make_curved_c3 = |peak: f64| -> Curve {
+            let z1 = 2.25 * peak;
+            let pw = vec![
+                CPoint::new(0.0, 0.5, 0.0, NOW),
+                CPoint::new(1.0 / 3.0, 0.5, z1, NOW),
+                CPoint::new(2.0 / 3.0, 0.5, 1.0 / 6.0, NOW),
+                CPoint::new(1.0, 0.5, 0.5, NOW),
+            ];
+            let nl = NlCurve::new(pw, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
+            Curve::from(BSplineCurve::from_nurb(nl, 3, false))
+        };
+        assert!(
+            certified_lift(&k, &curved_srf, &uvc, &make_curved_c3(0.9 * tol), ivl, tol).is_ok()
+        );
+        assert!(matches!(
+            certified_lift(&k, &curved_srf, &uvc, &make_curved_c3(1.15 * tol), ivl, tol),
+            Err(SolidError::Unsupported { operation: OP, .. })
+        ));
+
+        let offset_srf =
+            Surface::from(OffsetSurface::new(&k, 0.4, curved_srf, true, SS_UNKNOWN).unwrap());
+        let dom = offset_srf.natural_uv_domain_with_nurb(&k).unwrap();
+        let p0 = offset_srf
+            .evaluate_point(&k, Point2::new(0.5, 0.0))
+            .unwrap();
+        let p1 = offset_srf
+            .evaluate_point(&k, Point2::new(0.5, 1.0))
+            .unwrap();
+        let exact_3d = Curve::from(Line::from_points(p0, p1, 3));
+        let dropped = offset_srf
+            .drop_curve::<NoObject>(&k, &dom, &exact_3d, &ivl, tol, false, None, true)
+            .unwrap();
+        let dropped_uv = dropped.uv_curves.into_iter().next().unwrap();
+        assert!(certified_lift(&k, &offset_srf, &dropped_uv, &exact_3d, ivl, tol).is_ok());
+
+        let z_bump = 2.25 * 1.15 * tol;
+        let bumped_pw = vec![
+            CPoint::new(p0.x, p0.y, p0.z, NOW),
+            CPoint::new(
+                (2.0 * p0.x + p1.x) / 3.0,
+                (2.0 * p0.y + p1.y) / 3.0,
+                (2.0 * p0.z + p1.z) / 3.0 + z_bump,
+                NOW,
+            ),
+            CPoint::new(
+                (p0.x + 2.0 * p1.x) / 3.0,
+                (p0.y + 2.0 * p1.y) / 3.0,
+                (p0.z + 2.0 * p1.z) / 3.0,
+                NOW,
+            ),
+            CPoint::new(p1.x, p1.y, p1.z, NOW),
+        ];
+        let bumped_nl =
+            NlCurve::new(bumped_pw, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
+        let bumped_off_3d = Curve::from(BSplineCurve::from_nurb(bumped_nl, 3, false));
+        assert!(matches!(
+            certified_lift(&k, &offset_srf, &dropped_uv, &bumped_off_3d, ivl, tol),
+            Err(SolidError::Unsupported { operation: OP, .. })
+        ));
+    }
+
+    #[test]
+    fn certified_lift_refuses_procedural_blend_and_offset_of_blend() {
+        use crate::blend::fillet_section::recertify::net_of_definition;
+        use crate::blend::fillet_section::section::GnSectionFsg;
+        use crate::curve::line::Line;
+        use crate::math::Point3;
+        use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
+        use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
+
+        let mut k = Kernel::default();
+        k.fixes.fillet_gn_section_generator = true;
+        k.fixes.fillet_round_as_definition = true;
+
+        let (l, r) = (10.0, 2.0);
+        let o = Point3::new(0.0, 0.0, 0.0);
+        let bilinear = |p: [Point3; 4]| {
+            BSplineSurface::create_bilinear_surface(p[0], p[1], p[2], p[3]).unwrap()
+        };
+        let supp_a = Surface::from(bilinear([
+            o,
+            Point3::new(2.0 * l, 0.0, 0.0),
+            Point3::new(0.0, 0.0, l),
+            Point3::new(2.0 * l, 0.0, l),
+        ]));
+        let supp_b = Surface::from(bilinear([
+            o,
+            Point3::new(2.0 * l, 0.0, 0.0),
+            Point3::new(0.0, l, 0.0),
+            Point3::new(2.0 * l, l, 0.0),
+        ]));
+        let toy = bilinear([
+            o,
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+        ]);
+        let seg = |a: Point3, b: Point3| BSplineCurve::create_line_segment(3, a, b).unwrap();
+        let leader = seg(Point3::new(0.0, r, r), Point3::new(l, r, r));
+        let seed = seg(Point3::new(0.0, r / l, 0.0), Point3::new(0.5, r / l, 0.0));
+        let input = BlendDefinitionInput {
+            supports: [&supp_a, &supp_b],
+            sides: [-1.0, 1.0],
+            offsets: [r, r],
+            law: None,
+            order: 2,
+            thumbweight: 0.5,
+            leader: &leader,
+            seeds: [&seed, &seed],
+            bound: 1e-3,
+            chamfer: None,
+        };
+        let valid = |n: u32, w: f64| GnSectionFsg::is_valid(n as usize, w);
+        let uncert = ProceduralBlend::create(&k, &toy, &input, valid).unwrap();
+        let (net, bound) = net_of_definition(&k, &uncert, 1e-12).unwrap();
+        let pb = ProceduralBlend::create(&k, &net, &BlendDefinitionInput { bound, ..input }, valid)
+            .unwrap();
+        let pb_srf = Surface::from(pb);
+        let dom = pb_srf.natural_uv_domain_with_nurb(&k).unwrap();
+        let (u0, u1) = (dom.min().x, dom.max().x);
+        let vm = 0.5 * (dom.min().y + dom.max().y);
+
+        let p0 = pb_srf.evaluate_point(&k, Point2::new(u0, vm)).unwrap();
+        let p1 = pb_srf.evaluate_point(&k, Point2::new(u1, vm)).unwrap();
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let c3 = Curve::from(Line::from_points(p0, p1, 3));
+        let uvc = Curve::from(Line::from_points(
+            Point3::new(u0, vm, NOZ),
+            Point3::new(u1, vm, NOZ),
+            2,
+        ));
+
+        let net_srf = Surface::from(net);
+        assert!(certified_lift(&k, &net_srf, &uvc, &c3, ivl, 1e-3).is_ok());
+        assert!(matches!(
+            certified_lift(&k, &pb_srf, &uvc, &c3, ivl, 1e-3),
+            Err(SolidError::Unsupported {
+                operation: OP,
+                reason: APPROXIMATE_NET_REASON,
+            })
+        ));
+
+        let off_pb = Surface::from(OffsetSurface::new(&k, 0.2, pb_srf, true, SS_UNKNOWN).unwrap());
+        let q0 = off_pb.evaluate_point(&k, Point2::new(u0, vm)).unwrap();
+        let q1 = off_pb.evaluate_point(&k, Point2::new(u1, vm)).unwrap();
+        let c3_off = Curve::from(Line::from_points(q0, q1, 3));
+        assert!(matches!(
+            certified_lift(&k, &off_pb, &uvc, &c3_off, ivl, 1e-3),
+            Err(SolidError::Unsupported {
+                operation: OP,
+                reason: APPROXIMATE_NET_REASON,
+            })
+        ));
+    }
+
+    #[test]
+    fn certified_lift_outward_rounding_unbounded_cone_and_depth_cap() {
+        use crate::curve::line::Line;
+        use crate::math::Point3;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        use crate::surface::cone::Cone;
+        use crate::surface::offset_surface::OffsetSurface;
+
+        let k = Kernel::default();
+        let shift = 1e6_f64;
+        let tol = 1e-5_f64;
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let srf_cpts = vec![
+            vec![
+                CPoint::new(shift, shift, shift, NOW),
+                CPoint::new(shift, shift + 1.0, shift, NOW),
+            ],
+            vec![
+                CPoint::new(shift + 0.5, shift, shift, NOW),
+                CPoint::new(shift + 0.5, shift + 1.0, shift, NOW),
+            ],
+            vec![
+                CPoint::new(shift + 1.0, shift, shift + 0.5, NOW),
+                CPoint::new(shift + 1.0, shift + 1.0, shift + 0.5, NOW),
+            ],
+        ];
+        let nl_srf = NlSurface::new(
+            srf_cpts,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let shifted_srf = Surface::from(BSplineSurface::from_nurb(nl_srf, false));
+        let uvc = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.5, NOZ),
+            Point3::new(1.0, 0.5, NOZ),
+            2,
+        ));
+        let make_shifted_c3 = |peak: f64| -> Curve {
+            let pw = vec![
+                CPoint::new(shift, shift + 0.5, shift, NOW),
+                CPoint::new(shift + 1.0 / 3.0, shift + 0.5, shift + 2.25 * peak, NOW),
+                CPoint::new(shift + 2.0 / 3.0, shift + 0.5, shift + 1.0 / 6.0, NOW),
+                CPoint::new(shift + 1.0, shift + 0.5, shift + 0.5, NOW),
+            ];
+            let nl = NlCurve::new(pw, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
+            Curve::from(BSplineCurve::from_nurb(nl, 3, false))
+        };
+        assert!(certified_lift(
+            &k,
+            &shifted_srf,
+            &uvc,
+            &make_shifted_c3(0.9 * tol),
+            ivl,
+            tol
+        )
+        .is_ok());
+        assert!(matches!(
+            certified_lift(
+                &k,
+                &shifted_srf,
+                &uvc,
+                &make_shifted_c3(1.15 * tol),
+                ivl,
+                tol
+            ),
+            Err(SolidError::Unsupported { operation: OP, .. })
+        ));
+
+        // `WR-713`: asymmetric unbounded inside-out `Cone` without `cone_unbounded_parameterized_as_nurb`
+        let cone_srf = Surface::from(
+            Cone::new_unbounded(&k, Point3::ZERO, Vec3::X, Vec3::Y, 5.0, 30.0, false, true)
+                .unwrap(),
+        );
+        assert!(exact_nurbs_surface(&k, &cone_srf).unwrap().is_none());
+        let mut k_fixed = Kernel::default();
+        k_fixed.fixes.cone_unbounded_parameterized_as_nurb = true;
+        let cone_fixed = Surface::from(
+            Cone::new_unbounded(
+                &k_fixed,
+                Point3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                5.0,
+                30.0,
+                false,
+                true,
+            )
+            .unwrap(),
+        );
+        assert!(exact_nurbs_surface(&k_fixed, &cone_fixed)
+            .unwrap()
+            .is_some());
+
+        // Rational curve homogeneous-to-Cartesian rounding and `LIFT_MAX_DEPTH` cap refusal:
+        // with weight `3.0`, adjacent homogeneous coordinates `wx_a` and `wx_b` (`+1` ULP)
+        // near `1e6` map to the identical `canonical()` float via `x * (1.0 / 3.0)`, while
+        // `exact_nurbs_curve_data` preserves raw `gw_nurb()` homogeneous `CPoint`s. Below
+        // `Ivl`'s rounding width at `x ~ 3.33e5` (`tol = 1e-11`), subdivision reaches
+        // `LIFT_MAX_DEPTH` and refuses with `lift_not_certified()`.
+        let step_ulp = |x: f64| f64::from_bits(x.to_bits() + 1);
+        let plane = Surface::from(Plane::create_canonical(&Axis2Placement::IDENTITY).unwrap());
+        let w = 3.0_f64;
+        let wx_a = step_ulp(1_000_000.0);
+        let wx_b = step_ulp(wx_a);
+        assert_eq!(wx_a * (1.0 / w), wx_b * (1.0 / w));
+        let rat_3d = Curve::from(BSplineCurve::from_nurb(
+            NlCurve::new(
+                vec![CPoint::new(wx_a, 0.0, 0.0, w), CPoint::new(wx_a, w, 0.0, w)],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ));
+        let rat_uv = Curve::from(BSplineCurve::from_nurb(
+            NlCurve::new(
+                vec![CPoint::new(wx_b, 0.0, NOZ, w), CPoint::new(wx_b, w, NOZ, w)],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            2,
+            false,
+        ));
+        let (CurveKind::BSpline(b3), CurveKind::BSpline(b2)) = (rat_3d.kind(), rat_uv.kind())
+        else {
+            panic!("expected rational B-spline curves");
+        };
+        assert_eq!(
+            b3.canonical().unwrap().control_points,
+            b2.canonical().unwrap().control_points,
+        );
+        assert_ne!(
+            exact_nurbs_curve_data(b3, false).unwrap().0.pw,
+            exact_nurbs_curve_data(b2, true).unwrap().0.pw,
+        );
+        assert_eq!(
+            certified_lift(&k, &plane, &rat_uv, &rat_3d, ivl, 1e-11).unwrap_err(),
+            lift_not_certified(),
+        );
+        assert!(certified_lift(&k, &plane, &rat_uv, &rat_3d, ivl, 1e-8).is_ok());
+
+        // Boundary iso-line (`u = 0`) on `OffsetSurface` with `allow_extension = true`, and
+        // end-span extrapolation past `[0, 1]` on `BSplineSurface`.
+        let unit_patch = BSplineSurface::from_nurb(
+            NlSurface::new(
+                vec![
+                    vec![
+                        CPoint::new(0.0, 0.0, 0.0, NOW),
+                        CPoint::new(0.0, 1.0, 0.0, NOW),
+                    ],
+                    vec![
+                        CPoint::new(1.0, 0.0, 0.0, NOW),
+                        CPoint::new(1.0, 1.0, 0.0, NOW),
+                    ],
+                ],
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            true,
+        );
+        let bsp_srf = Surface::from(unit_patch);
+        let mut off = OffsetSurface::new(&k, 2.0, bsp_srf.clone(), true, 0).unwrap();
+        off.set_allow_extension(true);
+        let off_srf = Surface::from(off);
+        let iso_u0 = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.0, NOZ),
+            Point3::new(0.0, 1.0, NOZ),
+            2,
+        ));
+        let off_edge_ok = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.0, 2.0),
+            Point3::new(0.0, 1.0, 2.0),
+            3,
+        ));
+        let off_edge_bad = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.0, 2.0),
+            Point3::new(0.0, 1.0, 2.001),
+            3,
+        ));
+        assert!(certified_lift(&k, &off_srf, &iso_u0, &off_edge_ok, ivl, 1e-12).is_ok());
+        assert_eq!(
+            certified_lift(&k, &off_srf, &iso_u0, &off_edge_bad, ivl, 1e-12).unwrap_err(),
+            lift_too_far(),
+        );
+        let uv_extrap = Curve::from(Line::from_points(
+            Point3::new(0.5, -0.25, NOZ),
+            Point3::new(0.5, 1.25, NOZ),
+            2,
+        ));
+        let c3_extrap = Curve::from(Line::from_points(
+            Point3::new(0.5, -0.25, 0.0),
+            Point3::new(0.5, 1.25, 0.0),
+            3,
+        ));
+        assert!(certified_lift(&k, &bsp_srf, &uv_extrap, &c3_extrap, ivl, 1e-12).is_ok());
     }
 }

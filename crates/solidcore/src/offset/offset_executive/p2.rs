@@ -844,6 +844,32 @@ impl OffsetExecutive {
                     marked.insert(required(eu::mate(original, across)?, OP_EXTENDED)?);
                 }
             }
+            // On an inset shell with selected open faces (`shell_faces`), a tangent
+            // edge between an open shell face (offset 0) and a kept face (offset inward
+            // by `d`) becomes a `d`-wide step rather than a tangent intersection. Skip
+            // those pairs in the convex-tangent extension pass and defer them until
+            // after non-shell-tangent mapped edges run so adjacent wall mitres settle
+            // the shared offset vertices first (`marked.insert(edgeuse)` in the main
+            // loop stays unchanged for every edge use).
+            let shell_faces_list = self.shell_faces().to_vec();
+            let tan_tol = self.tangency_tol_degrees();
+            let is_inset = self.inset();
+            let is_shell_tangent =
+                |k: &Kernel, orig: &mut Brep, eu: EdgeuseId, rad: EdgeuseId| -> Result<bool> {
+                    if !is_inset || shell_faces_list.is_empty() {
+                        return Ok(false);
+                    }
+                    let f1 = eu::face(orig, eu)?;
+                    let f2 = eu::face(orig, rad)?;
+                    let in1 = f1.is_some_and(|f| shell_faces_list.contains(&f));
+                    let in2 = f2.is_some_and(|f| shell_faces_list.contains(&f));
+                    if in1 == in2 {
+                        return Ok(false);
+                    }
+                    let tan = eu2::is_tangent_sector(k, orig, eu, tan_tol, false, true)?;
+                    Ok(tan)
+                };
+
             if self.extend_convex_edges() {
                 for &edgeuse in &mapped {
                     kernel.check_cancelled(OP_EXTENDED)?;
@@ -858,6 +884,9 @@ impl OffsetExecutive {
                     let Some(radial) = select_radial(original, radial, &mapped, &marked)? else {
                         continue;
                     };
+                    if is_shell_tangent(kernel, original, edgeuse, radial)? {
+                        continue;
+                    }
                     if eu2::is_tangent_sector(
                         kernel,
                         original,
@@ -883,6 +912,7 @@ impl OffsetExecutive {
                 }
             }
 
+            let mut deferred_shell_tangents = Vec::new();
             for &edgeuse in &mapped {
                 kernel.check_cancelled(OP_EXTENDED)?;
                 let mut radial = required(eu::radial(original, edgeuse)?, OP_EXTENDED)?;
@@ -901,6 +931,23 @@ impl OffsetExecutive {
                     };
                     radial = selected;
                 }
+                if is_shell_tangent(kernel, original, edgeuse, radial)? {
+                    deferred_shell_tangents.push((edgeuse, radial));
+                    continue;
+                }
+                self.mapped_edge_prefix(
+                    kernel,
+                    original,
+                    edgeuse,
+                    radial,
+                    mark_type,
+                    &marked,
+                    notifications,
+                )?;
+            }
+
+            for (edgeuse, radial) in deferred_shell_tangents {
+                kernel.check_cancelled(OP_EXTENDED)?;
                 self.mapped_edge_prefix(
                     kernel,
                     original,

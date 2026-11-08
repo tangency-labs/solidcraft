@@ -1220,6 +1220,9 @@ impl OffsetBrep<H> for Two {
     fn vertex_point(&self, vertex: H) -> solidcore::Result<Point3> {
         vx::point(self.brep_r(vertex)?, vid(vertex))
     }
+    fn vertex_tolerance(&self, vertex: H) -> solidcore::Result<f64> {
+        vx::tolerance(self.brep_r(vertex)?, vid(vertex))
+    }
     fn set_vertex_point(&mut self, _k: &Kernel, vertex: H, point: Point3) -> solidcore::Result<()> {
         let slot = usize::try_from(vertex.b).map_err(|_| invalid("bad B-rep"))?;
         let (breps, env) = (&mut self.breps, &mut self.env);

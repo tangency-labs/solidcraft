@@ -224,6 +224,57 @@ impl<T: GnScalar> V3<T> {
     }
 }
 
+/// The zero interval vector `(0, 0, 0)`.
+pub const VZ: V3<Ivl> = V3 {
+    x: Ivl::new(0.0, 0.0),
+    y: Ivl::new(0.0, 0.0),
+    z: Ivl::new(0.0, 0.0),
+};
+
+/// `a + b`, componentwise in rounded intervals.
+#[inline]
+#[must_use]
+pub fn v_add(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
+    V3 {
+        x: a.x + b.x,
+        y: a.y + b.y,
+        z: a.z + b.z,
+    }
+}
+
+/// `a - b`, componentwise in rounded intervals.
+#[inline]
+#[must_use]
+pub fn v_sub(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
+    V3 {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+    }
+}
+
+/// `a s`, componentwise in rounded intervals.
+#[inline]
+#[must_use]
+pub fn v_scale(a: V3<Ivl>, s: Ivl) -> V3<Ivl> {
+    V3 {
+        x: a.x * s,
+        y: a.y * s,
+        z: a.z * s,
+    }
+}
+
+/// Componentwise interval hull of `a` and `b`.
+#[inline]
+#[must_use]
+pub fn v_hull(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
+    V3 {
+        x: a.x.hull(b.x),
+        y: a.y.hull(b.y),
+        z: a.z.hull(b.z),
+    }
+}
+
 /// `sm_VSer`: a vector of series.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VSer<T> {
