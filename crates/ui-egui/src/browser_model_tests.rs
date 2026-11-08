@@ -683,7 +683,7 @@ fn find_in_browser_opens_placements_that_start_closed() {
 fn a_body_keeps_a_faint_bar_while_one_of_its_faces_is_selected() {
     let (mut h, component, occurrence) = fixture();
     let body = super::model_placement(&mut h.app, &[occurrence]).unwrap().bodies[0].world.clone();
-    let point = solidcraft_engine::geom::Vec3::new(0.0, 5.0, 5.0);
+    let point = solidcore_record::Vec3::new(0.0, 5.0, 5.0);
     let state = crate::open_meshing::session_world(&h.app.session);
     let face = solidcraft_engine::doc::appearance::face_index_at(state.body(&body).unwrap(), point).unwrap();
     let row = |app: &mut crate::SolveApp| {
