@@ -1915,6 +1915,7 @@ struct Snapshot {
     agent: crate::agent_cursor::Settings,
     autosave: f64,
     auto_project: bool,
+    project_construction: bool,
     keys: std::collections::BTreeMap<String, Vec<String>>,
     /// What a settings profile also switches: the toolbar, the S box favourites and which profile is active.
     toolbar: serde_json::Value,
@@ -1943,6 +1944,7 @@ impl Snapshot {
             agent: app.ui.agent_cursor,
             autosave: app.autosave_minutes,
             auto_project: app.session.auto_project,
+            project_construction: app.session.project_construction,
             keys: app.keymap.custom.clone(),
             toolbar: app.toolbar_custom.prefs(),
             favourites: app.sbox.pinned.clone(),
@@ -1974,6 +1976,7 @@ impl Snapshot {
         app.autosave_minutes = self.autosave;
         set_autosave(app);
         app.session.auto_project = self.auto_project;
+        app.session.project_construction = self.project_construction;
         app.keymap.custom = self.keys;
         app.toolbar_custom.load(&self.toolbar);
         app.sbox.pinned = self.favourites;
@@ -2003,6 +2006,7 @@ impl Snapshot {
             agent,
             autosave,
             auto_project,
+            project_construction,
             keys,
             toolbar,
             favourites,
@@ -2023,6 +2027,7 @@ impl Snapshot {
             && *agent == app.ui.agent_cursor
             && *autosave == app.autosave_minutes
             && *auto_project == app.session.auto_project
+            && *project_construction == app.session.project_construction
             && *keys == app.keymap.custom
             && *toolbar == app.toolbar_custom.prefs()
             && *favourites == app.sbox.pinned
@@ -2074,6 +2079,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
         ("perspective", serde_json::json!(s.perspective)),
         ("pick_bodies", serde_json::json!(s.pick_bodies)),
         ("auto_project", serde_json::json!(s.auto_project)),
+        ("project_construction", serde_json::json!(s.project_construction)),
         ("visual_style", serde_json::json!(s.style)),
         ("shortcut_box", shortcut_box),
         ("shortcuts", serde_json::Value::Object(shortcuts)),
@@ -2267,6 +2273,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
         }
         PAGE_SKETCH => {
             app.session.auto_project = true;
+            app.session.project_construction = false;
             app.ui.pick_bodies = false;
         }
         _ => {}
@@ -6511,16 +6518,19 @@ mod tests {
         app.ui.agent_cursor.show = false;
         app.ui.pick_bodies = true;
         app.session.auto_project = false;
+        app.session.project_construction = true;
         defaults(&mut app, PAGE_GENERAL);
         assert!(!app.ui.agent_cursor.show);
         assert!(app.ui.pick_bodies);
         assert!(!app.session.auto_project);
+        assert!(app.session.project_construction);
         defaults(&mut app, PAGE_ASSISTANT);
         let expected = SolveApp::new(Default::default(), Default::default()).ui.agent_cursor.show;
         assert_eq!(app.ui.agent_cursor.show, expected);
         defaults(&mut app, PAGE_SKETCH);
         assert!(!app.ui.pick_bodies);
         assert!(app.session.auto_project);
+        assert!(!app.session.project_construction, "off by default (#13142)");
     }
 
     #[test]

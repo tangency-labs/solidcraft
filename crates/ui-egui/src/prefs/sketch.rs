@@ -96,8 +96,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch.auto_locate",
             "ui.first_dimension_scales",
         ];
-        let right_labels =
-            ["prefs.sketch.shortcut_cycles_modes", "prefs.ribbon_click_ends_tool", "ui.project_face_edges_sketch", "prefs.sketch.project_options"];
+        let right_labels = [
+            "prefs.sketch.shortcut_cycles_modes",
+            "prefs.ribbon_click_ends_tool",
+            "ui.project_face_edges_sketch",
+            "ui.project_references_construction",
+            "prefs.sketch.project_options",
+        ];
         let natural = [left_labels.as_slice(), right_labels.as_slice()]
             .map(|labels| labels.iter().map(|id| check_width(ui, app.tr(id), true)).fold(0.0, f32::max));
         let available = ui.available_width();
@@ -175,6 +180,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if check(ui, "auto_project", "ui.project_face_edges_sketch", None, &mut auto).changed() {
                     let _ = app.run("sketch.auto_project", json!({"value": auto}));
                 }
+                check(
+                    ui,
+                    "project_construction",
+                    "ui.project_references_construction",
+                    Some("ui.project_references_construction_note"),
+                    &mut app.session.project_construction,
+                );
                 check(
                     ui,
                     "project_options_dialog",
