@@ -9,7 +9,8 @@ use crate::test_support::sample_app;
 use std::collections::BTreeSet;
 
 use crate::browser;
-use crate::context_menu::{self, Item, Target};
+use crate::context_menu::{self, Target};
+use crate::ui_kit::Item;
 use crate::{Services, SolveApp};
 use serde_json::json;
 use solidcraft_engine::Session;

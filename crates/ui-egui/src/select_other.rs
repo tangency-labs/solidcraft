@@ -630,7 +630,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut picked = None;
     let screen = ctx.content_rect();
     let margins = crate::ui_kit::Menu::frame().total_margin().sum();
-    let width = crate::context_menu::LIST_W.min(screen.width());
+    let width = crate::ui_kit::LIST_W.min(screen.width());
     let w = (width - margins.x).max(0.0);
     let header = 20.0;
     let gap = vec2(12.0, 12.0);

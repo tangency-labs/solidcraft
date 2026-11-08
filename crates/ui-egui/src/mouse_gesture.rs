@@ -27,8 +27,9 @@ use egui::{Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Sense, Shape, Str
 use serde::{Deserialize, Serialize};
 
 use crate::SolveApp;
-use crate::context_menu::{Item, act, cmd};
+use crate::context_menu::{act, cmd};
 use crate::theme::Tokens;
+use crate::ui_kit::Item;
 
 /// Most tools one ring may hold.
 pub(crate) const MAX_TOOLS: usize = 12;

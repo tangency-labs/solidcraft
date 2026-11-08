@@ -147,14 +147,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                     .into_iter()
                     .filter(|(id, ..)| *id != "install_cli" || cfg!(target_os = "macos"))
                     {
-                        let item = crate::context_menu::Item::action(id, label, icon).on_if(available(app, id));
+                        let item = crate::ui_kit::Item::action(id, label, icon).on_if(available(app, id));
                         if crate::context_menu::list_row(ui, &item).is_some() {
                             pick = Some(id);
                         }
                         // A layout without the version in the application bar lists it here.
                         if id == "about" && app.header.version == crate::toolbar::VersionPlace::HelpMenu {
                             let label = crate::i18n::format("help.version", &[("version", crate::update::current_version())]);
-                            if crate::context_menu::list_row(ui, &crate::context_menu::Item::action("version", &label, "update")).is_some() {
+                            if crate::context_menu::list_row(ui, &crate::ui_kit::Item::action("version", &label, "update")).is_some() {
                                 pick = Some("version");
                             }
                         }

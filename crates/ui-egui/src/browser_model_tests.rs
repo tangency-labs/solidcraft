@@ -211,11 +211,7 @@ fn with_rows_starting_closed_a_designs_folders_open_with_their_arrow_or_find_in_
         "the Bodies folder stays closed"
     );
 
-    crate::context_menu::run_item(
-        &mut h.app,
-        &crate::context_menu::Item::action("ui.findBrowser", "", "").with(json!({"body":"Block"})),
-        egui::Pos2::ZERO,
-    );
+    crate::context_menu::run_item(&mut h.app, &crate::ui_kit::Item::action("ui.findBrowser", "", "").with(json!({"body":"Block"})), egui::Pos2::ZERO);
     h.frames(2);
     assert!(super::is_open(&h.app, "c0/bodies", false), "Find in Browser opens the Bodies folder");
     assert!(

@@ -395,8 +395,9 @@ pub(crate) fn preview_scene(scene: &mut ProductScene, preview: Option<&Preview>)
     Ok(())
 }
 
-pub(crate) fn menu(app: &SolveApp, body: &str) -> crate::context_menu::Item {
-    use crate::context_menu::{Item, cmd};
+pub(crate) fn menu(app: &SolveApp, body: &str) -> crate::ui_kit::Item {
+    use crate::context_menu::cmd;
+    use crate::ui_kit::Item;
     let selected_face = app
         .render_workspace
         .view

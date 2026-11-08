@@ -1,7 +1,104 @@
 //! Menus share one popup surface and one row painter. Command dispatch stays with callers.
 use crate::ui_kit::{Container, Surface};
-use crate::{context_menu::Item, fonts::RichTextExt as _, icons, theme::Tokens};
+use crate::{fonts::RichTextExt as _, icons, theme::Tokens};
 use egui::{Color32, FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
+use serde::Serialize;
+use serde_json::Value;
+
+/// One menu entry: a command id (run with `params` when given, else started like a toolbar
+/// click) or a `ui.*` action. `-` is a separator, `#…` a section heading.
+#[derive(Clone, Debug, Serialize)]
+pub struct Item {
+    pub id: String,
+    pub label: String,
+    pub shortcut: String,
+    pub enabled: bool,
+    pub icon: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<Value>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<Item>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub swatch: Option<[u8; 3]>,
+    /// Why the entry is off: shown on hover, and in the control channel's report.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
+}
+
+impl Item {
+    /// A view action (`ui.*`).
+    pub fn action(id: &str, label: &str, icon: &str) -> Item {
+        Item {
+            id: id.into(),
+            label: label.into(),
+            shortcut: String::new(),
+            enabled: true,
+            icon: icon.into(),
+            params: None,
+            children: Vec::new(),
+            swatch: None,
+            tip: None,
+        }
+    }
+    pub fn sep() -> Item {
+        Item {
+            id: "-".into(),
+            label: String::new(),
+            shortcut: String::new(),
+            enabled: false,
+            icon: String::new(),
+            params: None,
+            children: Vec::new(),
+            swatch: None,
+            tip: None,
+        }
+    }
+    pub(crate) fn heading(label: &str) -> Item {
+        Item {
+            id: format!("#{label}"),
+            label: label.into(),
+            shortcut: String::new(),
+            enabled: false,
+            icon: String::new(),
+            params: None,
+            children: Vec::new(),
+            swatch: None,
+            tip: None,
+        }
+    }
+    pub(crate) fn is_sep(&self) -> bool {
+        self.id == "-"
+    }
+    pub(crate) fn is_heading(&self) -> bool {
+        self.id.starts_with('#')
+    }
+    pub fn with(mut self, params: Value) -> Item {
+        self.params = Some(params);
+        self
+    }
+    pub fn on_if(self, enabled: bool) -> Item {
+        self.on(enabled)
+    }
+    pub(crate) fn on(mut self, enabled: bool) -> Item {
+        self.enabled &= enabled;
+        self
+    }
+    /// Off, saying why, when there is a reason.
+    pub(crate) fn off_because(mut self, why: Option<String>) -> Item {
+        if let Some(why) = why {
+            self.enabled = false;
+            self.tip = Some(why);
+        }
+        self
+    }
+    pub fn key(mut self, k: &str) -> Item {
+        self.shortcut = k.into();
+        self
+    }
+}
+
+/// Width of list menus.
+pub const LIST_W: f32 = 250.0;
 
 pub(crate) struct Menu;
 
@@ -244,7 +341,7 @@ impl Menu {
         leftward: bool,
         add: impl FnOnce(&mut Ui) -> R,
     ) -> egui::InnerResponse<R> {
-        let width = crate::context_menu::LIST_W;
+        let width = LIST_W;
         let screen = ctx.content_rect();
         // The estimate only places the area's first, invisible sizing pass.
         let height = ctx.memory(|m| m.area_rect(id)).map_or(height, |r| r.height());

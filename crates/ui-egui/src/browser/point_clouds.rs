@@ -12,8 +12,9 @@ use solidcraft_engine::view::POINT_CLOUDS_FOLDER;
 
 use super::{Actions, Row, draw_row, is_open, panel_pos, rows_start_open, toggle, toggle_folder};
 use crate::SolveApp;
-use crate::context_menu::{Item, Target};
+use crate::context_menu::Target;
 use crate::ui_kit;
+use crate::ui_kit::Item;
 
 #[path = "point_cloud_tracks.rs"]
 pub(crate) mod point_cloud_tracks;

@@ -1659,7 +1659,7 @@ fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &
         .frame(ui_kit::Menu::frame())
         .open_memory(if opened { Some(egui::SetOpenCommand::Bool(true)) } else { None })
         .show(|ui| {
-            ui_kit::Menu::show(ui, crate::context_menu::LIST_W, |ui| {
+            ui_kit::Menu::show(ui, crate::ui_kit::LIST_W, |ui| {
                 let item = ui_kit::MenuItem::new("copy_message", tr("ui.agent_chat_copy_message"), "copy");
                 let row = item.show(ui);
                 crate::scenario::publish_handle(&format!("agent_chat:copy_menu:{n}"), row.rect.center());

@@ -84,6 +84,7 @@ pub(crate) use history::*;
 pub(crate) use history_group::*;
 pub(crate) use layout::*;
 pub use look_chain::{LookStep, look_chain};
+pub use menu::{Item, LIST_W};
 pub(crate) use menu::{Menu, MenuItem, rename_menu, workspace_menu};
 pub(crate) use metrics::{ContentWidth, header_height, row_height, table_row_height};
 pub use name_list::{NameList, NameRow, name_list};
