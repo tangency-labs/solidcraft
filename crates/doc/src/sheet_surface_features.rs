@@ -2515,6 +2515,20 @@ impl SurfaceSheet {
         bends.next().is_none().then_some(joint)
     }
 
+    /// Current body-face indices belonging to the flange made from a named source rim.
+    /// Returns no faces for flat, altered, mismatched or unresolved sheets.
+    pub fn bend_face_indices(&self, body: &solidcraft_kernel::Body, source: &SheetEdgeName) -> Vec<usize> {
+        if self.unfolded || self.altered_by.is_some() || self.face_names.len() != body.face_count() {
+            return Vec::new();
+        }
+        let Ok(joint) = self.bend_joint_for_edge_name(source) else { return Vec::new() };
+        self.face_names
+            .iter()
+            .enumerate()
+            .filter_map(|(index, name)| (name.as_deref().and_then(|name| self.bend_joint_for_face(name)) == Some(joint)).then_some(index))
+            .collect()
+    }
+
     /// The uniquely closed planar flange corners in this sheet, in bend-joint order, identified by
     /// their two named source rims. Unsupported or ambiguous corners are not offered.
     pub fn corner_join_sources(&self) -> Vec<[SheetEdgeName; 2]> {
@@ -4473,7 +4487,8 @@ mod tests {
 
     #[test]
     fn corner_join_invalid_overlap_names_the_thickness_limit_without_changing_the_sheet() {
-        for amount in [0.0, -1.0, 3.0, f64::NAN, f64::INFINITY] {
+        let thickness = corner_sheet().sheet.thickness;
+        for amount in [0.0, -1.0, thickness + 0.5, f64::NAN, f64::INFINITY] {
             let mut sheet = corner_sheet();
             let before = sheet.clone();
             let error = sheet.set_corner_join([0, 1], 0, CornerJoinKind::PartialOverlap, Some(amount), None).unwrap_err();

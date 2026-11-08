@@ -336,6 +336,7 @@ impl MovePreview {
             centrelines: Vec::new(),
             tapered: Vec::new(),
             flange_corners: Vec::new(),
+            flange_faces: Vec::new(),
             replaced,
             outlines: Vec::new(),
             error: None,
