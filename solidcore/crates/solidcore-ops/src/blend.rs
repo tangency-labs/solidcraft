@@ -824,13 +824,11 @@ fn overflow_first(
     }
     // a round mitred to one that goes first goes with it, through every mitre
     let place = |e: &EdgeId| edges.iter().position(|p| p == e);
-    let pairs: Vec<(usize, usize)> = mitred
-        // two by two (an odd last one is no pair); the chunk size 2 is not 0: cannot panic
-        .chunks_exact(2)
-        .filter_map(|pair| match pair {
-            [a, b] => Some((place(a)?, place(b)?)),
-            _ => None,
-        })
+    // two by two (an odd last one is no pair)
+    let (mitred_pairs, _) = mitred.as_chunks::<2>();
+    let pairs: Vec<(usize, usize)> = mitred_pairs
+        .iter()
+        .filter_map(|[a, b]| Some((place(a)?, place(b)?)))
         .collect();
     let mut grew = true;
     while grew {
