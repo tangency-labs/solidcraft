@@ -621,3 +621,64 @@ fn navigation_board_drops_menu_value_text_before_folding_slots() {
     assert!(!folded.values && !folded.overflow.is_empty());
     assert_eq!(folded.more.size(), vec2(32.0, 32.0));
 }
+
+#[test]
+fn the_bar_component_returns_the_slot_or_menu_row_chosen_from_plain_data() {
+    use crate::nav_bar::{Bar, Menu, MenuEntry, MenuRow, NavAction, SlotView, show};
+    use egui::{Event, RawInput};
+    let ctx = crate::fonts::test_context();
+    let slot = |index: usize, id: &'static str, kind, x: f32| SlotView {
+        index,
+        id,
+        kind,
+        icon: id,
+        text: id.to_owned(),
+        name: id.to_owned(),
+        tip: id.to_owned(),
+        key: None,
+        selected: false,
+        enabled: true,
+        hidden: false,
+        show_text: false,
+        rect: Rect::from_min_size(pos2(x, 304.0), vec2(26.0, 26.0)),
+    };
+    let bar = Bar {
+        rect: Rect::from_min_size(pos2(96.0, 300.0), vec2(68.0, 34.0)),
+        size: Default::default(),
+        edge: NavigationEdge::Bottom,
+        idle: NavigationIdle::Always,
+        active: false,
+        slots: vec![slot(0, "fit", NavigationKind::Action, 100.0), slot(1, "styles", NavigationKind::Menu, 134.0)],
+        overflow: Vec::new(),
+        more: Rect::NOTHING,
+        labels: Default::default(),
+    };
+    let menu = |id: &str| Menu {
+        entries: if id == "styles" { vec![MenuEntry::Row(MenuRow::new("wire", "Wire", "", "test:wire"))] } else { Vec::new() },
+        close_on_pick: true,
+    };
+    let frame = |events: Vec<Event>| {
+        solidcraft_ui_registry::clear_handles();
+        let mut action = None;
+        crate::test_support::frame(
+            &ctx,
+            RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 400.0))), events, focused: true, ..Default::default() },
+            |ui| action = show(ui, &bar, menu),
+        );
+        action
+    };
+    let click = |at: egui::Pos2| {
+        frame(vec![Event::PointerMoved(at)]);
+        frame(crate::test_support::pointer(at, true)).or(frame(crate::test_support::pointer(at, false)))
+    };
+    frame(Vec::new());
+    assert_eq!(click(pos2(113.0, 317.0)), Some(NavAction::Slot("fit".into())), "an action slot is returned, not run");
+    assert_eq!(click(pos2(147.0, 317.0)), None, "a menu slot opens its menu");
+    // The popup measures itself on its first frame and is placed from the next.
+    frame(Vec::new());
+    frame(Vec::new());
+    let row = solidcraft_ui_registry::rect_of("test:wire").expect("the open menu's row is drawn").center();
+    assert_eq!(click(row), Some(NavAction::Item { menu: "styles".into(), item: "wire".into() }));
+    frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("test:wire").is_none(), "a pick closes a menu that asks for it");
+}

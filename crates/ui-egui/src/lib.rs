@@ -191,6 +191,7 @@ mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
 pub mod mouse_gesture;
+mod nav_bar;
 pub(crate) mod navigation;
 pub mod navigation_bar;
 mod navigation_bar_view;
