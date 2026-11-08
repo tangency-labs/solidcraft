@@ -2704,3 +2704,38 @@ fn an_emboss_that_works_has_no_warning() {
         run(&mut s, "edit.undo", json!({}));
     }
 }
+
+/// #6612: a converted mesh's faces have no history that can keep an attachment, so extruding
+/// one is refused, and the refusal offers `fixed:true`. Extrude takes it: the sketch goes on the
+/// face's plane as a fixed plane and the face extrudes. A 20 x 20 x 10 block with a bore of
+/// radius 3, through STL and Convert Mesh, joined 5 up from its top face.
+#[test]
+fn a_converted_meshs_face_extrudes_on_a_fixed_plane_when_asked() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-6612-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("Block.stl");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 30, "base": [10, 10, -5], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    let [name] = names.as_slice() else { panic!("{names:?}") };
+    run(&mut s, "mesh.convert", json!({"body": name}));
+    let before = body_volume(&s, name);
+    let top = json!({"face": [2, 2, 10], "distance": 5, "operation": "join"});
+    let refused = s.execute("solid.extrude", &top).expect_err("the face keeps no attachment").to_string();
+    assert!(refused.contains("fixed:true"), "{refused}");
+    let mut fixed = top.clone();
+    fixed["fixed"] = json!(true);
+    run(&mut s, "solid.extrude", fixed);
+    let area = 400.0 - std::f64::consts::PI * 9.0;
+    let grown = body_volume(&s, name) - before;
+    assert!((grown - area * 5.0).abs() < 1e-3 * area * 5.0, "the join added {grown}, not {}", area * 5.0);
+    let not_a_bool =
+        s.execute("solid.extrude", &json!({"face": [2, 2, 15], "distance": 5, "fixed": "yes"})).expect_err("fixed is a boolean").to_string();
+    assert!(not_a_bool.contains("`fixed` must be true or false"), "{not_a_bool}");
+}
