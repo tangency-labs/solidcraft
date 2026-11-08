@@ -4075,7 +4075,6 @@ dependencies = [
  "eframe",
  "egui",
  "embed-resource",
- "getrandom 0.3.4",
  "hidapi",
  "keyring",
  "libc",
@@ -4093,6 +4092,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcraft-3dx-client",
+ "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",
@@ -4128,6 +4128,25 @@ dependencies = [
 [[package]]
 name = "solidcraft-color"
 version = "0.40.0-rc.3"
+
+[[package]]
+name = "solidcraft-control"
+version = "0.40.0-rc.3"
+dependencies = [
+ "getrandom 0.3.4",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "solidcraft-control-egui"
+version = "0.40.0-rc.3"
+dependencies = [
+ "egui",
+ "image",
+ "serde_json",
+ "solidcraft-control",
+]
 
 [[package]]
 name = "solidcraft-derive"
@@ -4181,6 +4200,7 @@ dependencies = [
  "serde_path_to_error",
  "solidcore-record",
  "solidcraft-color",
+ "solidcraft-control",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-io",
@@ -4278,6 +4298,7 @@ version = "0.40.0-rc.3"
 dependencies = [
  "image",
  "serde_json",
+ "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-mcp-server",
@@ -4393,6 +4414,8 @@ dependencies = [
  "sha2 0.10.9",
  "solidcore-record",
  "solidcraft-color",
+ "solidcraft-control",
+ "solidcraft-control-egui",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",
@@ -4435,6 +4458,7 @@ dependencies = [
  "log",
  "percent-encoding",
  "serde_json",
+ "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-ui-egui",
  "solidcraft-ui-text",
