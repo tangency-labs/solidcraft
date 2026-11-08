@@ -44,8 +44,17 @@
 //!   runs once (nothing clears the flag) and is a single pass here.
 //! - **Debug only code** (`SM_DEBUG_CODE` drawing and dumps) and the assertions are not
 //!   ported.
-//! - **Bounds.** The leaf solve takes at most six guesses (upstream's fixed arrays). No
-//!   recursion.
+//! - **A leaf the line may cross twice** (not upstream's, WR-758, #3120). Upstream solves a
+//!   leaf from one set of guesses and, where its normal map has a direction
+//!   perpendicular to the line, looks for a second crossing only next to the first; a
+//!   first crossing behind a ray's start was dropped before that, so a line just under
+//!   a cylinder's top missed the crossing ahead. Such a leaf is solved part by part
+//!   ([`LsiGlobalSolver::parts_crossed_once`]): halved until each part's normal map has
+//!   no perpendicular to the line, so each holds at most one crossing. A leaf without
+//!   one is solved as upstream solves it.
+//! - **Bounds.** Each leaf, or part of one, takes at most six guesses (upstream's fixed
+//!   arrays). A leaf is halved into parts at most [`MAX_PART_DEPTH`] deep, with an
+//!   explicit stack. No recursion.
 
 use super::p1::{is_node_valid, is_surface_cache_owner, surface_to_evaluate};
 use super::p2::{original_surface, LsiGlobalSolver, Surface, TsectCurveType};
@@ -302,6 +311,52 @@ fn pseudo_hit(hit: &Result<PseudoHit>) -> Option<(u32, f64, f64)> {
 
 // ---- SmLSIGlobalSolver::LocalSolve -------------------------------------------------------------
 
+/// The most halvings [`LsiGlobalSolver::parts_crossed_once`] makes of a leaf: a part's
+/// side is then at least 2^-20 of the leaf's (about a millionth), below which two
+/// crossings of a line are one near-tangent crossing for the part's guesses.
+const MAX_PART_DEPTH: u32 = 20;
+
+/// A part of a leaf's domain the line may cross ([`LsiGlobalSolver::parts_crossed_once`]).
+struct LeafPart {
+    /// Its uv domain.
+    domain: Extent2d,
+    /// The line interval its box allows.
+    interval: Extent1d,
+    /// The line crosses it at most once (its normal map has no direction perpendicular to
+    /// the line).
+    once: bool,
+}
+
+/// The infinite line through `point` along `vector` (`sTmpLine`).
+fn line_curve(point: Point3, vector: Vec3) -> Curve {
+    Curve::from(Line::infinite(point, vector, 3, false))
+}
+
+/// How far the unit normals of `surface` turn across `domain` in `u` (`along_u`) or `v`:
+/// the angles between them at the ends of the domain's two sides in that direction,
+/// summed. A corner whose normal cannot be evaluated (a pole) adds nothing.
+fn normal_turn(k: &Kernel, surface: &Surface, domain: Extent2d, along_u: bool) -> Result<f64> {
+    let (lo, hi) = (domain.min(), domain.max());
+    let normal = |u: f64, v: f64| -> Result<Option<Vec3>> {
+        Ok(
+            ignored(surface.evaluate_normal(k, Point2::new(u, v), Side::Left, Side::Left))?
+                .and_then(|n| n.unitize().ok()),
+        )
+    };
+    let sides = if along_u {
+        [((lo.x, lo.y), (hi.x, lo.y)), ((lo.x, hi.y), (hi.x, hi.y))]
+    } else {
+        [((lo.x, lo.y), (lo.x, hi.y)), ((hi.x, lo.y), (hi.x, hi.y))]
+    };
+    let mut turn = 0.0;
+    for ((u0, v0), (u1, v1)) in sides {
+        if let (Some(a), Some(b)) = (normal(u0, v0)?, normal(u1, v1)?) {
+            turn += a.dot(b).clamp(-1.0, 1.0).acos();
+        }
+    }
+    Ok(turn)
+}
+
 /// Read-only state of one leaf solve.
 struct LsiLeaf<'s, O> {
     cache: &'s SurfaceCache<O>,
@@ -337,6 +392,45 @@ impl<O: SolutionObject> LsiLeaf<'_, O> {
         solution.objects[1] = Some(self.parent);
         solution.nodes[0] = self.nodes[0];
         solution.nodes[1] = self.nodes[1];
+    }
+
+    /// This leaf over `domain`, part of its own, with the line interval `interval` and
+    /// the line `line`: a side the part shares with the leaf keeps the leaf's
+    /// continuity; a side inside the leaf is a discontinuity, so a crossing on it is kept
+    /// by the parts either side (and merged as a duplicate), never left to a neighbouring
+    /// branch that is not there.
+    fn part(&self, domain: Extent2d, interval: Extent1d, line: Curve) -> Self {
+        let [u_conts, v_conts, t_conts] = self.conts;
+        let side = |shared: bool, cont: ContinuityType| {
+            if shared {
+                cont
+            } else {
+                ContinuityType::Discontinuous
+            }
+        };
+        let (lo, hi) = (self.domain.min(), self.domain.max());
+        let (plo, phi) = (domain.min(), domain.max());
+        Self {
+            cache: self.cache,
+            owner: self.owner,
+            parent: self.parent,
+            eval: self.eval,
+            domain,
+            line,
+            interval,
+            conts: [
+                [
+                    side(plo.x == lo.x, u_conts[0]),
+                    side(phi.x == hi.x, u_conts[1]),
+                ],
+                [
+                    side(plo.y == lo.y, v_conts[0]),
+                    side(phi.y == hi.y, v_conts[1]),
+                ],
+                t_conts,
+            ],
+            nodes: self.nodes,
+        }
     }
 }
 
@@ -390,6 +484,233 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             }
         }
         Ok(keep)
+    }
+
+    /// Solves `leaf` (a leaf, or a part of one) from its guesses (upstream's guess
+    /// points and their refinement by the surface's local curve intersection), adding the
+    /// crossings kept to `base.solutions`. `once`: the line crosses `leaf` at most once
+    /// (its normal map has no direction perpendicular to the line), so its first crossing
+    /// kept ends the solve, and true is returned; otherwise every guess is followed,
+    /// with the search for a near-tangent second crossing, and false is returned.
+    fn solve_part(&mut self, k: &Kernel, leaf: &LsiLeaf<'s, O>, once: bool) -> Result<bool> {
+        let domain = leaf.domain;
+        let interval = leaf.interval;
+        // let guess = LineInterval/SurfaceDomain CenterPoints
+        let mut first_t = interval.evaluate(0.5);
+        let first_uv_guess = domain.evaluate(0.5, 0.5);
+        let mut uv_guesses = Vec::new();
+        let mut t_guesses = Vec::new();
+
+        // Let SurfaceGuessPoint = Drop LinePoint down to SurfacePoint Tangent Plane
+        let drop = |uv: Point2, t: f64| -> Result<Point2> {
+            let point = self.line_point + t * self.line_vector;
+            super::p7::drop_points_to_tangent_plane(
+                k,
+                leaf.eval,
+                uv,
+                Side::Left,
+                Side::Left,
+                &[point],
+            )?
+            .first()
+            .copied()
+            .ok_or_else(|| {
+                SolidError::surface_failed(OP_LSI, "the tangent plane drop gave no point")
+            })
+        };
+        let mut first_uv = drop(first_uv_guess, first_t)?;
+
+        // When the updated SurfaceGuessPoint is outside the leafNodeIntersectionDomain
+        let uv_eps = EFF_ZERO * (1.0 + domain.size().max_dimension());
+        if !domain.contains_point(first_uv, uv_eps) {
+            // move guess to SurfaceMidPoint and near LineInterval beginPoint.
+            first_t = interval.evaluate(0.1);
+            first_uv = drop(domain.evaluate(0.5, 0.5), first_t)?;
+
+            // When SurfaceMid/LineStart Drop is also outside the leafNodeIntersectionDomain
+            if !domain.contains_point(first_uv, 0.0) {
+                // move guess to SurfaceMidPoint and near LineInterval endPoint.
+                first_t = interval.evaluate(0.9);
+                first_uv = drop(domain.evaluate(0.5, 0.5), first_t)?;
+
+                // when this 3rd point is also outside the leafNodeIntersectionDomain
+                if !domain.contains_point(first_uv, 0.0) {
+                    // clamp the guess to the leafNodeIntersectionDomain
+                    first_uv = domain.clamp_point(first_uv);
+
+                    // add in 3 more guesses: SurfLeafCenterPoint/(Interval Start, Mid, End)
+                    for fraction in [0.5, 0.1, 0.9] {
+                        uv_guesses.push(domain.evaluate(0.5, 0.5));
+                        t_guesses.push(interval.evaluate(fraction));
+                    }
+                }
+            }
+        }
+        uv_guesses.insert(0, first_uv);
+        t_guesses.insert(0, first_t);
+
+        // for every Guess (more than 1 when LineGuess does not drop to SurfaceDomain)
+        let mut i = 0;
+        while let (Some(&uv_guess), Some(&t_guess)) = (uv_guesses.get(i), t_guesses.get(i)) {
+            let index = i;
+            i += 1;
+
+            // pass the call along to local curve intersection
+            let Some(hit) = surface_local_curve_intersect(
+                k,
+                leaf.eval,
+                &leaf.domain,
+                &leaf.line,
+                &leaf.interval,
+                self.base.tolerance_3d,
+                uv_guess,
+                t_guess,
+            )?
+            else {
+                continue;
+            };
+
+            // process intersections
+            let solution = leaf.solution(hit.t, hit.uv, hit.deviation)?;
+
+            // skip negative parameter ray/surface intersections
+            if self.ray_fire {
+                let scaled_zero = EFF_ZERO * (1.0 + self.line_point.max_dimension());
+                if hit.t < -scaled_zero {
+                    continue;
+                }
+            }
+
+            // keep exact solutions - check near solutions
+            if !filter_solution(
+                k,
+                leaf.eval,
+                &leaf.domain,
+                &leaf.line,
+                &leaf.interval,
+                leaf.conts,
+                &solution,
+            )? {
+                continue;
+            }
+
+            // for points within the surface's trim boundary
+            if self.is_point_valid(k, leaf.owner, leaf.cache, hit.uv)? {
+                self.add_sorted_solution(&solution, SortKey::ByAllParameters, true)?;
+            }
+
+            // Try to eliminate additional intersections with the patch's normal map.
+            if once {
+                return Ok(true);
+            }
+
+            // look for another intersection very close to this one (near tangent)
+            if index < 1 {
+                let class = classify_curve_surface_xsect_point(
+                    k,
+                    leaf.eval,
+                    &leaf.domain,
+                    &leaf.line,
+                    &leaf.interval,
+                    hit.uv,
+                    hit.t,
+                    None,
+                );
+                // status ignored upstream (SE)
+                if let Some(XsectPointClass {
+                    guess: Some((new_uv, new_t)),
+                    ..
+                }) = ignored(class)?
+                {
+                    if uv_guesses.len() >= MAX_GUESSES {
+                        return Err(SolidError::invalid_input(
+                            OP_LSI,
+                            "intersection guess limit exceeded",
+                        ));
+                    }
+                    uv_guesses.push(new_uv);
+                    t_guesses.push(new_t);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// The parts of `leaf` the line may cross, each crossed at most once where it can be
+    /// told: `leaf`'s normal map has a direction perpendicular to the line, so the line
+    /// may cross it more than once. Its domain is halved across the direction its
+    /// normals turn most in, until a part's normal map has no direction perpendicular to
+    /// the line (the normal-cone condition of Sederberg and Meyers, 1988: the line then
+    /// crosses the part at most once, `once`). A part whose box (grown by the tolerance)
+    /// the line misses within `leaf`'s interval, or only behind a ray's start, is
+    /// dropped; each part kept carries the line interval its box allows. A part that
+    /// still has a perpendicular after [`MAX_PART_DEPTH`] halvings is a near-tangent
+    /// spot, kept with `once` false, as is one whose normals cannot be bounded. An explicit stack, at most [`MAX_PART_DEPTH`] deep.
+    fn parts_crossed_once(
+        &self,
+        k: &Kernel,
+        leaf: &LsiLeaf<'s, O>,
+        line_vec: Vec3,
+        pass: bool,
+    ) -> Result<Vec<LeafPart>> {
+        let tol = self.base.tolerance_3d;
+        let mut parts = Vec::new();
+        let mut stack = vec![(leaf.domain, 0_u32)];
+        while let Some((domain, depth)) = stack.pop() {
+            let (bbox, polar) = leaf.cache.boxes_over(k, &domain)?;
+            // the line interval within the part's box (the leaf's where it has no box)
+            let mut interval = leaf.interval;
+            if let Some(mut bbox) = bbox {
+                bbox.expand_absolute(tol);
+                let Some((enter, exit)) = box_hit(&passed_on(
+                    bbox.intersect_line(self.line_point, self.line_vector),
+                    pass,
+                )?) else {
+                    continue;
+                };
+                let mut hit = Extent1d::from_min_max(enter, exit);
+                hit.expand_absolute(2.0 * tol);
+                if hit.are_disjoint(&leaf.interval, 0.0) {
+                    continue;
+                }
+                interval = hit.intersect(&leaf.interval)?;
+            }
+            if self.ray_fire && interval.max() <= 0.0 {
+                continue;
+            }
+            // a part whose normals cannot be bounded is solved as it is: halving it tells
+            // nothing more
+            let once = polar.is_some_and(|b| !b.has_perpendicular_to_vector(line_vec));
+            if once || polar.is_none() || depth >= MAX_PART_DEPTH {
+                parts.push(LeafPart {
+                    domain,
+                    interval,
+                    once,
+                });
+                continue;
+            }
+            let (lo, hi) = (domain.min(), domain.max());
+            let halves = if normal_turn(k, leaf.eval, domain, true)?
+                >= normal_turn(k, leaf.eval, domain, false)?
+            {
+                let mid = 0.5 * (lo.x + hi.x);
+                [
+                    Extent2d::from_bounds(lo.x, lo.y, mid, hi.y),
+                    Extent2d::from_bounds(mid, lo.y, hi.x, hi.y),
+                ]
+            } else {
+                let mid = 0.5 * (lo.y + hi.y);
+                [
+                    Extent2d::from_bounds(lo.x, lo.y, hi.x, mid),
+                    Extent2d::from_bounds(lo.x, mid, hi.x, hi.y),
+                ]
+            };
+            for half in halves.into_iter().rev() {
+                stack.push((half, depth + 1));
+            }
+        }
+        Ok(parts)
     }
 
     /// `SmLSIGlobalSolver::LocalSolve`: intersects the line with the Bezier patch of
@@ -553,69 +874,14 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             None => bound_ivl,
         };
 
-        // let guess = LineInterval/SurfaceDomain CenterPoints
-        let mut first_t = ivl.evaluate(0.5);
-        let first_uv_guess = uv_domain.evaluate(0.5, 0.5);
-        let mut uv_guesses = Vec::new();
-        let mut t_guesses = Vec::new();
-
-        // Let SurfaceGuessPoint = Drop LinePoint down to SurfacePoint Tangent Plane
-        let drop = |uv: Point2, t: f64| -> Result<Point2> {
-            let point = self.line_point + t * self.line_vector;
-            super::p7::drop_points_to_tangent_plane(
-                k,
-                srf_eval,
-                uv,
-                Side::Left,
-                Side::Left,
-                &[point],
-            )?
-            .first()
-            .copied()
-            .ok_or_else(|| {
-                SolidError::surface_failed(OP_LSI, "the tangent plane drop gave no point")
-            })
-        };
-        let mut first_uv = drop(first_uv_guess, first_t)?;
-
-        // When the updated SurfaceGuessPoint is outside the leafNodeIntersectionDomain
-        let uv_eps = EFF_ZERO * (1.0 + uv_domain.size().max_dimension());
-        if !uv_domain.contains_point(first_uv, uv_eps) {
-            // move guess to SurfaceMidPoint and near LineInterval beginPoint.
-            first_t = ivl.evaluate(0.1);
-            first_uv = drop(uv_domain.evaluate(0.5, 0.5), first_t)?;
-
-            // When SurfaceMid/LineStart Drop is also outside the leafNodeIntersectionDomain
-            if !uv_domain.contains_point(first_uv, 0.0) {
-                // move guess to SurfaceMidPoint and near LineInterval endPoint.
-                first_t = ivl.evaluate(0.9);
-                first_uv = drop(uv_domain.evaluate(0.5, 0.5), first_t)?;
-
-                // when this 3rd point is also outside the leafNodeIntersectionDomain
-                if !uv_domain.contains_point(first_uv, 0.0) {
-                    // clamp the guess to the leafNodeIntersectionDomain
-                    first_uv = uv_domain.clamp_point(first_uv);
-
-                    // add in 3 more guesses: SurfLeafCenterPoint/(Interval Start, Mid, End)
-                    for fraction in [0.5, 0.1, 0.9] {
-                        uv_guesses.push(uv_domain.evaluate(0.5, 0.5));
-                        t_guesses.push(ivl.evaluate(fraction));
-                    }
-                }
-            }
-        }
-        uv_guesses.insert(0, first_uv);
-        t_guesses.insert(0, first_t);
-
         // Make the line object (sTmpIvl = the bounded interval of interest).
-        let line = Curve::from(Line::infinite(self.line_point, self.line_vector, 3, false));
         let leaf = LsiLeaf {
             cache,
             owner: tree.owner(),
             parent,
             eval: srf_eval,
             domain: uv_domain,
-            line,
+            line: line_curve(self.line_point, self.line_vector),
             interval: ivl,
             conts: [u_conts, v_conts, t_conts],
             nodes: [
@@ -624,93 +890,27 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             ],
         };
 
-        // for every Guess (more than 1 when LineGuess does not drop to SurfaceDomain)
-        let mut i = 0;
-        while let (Some(&uv_guess), Some(&t_guess)) = (uv_guesses.get(i), t_guesses.get(i)) {
-            let index = i;
-            i += 1;
-
-            // pass the call along to local curve intersection
-            let Some(hit) = surface_local_curve_intersect(
-                k,
-                leaf.eval,
-                &leaf.domain,
-                &leaf.line,
-                &leaf.interval,
-                self.base.tolerance_3d,
-                uv_guess,
-                t_guess,
-            )?
-            else {
-                continue;
-            };
-
-            // process intersections
-            let solution = leaf.solution(hit.t, hit.uv, hit.deviation)?;
-
-            // skip negative parameter ray/surface intersections
-            if self.ray_fire {
-                let scaled_zero = EFF_ZERO * (1.0 + self.line_point.max_dimension());
-                if hit.t < -scaled_zero {
-                    continue;
-                }
-            }
-
-            // keep exact solutions - check near solutions
-            if !filter_solution(
-                k,
-                leaf.eval,
-                &leaf.domain,
-                &leaf.line,
-                &leaf.interval,
-                leaf.conts,
-                &solution,
-            )? {
-                continue;
-            }
-
-            // for points within the surface's trim boundary
-            if self.is_point_valid(k, leaf.owner, cache, hit.uv)? {
-                self.add_sorted_solution(&solution, SortKey::ByAllParameters, true)?;
-            }
-
-            // Try to eliminate additional intersections with the patch's normal map.
-            let line_vec = self.line_vector.unitize()?;
-            if !cache
-                .polar_box_unstored(k, surface_id)?
-                .has_perpendicular_to_vector(line_vec)
-            {
-                return Ok(false);
-            }
-
-            // look for another intersection very close to this one (near tangent)
-            if index < 1 {
-                let class = classify_curve_surface_xsect_point(
-                    k,
-                    leaf.eval,
-                    &leaf.domain,
-                    &leaf.line,
-                    &leaf.interval,
-                    hit.uv,
-                    hit.t,
-                    None,
+        // A leaf whose normal map has no direction perpendicular to the line is crossed
+        // at most once: its crossing ends the solve, as upstream's. One whose normal map
+        // has such a direction may be crossed twice (a line just under a cylinder's top
+        // crosses its leaf on either side of the top): it is solved part by part, each
+        // part crossed at most once, so a crossing behind a ray's start cannot hide one
+        // ahead of it (WR-758, #3120).
+        let line_vec = self.line_vector.unitize()?;
+        if cache
+            .polar_box_unstored(k, surface_id)?
+            .has_perpendicular_to_vector(line_vec)
+        {
+            for part in self.parts_crossed_once(k, &leaf, line_vec, pass)? {
+                let part_leaf = leaf.part(
+                    part.domain,
+                    part.interval,
+                    line_curve(self.line_point, self.line_vector),
                 );
-                // status ignored upstream (SE)
-                if let Some(XsectPointClass {
-                    guess: Some((new_uv, new_t)),
-                    ..
-                }) = ignored(class)?
-                {
-                    if uv_guesses.len() >= MAX_GUESSES {
-                        return Err(SolidError::invalid_input(
-                            OP_LSI,
-                            "intersection guess limit exceeded",
-                        ));
-                    }
-                    uv_guesses.push(new_uv);
-                    t_guesses.push(new_t);
-                }
+                self.solve_part(k, &part_leaf, part.once)?;
             }
+        } else if self.solve_part(k, &leaf, true)? {
+            return Ok(false);
         }
 
         // the extra work required at discontinuities of the line ends and patch boundaries
