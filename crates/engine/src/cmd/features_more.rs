@@ -14,7 +14,7 @@ use super::features::{
 };
 use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
 use crate::schema::features::FeatureResult;
-use crate::schema::features_more::{BoundaryFillParams, RemoveParams, RibParams};
+use crate::schema::features_more::{BoundaryFillParams, RemoveParams, ReplaceFaceParams, RibParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -22,6 +22,7 @@ use crate::{Result, Session};
 const RIB_CONTRACT: TypedContract<RibParams> = TypedContract::new();
 const REMOVE_CONTRACT: TypedContract<RemoveParams> = TypedContract::new();
 const BOUNDARY_FILL_CONTRACT: TypedContract<BoundaryFillParams> = TypedContract::new();
+const REPLACE_FACE_CONTRACT: TypedContract<ReplaceFaceParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.boundary_fill", "Boundary Fill", crate::checked!("solid.boundary_fill", boundary_fill))
@@ -54,7 +55,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("emboss")
         .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] selecting a planar or complete exterior cylindrical wall (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
-    CommandSpec::new("solid.replace_face", "Replace Face", replace_face)
+    CommandSpec::new("solid.replace_face", "Replace Face", crate::checked!("solid.replace_face", replace_face))
+        .contract(&REPLACE_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .at("SOLID", "MODIFY")
         .icon("replace_face")
         .params("faces: [[x,y,z] points on planar faces, or face names from model.faces]; target: plane (XY|XZ|YZ|construction plane|{origin, normal}) | target_face: [x,y,z] on a parallel planar face; body?"),

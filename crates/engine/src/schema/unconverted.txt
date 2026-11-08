@@ -35,8 +35,6 @@ solid.offset_face
 solid.pattern.circular
 solid.pattern.path
 solid.pattern.rectangular
-solid.press_pull
-solid.replace_face
 solid.shell
 solid.thread
 surface.blend
