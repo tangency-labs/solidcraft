@@ -337,6 +337,7 @@ view.back                         the view: camera, layout, display
 view.bottom                       the view: camera, layout, display
 view.delete                       the view: camera, layout, display
 view.fit                          the view: camera, layout, display
+view.frame                        the view: the design's own front and top; crates/engine/src/cmd/browser.rs::tests::set_as_front_and_top_give_the_design_its_own_orientation
 view.front                        the view: camera, layout, display
 view.graphics_preset              the view: camera, layout, display
 view.grid                         the view: camera, layout, display

@@ -5798,6 +5798,7 @@ fn gpu_ui_box_coat_and_color_map_keep_every_raw_sample_finite() {
         distance: 61.06594959585294,
         fov: 0.0,
         up: solidcraft_render::UpAxis::Z,
+        frame: None,
     };
     let options: JobOptions = serde_json::from_value(json!({
         "samples":4,"max_depth":3,"seed":7,"exposure_ev":0.5,"tone_map":"aces_fitted",
