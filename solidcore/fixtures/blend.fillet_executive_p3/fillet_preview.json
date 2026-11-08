@@ -1,0 +1,683 @@
+{
+  "cases": [
+    {
+      "name": "preview-upstream-box10-first4",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "tests/SM_API_test/src/TestSmFillets.cpp TestSmFilletPreview: box 10 at the origin, its first four GetEdges, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-no-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "An empty edge list is SM_ERR_INVALID_INPUT.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-edge0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, edge 0 alone, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            0
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-edge1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, edge 1 alone, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            1
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-edge2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, edge 2 alone, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            2
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-edge3",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, edge 3 alone, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            3
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-edge4",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, edge 4 alone, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            4
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-edge5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, edge 5 alone, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            5
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-edge6",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, edge 6 alone, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            6
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-edge7",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, edge 7 alone, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            7
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-edge8",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, edge 8 alone, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            8
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-edge9",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, edge 9 alone, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            9
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-edge10",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, edge 10 alone, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            10
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-edge11",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, edge 11 alone, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            11
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, all twelve edges, radius 1 (every vertex a 3-edge corner).",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-big-radius",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, first four edges, radius 4.9.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "radius": 4.9
+        }
+      }
+    },
+    {
+      "name": "preview-box-thin",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "A 20 x 2 x 1 bar, all edges, radius 0.3.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            20.0,
+            2.0,
+            1.0
+          ],
+          "edges": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "radius": 0.3
+        }
+      }
+    },
+    {
+      "name": "preview-box-small-radius",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Box 10, first two edges, radius 1e-3.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            0,
+            1
+          ],
+          "radius": 0.001
+        }
+      }
+    },
+    {
+      "name": "preview-box-tiny",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "A 0.01 box, first three edges, radius 1e-3.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            0.01,
+            0.01,
+            0.01
+          ],
+          "edges": [
+            0,
+            1,
+            2
+          ],
+          "radius": 0.001
+        }
+      }
+    },
+    {
+      "name": "preview-box-huge",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "A 1000 box, first three edges, radius 50.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            1000.0,
+            1000.0,
+            1000.0
+          ],
+          "edges": [
+            0,
+            1,
+            2
+          ],
+          "radius": 50.0
+        }
+      }
+    },
+    {
+      "name": "preview-cylinder-edge0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "SmApiCreateCylinder r 5 h 10, its first edge, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0.0,
+              0,
+              0
+            ],
+            "radius": 5.0,
+            "height": 10.0
+          },
+          "edges": [
+            0
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-cylinder-edge1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "The cylinder, its second edge, radius 1.",
+      "inputs": {
+        "fillet_preview": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0.0,
+              0,
+              0
+            ],
+            "radius": 5.0,
+            "height": 10.0
+          },
+          "edges": [
+            1
+          ],
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "preview-box-union",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "SmApiBooleanUnion of boxes [0,10]^3 and [5,15]x[5,15]x[0,5], first four edges, radius 0.5.",
+      "inputs": {
+        "fillet_preview": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0.0,
+                0,
+                0
+              ],
+              "size": [
+                10.0,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5.0,
+                5,
+                0
+              ],
+              "size": [
+                10.0,
+                10,
+                5
+              ]
+            }
+          },
+          "edges": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "radius": 0.5
+        }
+      }
+    },
+    {
+      "name": "preview-box-difference",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "SmApiBooleanDifference of boxes [0,10]^3 minus [5,15]x[5,15]x[0,5], first four edges, radius 0.5.",
+      "inputs": {
+        "fillet_preview": {
+          "source": {
+            "kind": "box_difference",
+            "a": {
+              "origin": [
+                0.0,
+                0,
+                0
+              ],
+              "size": [
+                10.0,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5.0,
+                5,
+                0
+              ],
+              "size": [
+                10.0,
+                10,
+                5
+              ]
+            }
+          },
+          "edges": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "radius": 0.5
+        }
+      }
+    },
+    {
+      "name": "preview-file-l_shaped_box",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "TestFiles Fillet/l_shaped_box.smb, its first three edges, radius 0.1.",
+      "inputs": {
+        "fillet_preview": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/l_shaped_box.smb"
+            }
+          },
+          "edges": [
+            0,
+            1,
+            2
+          ],
+          "radius": 0.1
+        }
+      }
+    },
+    {
+      "name": "preview-radius-zero",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Degenerate radius: 0 (SmApiFilletPreview does not check the radius).",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            0
+          ],
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "preview-radius-negative",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Degenerate radius: -1.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            0
+          ],
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "preview-radius-negative-corner",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Degenerate radius -1 on the first four edges (corners).",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "preview-radius-tiny",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Radius 1e-12, below SM_EFF_ZERO's neighbourhood.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            0
+          ],
+          "radius": 1e-12
+        }
+      }
+    },
+    {
+      "name": "preview-radius-larger-than-box",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Radius 20 on a box of side 10.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            0
+          ],
+          "radius": 20.0
+        }
+      }
+    },
+    {
+      "name": "preview-radius-larger-than-box-corner",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Radius 20 on the first four edges of a box of side 10.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "radius": 20.0
+        }
+      }
+    },
+    {
+      "name": "preview-radius-half-side",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2285",
+      "note": "Radius 5, exactly half the box side.",
+      "inputs": {
+        "fillet_preview": {
+          "dimensions": [
+            10.0,
+            10.0,
+            10.0
+          ],
+          "edges": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "radius": 5.0
+        }
+      }
+    }
+  ]
+}

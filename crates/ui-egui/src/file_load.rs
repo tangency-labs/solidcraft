@@ -1472,6 +1472,7 @@ mod tests {
     /// on the last once the parts are done; a design's steps follow its features.
     #[test]
     fn the_card_follows_an_import_through_its_three_steps() {
+        crate::i18n::install();
         let step = |phase, work, features| {
             let (_, current, detail) = load_steps(true, phase, work, features);
             (current, detail)

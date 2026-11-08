@@ -45,7 +45,12 @@ impl Icon<'_> {
         match self {
             Icon::Kit(name) => crate::icons::paint_accented(painter, rect, name, None, opacity),
             Icon::Texture(texture) => {
-                painter.image(*texture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE.gamma_multiply(opacity));
+                painter.image(
+                    *texture,
+                    rect,
+                    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                    Tokens::get().file_image_tint.gamma_multiply(opacity),
+                );
             }
             Icon::Paint(paint) => paint(painter, rect, opacity),
         }

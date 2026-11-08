@@ -1,0 +1,90 @@
+{
+  "cases": [
+    {
+      "name": "pr208_support_planes_start_without_directions",
+      "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+      "inputs": {
+        "query": {
+          "q": "srf_srf",
+          "s1": {
+            "analytic": {
+              "kind": "plane",
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "x_axis": [
+                0,
+                1,
+                0
+              ],
+              "y_axis": [
+                0,
+                0,
+                1
+              ],
+              "uv_scale": [
+                1.0,
+                1.0
+              ],
+              "domain": [
+                [
+                  -2,
+                  -2
+                ],
+                [
+                  2,
+                  2
+                ]
+              ],
+              "make_nurb": false
+            }
+          },
+          "s2": {
+            "analytic": {
+              "kind": "plane",
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "x_axis": [
+                0,
+                0,
+                1
+              ],
+              "y_axis": [
+                1,
+                0,
+                0
+              ],
+              "uv_scale": [
+                1.0,
+                1.0
+              ],
+              "domain": [
+                [
+                  -2,
+                  -2
+                ],
+                [
+                  2,
+                  2
+                ]
+              ],
+              "make_nurb": false
+            }
+          },
+          "tol": 1e-05,
+          "ang": 0.001,
+          "start": [
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    }
+  ]
+}

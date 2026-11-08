@@ -300,6 +300,7 @@ fn interference_dialog_renders_in_the_active_language() {
 /// different words in some languages, so each has its own message.
 #[test]
 fn continuity_gap_and_sheet_metal_gap_are_separate_messages() {
+    crate::i18n::install();
     for (lang, legend, sheet) in [("fr", "Écart", "Jeu"), ("de", "Lücke", "Spalt")] {
         let locale = solidcraft_ui_text::Locale::for_language(lang);
         assert_eq!(locale.text("ui.continuity_gap"), legend, "{lang}");

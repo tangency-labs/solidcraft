@@ -25,7 +25,7 @@ const SCRATCH_TARGET: &str = "target/xtask-shared-target";
 
 pub fn run(root: &Path) -> Result<(), String> {
     let meta = crate::metadata()?;
-    let crates = layers::from_metadata(&meta)?;
+    let crates = layers::from_metadata(&meta, None)?;
     let dirs = manifest_dirs(&meta)?;
     let shared: BTreeSet<&str> = crates.iter().filter(|c| layers::classify(&c.name) == Some(Class::Shared)).map(|c| c.name.as_str()).collect();
     if shared.is_empty() {

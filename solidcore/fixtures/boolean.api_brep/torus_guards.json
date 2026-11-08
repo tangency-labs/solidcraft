@@ -1,0 +1,376 @@
+{
+ "cases": [
+  {
+   "name": "torus_guard_horn_box_intersection",
+   "note": "A horn torus (major 2.5, minor 2.5; SmTorus::CreateCanonical accepts minor >= major) intersection with a box through its side; volume and face areas compared.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      1.0,
+      -1.5,
+      -1.5
+     ],
+     "size": [
+      6.0,
+      3.0,
+      3.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "major": 2.5,
+     "minor": 2.5
+    },
+    "operation": 2
+   }
+  },
+  {
+   "name": "torus_guard_horn_box_difference",
+   "note": "A horn torus (major 2.5, minor 2.5; SmTorus::CreateCanonical accepts minor >= major) difference with a box through its side; volume and face areas compared.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      1.0,
+      -1.5,
+      -1.5
+     ],
+     "size": [
+      6.0,
+      3.0,
+      3.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "major": 2.5,
+     "minor": 2.5
+    },
+    "operation": 3
+   }
+  },
+  {
+   "name": "torus_guard_minor_eff_zero",
+   "note": "Torus radius guard boundary (major 1.0, minor 1e-12; SmTorus::CreateCanonical rejects a radius <= SM_EFF_ZERO = 1e-12 with SM_ERR). The call is SM_BO_EXTRACT_SEPARATE, which SmApiBoolean rejects (SM_ERR_INVALID_INPUT) only after the operands are built, so the record is the constructor's accept or reject.",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "size": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "major": 1.0,
+     "minor": 1e-12
+    },
+    "operation": 9
+   }
+  },
+  {
+   "name": "torus_guard_minor_2x_eff_zero",
+   "note": "Torus radius guard boundary (major 1.0, minor 2e-12; SmTorus::CreateCanonical rejects a radius <= SM_EFF_ZERO = 1e-12 with SM_ERR). The call is SM_BO_EXTRACT_SEPARATE, which SmApiBoolean rejects (SM_ERR_INVALID_INPUT) only after the operands are built, so the record is the constructor's accept or reject.",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "size": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "major": 1.0,
+     "minor": 2e-12
+    },
+    "operation": 9
+   }
+  },
+  {
+   "name": "torus_guard_minor_half_eff_zero",
+   "note": "Torus radius guard boundary (major 1.0, minor 5e-13; SmTorus::CreateCanonical rejects a radius <= SM_EFF_ZERO = 1e-12 with SM_ERR). The call is SM_BO_EXTRACT_SEPARATE, which SmApiBoolean rejects (SM_ERR_INVALID_INPUT) only after the operands are built, so the record is the constructor's accept or reject.",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "size": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "major": 1.0,
+     "minor": 5e-13
+    },
+    "operation": 9
+   }
+  },
+  {
+   "name": "torus_guard_minor_zero",
+   "note": "Torus radius guard boundary (major 1.0, minor 0.0; SmTorus::CreateCanonical rejects a radius <= SM_EFF_ZERO = 1e-12 with SM_ERR). The call is SM_BO_EXTRACT_SEPARATE, which SmApiBoolean rejects (SM_ERR_INVALID_INPUT) only after the operands are built, so the record is the constructor's accept or reject.",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "size": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "major": 1.0,
+     "minor": 0.0
+    },
+    "operation": 9
+   }
+  },
+  {
+   "name": "torus_guard_minor_negative",
+   "note": "Torus radius guard boundary (major 1.0, minor -0.5; SmTorus::CreateCanonical rejects a radius <= SM_EFF_ZERO = 1e-12 with SM_ERR). The call is SM_BO_EXTRACT_SEPARATE, which SmApiBoolean rejects (SM_ERR_INVALID_INPUT) only after the operands are built, so the record is the constructor's accept or reject.",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "size": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "major": 1.0,
+     "minor": -0.5
+    },
+    "operation": 9
+   }
+  },
+  {
+   "name": "torus_guard_major_eff_zero",
+   "note": "Torus radius guard boundary (major 1e-12, minor 0.5; SmTorus::CreateCanonical rejects a radius <= SM_EFF_ZERO = 1e-12 with SM_ERR). The call is SM_BO_EXTRACT_SEPARATE, which SmApiBoolean rejects (SM_ERR_INVALID_INPUT) only after the operands are built, so the record is the constructor's accept or reject.",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "size": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "major": 1e-12,
+     "minor": 0.5
+    },
+    "operation": 9
+   }
+  },
+  {
+   "name": "torus_guard_major_2x_eff_zero",
+   "note": "Torus radius guard boundary (major 2e-12, minor 0.5; SmTorus::CreateCanonical rejects a radius <= SM_EFF_ZERO = 1e-12 with SM_ERR). The call is SM_BO_EXTRACT_SEPARATE, which SmApiBoolean rejects (SM_ERR_INVALID_INPUT) only after the operands are built, so the record is the constructor's accept or reject.",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "size": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "major": 2e-12,
+     "minor": 0.5
+    },
+    "operation": 9
+   }
+  },
+  {
+   "name": "torus_guard_major_negative",
+   "note": "Torus radius guard boundary (major -1.0, minor 0.5; SmTorus::CreateCanonical rejects a radius <= SM_EFF_ZERO = 1e-12 with SM_ERR). The call is SM_BO_EXTRACT_SEPARATE, which SmApiBoolean rejects (SM_ERR_INVALID_INPUT) only after the operands are built, so the record is the constructor's accept or reject.",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "size": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "major": -1.0,
+     "minor": 0.5
+    },
+    "operation": 9
+   }
+  },
+  {
+   "name": "torus_guard_huge_scale_box_intersection",
+   "note": "Scale 1e+06: a torus (major 1e+06, minor 300000) intersection with a box cutting its tube; volume and face areas compared.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      500000.0,
+      -500000.0,
+      -1000000.0
+     ],
+     "size": [
+      1000000.0,
+      1000000.0,
+      2000000.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "major": 1000000.0,
+     "minor": 300000.0
+    },
+    "operation": 2
+   }
+  },
+  {
+   "name": "torus_guard_huge_scale_box_difference",
+   "note": "Scale 1e+06: a torus (major 1e+06, minor 300000) difference with a box cutting its tube; volume and face areas compared.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      500000.0,
+      -500000.0,
+      -1000000.0
+     ],
+     "size": [
+      1000000.0,
+      1000000.0,
+      2000000.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "major": 1000000.0,
+     "minor": 300000.0
+    },
+    "operation": 3
+   }
+  }
+ ]
+}

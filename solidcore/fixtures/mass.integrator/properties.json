@@ -1,0 +1,3970 @@
+{
+  "cases": [
+    {
+      "name": "face_selected_0_01",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_02",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            2.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_03",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            3.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_04",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            4.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_05",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            5.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_06",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            6.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_07",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            7.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_08",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            8.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_09",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            9.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_10",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            10.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_11",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            11.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_12",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            12.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_13",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            13.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_14",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            14.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_15",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            15.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_16",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            16.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_17",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            17.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_18",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            18.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_19",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            19.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_20",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            20.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_21",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            21.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_22",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            22.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_23",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            23.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_24",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            24.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_25",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            25.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_26",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            26.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_27",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            27.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_28",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            28.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_29",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            29.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_30",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            30.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_31",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            31.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_32",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            32.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_33",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            33.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_34",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            34.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_35",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            35.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_36",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            36.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_37",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            37.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_38",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            38.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_39",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            39.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_40",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            40.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_41",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            41.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_42",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            42.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_43",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            43.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_44",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            44.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_45",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            45.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_46",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            46.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_47",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            47.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_48",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            48.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_49",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            49.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_50",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            50.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_51",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            51.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_52",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            52.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_53",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            53.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_54",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            54.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_55",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            55.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_56",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            56.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_57",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            57.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_58",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            58.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_59",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            59.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_60",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            60.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_61",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            61.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_62",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            62.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_0_63",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            0.0,
+            63.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_01",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_02",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            2.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_03",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            3.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_04",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            4.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_05",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            5.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_06",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            6.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_07",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            7.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_08",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            8.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_09",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            9.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_10",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            10.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_11",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            11.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_12",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            12.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_13",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            13.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_14",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            14.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_15",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            15.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_16",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            16.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_17",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            17.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_18",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            18.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_19",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            19.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_20",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            20.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_21",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            21.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_22",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            22.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_23",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            23.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_24",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            24.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_25",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            25.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_26",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            26.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_27",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            27.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_28",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            28.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_29",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            29.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_30",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            30.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_31",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            31.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_32",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            32.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_33",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            33.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_34",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            34.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_35",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            35.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_36",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            36.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_37",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            37.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_38",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            38.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_39",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            39.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_40",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            40.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_41",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            41.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_42",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            42.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_43",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            43.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_44",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            44.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_45",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            45.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_46",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            46.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_47",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            47.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_48",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            48.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_49",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            49.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_50",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            50.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_51",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            51.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_52",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            52.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_53",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            53.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_54",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            54.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_55",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            55.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_56",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            56.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_57",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            57.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_58",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            58.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_59",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            59.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_60",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            60.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_61",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            61.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_62",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            62.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_selected_1_63",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:244-310 (sm_CheckPrecisePropertySelection; plane face of 2x3x4 box)",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0.0,
+            1.0,
+            63.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_api_dependency_2",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:426,657",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0.0,
+            0.0,
+            63.0
+          ],
+          "query": 2
+        }
+      }
+    },
+    {
+      "name": "face_api_dependency_3",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:426,657",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0.0,
+            0.0,
+            63.0
+          ],
+          "query": 3
+        }
+      }
+    },
+    {
+      "name": "face_api_dependency_4",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:426,657",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0.0,
+            0.0,
+            63.0
+          ],
+          "query": 4
+        }
+      }
+    },
+    {
+      "name": "face_api_dependency_5",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:426,657",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0.0,
+            0.0,
+            63.0
+          ],
+          "query": 5
+        }
+      }
+    },
+    {
+      "name": "face_api_dependency_6",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:426,657",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0.0,
+            0.0,
+            63.0
+          ],
+          "query": 6
+        }
+      }
+    },
+    {
+      "name": "face_invalid_mask",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0001,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "face_thickness_dependency",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:260",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0001,
+            0.1,
+            0.0,
+            63.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "edge_0_0",
+      "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6700 (curve-interface length); source/SMLib/src/SmEdge.cpp:355",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.0,
+            0.0,
+            0.0,
+            4.0,
+            0.0,
+            0.0,
+            4.0,
+            4.0,
+            0.0
+          ],
+          "weights": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "edge_0_1",
+      "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6700 (curve-interface length); source/SMLib/src/SmEdge.cpp:355",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.0,
+            0.0,
+            0.0,
+            4.0,
+            0.0,
+            0.0,
+            4.0,
+            4.0,
+            0.0
+          ],
+          "weights": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "edge_0_2",
+      "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6700 (curve-interface length); source/SMLib/src/SmEdge.cpp:355",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.0,
+            0.0,
+            0.0,
+            4.0,
+            0.0,
+            0.0,
+            4.0,
+            4.0,
+            0.0
+          ],
+          "weights": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 2
+        }
+      }
+    },
+    {
+      "name": "edge_1_0",
+      "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6700 (curve-interface length); source/SMLib/src/SmEdge.cpp:355",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 1,
+          "p": [
+            0.0,
+            0.0,
+            0.0,
+            4.0,
+            0.0,
+            0.0,
+            4.0,
+            4.0,
+            0.0
+          ],
+          "weights": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "edge_1_1",
+      "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6700 (curve-interface length); source/SMLib/src/SmEdge.cpp:355",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 1,
+          "p": [
+            0.0,
+            0.0,
+            0.0,
+            4.0,
+            0.0,
+            0.0,
+            4.0,
+            4.0,
+            0.0
+          ],
+          "weights": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "edge_1_2",
+      "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6700 (curve-interface length); source/SMLib/src/SmEdge.cpp:355",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 1,
+          "p": [
+            0.0,
+            0.0,
+            0.0,
+            4.0,
+            0.0,
+            0.0,
+            4.0,
+            4.0,
+            0.0
+          ],
+          "weights": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 2
+        }
+      }
+    },
+    {
+      "name": "face_unknown_property_mask",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "parameters": [
+            1.0,
+            2.0,
+            3.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            3.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0001,
+            0.0,
+            0.0,
+            64.0
+          ],
+          "query": 0
+        }
+      }
+    }
+  ]
+}

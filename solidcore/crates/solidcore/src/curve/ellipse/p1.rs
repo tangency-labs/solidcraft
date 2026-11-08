@@ -1,0 +1,3413 @@
+//! `SmEllipse` and `SmCircle`, part 1: the circle class, construction and copying,
+//! the NURB build and its edits (2D conversion, STEP domain changes, joins,
+//! reversal, trimming), the NURB to STEP parameter conversion, the STEP global
+//! point solve, validity checks and database reading.
+//!
+//! Upstream: `source/SMLib/src/SmEllipse.cpp`, `source/SMLib/src/SmCircle.cpp`,
+//! `source/SMLib/inc/SmCircle.h`.
+//!
+//! | Rust                                               | Upstream                                          |
+//! |----------------------------------------------------|---------------------------------------------------|
+//! | [`Ellipse::new`] (in `p2`)                          | `SmEllipse(Center, XAxis, YAxis, AnalDomain, ..)` |
+//! | [`Ellipse::copy`], `Clone`                         | `SmEllipse(const SmEllipse&)`, `SmEllipse::Copy`  |
+//! | [`Ellipse::create_canonical`]                      | `SmEllipse::CreateCanonical`                      |
+//! | [`Ellipse::new_circle`]                            | `SmCircle(Center, XAxis, YAxis, AnalDomain, dRadius, ..)` |
+//! | [`Ellipse::circle_from_3_points`]                  | `SmCircle(StartPoint, MidPoint, EndPoint, ..)`    |
+//! | [`Ellipse::empty_circle`]                          | `SmCircle()`                                      |
+//! | [`Ellipse::copy`] (circle)                         | `SmCircle(const SmCircle&)`, `SmCircle::Copy`     |
+//! | [`Ellipse::create_canonical_circle`]               | `SmCircle::CreateCanonical`                       |
+//! | `Drop` (implicit)                                  | `~SmCircle`                                       |
+//! | [`Ellipse::approx_eq`] (in `p2`)                   | `SmCircle::operator==`                            |
+//! | [`Ellipse::radius`], [`Ellipse::set_radius`]       | `SmCircle::GetRadius`, `SmCircle::SetRadius`      |
+//! | [`Ellipse::is_circle_class`], [`Ellipse::kind_of`] | `SmCircle_TYPE` objects, `SmCircle::IsKindOf`     |
+//! | [`Ellipse::type_code`], [`Ellipse::type_string`], [`Ellipse::class_string`] (in `p2`), [`CIRCLE_CLASS_TYPE`] | `SmCircle::GetType`, `GetTypeString`, `GetClassString`, `GetClassType` |
+//! | [`Ellipse::is_arc`]                                | `SmCircle::IsArc`                                 |
+//! | [`Ellipse::is_nurb_curve_circle`]                  | `SmCircle::IsNurbCurveCircle`                     |
+//! | [`Ellipse::create_simple_offset`]                  | `SmCircle::CreateSimpleOffset`                    |
+//! | [`Ellipse::assert_valid`]                          | `SmEllipse::AssertValid`, `SmCircle::AssertValid` |
+//! | [`Ellipse::read_from_db`]                          | `SmEllipse::ReadFromDB`, `SmCircle::ReadFromDB`   |
+//! | [`Ellipse::write_to_db`]                           | `SmEllipse::WriteToDB`, `SmCircle::WriteToDB`     |
+//! | [`Ellipse::convert_to_2d`]                         | `SmEllipse::ConvertTo2D`                          |
+//! | [`Ellipse::convert_t_from_nurbs_to_step`]          | `SmEllipse::ConvertTFromNURBSToSTEP`              |
+//! | [`Ellipse::adjust_step_interval`]                  | `SmEllipse::AdjustSTEPInterval`                   |
+//! | [`Ellipse::global_point_solve_step`]               | `SmEllipse::GlobalPointSolveSTEP`                 |
+//! | [`Ellipse::join_with`]                             | `SmEllipse::JoinWith`                             |
+//! | [`Ellipse::make_nurb`], [`Ellipse::make_nurb_owned`], [`Ellipse::make_nurb_owned_with_edge_tol`] | `SmEllipse::MakeNurb` |
+//! | [`Ellipse::notify`]                                | `SmEllipse::Notify`                               |
+//! | [`Ellipse::reverse_parameterization`]              | `SmEllipse::ReverseParameterization`              |
+//! | [`Ellipse::trim`]                                  | `SmEllipse::Trim`                                 |
+//! | [`Ellipse::edit_parameterization`]                 | `SmBSplineCurve::EditParameterization` on an ellipse (virtual `MakeNurb`, `Notify`) |
+//! | `Clone` of [`PolarConversion`]                     | `SmPolarConversion(crContext, crSource)`          |
+//! | [`PolarConversion::convert_to_polar_parameter`]    | `SmPolarConversion::ConvertToPolarParameter`      |
+//! | [`PolarConversion::is_current`]                    | `SmPolarConversion::IsCurrent`                    |
+//! | [`PolarConversion::assert_valid`]                  | `SmPolarConversion::AssertValid`                  |
+//! | [`PolarConversion::read_from_db`], [`PolarConversion::read_from_db_with_curve`] | `SmPolarConversion::ReadFromDB` (ellipse back pointer; null back pointer, from `SmSurfOfRevolution::ReadFromDB`) |
+//! | [`PolarConversion::write_to_db`]                   | `SmPolarConversion::WriteToDB`                    |
+//!
+//! Deviations:
+//! - **Collapsed STEP edits (#428).** `Kernel::fixes.ellipse_step_interval_checks`
+//!   rejects inverted STEP edits and empty/non-finite converted NURBS intervals
+//!   before mutation. Default finite-input behavior stays pinned C++; non-finite
+//!   source intervals are always refused.
+//! - **Projected 2D semi-axes (#2140, WR-31).**
+//!   `Kernel::fixes.ellipse_convert_to_2d_uses_both_axes` passes the extremal
+//!   projected-radius quadratic to `SolveQuadraticEqn` in ascending `[C, B, A]`
+//!   order, evaluates the second semi-axis at `dThetaYRad` (`theta_x_rad + HALF_PI`
+//!   when linear) instead of reusing `dThetaXRad`, and aligns a full-turn STEP
+//!   domain with the projected NURB seam before `SetUpPolarConversion`. Default
+//!   behavior stays pinned C++.
+//! - **Rounding of the analytic form (WR-741).** `AssertValid`'s tests 1 and 2 also
+//!   allow `gamma_11 max(|rx|, |ry|) (1 + |t|)` (`t` in radians), the rounding the angle
+//!   and the evaluation of `o + rx cos(t) X + ry sin(t) Y` carry: a near-degenerate
+//!   ellipse (radii 1.8e7 and 8) makes it larger than `100 SM_EFF_ZERO (1 + |p|)`.
+//! - **Circle class.** `SmCircle` derives from `SmEllipse` without data of its own;
+//!   it is an [`Ellipse`] whose `circle` flag is set ([`Ellipse::is_circle_class`]),
+//!   which picks the circle's type, its `IsKindOf`, `IsArc`, `CreateSimpleOffset` and
+//!   `AssertValid` overrides and its B-spline form (`SM_CF_CIRCULAR_ARC`). The
+//!   geometric test [`Ellipse::is_circle`] (`IsCircle`) is unrelated.
+//! - **Owner.** The owner (`m_pOwner`) lives in the [`crate::curve::curve::Curve`]
+//!   wrapper; the methods that make the NURB take it as an argument (`None` for a
+//!   free ellipse). `MakeNurb` of an ellipse owned by an edge (or by an edge use or
+//!   a curve, whose owner chain may reach one: `GetEdge`) needs the edge's zone
+//!   tolerance (`SmTol::GetZoneTol3d(const SmObject*)`, unit `topology.brep_p1`);
+//!   one owned by a surface of extrusion or revolution needs its generator range
+//!   (units `surface.surf_of_extrusion_p1`, `surface.surf_of_revolution_p1`). These
+//!   return [`SolidError::Unported`], except where the caller resolved the edge's
+//!   tolerance ([`Ellipse::make_nurb_owned_with_edge_tol`]: the curve cache of an edge
+//!   curve, and a curve carrying its edge's tolerance,
+//!   [`crate::curve::curve::Curve::owner_zone_tol_3d`]).
+//!   Trimming accepts a caller-resolved owning edge tolerance through
+//!   `trim_with_zone_tol`; public ownerless trimming uses the system tolerance.
+//! - **Notifications.** `Notify(SM_NO_POST_EDIT)` rebuilds the polar converter
+//!   (status ignored); the other operations only drop caches the ellipse does not
+//!   own here, and `SM_NO_UNKNOWN` only logs. `SmCurve::Notify`'s cache bookkeeping
+//!   belongs to the [`crate::curve::curve::Curve`] wrapper.
+//! - **Polar converter.** As in `p2`, the converter's curve is always the owning
+//!   ellipse (borrowed). `SmPolarConversion::ReadFromDB` of a converter that owns a
+//!   copy of its curve (`bHasCurve`, never written for an ellipse's own converter)
+//!   returns `InvalidInput`; [`PolarConversion::read_from_db_with_curve`] (added by
+//!   `surface.surf_of_revolution_p3`) reads that copy for the surface of revolution's
+//!   converter, which owns its sweep circle.
+//! - **Undefined behaviour.** Where upstream would read an uninitialised value (an
+//!   unreadable ASCII count or flag, a failed `ConvertTFromSTEPToNURBS` in
+//!   `AssertValid`, a missing polar curve in `ConvertToPolarParameter`'s callers,
+//!   `ConvertTo2D`'s quadratic without a root (with one root `dThetaYRad` reads the
+//!   uninitialised second: unused by default, `theta_x_rad + HALF_PI` under
+//!   `ellipse_convert_to_2d_uses_both_axes`), the 3-point circle of
+//!   collinear points) or index past a table (polar tables shorter than the knot
+//!   list), the port returns [`SolidError::InvalidInput`] (or the solver's status).
+//! - **Statuses ignored upstream** stay ignored, except [`SolidError::Unported`],
+//!   which always propagates. `SmBoolean` values read from a database are taken as
+//!   `!= 0`.
+//! - **Arguments.** Out-params become return values; `SmContext` arguments, the
+//!   arguments upstream marks `NotUsed` (`GlobalPointSolveSTEP`'s interval and
+//!   vectors, `IsArc`'s sample count and tolerance, `ReadFromDB`'s type) and debug
+//!   flags (`Trim`'s `bSkipDebugCheck`) are dropped. `AssertValid` takes the keys
+//!   naming the ellipse and its polar converter in reports and `level_given` for
+//!   `SM_LEVEL_GIVEN` (the other levels run every check used here).
+//! - **Back-edges.** `SmCurve::IsArc` of a non-circular ellipse (inside
+//!   `SmBSplineCurve::CreateSimpleOffset`) is the base class of unit `curve.curve_p5`
+//!   ([`crate::curve::curve::p5::is_arc_base`]) on the ellipse's NURB.
+//! - **`IsNurbCurveCircle`.** The `SmCircle*&` out-param is the returned `Option`
+//!   (`None` for `FALSE`), the defaulted `dToleranceScale` an `Option` (`None`: `1.0`);
+//!   the `SmBSplineCurve*` is a [`Curve`] whose kind must derive from `SmBSplineCurve`
+//!   (B-spline, ellipse, circle, line, parabola, hyperbola), others are
+//!   [`SolidError::InvalidInput`]. The ignored `EvaluatePoint` status propagates.
+
+use core::ops::Div;
+
+use crate::curve::curve::p1::GlobalPointSolveOptions;
+use crate::curve::curve::p2::CIRCLE_TYPE;
+use crate::curve::curve::p4::is_closed_base;
+use crate::curve::curve::{Curve, CurveKind};
+use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::geom::assert_array::labels::{
+    self, EDGEUSE_TYPE, EDGE_TYPE, POLAR_CONVERSION_TYPE, SURF_OF_EXTRUSION_TYPE,
+    SURF_OF_REVOLUTION_TYPE,
+};
+use crate::geom::assert_array::{AssertArray, AssertReport, ObjectKey, ReportSpec};
+use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::extent1d::{Extent1d, ExtentPointType};
+use crate::geom::geom_utility::p1::circle_from_3_points;
+use crate::geom::global_solver::{SolutionRequested, SolverOperation};
+use crate::geom::object::{NotifyOperation, ObjectRef};
+use crate::geom::polynomial::solve_quadratic;
+use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject};
+use crate::geom::tol::{are_same, are_same_to_tol, is_zero_to_tol, tol3d};
+use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
+use crate::math::{max2, min3, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQRT, HALF_PI, PI, UNDEF_DOUBLE};
+use crate::nurbs::b_spline_curve::p2::ArcData;
+use crate::nurbs::b_spline_curve::p3::DerivedOverrides;
+use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm};
+use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::crv_basic::ConicType;
+use crate::nurbs::crv_common::{elliptical_arc_tol, EllipseArc};
+use crate::nurbs::index::at;
+use crate::nurbs::math::gamma;
+use crate::nurbs::nurbs_crv::to_euclid;
+use crate::surface::surface::Surface;
+use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
+
+use super::p2::{Ellipse, EllipseOptions, PolarConversion};
+
+const OP_ADJUST: &str = "curve::ellipse::p1::Ellipse::adjust_step_interval";
+const OP_MAKE_NURB: &str = "curve::ellipse::p1::Ellipse::make_nurb";
+const OP_TO_2D: &str = "curve::ellipse::p1::Ellipse::convert_to_2d";
+const OP_TO_POLAR: &str = "curve::ellipse::p1::PolarConversion::convert_to_polar_parameter";
+const OP_IS_CURRENT: &str = "curve::ellipse::p1::PolarConversion::is_current";
+const OP_ASSERT: &str = "curve::ellipse::p1::Ellipse::assert_valid";
+const OP_READ_POLAR: &str = "curve::ellipse::p1::PolarConversion::read_from_db";
+const OP_CANONICAL: &str = "curve::ellipse::p1::Ellipse::create_canonical";
+const OP_CIRCLE_CANONICAL: &str = "curve::ellipse::p1::Ellipse::create_canonical_circle";
+const OP_JOIN: &str = "curve::ellipse::p1::Ellipse::join_with";
+const OP_OFFSET: &str = "curve::ellipse::p1::Ellipse::create_simple_offset";
+const OP_IS_NURB_CURVE_CIRCLE: &str = "curve::ellipse::p1::Ellipse::is_nurb_curve_circle";
+/// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
+const ANALYTIC_TOL_SCALE: f64 = 100.0;
+
+/// `SmCircle_TYPE` (`CURV_BASE_TYPE + 21`), the class type of a circle.
+pub const CIRCLE_CLASS_TYPE: i64 = CIRCLE_TYPE;
+
+/// The handle of the ellipse in its own global solve: a curve with the given natural
+/// interval (the solver's duplicate test reads it). The solutions returned name no
+/// object.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SelfHandle(Extent1d);
+
+impl SolutionObject for SelfHandle {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Curve
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        Some(self.0)
+    }
+}
+
+/// The `SM_ASSERT_*_REPORT` macros (`SM_LEVEL_0` tests: the predicate always runs):
+/// `true` when `passed`; otherwise, with a list, a report for test `test_index` of
+/// the label table `(class.0, list_index)` about `key` (whose dynamic class string is
+/// `class.1`), unless an equal one is there.
+fn report(
+    list: &mut Option<&mut AssertArray>,
+    key: ObjectKey,
+    class: (i64, &'static str),
+    list_index: u64,
+    test_index: u64,
+    passed: bool,
+    tol: f64,
+    val: f64,
+) -> Result<bool> {
+    if passed {
+        if let Some(l) = list.as_deref_mut() {
+            l.set_last_add(false);
+        }
+        return Ok(true);
+    }
+    if let Some(l) = list.as_deref_mut() {
+        let r = AssertReport::new(ReportSpec {
+            reporter: Some(key),
+            test_index,
+            test_class: class.0,
+            owner: Some(key),
+            owner_type: class.0,
+            owner_type_string: Some(class.1),
+            other: None,
+            other_type: 0,
+            other_type_string: Some("NULL"),
+            tol3d: tol3d(tol),
+            value: val,
+            list_index,
+            message: None,
+        })?;
+        l.add_unique_delete_duplicate(r);
+    }
+    Ok(false)
+}
+
+const POLAR_CLASS: (i64, &str) = (POLAR_CONVERSION_TYPE, "SmPolarConversion");
+
+/// `is >> value` of a double: stores the extracted value unless the stream's
+/// sentry fails.
+fn extract(s: &mut InputStream, slot: &mut f64) {
+    if let Some(v) = s.extract_double() {
+        *slot = v;
+    }
+}
+
+// ---- the polar conversion table -------------------------------------------------------
+
+impl PolarConversion {
+    /// The STEP angle in degrees of the NURB parameter `nurbs_param` of `curve` (the
+    /// ellipse owning this table) and whether the conversion is exact (always, when it
+    /// succeeds) (`ConvertToPolarParameter`). The NURB ends (within `SM_EFF_ZERO`) map
+    /// to the STEP domain ends (swapped for an inside-out ellipse); other parameters
+    /// are evaluated and inverted (`STEPInversion`). On a closed curve the seam
+    /// parameter returns the angle of its own end of the domain (`-/+ 360`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NULL_POINTER` when the table has no curve; `InvalidInput` when the
+    /// tables are shorter than the closed-curve checks read.
+    pub fn convert_to_polar_parameter(
+        &self,
+        k: &Kernel,
+        curve: &Ellipse,
+        nurbs_param: f64,
+    ) -> Result<(f64, bool)> {
+        // Can't do anything if not set.
+        if !self.has_curve {
+            return Err(SolidError::null_pointer(OP_TO_POLAR));
+        }
+
+        // avoid roundoff errors at boundaries
+        let anal_ivl = curve.step_interval();
+        let nurb_ivl = curve.base.natural_interval();
+        let point_type = nurb_ivl.classify_point(nurbs_param, EFF_ZERO);
+
+        // switch on ePointType - map boundary values and invert internal values
+        let mut polar_deg = match point_type {
+            ExtentPointType::Start => {
+                if curve.inside_out {
+                    anal_ivl.max()
+                } else {
+                    anal_ivl.min()
+                }
+            }
+            ExtentPointType::End => {
+                if curve.inside_out {
+                    anal_ivl.min()
+                } else {
+                    anal_ivl.max()
+                }
+            }
+            ExtentPointType::Both
+            | ExtentPointType::Outside
+            | ExtentPointType::Unknown
+            | ExtentPointType::Inside => {
+                // use a conversion based arcTan2 (EvaluatePoint status ignored)
+                let point = ignored(curve.base.evaluate_point(nurbs_param))?.unwrap_or(Vec3::UNDEF);
+                curve.step_inversion(k, point, false, 0.0).0
+            }
+        };
+
+        let exact = true;
+
+        // make sure to return the proper end value for closed curve seam conversions.
+        // The seam adjustments only apply at the ends of the knot/angle tables, so test those
+        // cheap conditions first and evaluate IsClosed() (three curve evaluations) only there.
+        if !self.natural_knots.is_empty() && !self.angles.is_empty() {
+            let inside_out = curve.inside_out;
+            let knots = &self.natural_knots;
+            let angles = &self.angles;
+            let last = knots.len().wrapping_sub(1);
+            let last_angle = angles.len().wrapping_sub(1);
+            let scaled_zero =
+                (at(knots, last, OP_TO_POLAR)? - at(knots, 0, OP_TO_POLAR)?) / 360.0 * EFF_ZERO_DEG;
+            let same = |a: f64, b: f64, tol: f64| are_same_to_tol(a, b, tol);
+
+            // when values are at opposing ends - move the end angle
+            let move_to_min = if inside_out {
+                same(nurbs_param, at(knots, last, OP_TO_POLAR)?, scaled_zero)
+                    && same(polar_deg, at(angles, 0, OP_TO_POLAR)?, EFF_ZERO_DEG)
+            } else {
+                same(nurbs_param, at(knots, 0, OP_TO_POLAR)?, scaled_zero)
+                    && same(
+                        polar_deg,
+                        at(angles, last_angle, OP_TO_POLAR)?,
+                        EFF_ZERO_DEG,
+                    )
+            };
+            let move_to_max = !move_to_min
+                && if inside_out {
+                    same(nurbs_param, at(knots, 0, OP_TO_POLAR)?, scaled_zero)
+                        && same(
+                            polar_deg,
+                            at(angles, last_angle, OP_TO_POLAR)?,
+                            EFF_ZERO_DEG,
+                        )
+                } else {
+                    same(nurbs_param, at(knots, last, OP_TO_POLAR)?, scaled_zero)
+                        && same(polar_deg, at(angles, 0, OP_TO_POLAR)?, EFF_ZERO_DEG)
+                };
+
+            if (move_to_min || move_to_max)
+                && is_closed_base(k, &curve.base, &curve.base.natural_interval(), 0.0)?
+            {
+                // increment, rather than PolarParam = min/maxAngle, to preserve tolerances
+                if move_to_min {
+                    polar_deg -= 360.0;
+                } else {
+                    polar_deg += 360.0;
+                }
+            }
+        }
+
+        // all done
+        Ok((polar_deg, exact))
+    }
+
+    /// Whether the tables agree with `curve`, the ellipse owning them (`IsCurrent`):
+    /// `false` without curve or set-up tables; else the knot count (report 0) and
+    /// values (report 1, `SM_ARE_SAME`) match the curve's natural knots, the stored
+    /// angles match the inverted knot points within `SM_EFF_ZERO_DEG` modulo 360
+    /// (report 2) and change monotonically (report 3). Reports go to `list` (label
+    /// list 1 of `SmPolarConversion`, about `key`).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when the angle table is shorter than the knot list; those of
+    /// [`AssertReport::new`].
+    pub fn is_current(
+        &self,
+        k: &Kernel,
+        curve: &Ellipse,
+        list: Option<&mut AssertArray>,
+        key: ObjectKey,
+    ) -> Result<bool> {
+        let mut list = list;
+
+        // init return
+        let mut rtn = true;
+
+        // These were already checked in the calling function
+        if !self.has_curve || !self.possible {
+            return Ok(false);
+        }
+
+        // get curve knots (status ignored)
+        let natural_knots = ignored(curve.base.knots(None))?
+            .map(|(k, _)| k)
+            .unwrap_or_default();
+        let cnt = natural_knots.len();
+
+        // for each knot - check stored knot value
+        rtn &= report(
+            &mut list,
+            key,
+            POLAR_CLASS,
+            1,
+            0,
+            natural_knots.len() == self.natural_knots.len(),
+            UNDEF_DOUBLE,
+            UNDEF_DOUBLE,
+        )?;
+
+        let mut ii = 0;
+        while ii < cnt && rtn {
+            let a = at(&natural_knots, ii, OP_IS_CURRENT)?;
+            let b = at(&self.natural_knots, ii, OP_IS_CURRENT)?;
+            rtn &= report(
+                &mut list,
+                key,
+                POLAR_CLASS,
+                1,
+                1,
+                are_same(a, b),
+                UNDEF_DOUBLE,
+                UNDEF_DOUBLE,
+            )?;
+            ii += 1;
+        }
+
+        // build angles for circles and ellipses (the curve is always an ellipse)
+        let angle_tol = EFF_ZERO_DEG;
+        if rtn {
+            // monotonic local
+            let mut angle_dir = 0.0;
+
+            // for each knot get a PolarParam angleDeg
+            let mut ii = 0;
+            while ii < cnt && rtn {
+                // Get CCW angle to vec = (thisKnotPoint - Origin) (status ignored)
+                let knot = at(&natural_knots, ii, OP_IS_CURRENT)?;
+                let point = ignored(curve.base.evaluate_point(knot))?.unwrap_or(Vec3::UNDEF);
+
+                // convert point to polar param (deg)
+                let angle_deg = curve.step_inversion(k, point, false, 0.0).0;
+                let stored = at(&self.angles, ii, OP_IS_CURRENT)?;
+
+                // computed angles must match angles in storage
+                let ok = are_same_to_tol(angle_deg, stored, angle_tol)
+                    || are_same_to_tol(angle_deg, stored + 360.0, angle_tol)
+                    || are_same_to_tol(angle_deg + 360.0, stored, angle_tol);
+                let val = min3(
+                    angle_deg - stored,
+                    angle_deg - stored + 360.0,
+                    angle_deg + 360.0 - stored,
+                );
+                rtn &= report(&mut list, key, POLAR_CLASS, 1, 2, ok, angle_tol, val)?;
+
+                // angles must increase or decrease monotonically
+                if ii == 1 {
+                    let d = at(&self.angles, ii, OP_IS_CURRENT)?
+                        - at(&self.angles, ii - 1, OP_IS_CURRENT)?;
+                    angle_dir = if d > 0.0 { 1.0 } else { -1.0 };
+                } else if ii > 1 {
+                    let d = at(&self.angles, ii, OP_IS_CURRENT)?
+                        - at(&self.angles, ii - 1, OP_IS_CURRENT)?;
+                    let this_dir = if d > 0.0 { 1.0 } else { -1.0 };
+                    rtn &= report(
+                        &mut list,
+                        key,
+                        POLAR_CLASS,
+                        1,
+                        3,
+                        this_dir == angle_dir,
+                        UNDEF_DOUBLE,
+                        UNDEF_DOUBLE,
+                    )?;
+                }
+                ii += 1;
+            }
+        }
+
+        // all done
+        Ok(rtn)
+    }
+
+    /// `AssertValid`: without curve the tables must not be set up (report 0), else
+    /// they must be current ([`Self::is_current`], report 1). Reports go to `list`
+    /// (label list 0 of `SmPolarConversion`, about `key`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::is_current`].
+    pub fn assert_valid(
+        &self,
+        k: &Kernel,
+        curve: &Ellipse,
+        list: Option<&mut AssertArray>,
+        key: ObjectKey,
+    ) -> Result<bool> {
+        let mut list = list;
+        let mut rtn = true;
+
+        if self.has_curve {
+            let current = self.is_current(k, curve, list.as_deref_mut(), key)?;
+            rtn &= report(
+                &mut list,
+                key,
+                POLAR_CLASS,
+                0,
+                1,
+                current,
+                UNDEF_DOUBLE,
+                UNDEF_DOUBLE,
+            )?;
+        } else {
+            rtn &= report(
+                &mut list,
+                key,
+                POLAR_CLASS,
+                0,
+                0,
+                !self.possible,
+                UNDEF_DOUBLE,
+                UNDEF_DOUBLE,
+            )?;
+        }
+        Ok(rtn)
+    }
+
+    /// Reads a table written by `WriteToDB` (`ReadFromDB`): the set-up flag, the
+    /// knot, angle and exactness counts and the has-curve flag (one per line in ASCII
+    /// files), then the three arrays (ASCII: a line break after the elements with
+    /// index 5, 10, ... and after a partial last line). The table's curve is the
+    /// ellipse being read (`cpCurve`, borrowed).
+    ///
+    /// # Errors
+    ///
+    /// A failed binary read; `InvalidInput` for unreadable ASCII values (upstream:
+    /// uninitialised), counts larger than the stream, or a stored copy of the curve
+    /// (`bHasCurve`, see the module deviations).
+    pub fn read_from_db(db: &mut DatabaseReader) -> Result<Self> {
+        let (pc, has_curve) = Self::read_tables(db)?;
+
+        // containing curve
+        if has_curve {
+            return Err(SolidError::invalid_input(
+                OP_READ_POLAR,
+                "a polar converter owning a copy of its curve is not modelled",
+            ));
+        }
+        Ok(Self::finish_back_pointer(db, pc, true))
+    }
+
+    /// Reads a table that may own a copy of its curve (`ReadFromDB` with a null
+    /// `cpCurve`, as `SmSurfOfRevolution::ReadFromDB` calls it): after the tables, a
+    /// stored curve (`bHasCurve`) is read with its type header; without one the
+    /// table has no curve (the null back pointer). Returns the table and the curve
+    /// it owns.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`PolarConversion::read_from_db`]'s table reads;
+    /// [`SolidError::InvalidInput`] for a stored curve that is not an ellipse
+    /// (upstream casts it). The statuses of the curve's type header and reader are
+    /// ignored, as upstream (a failed read leaves the table without curve), except
+    /// [`SolidError::Unported`].
+    pub fn read_from_db_with_curve(
+        k: &Kernel,
+        db: &mut DatabaseReader,
+        version: u64,
+    ) -> Result<(Self, Option<Ellipse>)> {
+        let (polar, curve) = Self::read_from_db_with_curve_object(k, db, version)?;
+        let ellipse = match curve.map(Curve::into_kind) {
+            Some(CurveKind::Ellipse(ellipse)) => Some(ellipse),
+            None => None,
+            Some(_) => {
+                return Err(SolidError::invalid_input(
+                    OP_READ_POLAR,
+                    "the stored polar curve is not an ellipse",
+                ))
+            }
+        };
+        Ok((polar, ellipse))
+    }
+
+    /// Same reader retaining the original owned curve wrapper and its identity.
+    pub(crate) fn read_from_db_with_curve_object(
+        k: &Kernel,
+        db: &mut DatabaseReader,
+        version: u64,
+    ) -> Result<(Self, Option<Curve>)> {
+        let (mut pc, has_curve) = Self::read_tables(db)?;
+        if !has_curve {
+            // m_cpCurve is the (null) back pointer passed in
+            return Ok((Self::finish_back_pointer(db, pc, false), None));
+        }
+
+        // read m_cpCurve object from file (statuses ignored upstream)
+        if db.file_type() == FileType::Ascii {
+            db.go_to_next_line();
+        }
+        let header = ignored(db.read_type(true))?;
+        let curve = match header {
+            Some(h) => match (h.type_code, h.dim) {
+                (Some(ty), Some(dim)) => ignored(Curve::read_from_db(k, ty, db, dim, version))?,
+                // (an unread header: upstream passes uninitialised values on)
+                _ => None,
+            },
+            None => None,
+        };
+        if curve
+            .as_ref()
+            .is_some_and(|curve| !matches!(curve.kind(), CurveKind::Ellipse(_)))
+        {
+            return Err(SolidError::invalid_input(
+                OP_READ_POLAR,
+                "the stored polar curve is not an ellipse",
+            ));
+        }
+        pc.has_curve = curve.is_some();
+        Ok((pc, curve))
+    }
+
+    /// `WriteToDB`: writes the set-up flag, the knot, angle and exactness counts and
+    /// whether the table owns a copy of its curve (`owned_curve`; the ellipse's own
+    /// table borrows it and passes `None`), then the three arrays (ASCII: a line
+    /// break after the elements with index 5, 10, ... and after a partial last line),
+    /// then the owned curve (`m_cpCurve`, any curve kind) with its type header, as
+    /// a curve nested `depth` levels deep.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`crate::topology::geometry_write::write_curve_at`] for the owned curve.
+    pub fn write_to_db(
+        &self,
+        db: &mut DatabaseWriter,
+        version: u64,
+        owned_curve: Option<&Curve>,
+        depth: usize,
+    ) -> Result<()> {
+        let ascii = db.file_type() == FileType::Ascii;
+        let n_knots = self.natural_knots.len() as u64;
+        let n_angles = self.angles.len() as u64;
+        let n_exact = self.exact_conversion.len() as u64;
+        let has_curve = i32::from(owned_curve.is_some());
+        let possible = i32::from(self.possible);
+
+        if ascii {
+            db.out_i64(possible.into());
+            db.out_str(
+                " SmPolarConversion PolarConversionPossible - TRUE=tables are initialized \n",
+            );
+            db.out_u64(n_knots);
+            db.out_str(" SmPolarConversion Number of Natural Knots \n");
+            db.out_u64(n_angles);
+            db.out_str(" SmPolarConversion Number of Angles \n");
+            db.out_u64(n_exact);
+            db.out_str(" SmPolarConversion Number of ExactConversion Flags \n");
+            db.out_i64(has_curve.into());
+            db.out_str(
+                " SmPolarConversion TRUE = Has Curve for stored conversions, \
+                 FALSE = back pointer \n",
+            );
+        } else {
+            db.write_boolean(possible);
+            db.write_long(n_knots as i64);
+            db.write_long(n_angles as i64);
+            db.write_long(n_exact as i64);
+            db.write_boolean(has_curve);
+        }
+
+        // Write Arrays
+        if ascii {
+            let rows = |db: &mut DatabaseWriter, values: &mut dyn Iterator<Item = String>| {
+                let mut n = 0usize;
+                for (ii, v) in values.enumerate() {
+                    db.out_str(&v).out_str(" ");
+                    if ii > 0 && ii % 5 == 0 {
+                        db.out_str("\n");
+                    }
+                    n += 1;
+                }
+                if n > 0 && n % 5 != 0 {
+                    db.out_str("\n");
+                }
+            };
+            let exact = &self.exact_conversion;
+            let mut flags = exact.iter().map(|&b| i32::from(b).to_string());
+            let knots: Vec<String> = self.natural_knots.iter().map(|&x| db.f64_text(x)).collect();
+            let angles: Vec<String> = self.angles.iter().map(|&x| db.f64_text(x)).collect();
+            rows(db, &mut knots.into_iter());
+            rows(db, &mut angles.into_iter());
+            rows(db, &mut flags);
+        } else {
+            if n_knots > 0 {
+                db.write_doubles(&self.natural_knots);
+            }
+            if n_angles > 0 {
+                db.write_doubles(&self.angles);
+            }
+            if n_exact > 0 {
+                let exact = &self.exact_conversion;
+                let flags: Vec<i32> = exact.iter().map(|&b| i32::from(b)).collect();
+                db.write_booleans(&flags);
+            }
+        }
+
+        // write out the curve the table owns (the ellipse's own table borrows it)
+        if let Some(c) = owned_curve {
+            if ascii {
+                db.out_str(" SmPolarConversion->CurveBeingConverted \n");
+            }
+            db.write_type(c.type_code(), Some(c.dim()));
+            crate::topology::geometry_write::write_curve_at(c, db, version, depth)?;
+        } else if ascii {
+            db.out_str("Has No Copy of SmPolarConversion->CurveBeingConverted \n");
+        }
+        Ok(())
+    }
+
+    /// The end of a read whose table has no stored curve: the back pointer
+    /// (`has_back_pointer`: the ellipse being read; else null), then the ASCII line
+    /// break.
+    fn finish_back_pointer(db: &mut DatabaseReader, mut pc: Self, has_back_pointer: bool) -> Self {
+        pc.has_curve = has_back_pointer;
+        if db.file_type() == FileType::Ascii {
+            db.go_to_next_line();
+        }
+        pc
+    }
+
+    /// The tables of [`PolarConversion::read_from_db`] and the has-curve flag.
+    fn read_tables(db: &mut DatabaseReader) -> Result<(Self, bool)> {
+        let bad = |reason: &'static str| SolidError::invalid_input(OP_READ_POLAR, reason);
+        let ascii = db.file_type() == FileType::Ascii;
+
+        // locals
+        let (possible, n_knots, n_angles, n_exact, has_curve) = if ascii {
+            let possible = db.in_stream_mut().and_then(InputStream::extract_int);
+            db.go_to_next_line();
+            let n_knots = db.in_stream_mut().and_then(InputStream::extract_ulong);
+            db.go_to_next_line();
+            let n_angles = db.in_stream_mut().and_then(InputStream::extract_ulong);
+            db.go_to_next_line();
+            let n_exact = db.in_stream_mut().and_then(InputStream::extract_ulong);
+            db.go_to_next_line();
+            let has_curve = db.in_stream_mut().and_then(InputStream::extract_int);
+            db.go_to_next_line();
+            (
+                possible.ok_or_else(|| bad("unreadable flag"))? != 0,
+                n_knots.ok_or_else(|| bad("unreadable count"))?,
+                n_angles.ok_or_else(|| bad("unreadable count"))?,
+                n_exact.ok_or_else(|| bad("unreadable count"))?,
+                has_curve.ok_or_else(|| bad("unreadable flag"))? != 0,
+            )
+        } else {
+            let possible = db.read_boolean()? != 0;
+            let n_knots = db.read_ulong()?;
+            let n_angles = db.read_ulong()?;
+            let n_exact = db.read_ulong()?;
+            let has_curve = db.read_boolean()? != 0;
+            (possible, n_knots, n_angles, n_exact, has_curve)
+        };
+
+        // array sizes must fit in what is left of the stream
+        let count = |n: u64| usize::try_from(n).map_err(|_| bad("count too large"));
+        let (n_knots, n_angles, n_exact) = (count(n_knots)?, count(n_angles)?, count(n_exact)?);
+        let min_bytes = if ascii { 1 } else { 8 };
+        db.ensure_available(n_knots, min_bytes, OP_READ_POLAR)?;
+        db.ensure_available(n_angles, min_bytes, OP_READ_POLAR)?;
+        db.ensure_available(n_exact, if ascii { 1 } else { 4 }, OP_READ_POLAR)?;
+
+        let mut pc = Self::new();
+        pc.possible = possible;
+
+        if ascii {
+            let read_reals = |db: &mut DatabaseReader, n: usize| -> Result<Vec<f64>> {
+                let mut v = Vec::new(); // grown as read: n comes from the file
+                for ii in 0..n {
+                    let x = db
+                        .in_stream_mut()
+                        .and_then(InputStream::extract_double)
+                        .ok_or_else(|| bad("unreadable value"))?;
+                    v.push(x);
+                    if ii > 0 && ii % 5 == 0 {
+                        db.go_to_next_line();
+                    }
+                }
+                if n > 0 && n % 5 != 0 {
+                    db.go_to_next_line();
+                }
+                Ok(v)
+            };
+            pc.natural_knots = read_reals(db, n_knots)?;
+            pc.angles = read_reals(db, n_angles)?;
+            let mut flags = Vec::new(); // grown as read: n_exact comes from the file
+            for ii in 0..n_exact {
+                let x = db
+                    .in_stream_mut()
+                    .and_then(InputStream::extract_int)
+                    .ok_or_else(|| bad("unreadable flag"))?;
+                flags.push(x != 0);
+                if ii > 0 && ii % 5 == 0 {
+                    db.go_to_next_line();
+                }
+            }
+            if n_exact > 0 && n_exact % 5 != 0 {
+                db.go_to_next_line();
+            }
+            pc.exact_conversion = flags;
+        } else {
+            pc.natural_knots = db.read_doubles(n_knots)?;
+            pc.angles = db.read_doubles(n_angles)?;
+            pc.exact_conversion = db
+                .read_booleans(n_exact)?
+                .into_iter()
+                .map(|b| b != 0)
+                .collect();
+        }
+
+        Ok((pc, has_curve))
+    }
+}
+
+// ---- the ellipse and circle -----------------------------------------------------------
+
+impl Ellipse {
+    // ---- construction -----------------------------------------------------------------
+
+    /// The empty circle that `ReadFromDB` fills (`SmCircle()`): [`Ellipse::empty`] of
+    /// dimension 3 of class `SmCircle`.
+    #[must_use]
+    pub const fn empty_circle() -> Self {
+        let mut e = Self::empty(3);
+        e.circle = true;
+        e
+    }
+
+    /// The circle centred at `center` with `radius` along the axes `x_axis` and
+    /// `y_axis` over the angular domain `domain` (degrees) (`SmCircle(Center, XAxis,
+    /// YAxis, AnalDomain, dRadius, ..)`): the ellipse of [`Ellipse::new`] with both
+    /// radii `radius`, of class `SmCircle` and form `SM_CF_CIRCULAR_ARC`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Ellipse::new`].
+    pub fn new_circle(
+        k: &Kernel,
+        center: Point3,
+        x_axis: Vec3,
+        y_axis: Vec3,
+        domain: Extent1d,
+        radius: f64,
+        opts: &EllipseOptions<'_>,
+    ) -> Result<Self> {
+        let mut e = Self::new(k, center, x_axis, y_axis, domain, radius, radius, opts)?;
+        e.circle = true;
+        e.base.form = BSplineCurveForm::CircularArc;
+        Ok(e)
+    }
+
+    /// The circle through `start`, `mid` and `end` (`SmCircle(StartPoint, MidPoint,
+    /// EndPoint, lDimension, bClosedCircle, ..)`): the arc from `start` to `end`, or
+    /// the closed circle when `closed` (`smgu_CircleFrom3Points`), placement set with
+    /// `SetCanonical` and the NURB made by [`Self::make_nurb`] (both statuses
+    /// ignored); form `SM_CF_CIRCULAR_ARC`.
+    ///
+    /// # Errors
+    ///
+    /// The status of `smgu_CircleFrom3Points` (collinear points, a bad dimension;
+    /// upstream then continues with uninitialised values); [`SolidError::Unported`]
+    /// from `MakeNurb`.
+    pub fn circle_from_3_points(
+        k: &Kernel,
+        start: Point3,
+        mid: Point3,
+        end: Point3,
+        dim: u64,
+        closed: bool,
+    ) -> Result<Self> {
+        let mut e = Self::empty(dim);
+        e.circle = true;
+
+        // compute circle parameters
+        let c = circle_from_3_points(start, mid, end, dim, closed)?;
+
+        // set Parent Object values
+        let _ = e.position.set_canonical(c.center, c.x_axis, c.y_axis);
+        e.anal_domain = c.domain;
+        e.radius_x = c.radius;
+        e.radius_y = c.radius;
+
+        // make the associated NURB and set the Form value
+        ignore_status(e.make_nurb(k))?;
+        e.base.form = BSplineCurveForm::CircularArc;
+        Ok(e)
+    }
+
+    /// A copy (`SmEllipse(const SmEllipse&)` and `Copy`; for a circle
+    /// `SmCircle(const SmCircle&)` and `SmCircle::Copy`): the B-spline base and the
+    /// ellipse data are copied, the polar converter is set up again, then the NURB is
+    /// set again from this ellipse's (rebuilding the converter; statuses ignored).
+    ///
+    /// # Errors
+    ///
+    /// None but [`SolidError::Unported`] (never produced here).
+    pub fn copy(&self, k: &Kernel) -> Result<Self> {
+        let mut c = Self {
+            base: self.base.copy(),
+            position: self.position,
+            anal_domain: self.anal_domain,
+            radius_x: self.radius_x,
+            radius_y: self.radius_y,
+            polar: PolarConversion::new(),
+            inside_out: self.inside_out,
+            circle: self.circle,
+        };
+
+        // stop infinite recursion: don't copy underlying PolarConverter - reSet it
+        ignore_status(c.set_up_polar_conversion(k))?;
+
+        // (Copy / the circle copy constructor)
+        ignore_status(c.set_from_gw_nurb(k, self.base.gw_nurb()))?;
+        Ok(c)
+    }
+
+    /// The ellipse with placement `origin`, radii `radius1` (X) and `radius2` (Y)
+    /// over `interval` (degrees; `None`: `[0, 360]`), inside out when `inside_out`
+    /// (`SmEllipse::CreateCanonical`; dimension 3).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the NURB could not be made; those of [`Ellipse::new`].
+    pub fn create_canonical(
+        k: &Kernel,
+        origin: &Axis2Placement,
+        radius1: f64,
+        radius2: f64,
+        interval: Option<&Extent1d>,
+        inside_out: Option<bool>,
+    ) -> Result<Self> {
+        let extent = Extent1d::from_min_max(0.0, 360.0);
+
+        // make the ellipse
+        let e = Self::new(
+            k,
+            origin.origin(),
+            origin.x_axis(),
+            origin.y_axis(),
+            interval.copied().unwrap_or(extent),
+            radius1,
+            radius2,
+            &EllipseOptions {
+                dim: 3,
+                nurb: None,
+                inside_out: inside_out.unwrap_or(false),
+            },
+        )?;
+
+        // all done
+        if e.base.nurb.is_none() {
+            return Err(SolidError::sm_err(OP_CANONICAL));
+        }
+        Ok(e)
+    }
+
+    /// The circle with placement `origin` and `radius` over `interval` (degrees;
+    /// `None`: `[0, 360]`), inside out when `inside_out` (`SmCircle::CreateCanonical`;
+    /// dimension 3). The circle may be without NURB when NLib fails.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for a radius not above `SM_EFF_ZERO` (or NaN); those of
+    /// [`Ellipse::new`].
+    pub fn create_canonical_circle(
+        k: &Kernel,
+        origin: &Axis2Placement,
+        radius: f64,
+        interval: Option<&Extent1d>,
+        inside_out: Option<bool>,
+    ) -> Result<Self> {
+        // Reject zero/negative radius: no valid NURB
+        if radius.is_nan() || radius <= EFF_ZERO {
+            return Err(SolidError::sm_err(OP_CIRCLE_CANONICAL));
+        }
+
+        // new circle, interval = given interval or [0,360], InsideOut = given value or FALSE
+        let null_interval = Extent1d::from_min_max(0.0, 360.0);
+        Self::new_circle(
+            k,
+            origin.origin(),
+            origin.x_axis(),
+            origin.y_axis(),
+            interval.copied().unwrap_or(null_interval),
+            radius,
+            &EllipseOptions {
+                dim: 3,
+                nurb: None,
+                inside_out: inside_out.unwrap_or(false),
+            },
+        )
+    }
+
+    // ---- the circle class -------------------------------------------------------------
+
+    /// Whether the object is an `SmCircle` (the class, not the geometric test
+    /// [`Ellipse::is_circle`]).
+    #[must_use]
+    pub const fn is_circle_class(&self) -> bool {
+        self.circle
+    }
+
+    /// `IsKindOf`: `SmCircle_TYPE` for a circle, then those of `SmEllipse`
+    /// ([`Ellipse::is_kind_of`]).
+    #[must_use]
+    pub const fn kind_of(&self, t: i64) -> bool {
+        (self.circle && t == CIRCLE_TYPE) || Self::is_kind_of(t)
+    }
+
+    /// The radius at the 0 degree point (`SmCircle::GetRadius`).
+    #[must_use]
+    pub const fn radius(&self) -> f64 {
+        self.radius_x
+    }
+
+    /// Sets both radii, leaving the NURB as it is (`SmCircle::SetRadius`).
+    pub fn set_radius(&mut self, radius: f64) {
+        self.radius_x = radius;
+        self.radius_y = radius;
+    }
+
+    /// The circle's arc: placement, radius and STEP domain ends in degrees.
+    const fn arc_data(&self) -> ArcData {
+        (
+            self.position,
+            self.radius_x,
+            self.anal_domain.min(),
+            self.anal_domain.max(),
+        )
+    }
+
+    /// `IsArc(lNumberOfSamplePoints, dTol, ..)`: a circle is its own arc
+    /// (placement, radius, start and end angle in degrees; `SmCircle::IsArc`, whose
+    /// sample count and tolerance are unused); an ellipse runs the base class
+    /// ([`crate::curve::curve::p5::is_arc_base`] on its NURB, with the ellipse's
+    /// `IsDegenerate`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`crate::curve::curve::p5::is_arc_base`].
+    pub fn is_arc(&self, k: &Kernel, num_samples: u64, tol: f64) -> Result<Option<ArcData>> {
+        if self.circle {
+            return Ok(Some(self.arc_data()));
+        }
+        crate::curve::curve::p5::is_arc_base(
+            k,
+            &self.base,
+            |_, tol| Ok(self.is_degenerate(tol)),
+            num_samples,
+            tol,
+        )
+    }
+
+    /// The circle a B-spline curve is, when its geometry and representation are those
+    /// of a circle (`SmCircle::IsNurbCurveCircle`; `tolerance_scale` defaults to `1.0`):
+    /// a copy of a circle; `None` for a curve that is not of degree 2 and rational, is
+    /// degenerate (`IsDegenerate` to `scale * ANALYTIC_TOL_SCALE * SM_EFF_ZERO * (1 +
+    /// |P|max)`, `P` the point at 0.4567 of the natural interval) or is not an arc
+    /// (`IsArc(5, ..)` to the same tolerance); else the circle of the arc's frame,
+    /// radius and angular domain, dimension 3, with a copy of the curve's NURB
+    /// (`pOptNurb`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a curve that is not an `SmBSplineCurve` (a
+    /// Hermite, composite, conic or procedural curve); those of the curve's
+    /// evaluator, [`Curve::is_degenerate`], [`Curve::is_arc`] and
+    /// [`Ellipse::new_circle`].
+    pub fn is_nurb_curve_circle(
+        k: &Kernel,
+        test_curve: &Curve,
+        tolerance_scale: Option<f64>,
+    ) -> Result<Option<Self>> {
+        let tolerance_scale = tolerance_scale.unwrap_or(1.0);
+        let line_base;
+        let test_base: &BSplineCurve = match test_curve.kind() {
+            CurveKind::BSpline(c) => c,
+            CurveKind::Ellipse(e) => {
+                // low work - already a circle
+                if e.is_circle_class() {
+                    // copy the circle
+                    return Ok(Some(e.copy(k)?));
+                }
+                e.base()
+            }
+            CurveKind::Parabola(c) => c.base(),
+            CurveKind::Hyperbola(c) => c.base(),
+            CurveKind::Line(l) => {
+                line_base = l.base_with_nurb()?;
+                &line_base
+            }
+            _ => {
+                return Err(SolidError::invalid_input(
+                    OP_IS_NURB_CURVE_CIRCLE,
+                    "the curve is not an SmBSplineCurve",
+                ))
+            }
+        };
+
+        // no work - not a degree 2 rational curve
+        let deg = test_curve.degree()?;
+        if deg != 2 || !test_curve.is_rational()? {
+            return Ok(None);
+        }
+
+        // scale zero value
+        let mid_point =
+            test_curve.evaluate_point(k, test_curve.natural_interval().evaluate(0.4567))?;
+        let scaled_zero =
+            tolerance_scale * ANALYTIC_TOL_SCALE * EFF_ZERO * (1.0 + mid_point.max_dimension());
+
+        // skip degenerate curves
+        if test_curve.is_degenerate(k, scaled_zero, None)? {
+            return Ok(None);
+        }
+
+        // Get circle reference frame, radius and angle extent
+        let Some((ref_frame, radius, start_ang_deg, end_ang_deg)) =
+            test_curve.is_arc(k, 5, scaled_zero)?
+        else {
+            // when isoParameterCurve is not a circular Arc
+            return Ok(None);
+        };
+        let anal_domain = Extent1d::from_min_max(start_ang_deg, end_ang_deg);
+
+        // make new circle
+        let circle = Self::new_circle(
+            k,
+            ref_frame.origin(),
+            ref_frame.x_axis(),
+            ref_frame.y_axis(),
+            anal_domain,
+            radius,
+            &EllipseOptions {
+                dim: 3,
+                nurb: Some(test_base),
+                inside_out: false,
+            },
+        )?;
+        // all done
+        Ok(Some(circle))
+    }
+
+    /// The offset of the curve by `offset_distance` in the plane with normal
+    /// `offset_plane_normal` within `approx_tol_3d`, and its maximum gap
+    /// (`CreateSimpleOffset`). For a circle (`SmCircle::CreateSimpleOffset`) whose
+    /// axis is parallel or anti-parallel to the normal (`IsParallelTo` accepts both,
+    /// so the first branch always wins: the radius grows by the distance) the offset
+    /// is the circle with the new radius: `SM_ERR` below `-approx_tol_3d`, a
+    /// degenerate curve at the center below `approx_tol_3d`, else a copy with a new
+    /// NURB (gap 0). Other normals, and ellipses, use
+    /// `SmBSplineCurve::CreateSimpleOffset` (with the circle's own `IsArc`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for a negative offset radius; those of
+    /// [`BSplineCurve::create_simple_offset`] and [`BSplineCurve::create_degenerate_curve`].
+    pub fn create_simple_offset(
+        &self,
+        k: &Kernel,
+        approx_tol_3d: f64,
+        offset_plane_normal: Vec3,
+        offset_distance: f64,
+        match_parameterization: bool,
+    ) -> Result<(Curve, f64)> {
+        if !self.circle {
+            // SmBSplineCurve::CreateSimpleOffset (IsArc is SmCurve's)
+            let (c, gap) = self.base.create_simple_offset(
+                k,
+                approx_tol_3d,
+                offset_plane_normal,
+                offset_distance,
+                match_parameterization,
+            )?;
+            return Ok((Curve::from(c), gap));
+        }
+
+        let my_radius = self.radius_x;
+        let my_z_axis = self.position.z_axis();
+        let offset_rad = if offset_plane_normal.is_parallel_to(my_z_axis, EFF_ZERO_DEG) {
+            if k.fixes.circle_offset_antiparallel_normal {
+                if offset_plane_normal.dot(my_z_axis) >= 0.0 {
+                    my_radius + offset_distance
+                } else {
+                    my_radius - offset_distance
+                }
+            } else {
+                my_radius + offset_distance
+            }
+        } else if offset_plane_normal.is_parallel_to(-my_z_axis, EFF_ZERO_DEG) {
+            my_radius - offset_distance
+        } else {
+            // Out-of-plane offset would not be a circle.
+            let arc = self.arc_data();
+            let (c, gap) = self.base.create_simple_offset_with(
+                k,
+                approx_tol_3d,
+                offset_plane_normal,
+                offset_distance,
+                match_parameterization,
+                &|_, _, _| Ok(Some(arc)),
+            )?;
+            return Ok((Curve::from(c), gap));
+        };
+
+        if offset_rad < -approx_tol_3d {
+            return Err(SolidError::sm_err(OP_OFFSET));
+        } else if offset_rad < approx_tol_3d {
+            // Offset is a degenerate curve.
+            let c = BSplineCurve::create_degenerate_curve(3, self.position.origin())?;
+            return Ok((Curve::from(c), 0.0));
+        }
+
+        // Ok, all is good.  Create an SmCircle for output.
+        let mut offset_circle = self.copy(k)?;
+        offset_circle.set_radius(offset_rad);
+        ignore_status(offset_circle.make_nurb(k))?;
+        Ok((Curve::from(offset_circle), 0.0))
+    }
+
+    // ---- validity ---------------------------------------------------------------------
+
+    /// `AssertValid` (`SmEllipse::AssertValid`; for a circle `SmCircle::AssertValid`,
+    /// which runs the ellipse's checks unless `level_given` and then checks the radii
+    /// are equal, report 0 of `SmCircle`). The ellipse's checks: unless
+    /// `level_given` the B-spline base checks (`SmBSplineCurve::AssertValid` with the
+    /// ellipse's `MakeNurb`, `GetDegree`, `IsAnalytic` and `IsDegenerate`), the polar
+    /// converter ([`PolarConversion::assert_valid`], about `polar_key`), only circles
+    /// inside out (report 0 of `SmEllipse`), and at 5 STEP samples the NURB point of
+    /// the converted parameter on the STEP point (report 1) and on the ellipse
+    /// (report 2) within `100 SM_EFF_ZERO` scaled and, beyond upstream, the rounding the
+    /// evaluation carries, `gamma_11 max(|rx|, |ry|) (1 + |t|)` (WR-741). Reports name `key`.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when a STEP sample cannot be converted (upstream: an
+    /// uninitialised parameter); those of the base and polar checks;
+    /// [`SolidError::Unported`] from `MakeNurb` or the conversion.
+    pub fn assert_valid(
+        &mut self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level_given: bool,
+        key: ObjectKey,
+        polar_key: ObjectKey,
+    ) -> Result<bool> {
+        self.assert_valid_on(k, list, level_given, key, polar_key, None)
+    }
+
+    /// [`Ellipse::assert_valid`] of a UV trim on `trim_surface`, its face's surface:
+    /// the `SmBSplineCurve` checks measure the trim on it with
+    /// `Kernel::fixes.uv_trim_checks_on_surface` (WR-560, see
+    /// [`BSplineCurve::assert_valid_on`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Ellipse::assert_valid`].
+    pub fn assert_valid_on(
+        &mut self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level_given: bool,
+        key: ObjectKey,
+        polar_key: ObjectKey,
+        trim_surface: Option<&Surface>,
+    ) -> Result<bool> {
+        let mut list = list;
+        if !self.circle {
+            return self.ellipse_assert_valid(k, list, level_given, key, polar_key, trim_surface);
+        }
+
+        // init return value
+        let mut rtn = true;
+
+        // call the base class AssertValid
+        rtn &= if level_given {
+            true
+        } else {
+            self.ellipse_assert_valid(
+                k,
+                list.as_deref_mut(),
+                level_given,
+                key,
+                polar_key,
+                trim_surface,
+            )?
+        };
+
+        // Check that analytic ellipse is a circle
+        rtn &= report(
+            &mut list,
+            key,
+            (labels::CIRCLE_TYPE, self.class_string()),
+            0,
+            0,
+            are_same(self.radius_x, self.radius_y),
+            EFF_ZERO,
+            self.radius_x - self.radius_y,
+        )?;
+        Ok(rtn)
+    }
+
+    /// `SmEllipse::AssertValid` (see [`Self::assert_valid`]).
+    fn ellipse_assert_valid(
+        &mut self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level_given: bool,
+        key: ObjectKey,
+        polar_key: ObjectKey,
+        trim_surface: Option<&Surface>,
+    ) -> Result<bool> {
+        let mut list = list;
+
+        // init return value
+        let mut rtn = true;
+
+        // call the base class AssertValid
+        if !level_given {
+            // SmBSplineCurve::AssertValid makes a missing NURB (virtual MakeNurb)
+            if self.base.nurb.is_none() {
+                ignore_status(self.make_nurb(k))?;
+            }
+            let this = &*self;
+            let is_degenerate = |tol: f64| Ok(this.is_degenerate(tol));
+            rtn &= this.base.assert_valid_with(
+                k,
+                list.as_deref_mut(),
+                false,
+                key,
+                &DerivedOverrides {
+                    degree: Some(2),
+                    analytic: true,
+                    bounded: true,
+                    is_degenerate: &is_degenerate,
+                    trim_surface,
+                    // (WR-668's zero-speed end needs coincident end control points, which
+                    // the conic segments of a nondegenerate ellipse never have)
+                    edge_ends: None,
+                },
+            )?;
+        }
+
+        // make sure nested SmPolarConversion is up to date
+        rtn &= self
+            .polar
+            .assert_valid(k, self, list.as_deref_mut(), polar_key)?;
+
+        // check that the use of bInsideOut is limited to circles
+        rtn &= report(
+            &mut list,
+            key,
+            (labels::ELLIPSE_TYPE, self.class_string()),
+            0,
+            0,
+            !self.inside_out || self.circle,
+            UNDEF_DOUBLE,
+            UNDEF_DOUBLE,
+        )?;
+
+        // Check that the BsplineCurve shape is the same as the analytic shape
+        // Not upstream (WR-741): beyond the point term, the STEP point `o + rx cos(t) X +
+        // ry sin(t) Y` carries rounding that grows with the radii, and an angle off by `d`
+        // moves it by up to `max(|rx|, |ry|) d`. Counted in roundings (units of `u`):
+        // - the angle, relative to `|t|` in radians: test 2's is the longer chain, 11:
+        //   `atan2` (within an ulp, 2), `+ 2 pi` (2), `* (180 / pi)` (3), the periodic map
+        //   into the domain (1) and `t * pi / 180` back (3); test 1's is the last 3;
+        // - the evaluation, at most 10 relative to `max(|rx|, |ry|)`: `cos` or `sin` (within
+        //   an ulp, 2), the products with the radius and the axis (2) and the two sums (6:
+        //   they round the axis terms, at most `sqrt(2) max r`, and `o`, at most that beyond
+        //   `|p|`, whose share is the point term's).
+        // Test 1's NURB point is found from its STEP point (kept within `SM_EFF_ZERO (1 +
+        // |p|)` of it, or inverted onto the NURB). So each test also allows
+        // `gamma_11 max(|rx|, |ry|) (1 + |t|)`.
+        let max_radius = self.radius_x.abs().max(self.radius_y.abs());
+        let rounding =
+            |step_deg: f64| gamma(11) * max_radius * (1.0 + (step_deg * PI / 180.0).abs());
+        let smp_count = 5u32;
+        for ii in 0..smp_count {
+            // get equivalent Nurb and STEP params
+            let step_t = self
+                .anal_domain
+                .evaluate(f64::from(ii) / f64::from(smp_count - 1));
+            // (status ignored: a failed conversion leaves the polar table's guess)
+            let Some(nurb_t) = self
+                .polar
+                .convert_to_nurbs_parameter_or_written(k, self, step_t, 0.0)?
+            else {
+                return Err(SolidError::invalid_input(
+                    OP_ASSERT,
+                    "STEP parameter not convertible (upstream: uninitialised)",
+                ));
+            };
+
+            // Evaluate the points (status ignored)
+            let nurb_point = ignored(self.base.evaluate_point(nurb_t))?.unwrap_or(Vec3::UNDEF);
+            let step_point = self.step_point(step_t);
+            let point_zero = EFF_ZERO * 100.0 * (1.0 + nurb_point.max_dimension());
+            let scaled_zero = point_zero + rounding(step_t);
+
+            // Points are equal - others vary by a small amount
+            let dist = (nurb_point - step_point).length();
+            rtn &= report(
+                &mut list,
+                key,
+                (labels::ELLIPSE_TYPE, self.class_string()),
+                0,
+                1,
+                dist < scaled_zero,
+                scaled_zero,
+                dist,
+            )?;
+
+            // every Nurb Point must lie on the Ellipse
+            let step_param = self.step_inversion(k, nurb_point, false, 0.0).0;
+            let check_point = self.step_point(step_param);
+            let check_dist = (check_point - nurb_point).length();
+            let check_zero = point_zero + rounding(step_param);
+            rtn &= report(
+                &mut list,
+                key,
+                (labels::ELLIPSE_TYPE, self.class_string()),
+                0,
+                2,
+                check_dist < check_zero,
+                check_zero,
+                check_dist,
+            )?;
+        }
+
+        // all done
+        Ok(rtn)
+    }
+
+    // ---- persistence ------------------------------------------------------------------
+
+    /// Reads an ellipse (or, with `circle`, a circle: `SmCircle::ReadFromDB`, which has
+    /// no data of its own) written by `WriteToDB` (`ReadFromDB`): center, X axis, Y
+    /// axis (three values each), domain ends, X and Y radius, the inside-out flag (one
+    /// group per line in ASCII files), the polar converter
+    /// ([`PolarConversion::read_from_db`]), then the B-spline base record
+    /// ([`BSplineCurve::read_from_db`]). The placement and domain are set with their
+    /// statuses ignored; the NURB is the stored one (the converter is not rebuilt).
+    /// A 3D record read for `dim == 2` is made 2D by [`Self::convert_to_2d`].
+    /// Unreadable ASCII values keep their defaults.
+    ///
+    /// # Errors
+    ///
+    /// A failed binary read of the ellipse data; the errors of
+    /// [`PolarConversion::read_from_db`]; [`SolidError::Unported`] from the base
+    /// reader (its other errors are ignored, as upstream).
+    pub fn read_from_db(
+        k: &Kernel,
+        db: &mut DatabaseReader,
+        dim: u64,
+        version: u64,
+        circle: bool,
+    ) -> Result<Self> {
+        // init output object
+        let mut e = Self::empty(3);
+        e.circle = circle;
+
+        // locals
+        let mut orig = Vec3::UNDEF;
+        let mut x = Vec3::UNDEF;
+        let mut y = Vec3::UNDEF;
+        let mut anal = [0.0f64; 2];
+        let mut radius_x = 0.0f64;
+        let mut radius_y = 0.0f64;
+        let mut inside_out = false;
+
+        if db.file_type() == FileType::Ascii {
+            for v in [&mut orig, &mut x, &mut y] {
+                if let Some(s) = db.in_stream_mut() {
+                    for c in [&mut v.x, &mut v.y, &mut v.z] {
+                        extract(s, c);
+                    }
+                }
+                db.go_to_next_line();
+            }
+            if let Some(s) = db.in_stream_mut() {
+                for c in &mut anal {
+                    extract(s, c);
+                }
+            }
+            db.go_to_next_line();
+            for c in [&mut radius_x, &mut radius_y] {
+                if let Some(s) = db.in_stream_mut() {
+                    extract(s, c);
+                }
+                db.go_to_next_line();
+            }
+            if let Some(v) = db.in_stream_mut().and_then(InputStream::extract_int) {
+                inside_out = v != 0;
+            }
+            db.go_to_next_line();
+        } else {
+            for v in [&mut orig, &mut x, &mut y] {
+                v.x = db.read_double()?;
+                v.y = db.read_double()?;
+                v.z = db.read_double()?;
+            }
+            anal[0] = db.read_double()?;
+            anal[1] = db.read_double()?;
+            radius_x = db.read_double()?;
+            radius_y = db.read_double()?;
+            inside_out = db.read_boolean()? != 0;
+        }
+
+        // PolarConverter - read directly into empty analytic
+        if db.file_type() == FileType::Ascii {
+            db.go_to_next_line();
+        }
+        e.polar = PolarConversion::read_from_db(db)?;
+
+        // load the obj
+        let _ = e.position.set_canonical(orig, x, y);
+        let _ = e.anal_domain.set_min_max(anal[0], anal[1]);
+        e.radius_x = radius_x;
+        e.radius_y = radius_y;
+        e.inside_out = inside_out;
+
+        // read the base type (status ignored upstream); its 2D fix-up of a 3D record
+        // calls the ellipse's ConvertTo2D, so it is done here
+        if let Some(b) = ignored(BSplineCurve::read_from_db(db, 3, version))? {
+            let read_dim = b.dim;
+            e.base = b;
+            if dim == 2 && read_dim == 3 {
+                ignore_status(e.convert_to_2d(k))?;
+            }
+        }
+
+        // all done
+        Ok(e)
+    }
+
+    /// `WriteToDB` (`SmCircle::WriteToDB` is the same): writes the placement origin
+    /// and axes, the angular domain (degrees), the two radii and the inside-out flag,
+    /// then the polar converter (which borrows this ellipse) and the B-spline curve
+    /// part.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`PolarConversion::write_to_db`]; `SM_ERR` when the B-spline part has
+    /// no NURB (upstream ignores the part's status; its virtual
+    /// `GetOrCreateGwNurbPointer` always has one to write).
+    pub fn write_to_db(&self, db: &mut DatabaseWriter, version: u64) -> Result<()> {
+        let o = self.position.origin();
+        let x = self.position.x_axis();
+        let y = self.position.y_axis();
+        let (lo, hi) = (self.anal_domain.min(), self.anal_domain.max());
+        let inside_out = i32::from(self.inside_out);
+        let ascii = db.file_type() == FileType::Ascii;
+        if ascii {
+            db.out_reals(&[o.x, o.y, o.z]);
+            db.out_str(" SmEllipse Axis Origin \n");
+            db.out_reals(&[x.x, x.y, x.z]);
+            db.out_str(" SmEllipse X Axis\n");
+            db.out_reals(&[y.x, y.y, y.z]);
+            db.out_str(" SmEllipse Y Axis\n");
+            db.out_reals(&[lo, hi]);
+            db.out_str(" SmEllipse angular arc domain in degrees \n");
+            db.out_f64(self.radius_x);
+            db.out_str(" SmEllipse X_Axis radius \n");
+            db.out_f64(self.radius_y);
+            db.out_str(" SmEllipse Y_Axis radius \n");
+            db.out_i64(inside_out.into());
+            db.out_str(" SmEllipse InsideOut Flag \n");
+        } else {
+            db.write_doubles(&[o.x, o.y, o.z, x.x, x.y, x.z, y.x, y.y, y.z]);
+            db.write_doubles(&[lo, hi, self.radius_x, self.radius_y]);
+            db.write_boolean(inside_out);
+        }
+
+        // PolarConverter
+        if ascii {
+            db.out_str(" SmEllipse->PolarConverter \n");
+        }
+        self.polar.write_to_db(db, version, None, 0)?;
+
+        self.base.write_to_db(db, version)
+    }
+
+    // ---- conversions ------------------------------------------------------------------
+
+    /// Projects the ellipse onto the x-y plane (`ConvertTo2D`): the NURB is made 2D
+    /// (status ignored), the placement's `z` values are dropped and the new axes are
+    /// the projected radius vectors (when the projected axes are no longer
+    /// perpendicular, both are taken at the angle of the first root of the extremal
+    /// radius quadratic by default, as upstream; with
+    /// `Kernel::fixes.ellipse_convert_to_2d_uses_both_axes` the quadratic is solved in
+    /// ascending `[C, B, A]` coefficient order, the second axis uses the orthogonal
+    /// root `dThetaYRad`, and a full-turn STEP domain is aligned with the projected
+    /// NURB seam); the radii become their lengths, zero axes are replaced by the
+    /// perpendicular of the other, the placement is set (`SetCanonical`, status
+    /// ignored) and the polar converter rebuilt (status ignored).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when the extremal radius quadratic has no root (upstream:
+    /// uninitialised values).
+    pub fn convert_to_2d(&mut self, k: &Kernel) -> Result<()> {
+        let fix_both_axes = k.fixes.ellipse_convert_to_2d_uses_both_axes;
+
+        // modify the NURB
+        ignore_status(self.base.convert_to_2d())?;
+
+        // Get current position
+        let mut origin = self.position.origin();
+        let mut x_axis = self.position.x_axis();
+        let mut y_axis = self.position.y_axis();
+
+        // convert position to 2d
+        origin.z = 0.0;
+        x_axis.z = 0.0;
+        y_axis.z = 0.0;
+
+        // Most times X and Y are not still perp to one another
+        let x_dot_x = x_axis.dot(x_axis);
+        let x_dot_y = x_axis.dot(y_axis);
+        let y_dot_y = y_axis.dot(y_axis);
+        let scaled_zero = EFF_ZERO;
+
+        let rx = self.radius_x;
+        let ry = self.radius_y;
+        let (mut new_x, mut new_y) = if x_dot_y.abs() < scaled_zero {
+            // use the projected vectors as the new ellipse vectors
+            (rx * x_axis, ry * y_axis)
+        } else {
+            // compute new angles for min/max radius values:
+            // 0 = - (R2*R1*Y*X)*t*t + (R2*R2*Y*Y-R1*R1*X*X)*t + (R1*R2*X*Y)
+            // SolveQuadraticEqn takes ascending [C, B, A]; upstream passed [A, B, C].
+            let coefs = if fix_both_axes {
+                [
+                    ry * rx * x_dot_y,
+                    ry * ry * y_dot_y - rx * rx * x_dot_x,
+                    -ry * rx * x_dot_y,
+                ]
+            } else {
+                [
+                    -ry * rx * x_dot_y,
+                    ry * ry * y_dot_y - rx * rx * x_dot_x,
+                    ry * rx * x_dot_y,
+                ]
+            };
+            let sols = solve_quadratic(&coefs, scaled_zero);
+            // Upstream only uses the first root: it also computes ThetaY from the second
+            // (uninitialised when the solver finds one root, e.g. a degenerate radius
+            // makes the equation linear) but copies ThetaX into both sNewX and sNewY
+            // (WR-31). Without any root the first is uninitialised too.
+            let Some(&first_root) = sols.first() else {
+                return Err(SolidError::invalid_input(
+                    OP_TO_2D,
+                    "extremal radius quadratic without a root",
+                ));
+            };
+            let theta_x_rad = first_root.atan();
+            let theta_y_rad = if fix_both_axes {
+                if let Some(&second_root) = sols.get(1) {
+                    let mut ty = second_root.atan();
+                    if ty < theta_x_rad {
+                        ty += PI;
+                    }
+                    ty
+                } else {
+                    theta_x_rad + HALF_PI
+                }
+            } else {
+                theta_x_rad
+            };
+
+            // get max vectors for each angle
+            let v = rx * theta_x_rad.cos() * x_axis + ry * theta_x_rad.sin() * y_axis;
+            let w = rx * theta_y_rad.cos() * x_axis + ry * theta_y_rad.sin() * y_axis;
+            (v, w)
+        };
+
+        // compute new radius values
+        self.radius_x = new_x.length();
+        self.radius_y = new_y.length();
+
+        // (a circle no longer a circle and a degenerate projection are only logged)
+
+        // compute new axis values (operator/, not the guarded operator/=)
+        if self.radius_x > scaled_zero {
+            new_x = Div::div(new_x, self.radius_x);
+        }
+        if self.radius_y > scaled_zero {
+            new_y = Div::div(new_y, self.radius_y);
+        }
+
+        // Don't pass zero vectors to the SmAxis2Placement.
+        if self.radius_x <= scaled_zero {
+            new_x = Vec3::new(new_y.y, -new_y.x, 0.0); // = Y x Z, sNewY is unit.
+        }
+        if self.radius_y <= scaled_zero {
+            new_y = Vec3::new(-new_x.y, new_x.x, 0.0); // = Z x X, sNewX is unit.
+        }
+
+        // modify the Position
+        let _ = self.position.set_canonical(origin, new_x, new_y);
+
+        // SetUpPolarConversion only re-derives m_vAnalDomain when shorter than 360 deg;
+        // rotating XAxis shifts a closed NURB's seam away from the old domain ends.
+        if fix_both_axes
+            && self.anal_domain.length() >= 360.0 - EFF_ZERO
+            && self.radius_x > scaled_zero
+            && self.radius_y > scaled_zero
+            && self.base.nurb.is_some()
+        {
+            let old_domain = self.anal_domain;
+            let nat = self.base.natural_interval();
+            let low_t = if self.inside_out {
+                nat.max()
+            } else {
+                nat.min()
+            };
+            self.anal_domain = Extent1d::from_min_max(0.0, 360.0);
+            if let Ok(seam_pt) = self.base.evaluate_point(low_t) {
+                let (seam_deg, _) = self.step_inversion(k, seam_pt, false, 0.0);
+                let was_neg_turn = (old_domain.min() + 360.0).abs() < EFF_ZERO * 1000.0
+                    && old_domain.max().abs() < EFF_ZERO * 1000.0;
+                let candidate = if seam_deg > EFF_ZERO_DEG && seam_deg < 360.0 - EFF_ZERO_DEG {
+                    Extent1d::from_min_max(seam_deg - 360.0, seam_deg)
+                } else if was_neg_turn {
+                    Extent1d::from_min_max(-360.0, 0.0)
+                } else {
+                    Extent1d::from_min_max(0.0, 360.0)
+                };
+                let same_min = (candidate.min() - old_domain.min()).abs() < EFF_ZERO * 1000.0;
+                let same_max = (candidate.max() - old_domain.max()).abs() < EFF_ZERO * 1000.0;
+                self.anal_domain = if same_min && same_max {
+                    old_domain
+                } else {
+                    candidate
+                };
+            } else {
+                self.anal_domain = old_domain;
+            }
+        }
+
+        // recompute the polar conversion
+        ignore_status(self.set_up_polar_conversion(k))?;
+        Ok(())
+    }
+
+    /// The STEP angle in degrees of the NURB parameter `nurbs_param`
+    /// (`ConvertTFromNURBSToSTEP`: [`PolarConversion::convert_to_polar_parameter`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`PolarConversion::convert_to_polar_parameter`].
+    pub fn convert_t_from_nurbs_to_step(&self, k: &Kernel, nurbs_param: f64) -> Result<f64> {
+        Ok(self
+            .polar
+            .convert_to_polar_parameter(k, self, nurbs_param)?
+            .0)
+    }
+
+    // ---- edits ------------------------------------------------------------------------
+
+    /// Makes the NURB (`MakeNurb`) of a free ellipse ([`Self::make_nurb_owned`] without
+    /// owner).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::make_nurb_owned`].
+    pub fn make_nurb(&mut self, k: &Kernel) -> Result<()> {
+        self.make_nurb_owned(k, None)
+    }
+
+    /// Makes the NURB (`MakeNurb`) of the ellipse owned by `owner`: the rational
+    /// quadratic elliptical arc over the STEP domain (`N_CreateEllipticalArcTol` with
+    /// angle tolerance `0.01` without edge; an inside-out ellipse is built over the
+    /// mirrored angles with the Y axis negated). When a domain end is within `3e-4`
+    /// degrees of `0`, `180` or `360` (NLib may snap it), the STEP domain is
+    /// recomputed from the NURB's end points. The NURB is set (rebuilding the polar
+    /// converter); a 2D ellipse is then made 2D ([`Self::convert_to_2d`], status
+    /// ignored).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when NLib fails (the old NURB is gone); [`SolidError::Unported`] for an
+    /// owner whose edge tolerance or generator range is needed (see the module
+    /// deviations).
+    pub fn make_nurb_owned(&mut self, k: &Kernel, owner: Option<ObjectRef>) -> Result<()> {
+        self.make_nurb_owned_with_edge_tol(k, owner, None)
+    }
+
+    /// [`Self::make_nurb_owned`] given the tolerance of the edge the ellipse's owner
+    /// chain reaches (`GetEdge()->GetTolerance()`), resolved by a caller that holds it
+    /// (`Some` means that edge exists, whatever `owner` says). Then the arc's angle
+    /// tolerance is a hundredth of that tolerance over the speed at the mid angle
+    /// (`EvaluateSTEP`) \[B630\].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::make_nurb_owned`].
+    pub fn make_nurb_owned_with_edge_tol(
+        &mut self,
+        k: &Kernel,
+        owner: Option<ObjectRef>,
+        edge_zone_tol_3d: Option<f64>,
+    ) -> Result<()> {
+        // free existing m_pNurb object
+        self.base.nurb = None;
+
+        // get circle origin and axis from Circle Position
+        let c = self.position.origin();
+        let x = self.position.x_axis();
+        let mut start_ang_deg = self.start_angle_deg();
+        let mut end_ang_deg = self.end_angle_deg();
+
+        // Get X and Y vectors depending on bInsideOut flag
+        let y = if self.inside_out {
+            // reverse and swap Start/End angles
+            let t = start_ang_deg;
+            start_ang_deg = 360.0 - end_ang_deg;
+            end_ang_deg = 360.0 - t;
+
+            if start_ang_deg > 360.0 {
+                start_ang_deg -= 360.0;
+                end_ang_deg -= 360.0;
+            }
+
+            // negate the Y vector
+            -self.position.y_axis()
+        } else {
+            self.position.y_axis()
+        };
+
+        // Convert 3d tolerance to Angle tol [B630]: GetEdge()
+        let angle_tol = if let Some(z_tol_3d) = edge_zone_tol_3d {
+            let approx_tol_3d = z_tol_3d / 100.;
+
+            let mid_p = (start_ang_deg + end_ang_deg) / 2.0;
+            let point_and_der = self.evaluate_step(mid_p, 1)?;
+            let der = point_and_der
+                .get(1)
+                .copied()
+                .ok_or_else(|| SolidError::sm_err(OP_MAKE_NURB))?;
+
+            approx_tol_3d / der.length()
+        } else if owner.is_some_and(|o| {
+            o.type_code == EDGE_TYPE
+                || o.type_code == EDGEUSE_TYPE
+                || crate::curve::curve::p2::is_kind_of(o.type_code)
+        }) {
+            // DISPATCH GAP: SmTol::GetZoneTol3d(const SmObject*) (geom.tol, green) on an opaque handle. Every
+            // arm it dispatches to is ported (topology::{vertex, edge, face::p2, edgeuse::p1}::tolerance,
+            // Brep::tolerance) but each takes `&Brep` and none is in scope here; wire once this code
+            // receives the owning B-rep
+            return Err(SolidError::Unported {
+                upstream: "SmTol::GetZoneTol3d(const SmObject*)",
+                unit: "geom.tol",
+            });
+        } else {
+            0.01 // Preserves behavior
+        };
+
+        // Build the circular arc
+        let arc = EllipseArc {
+            center: c,
+            x,
+            y,
+            r1: self.radius_x,
+            r2: self.radius_y,
+            start: start_ang_deg,
+            end: end_ang_deg,
+        };
+        let cur = elliptical_arc_tol(&arc, angle_tol, ConicType::Quadratic)
+            .map_err(SolidError::nl_ser(OP_MAKE_NURB))?;
+
+        // when arc's domain may have been modified
+        if is_zero_to_tol(start_ang_deg, 3.0e-4)
+            || is_zero_to_tol(180.0 - start_ang_deg, 3.0e-4)
+            || is_zero_to_tol(360.0 - start_ang_deg, 3.0e-4)
+            || is_zero_to_tol(end_ang_deg, 3.0e-4)
+            || is_zero_to_tol(180.0 - end_ang_deg, 3.0e-4)
+            || is_zero_to_tol(360.0 - end_ang_deg, 3.0e-4)
+        {
+            // compute analytic domain from curve: get curve endPoints
+            let cpts = cur.cpts();
+            let start_pt = to_euclid(cpts.first().copied().ok_or_else(empty_nurb)?);
+            let end_pt = to_euclid(cpts.last().copied().ok_or_else(empty_nurb)?);
+
+            // convert endPoints to ellipse angles
+            let (mut anal_start, _) = self.step_inversion(k, start_pt, false, 0.0);
+            let (mut anal_end, _) = self.step_inversion(k, end_pt, false, 0.0);
+
+            // Reset these to our analytic values.
+            start_ang_deg = if self.inside_out {
+                self.end_angle_deg()
+            } else {
+                self.start_angle_deg()
+            };
+            end_ang_deg = if self.inside_out {
+                self.start_angle_deg()
+            } else {
+                self.end_angle_deg()
+            };
+
+            // watch out for periodicity
+            if !is_zero_to_tol(anal_start - start_ang_deg, 3.0e-3) {
+                if is_zero_to_tol(anal_start + 360.0 - start_ang_deg, 3.0e-3) {
+                    anal_start += 360.0;
+                }
+                if is_zero_to_tol(anal_start - 360.0 - start_ang_deg, 3.0e-3) {
+                    anal_start -= 360.0;
+                }
+            }
+            if !is_zero_to_tol(anal_end - end_ang_deg, 3.0e-3) {
+                if is_zero_to_tol(anal_end + 360.0 - end_ang_deg, 3.0e-3) {
+                    anal_end += 360.0;
+                }
+                if is_zero_to_tol(anal_end - 360.0 - end_ang_deg, 3.0e-3) {
+                    anal_end -= 360.0;
+                }
+            }
+
+            // Set anal domain when its changed
+            if !is_zero_to_tol(anal_start - start_ang_deg, EFF_ZERO)
+                || !is_zero_to_tol(anal_end - end_ang_deg, EFF_ZERO)
+            {
+                // Either the start or end angle could be larger: m_bInsideOut.
+                self.anal_domain.init();
+                self.anal_domain.add_value(anal_start);
+                self.anal_domain.add_value(anal_end);
+            }
+        }
+
+        // set the m_pNurb pointer and use Notify to rebuild polarConverter
+        ignore_status(self.set_from_gw_nurb(k, Some(&cur)))?;
+
+        // Set ControlPoint Z values for 2d curves (status ignored)
+        if self.base.dim == 2 {
+            ignore_status(self.convert_to_2d(k))?;
+        }
+
+        // When this is a SmSurfOfExtrusion GenCurve, look for Parent Surface NURB
+        // Interval constraint.
+        if owner.is_some_and(|o| o.type_code == SURF_OF_EXTRUSION_TYPE) {
+            // DISPATCH GAP: SmSurfOfExtrusion::GetGenDirParamExtent (surface.surf_of_extrusion_p1,
+            // ported as SurfOfExtrusion::gen_dir_param_extent; no UNPORTED marker: the owner is an
+            // opaque ObjectRef. An owning extrusion does this step itself (adjust_generator_interval,
+            // SurfOfExtrusion::make_nurb) and never sets its generator's owner, so nothing reaches here)
+            return Err(SolidError::Unported {
+                upstream: "SmSurfOfExtrusion::GetGenDirParamExtent",
+                unit: "surface.surf_of_extrusion_p1",
+            });
+        }
+
+        if owner.is_some_and(|o| o.type_code == SURF_OF_REVOLUTION_TYPE) {
+            // DISPATCH GAP: SmSurfOfRevolution::GetGenDirParamExtent (surface.surf_of_revolution_p1,
+            // ported as SurfOfRevolution::gen_dir_param_extent; no UNPORTED marker: the owner is an
+            // opaque ObjectRef. An owning revolution does this step itself (e.g. the cone's
+            // adjust_gen_line_with_owner) and never sets its generator's owner, so nothing reaches here)
+            return Err(SolidError::Unported {
+                upstream: "SmSurfOfRevolution::GetGenDirParamExtent",
+                unit: "surface.surf_of_revolution_p1",
+            });
+        }
+
+        // all done
+        Ok(())
+    }
+
+    /// `Notify(eNotifyOperation, ..)`: [`NotifyOperation::PostEdit`] rebuilds the polar
+    /// converter (status ignored); the other operations change nothing here.
+    ///
+    /// # Errors
+    ///
+    /// None but [`SolidError::Unported`] (never produced here).
+    pub fn notify(&mut self, k: &Kernel, operation: NotifyOperation) -> Result<()> {
+        if operation == NotifyOperation::PostEdit {
+            // recompute the polar converter
+            ignore_status(self.set_up_polar_conversion(k))?;
+        }
+        Ok(())
+    }
+
+    /// `SmBSplineCurve::EditParameterization(new_param, notify)` of the ellipse:
+    /// nothing when the natural interval ends are already the same (scaled zero);
+    /// else the NURB (made by [`Self::make_nurb_owned`] when missing) is
+    /// reparameterised, then with `notify` the polar converter rebuilt.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB; [`SolidError::Unported`] from `MakeNurb`.
+    pub fn edit_parameterization(
+        &mut self,
+        k: &Kernel,
+        new_param: &Extent1d,
+        notify: bool,
+        owner: Option<ObjectRef>,
+    ) -> Result<()> {
+        // get current interval
+        let old = self.base.natural_interval();
+
+        // low work: current interval == new interval
+        if are_same(old.min(), new_param.min()) && are_same(old.max(), new_param.max()) {
+            return Ok(());
+        }
+
+        // GetOrCreateGwNurbPointer: the virtual MakeNurb (status ignored)
+        if self.base.nurb.is_none() {
+            ignore_status(self.make_nurb_owned(k, owner))?;
+        }
+        self.base.edit_parameterization(new_param)?;
+
+        if notify {
+            self.notify(k, NotifyOperation::PostEdit)?;
+        }
+        Ok(())
+    }
+
+    /// Makes `new_interval` (degrees) the STEP domain and rebuilds the NURB over it,
+    /// reparameterised to the NURB parameters the old table gives the new domain ends
+    /// (`AdjustSTEPInterval`); nothing when the domains agree within `SM_EFF_ZERO`.
+    /// The old table clamps an end outside the current arc to the arc's ends (WR-211);
+    /// with [`crate::kernel::UpstreamFixes::ellipse_adjust_step_interval_keeps_turns`]
+    /// such an end is converted by `Self::step_to_nurbs_keeping_turns` instead.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a non-finite source interval. With
+    /// `Kernel::fixes.ellipse_step_interval_checks`, also for an inverted interval
+    /// or endpoints that map to one NURBS parameter (nothing changed). Those of
+    /// [`PolarConversion::convert_to_nurbs_parameter`] (nothing changed) and
+    /// [`Self::make_nurb_owned`] (the new domain is kept).
+    pub fn adjust_step_interval(
+        &mut self,
+        k: &Kernel,
+        new_interval: &Extent1d,
+        owner: Option<ObjectRef>,
+    ) -> Result<()> {
+        if !new_interval.min().is_finite()
+            || !new_interval.max().is_finite()
+            || !new_interval.length().is_finite()
+        {
+            return Err(SolidError::invalid_input(
+                OP_ADJUST,
+                "STEP interval must have finite endpoints and finite length",
+            ));
+        }
+
+        if k.fixes.ellipse_step_interval_checks && new_interval.length() < 0.0 {
+            return Err(SolidError::invalid_input(
+                OP_ADJUST,
+                "STEP interval must have nonnegative length",
+            ));
+        }
+
+        // no work - new interval is same as old
+        if new_interval.is_contained_by(&self.anal_domain, EFF_ZERO)
+            && self.anal_domain.is_contained_by(new_interval, EFF_ZERO)
+        {
+            return Ok(());
+        }
+
+        // Locals to get the Nurbs parameters corresponding to the new STEP interval.
+        let step_t0 = new_interval.min();
+        let step_t1 = new_interval.max();
+
+        // After these calls, the conversion may not be reciprocal.
+        let (nurbs_t0, nurbs_t1) = if k.fixes.ellipse_adjust_step_interval_keeps_turns {
+            (
+                self.step_to_nurbs_keeping_turns(k, step_t0)?,
+                self.step_to_nurbs_keeping_turns(k, step_t1)?,
+            )
+        } else {
+            (
+                self.polar
+                    .convert_to_nurbs_parameter(k, self, step_t0, 0.0)?
+                    .0,
+                self.polar
+                    .convert_to_nurbs_parameter(k, self, step_t1, 0.0)?
+                    .0,
+            )
+        };
+        let new_nurbs_ivl = Extent1d::from_min_max(nurbs_t0, nurbs_t1);
+        // The polar converter clamps out-of-arc angles to the old endpoints.
+        // Distinct STEP angles can therefore map to one NURBS parameter. Do not
+        // install that zero-length interval with the opt-in: the next edit divides
+        // by its length and creates NaN interior knots (#428 / WR-211).
+        // The default preserves the pinned C++ result, including legacy probes.
+        if k.fixes.ellipse_step_interval_checks
+            && (!nurbs_t0.is_finite()
+                || !nurbs_t1.is_finite()
+                || !new_nurbs_ivl.length().is_finite()
+                || new_nurbs_ivl.length() <= 0.0)
+        {
+            return Err(SolidError::invalid_input(
+                OP_ADJUST,
+                "STEP endpoints map to an empty or non-finite NURBS interval",
+            ));
+        }
+
+        // save the input
+        self.anal_domain = *new_interval;
+
+        self.make_nurb_owned(k, owner)?;
+
+        // MakeNurb() creates m_pNurb parameterized 0 -> 1 [B284] (status ignored)
+        ignore_status(self.edit_parameterization(k, &new_nurbs_ivl, true, owner))?;
+
+        self.notify(k, NotifyOperation::PostEdit)?;
+
+        // all done
+        Ok(())
+    }
+
+    /// The NURBS parameter of the STEP angle `step_t` (degrees) for
+    /// [`Self::adjust_step_interval`] under
+    /// [`crate::kernel::UpstreamFixes::ellipse_adjust_step_interval_keeps_turns`] (the
+    /// fork's `ConvertAngle`, tangency-labs/smlib@5c0b5ed): inside the current arc (or for
+    /// an arc of no length) the polar converter's; outside a full-turn arc, the angle taken
+    /// whole turns back into the arc, its parameter moved by the NURBS length per turn
+    /// (negated when inside out); outside a partial arc, the arc's NURBS interval continued
+    /// in proportion to the angle.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`PolarConversion::convert_to_nurbs_parameter`].
+    fn step_to_nurbs_keeping_turns(&self, k: &Kernel, step_t: f64) -> Result<f64> {
+        let old_step = self.anal_domain;
+        let old_nurbs = self.base.natural_interval();
+        let span = old_step.length();
+        if old_step.contains_value(step_t, EFF_ZERO_DEG)
+            || span.partial_cmp(&EFF_ZERO_DEG) != Some(core::cmp::Ordering::Greater)
+        {
+            return Ok(self
+                .polar
+                .convert_to_nurbs_parameter(k, self, step_t, 0.0)?
+                .0);
+        }
+        let sign = if self.inside_out { -1.0 } else { 1.0 };
+        if (span - 360.0).abs() < EFF_ZERO_DEG {
+            let turns = ((step_t - old_step.min()) / 360.0).floor();
+            let inside = old_step.clamp_value(step_t - turns * 360.0);
+            let nurbs_t = self
+                .polar
+                .convert_to_nurbs_parameter(k, self, inside, 0.0)?
+                .0;
+            return Ok(nurbs_t + sign * turns * old_nurbs.length());
+        }
+        let fraction = (step_t - old_step.min()) / span;
+        Ok(if self.inside_out {
+            old_nurbs.max() - fraction * old_nurbs.length()
+        } else {
+            old_nurbs.min() + fraction * old_nurbs.length()
+        })
+    }
+
+    /// The points of the ellipse solving `operation` for `test_point`, as STEP angles
+    /// (`GlobalPointSolveSTEP`): `SmCurve::GlobalPointSolve` over the natural interval
+    /// ([`Curve::global_point_solve`] on a copy of the ellipse), each solution
+    /// parameter then mapped to the STEP domain end (NURB ends within `SM_EFF_ZERO`,
+    /// swapped when inside out) or inverted (`STEPInversion`). The solutions name no
+    /// object.
+    ///
+    /// # Errors
+    ///
+    /// Those of the global solve and the evaluations.
+    pub fn global_point_solve_step(
+        &self,
+        k: &Kernel,
+        operation: SolverOperation,
+        test_point: Point3,
+        distance_tol: f64,
+        target_distance: Option<f64>,
+        requested: SolutionRequested,
+    ) -> Result<Vec<Solution<ObjectRef>>> {
+        // ellipse locals (the Z axis is unused upstream)
+        let _z_axis = self.position.z_axis();
+
+        // Drop the point using NURBS-based solver
+        let nurb_ivl = self.base.natural_interval();
+        let curve = Curve::from(self.clone());
+        let opts = GlobalPointSolveOptions {
+            target_distance,
+            handle: Some(SelfHandle(nurb_ivl)),
+            ..GlobalPointSolveOptions::default()
+        };
+        let sols = curve.global_point_solve(
+            k,
+            &nurb_ivl,
+            operation,
+            test_point,
+            distance_tol,
+            requested,
+            &opts,
+        )?;
+
+        // Convert NURBS solutions to STEP solutions
+        let mut out = Vec::new();
+        for sol in sols.as_slice() {
+            let mut r: Solution<ObjectRef> = Solution::new();
+            r.solution_type = sol.solution_type;
+            r.num_variables = sol.num_variables;
+            r.start = sol.start;
+            r.end = sol.end;
+            r.num_objects = sol.num_objects; // (objects: this curve, not named here)
+            r.nodes = sol.nodes;
+
+            let t = r.start.parameters[0];
+            let point_on_curve = self.base.evaluate_point(t)?;
+
+            // First take care of start and end equivalents
+            if (nurb_ivl.min() - t).abs() < EFF_ZERO {
+                r.start.parameters[0] = if self.inside_out {
+                    self.anal_domain.max()
+                } else {
+                    self.anal_domain.min()
+                };
+            } else if (nurb_ivl.max() - t).abs() < EFF_ZERO {
+                r.start.parameters[0] = if self.inside_out {
+                    self.anal_domain.min()
+                } else {
+                    self.anal_domain.max()
+                };
+            } else {
+                r.start.parameters[0] = self.step_inversion(k, point_on_curve, false, 0.0).0;
+            }
+            out.push(r);
+        }
+
+        // all done
+        Ok(out)
+    }
+
+    /// Joins `other` onto this ellipse at this curve's start (`join_end_this == 0`) or
+    /// end (`1`) and `other`'s start or end (NURB ends; `JoinWith`). `other` must be an
+    /// ellipse of the same geometry (radii, center, normal up to sign, and for a
+    /// non-circle X and Y axes up to sign, all within the gap tolerance: `gap_tol` or
+    /// `max(rx, ry) * 1000 sqrt(SM_EFF_ZERO)`) whose join point is within the
+    /// tolerance of this one's. The STEP domain grows to `other`'s far end (the full
+    /// ellipse when that end falls inside this domain) and the NURB is rebuilt
+    /// (status ignored).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when `other` is not an ellipse or the geometry checks fail.
+    pub fn join_with(
+        &mut self,
+        k: &Kernel,
+        join_end_this: u64,
+        other: &Curve,
+        join_end_other: u64,
+        gap_tol: Option<f64>,
+        owner: Option<ObjectRef>,
+    ) -> Result<()> {
+        let err = || SolidError::sm_err(OP_JOIN);
+
+        // the other curve must actually be an SmEllipse
+        let CurveKind::Ellipse(other_ell) = other.kind() else {
+            return Err(err());
+        };
+
+        // Get geometric info.
+        let this_c = self.canonical();
+        let that_c = other_ell.canonical();
+        let (placement_this, rad1_this, rad2_this) =
+            (this_c.position, this_c.radius_x, this_c.radius_y);
+        let (placement_that, rad1_that, rad2_that) =
+            (that_c.position, that_c.radius_x, that_c.radius_y);
+
+        // Get a tolerance to use.
+        let tol = gap_tol
+            .unwrap_or_else(|| max2(self.x_radius(), self.y_radius()) * EFF_ZERO_SQRT * 1000.0);
+
+        // Same curve? Geometry checks:
+        if (rad1_this - rad1_that).abs() > tol {
+            return Err(err());
+        }
+        if (rad2_this - rad2_that).abs() > tol {
+            return Err(err());
+        }
+
+        if !placement_this
+            .origin()
+            .closer_than(tol, placement_that.origin())
+        {
+            return Err(err());
+        }
+
+        // We do need the same normals though, plus or minus.
+        let mut cross = placement_this.z_axis().cross(placement_that.z_axis());
+        if cross.length() > tol {
+            return Err(err());
+        }
+
+        // If circular, then we're good to go, otherwise x and y axes must be compatible.
+        if (rad2_this - rad1_this).abs() > tol {
+            cross = placement_this.x_axis().cross(placement_that.x_axis());
+            if cross.length() > tol {
+                return Err(err());
+            }
+            cross = placement_this.y_axis().cross(placement_that.y_axis());
+            if cross.length() > tol {
+                return Err(err());
+            }
+        }
+
+        // Make sure that the points of join ends are close enough (GetEnds, status
+        // ignored).
+        let ends = |c: &BSplineCurve| -> Result<(Point3, Point3)> {
+            Ok(ignored(c.ends())?.map_or((Vec3::UNDEF, Vec3::UNDEF), |e| (e.start, e.end)))
+        };
+        let (this_start, this_stop) = ends(&self.base)?;
+        let (other_start, other_stop) = ends(&other_ell.base)?;
+
+        // Sort out which are the common point vs. the new end points.
+        let this_common = if join_end_this == 1 {
+            this_stop
+        } else {
+            this_start
+        };
+        let (other_common, other_end) = if join_end_other == 1 {
+            (other_stop, other_start)
+        } else {
+            (other_start, other_stop)
+        };
+
+        // Check join-point distance.
+        if this_common.distance(other_common) > tol {
+            return Err(err());
+        }
+
+        // Passed all tests, good to go.  Modify ourself.
+        let orig_domain = self.anal_domain;
+
+        let inside_out_flag = u64::from(self.inside_out);
+        if join_end_this == inside_out_flag {
+            let v = self.anal_domain.max() - 360.0;
+            self.anal_domain.add_value(v);
+        } else {
+            let v = self.anal_domain.min() + 360.0;
+            self.anal_domain.add_value(v);
+        }
+
+        let new_ellipse_angle = self.step_inversion(k, other_end, false, 0.0).0;
+
+        // change it only if the dropped param is outside the original domain
+        if !orig_domain.contains_value(new_ellipse_angle, EFF_ZERO) {
+            self.anal_domain = orig_domain;
+            self.anal_domain.add_value(new_ellipse_angle);
+        }
+
+        // And update the Nurbs (statuses ignored).
+        ignore_status(self.make_nurb_owned(k, owner))?;
+        self.notify(k, NotifyOperation::PostEdit)?;
+
+        Ok(())
+    }
+
+    /// Reverses the direction of the curve (`ReverseParameterization`): a missing NURB
+    /// is made, the Y axis is negated (`SetCanonical`, status ignored), the STEP domain
+    /// `[m, M]` becomes `[360 - M, 360 - m]` (status ignored) and the NURB is reversed
+    /// (`SmBSplineCurve::ReverseParameterization`, rebuilding the polar converter).
+    /// Returns `old_interval` in the reversed parameterisation.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::make_nurb_owned`] and [`BSplineCurve::reverse_parameterization`].
+    pub fn reverse_parameterization(
+        &mut self,
+        k: &Kernel,
+        old_interval: &Extent1d,
+        owner: Option<ObjectRef>,
+    ) -> Result<Extent1d> {
+        if self.base.nurb.is_none() {
+            self.make_nurb_owned(k, owner)?;
+        }
+        let (origin, x_axis, y_axis) = self.position.canonical();
+        let _ = self.position.set_canonical(origin, x_axis, -y_axis);
+        let (min, max) = (self.anal_domain.min(), self.anal_domain.max());
+        let _ = self.anal_domain.set_min_max(360.0 - max, 360.0 - min);
+        let new_interval = self.base.reverse_parameterization(old_interval)?;
+        self.notify(k, NotifyOperation::PostEdit)?;
+        Ok(new_interval)
+    }
+
+    /// Trims the ellipse to the NURB interval `trim_interval` (`Trim`): nothing when the
+    /// natural interval is inside it (`SM_EFF_ZERO`); else the interval is snapped
+    /// (`SmBSplineCurve::Trim`, [`TrimMode::IntervalOnly`]; with that mode nothing
+    /// more), its ends are converted to STEP angles (statuses ignored), the NURB is
+    /// trimmed without notification, the STEP domain set to the angles (swapped when
+    /// inside out; status ignored) and the polar converter rebuilt, and with
+    /// [`TrimMode::Notify`] rebuilt again by the post-edit notification.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineCurve::trim`]; `InvalidInput` when an end cannot be converted
+    /// (upstream: an uninitialised angle).
+    pub fn trim(&mut self, k: &Kernel, trim_interval: &mut Extent1d, mode: TrimMode) -> Result<()> {
+        self.trim_with_zone_tol(
+            k,
+            trim_interval,
+            mode,
+            crate::geom::tol::zone_tol_3d(k, crate::geom::tol::SmallTopoType::NormalSize),
+        )
+    }
+
+    /// Trims with the caller-resolved owning edge's 3D zone tolerance, forwarding
+    /// it to both base-curve trim passes without changing interval-only behavior.
+    ///
+    /// # Errors
+    ///
+    /// The same errors as [`Self::trim`].
+    pub(crate) fn trim_with_zone_tol(
+        &mut self,
+        k: &Kernel,
+        trim_interval: &mut Extent1d,
+        mode: TrimMode,
+        zone_tol_3d: f64,
+    ) -> Result<()> {
+        // no work - current natural interval is a subSet of targetInterval
+        let nat_ivl = self.base.natural_interval();
+        if nat_ivl.is_contained_by(trim_interval, EFF_ZERO) {
+            return Ok(());
+        }
+
+        // First ask SmBSplineCurve::Trim to compute the actual trim interval.
+        self.base
+            .trim_with_zone_tol(k, trim_interval, TrimMode::IntervalOnly, zone_tol_3d)?;
+
+        // all done when asked to stop here
+        if mode == TrimMode::IntervalOnly {
+            return Ok(());
+        }
+
+        // Convert Nurb Parameters into STEP parameters (statuses ignored)
+        let to_step = |e: &Self, t: f64| -> Result<f64> {
+            match e.convert_t_from_nurbs_to_step(k, t) {
+                Ok(v) => Ok(v),
+                Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(err),
+                Err(_) => Err(SolidError::invalid_input(
+                    "curve::ellipse::p1::Ellipse::trim",
+                    "trim end not convertible (upstream: uninitialised)",
+                )),
+            }
+        };
+        let min_step = to_step(self, trim_interval.min())?;
+        let max_step = to_step(self, trim_interval.max())?;
+
+        // pass the call to Trim the BSpline - skip its Notify call
+        self.base
+            .trim_with_zone_tol(k, trim_interval, TrimMode::Silent, zone_tol_3d)?;
+
+        // store the angular interval paying attention to m_bInsideOut
+        if self.inside_out {
+            let _ = self.anal_domain.set_min_max(max_step, min_step);
+        } else {
+            let _ = self.anal_domain.set_min_max(min_step, max_step);
+        }
+
+        // rebuild the polar converter
+        ignore_status(self.set_up_polar_conversion(k))?;
+
+        // all done
+        if mode == TrimMode::Notify {
+            self.notify(k, NotifyOperation::PostEdit)?;
+        }
+        Ok(())
+    }
+}
+
+/// An empty NURB from NLib (upstream reads its first control point regardless).
+const fn empty_nurb() -> SolidError {
+    SolidError::InvalidInput {
+        operation: OP_MAKE_NURB,
+        reason: "NLib returned a curve without control points",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::curve::curve::p2::ELLIPSE_TYPE;
+
+    fn kernel() -> Kernel {
+        Kernel::default()
+    }
+
+    fn circle(k: &Kernel, d0: f64, d1: f64, r: f64) -> Ellipse {
+        Ellipse::new_circle(
+            k,
+            Point3::new(1.0, 2.0, 3.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Extent1d::from_min_max(d0, d1),
+            r,
+            &EllipseOptions::default(),
+        )
+        .unwrap()
+    }
+
+    /// #428 / WR-211: clamping both new endpoints to one old NURBS
+    /// parameter must fail before it collapses the curve or poisons later edits.
+    #[test]
+    fn step_interval_past_a_turn_is_rejected_without_changing_the_curve() {
+        let past = Extent1d::from_min_max(360.0, 540.0);
+        let defaults = kernel();
+        assert!(!defaults.fixes.ellipse_step_interval_checks);
+        let mut legacy = circle(&defaults, 0.0, 360.0, 2.0);
+        legacy.adjust_step_interval(&defaults, &past, None).unwrap();
+        assert_eq!(legacy.anal_domain, past);
+        // Pinned C++ accepts this finite edit and collapses the NURBS domain.
+        assert_eq!(legacy.base.natural_interval().length(), 0.0);
+
+        let mut k = kernel();
+        k.fixes.ellipse_step_interval_checks = true;
+        for end in [360.0, 180.0] {
+            let mut c = circle(&k, 0.0, end, 2.0);
+            let old_domain = c.anal_domain;
+            let old_nurb = c.base.gw_nurb().unwrap().clone();
+            let old_angles = c.polar.angles.clone();
+            assert!(matches!(
+                c.adjust_step_interval(&k, &past, None),
+                Err(SolidError::InvalidInput { .. })
+            ));
+            assert_eq!(c.anal_domain, old_domain);
+            assert_eq!(c.base.gw_nurb().unwrap(), &old_nurb);
+            assert_eq!(c.polar.angles, old_angles);
+            // This was the second operation that produced interior NaN knots.
+            c.edit_parameterization(&k, &past, true, None).unwrap();
+            let knots = c.base.gw_nurb().unwrap().knots();
+            assert!(knots.iter().all(|v| v.is_finite()));
+            assert_eq!(c.base.natural_interval(), past);
+        }
+    }
+
+    /// The refusal policy also accepts a valid mapping supplied by main's
+    /// turn-preserving opt-in (#1846); the flags can be enabled together.
+    #[test]
+    fn step_interval_checks_allow_turn_preserving_mapping() {
+        let mut k = kernel();
+        k.fixes.ellipse_step_interval_checks = true;
+        k.fixes.ellipse_adjust_step_interval_keeps_turns = true;
+        let past = Extent1d::from_min_max(360.0, 540.0);
+        for end in [360.0, 180.0] {
+            let mut c = circle(&k, 0.0, end, 2.0);
+            c.adjust_step_interval(&k, &past, None).unwrap();
+            assert_eq!(c.anal_domain, past);
+            let natural = c.base.natural_interval();
+            assert!(natural.length() > 0.0);
+            let start = c.base.evaluate_point(natural.min()).unwrap();
+            let finish = c.base.evaluate_point(natural.max()).unwrap();
+            assert!((start - Point3::new(3.0, 2.0, 3.0)).length() < 1e-12);
+            assert!((finish - Point3::new(-1.0, 2.0, 3.0)).length() < 1e-12);
+            c.edit_parameterization(&k, &past, true, None).unwrap();
+            assert!(c
+                .base
+                .gw_nurb()
+                .unwrap()
+                .knots()
+                .iter()
+                .all(|v| v.is_finite()));
+        }
+    }
+
+    #[test]
+    fn invalid_step_interval_is_rejected_before_an_ellipse_edit() {
+        let mut k = kernel();
+        k.fixes.ellipse_step_interval_checks = true;
+        // An equal-angle request is not retained as a point arc: MakeNurb
+        // expands it to a full turn, while the old converter still gives a
+        // zero-length NURBS interval. Reject it rather than creating that pair.
+        for interval in [
+            Extent1d::from_value(90.0),
+            Extent1d::from_raw(90.0, 0.0),
+            Extent1d::from_raw(f64::NAN, 90.0),
+            Extent1d::from_raw(0.0, f64::NAN),
+            Extent1d::from_raw(0.0, f64::INFINITY),
+            Extent1d::from_raw(-f64::MAX, f64::MAX),
+        ] {
+            let mut c = circle(&k, 0.0, 360.0, 2.0);
+            let old = c.base.gw_nurb().unwrap().clone();
+            assert!(matches!(
+                c.adjust_step_interval(&k, &interval, None),
+                Err(SolidError::InvalidInput { .. })
+            ));
+            assert_eq!(c.anal_domain, Extent1d::from_min_max(0.0, 360.0));
+            assert_eq!(c.base.gw_nurb().unwrap(), &old);
+        }
+    }
+
+    /// #428 (`WR-211`) with `ellipse_adjust_step_interval_keeps_turns` (the fork's
+    /// tangency-labs/smlib@5c0b5ed): a full circle moved a turn on to `[360, 540]` keeps
+    /// half its NURBS length and starts where angle 0 is; a half circle moved there
+    /// continues its NURBS interval in proportion. The knots stay finite.
+    #[test]
+    fn step_interval_past_a_turn_keeps_its_length_with_the_fix() {
+        let mut k = kernel();
+        k.fixes.ellipse_adjust_step_interval_keeps_turns = true;
+        let past = Extent1d::from_min_max(360.0, 540.0);
+        for d1 in [360.0, 180.0] {
+            let mut c = circle(&k, 0.0, d1, 2.0);
+            c.adjust_step_interval(&k, &past, None).unwrap();
+            assert_eq!(c.anal_domain, past);
+            let nat = c.base.natural_interval();
+            assert!(nat.max() > nat.min(), "[0, {d1}]");
+            // the start is angle 0 again, the end angle 180: (1, 2, 3) +- 2 x
+            let start = c.base.evaluate_point(nat.min()).unwrap();
+            let end = c.base.evaluate_point(nat.max()).unwrap();
+            assert!(
+                (start - Point3::new(3.0, 2.0, 3.0)).length() < 1e-12,
+                "{start:?}"
+            );
+            assert!(
+                (end - Point3::new(-1.0, 2.0, 3.0)).length() < 1e-12,
+                "{end:?}"
+            );
+        }
+        let mut c = circle(&k, 0.0, 360.0, 2.0);
+        c.adjust_step_interval(&k, &past, None).unwrap();
+        c.base.edit_parameterization(&past).unwrap();
+        let (knots, _) = c.base.knots(None).unwrap();
+        assert!(knots.iter().all(|x| x.is_finite()), "{knots:?}");
+    }
+
+    #[test]
+    fn circle_class_and_types() {
+        let k = kernel();
+        let c = circle(&k, 0.0, 90.0, 2.0);
+        assert!(c.is_circle_class());
+        assert_eq!(c.type_code(), CIRCLE_TYPE);
+        assert!(c.kind_of(CIRCLE_TYPE));
+        assert!(c.kind_of(ELLIPSE_TYPE));
+        assert_eq!(c.class_string(), "SmCircle");
+        assert_eq!(c.base().form, BSplineCurveForm::CircularArc);
+        assert_eq!(c.radius(), 2.0);
+        let (_, r, a, b) = c.is_arc(&k, 5, 0.0).unwrap().unwrap();
+        assert_eq!((r, a, b), (2.0, 0.0, 90.0));
+    }
+
+    #[test]
+    fn polar_round_trip_and_validity() {
+        let k = kernel();
+        let mut c = circle(&k, 0.0, 360.0, 2.0);
+        let ivl = c.base().natural_interval();
+        let s = c
+            .convert_t_from_nurbs_to_step(&k, ivl.evaluate(0.3))
+            .unwrap();
+        let t = c.convert_t_from_step_to_nurbs(&k, s).unwrap();
+        assert!((t - ivl.evaluate(0.3)).abs() < 1e-9);
+        let mut l = AssertArray::new();
+        assert!(c
+            .assert_valid(&k, Some(&mut l), false, ObjectKey(1), ObjectKey(2))
+            .unwrap());
+        assert!(l.is_empty());
+    }
+
+    #[test]
+    fn three_point_circle_and_copy() {
+        let k = kernel();
+        let c = Ellipse::circle_from_3_points(
+            &k,
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(-1.0, 0.0, 0.0),
+            3,
+            false,
+        )
+        .unwrap();
+        assert!((c.radius() - 1.0).abs() < 1e-12);
+        let d = c.copy(&k).unwrap();
+        assert!(d.approx_eq(&c));
+        assert!(d.is_circle_class());
+    }
+
+    #[test]
+    fn reverse_and_trim() {
+        let k = kernel();
+        let mut c = circle(&k, 10.0, 100.0, 1.0);
+        let ivl = c.base().natural_interval();
+        let r = c.reverse_parameterization(&k, &ivl, None).unwrap();
+        assert!(r.are_same(&ivl));
+        assert!((c.step_interval().min() - 260.0).abs() < 1e-9);
+        let mut t = Extent1d::from_min_max(ivl.evaluate(0.25), ivl.evaluate(0.75));
+        c.trim(&k, &mut t, TrimMode::Notify).unwrap();
+        assert!(c.polar_converter().is_polar_conversion_possible());
+    }
+
+    /// #1432: a full unit circle given as its rational quadratic NURBS (9 points,
+    /// weights `1, s, 1, s, ..`, a plain B-spline) is recognised as that circle.
+    #[test]
+    fn is_nurb_curve_circle_full_unit_circle() {
+        let k = kernel();
+        let circle =
+            Ellipse::create_canonical_circle(&k, &Axis2Placement::default(), 1.0, None, None)
+                .unwrap();
+        let nurbs = Curve::from(circle.base().copy());
+        assert!(matches!(nurbs.kind(), CurveKind::BSpline(_)));
+        let got = Ellipse::is_nurb_curve_circle(&k, &nurbs, None)
+            .unwrap()
+            .expect("a circle");
+        assert!(got.is_circle_class());
+        assert!((got.radius() - 1.0).abs() < 1e-12);
+        let dom = got.step_interval();
+        assert!((dom.max() - dom.min() - 360.0).abs() < 1e-9);
+        assert!(got.base().gw_nurb().is_some());
+
+        // already a circle: a copy
+        let same = Ellipse::is_nurb_curve_circle(&k, &Curve::from(circle.copy(&k).unwrap()), None)
+            .unwrap()
+            .expect("a copy");
+        assert!(same.is_circle_class());
+        assert_eq!(same.radius(), 1.0);
+
+        // a non-circular ellipse is rational degree 2 but not an arc
+        let ell = Ellipse::create_canonical(&k, &Axis2Placement::default(), 2.0, 1.0, None, None)
+            .unwrap();
+        let none = Ellipse::is_nurb_curve_circle(&k, &Curve::from(ell.base().copy()), None);
+        assert!(none.unwrap().is_none());
+    }
+
+    #[test]
+    fn simple_offset_and_join() {
+        let k = kernel();
+        let c = circle(&k, 0.0, 90.0, 1.0);
+        let (o, gap) = c
+            .create_simple_offset(&k, 1e-6, Vec3::new(0.0, 0.0, 1.0), 0.5, false)
+            .unwrap();
+        assert_eq!(gap, 0.0);
+        match o.kind() {
+            CurveKind::Ellipse(e) => assert_eq!(e.radius(), 1.5),
+            _ => panic!("not a circle"),
+        }
+        let mut a = circle(&k, 0.0, 90.0, 1.0);
+        let b = Curve::from(circle(&k, 90.0, 180.0, 1.0));
+        a.join_with(&k, 1, &b, 0, None, None).unwrap();
+        assert!((a.step_interval().max() - 180.0).abs() < 1e-6);
+        let line = Curve::from(BSplineCurve::create_degenerate_curve(3, Vec3::UNDEF).unwrap());
+        assert!(a.join_with(&k, 1, &line, 0, None, None).is_err());
+    }
+
+    #[test]
+    fn two_d_conversion() {
+        let k = kernel();
+        let e = Ellipse::new(
+            &k,
+            Point3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Extent1d::from_min_max(0.0, 180.0),
+            2.0,
+            1.0,
+            &EllipseOptions {
+                dim: 2,
+                ..EllipseOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(e.position().origin().z, 0.0);
+        assert_eq!(e.base().dim, 2);
+    }
+
+    #[test]
+    fn wr32_circle_offset_antiparallel_default_preserves_expansion() {
+        let k = kernel();
+        assert!(!k.fixes.circle_offset_antiparallel_normal);
+        let c = circle(&k, 0.0, 90.0, 1.0);
+        let normal_neg_z = Vec3::new(0.0, 0.0, -1.0);
+        let (o, gap) = c
+            .create_simple_offset(&k, 1e-6, normal_neg_z, 0.4, false)
+            .unwrap();
+        assert_eq!(gap, 0.0);
+        match o.kind() {
+            CurveKind::Ellipse(e) => {
+                assert!((e.radius() - 1.4).abs() < 1e-12);
+            }
+            _ => panic!("expected circle"),
+        }
+    }
+
+    #[test]
+    fn wr32_circle_offset_antiparallel_opt_in_shrinks_positive_radius() {
+        let mut k = kernel();
+        k.fixes.circle_offset_antiparallel_normal = true;
+        let c = circle(&k, 0.0, 90.0, 1.0);
+        let normal_neg_z = Vec3::new(0.0, 0.0, -1.0);
+
+        // Positive offset distance with antiparallel normal shrinks radius
+        let (o, gap) = c
+            .create_simple_offset(&k, 1e-6, normal_neg_z, 0.4, false)
+            .unwrap();
+        assert_eq!(gap, 0.0);
+        match o.kind() {
+            CurveKind::Ellipse(e) => {
+                assert!((e.radius() - 0.6).abs() < 1e-12);
+            }
+            _ => panic!("expected circle"),
+        }
+
+        // Negative offset distance with antiparallel normal expands radius
+        let (o_neg, gap_neg) = c
+            .create_simple_offset(&k, 1e-6, normal_neg_z, -0.4, false)
+            .unwrap();
+        assert_eq!(gap_neg, 0.0);
+        match o_neg.kind() {
+            CurveKind::Ellipse(e) => {
+                assert!((e.radius() - 1.4).abs() < 1e-12);
+            }
+            _ => panic!("expected circle"),
+        }
+    }
+
+    #[test]
+    fn wr32_circle_offset_antiparallel_opt_in_degenerate_radius() {
+        let mut k = kernel();
+        k.fixes.circle_offset_antiparallel_normal = true;
+        let c = circle(&k, 0.0, 90.0, 1.0);
+        let normal_neg_z = Vec3::new(0.0, 0.0, -1.0);
+        let tol = 1e-4;
+
+        // Exact zero radius (1.0 - 1.0 = 0.0 < tol and >= -tol) -> degenerate curve
+        let (o, gap) = c
+            .create_simple_offset(&k, tol, normal_neg_z, 1.0, false)
+            .unwrap();
+        assert_eq!(gap, 0.0);
+        match o.kind() {
+            CurveKind::BSpline(b) => {
+                assert!(b.is_degenerate(&k, tol, None).unwrap());
+            }
+            _ => panic!("expected degenerate BSplineCurve"),
+        }
+
+        // Slightly negative radius within approx_tol_3d (1.0 - 1.00005 = -5e-5 >= -1e-4) -> degenerate curve
+        let (o2, gap2) = c
+            .create_simple_offset(&k, tol, normal_neg_z, 1.0 + 5e-5, false)
+            .unwrap();
+        assert_eq!(gap2, 0.0);
+        match o2.kind() {
+            CurveKind::BSpline(b) => {
+                assert!(b.is_degenerate(&k, tol, None).unwrap());
+            }
+            _ => panic!("expected degenerate BSplineCurve"),
+        }
+    }
+
+    #[test]
+    fn wr32_circle_offset_antiparallel_opt_in_negative_radius_error() {
+        let mut k = kernel();
+        k.fixes.circle_offset_antiparallel_normal = true;
+        let c = circle(&k, 0.0, 90.0, 1.0);
+        let normal_neg_z = Vec3::new(0.0, 0.0, -1.0);
+        let tol = 1e-4;
+
+        // Radius exceeds tolerance in negative direction (1.0 - 1.5 = -0.5 < -tol) -> error
+        let res = c.create_simple_offset(&k, tol, normal_neg_z, 1.5, false);
+        assert!(res.is_err());
+        match res {
+            Err(SolidError::Upstream {
+                code, operation, ..
+            }) => {
+                assert_eq!(code, 1001);
+                assert_eq!(
+                    operation,
+                    "curve::ellipse::p1::Ellipse::create_simple_offset"
+                );
+            }
+            _ => panic!("expected Upstream error"),
+        }
+    }
+
+    #[test]
+    fn wr32_circle_offset_parallel_normal_invariance() {
+        let k_def = kernel();
+        let mut k_fix = kernel();
+        k_fix.fixes.circle_offset_antiparallel_normal = true;
+        let c = circle(&k_def, 0.0, 90.0, 1.0);
+        let normal_pos_z = Vec3::new(0.0, 0.0, 1.0);
+
+        let (o_def, _) = c
+            .create_simple_offset(&k_def, 1e-6, normal_pos_z, 0.4, false)
+            .unwrap();
+        let (o_fix, _) = c
+            .create_simple_offset(&k_fix, 1e-6, normal_pos_z, 0.4, false)
+            .unwrap();
+
+        match (o_def.kind(), o_fix.kind()) {
+            (CurveKind::Ellipse(e_def), CurveKind::Ellipse(e_fix)) => {
+                assert_eq!(e_def.radius(), e_fix.radius());
+                assert!((e_fix.radius() - 1.4).abs() < 1e-12);
+            }
+            _ => panic!("expected circles"),
+        }
+    }
+
+    fn tilted_axes(rot_z_deg: f64, tilt_x_deg: f64, flip_z: bool) -> (Vec3, Vec3) {
+        let a = rot_z_deg.to_radians();
+        let b = tilt_x_deg.to_radians();
+        let (sa, ca) = (a.sin(), a.cos());
+        let (sb, cb) = (b.sin(), b.cos());
+        let ux = Vec3::new(ca, sa * cb, sa * sb);
+        let mut uy = Vec3::new(-sa, ca * cb, ca * sb);
+        if flip_z {
+            uy = -uy;
+        }
+        (ux, uy)
+    }
+
+    fn project_xy(p: Point3) -> Point3 {
+        Point3::new(p.x, p.y, 0.0)
+    }
+
+    fn assert_projected_matches_3d(k: &Kernel, orig_3d: &Ellipse, proj_2d: &mut Ellipse) {
+        assert_eq!(proj_2d.base().dim, 2);
+        let pos = proj_2d.position();
+        assert_eq!(pos.origin().z, 0.0);
+        assert_eq!(pos.x_axis().z, 0.0);
+        assert_eq!(pos.y_axis().z, 0.0);
+        assert!((pos.x_axis().length() - 1.0).abs() < 1e-12);
+        assert!((pos.y_axis().length() - 1.0).abs() < 1e-12);
+        assert!(pos.x_axis().dot(pos.y_axis()).abs() < 1e-12);
+
+        let mut list = AssertArray::new();
+        let ok = if proj_2d.is_circle_class() {
+            proj_2d
+                .polar
+                .assert_valid(k, proj_2d, Some(&mut list), ObjectKey(2))
+                .unwrap()
+        } else {
+            proj_2d
+                .assert_valid(k, Some(&mut list), false, ObjectKey(1), ObjectKey(2))
+                .unwrap()
+        };
+        assert!(ok, "{list:?}");
+        assert!(list.is_empty());
+
+        let nat_3d = orig_3d.base().natural_interval();
+        let nat_2d = proj_2d.base().natural_interval();
+        assert!((nat_3d.min() - nat_2d.min()).abs() < 1e-12);
+        assert!((nat_3d.max() - nat_2d.max()).abs() < 1e-12);
+
+        let crv_2d = Curve::from(proj_2d.clone());
+        for i in 0..=24_u32 {
+            let u = f64::from(i) / 24.0;
+            let t = nat_2d.evaluate(u);
+            let p3 = orig_3d.base().evaluate_point(t).unwrap();
+            let expected = project_xy(p3);
+
+            let p_nurb = proj_2d.base().evaluate_point(t).unwrap();
+            assert!((p_nurb - expected).length() < 1e-11, "{p_nurb:?}");
+
+            let p_crv = crv_2d.evaluate_point(k, t).unwrap();
+            assert!((p_crv - expected).length() < 1e-11, "{p_crv:?}");
+
+            let step_t = proj_2d.convert_t_from_nurbs_to_step(k, t).unwrap();
+            let p_step = proj_2d.evaluate_step_point(step_t).unwrap();
+            assert!((p_step - expected).length() < 1e-11, "{p_step:?}");
+
+            let t_back = proj_2d.convert_t_from_step_to_nurbs(k, step_t).unwrap();
+            let p_back = proj_2d.base().evaluate_point(t_back).unwrap();
+            assert!((p_back - expected).length() < 1e-11, "{p_back:?}");
+        }
+    }
+
+    /// `WR-31` (#2140): pinned C++ default reuses `dThetaXRad` for both projected
+    /// semi-axes (making `x_radius == y_radius`), passes `[A, B, C]` instead of
+    /// `[C, B, A]` to `SolveQuadraticEqn`, collapses a full-turn STEP domain when
+    /// `new_x` rotates away from the closed NURB seam, and can leave `y_axis` along
+    /// `+Z` via `SetCanonical` when parallel `new_x == new_y` lies along `Y`.
+    #[test]
+    fn wr31_tilted_ellipse_default_gives_equal_radii_and_mismatches_projection() {
+        let k_def = kernel();
+        assert!(!k_def.fixes.ellipse_convert_to_2d_uses_both_axes);
+
+        let (ux, uy) = tilted_axes(45.0, 60.0, false);
+        let center = Point3::new(1.5, -2.5, 4.0);
+        for (d0, d1) in [(20.0, 230.0), (0.0, 360.0)] {
+            let orig = Ellipse::new(
+                &k_def,
+                center,
+                ux,
+                uy,
+                Extent1d::from_min_max(d0, d1),
+                3.0,
+                1.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap();
+            let mut legacy = orig.clone();
+            legacy.convert_to_2d(&k_def).unwrap();
+            assert!((legacy.x_radius() - legacy.y_radius()).abs() < 1e-15);
+
+            let nat = orig.base().natural_interval();
+            let mut max_err = 0.0_f64;
+            for i in 0..=16_u32 {
+                let t = nat.evaluate(f64::from(i) / 16.0);
+                let expected = project_xy(orig.base().evaluate_point(t).unwrap());
+                let step_t = legacy.convert_t_from_nurbs_to_step(&k_def, t).unwrap();
+                let got = legacy.evaluate_step_point(step_t).unwrap();
+                max_err = max_err.max((got - expected).length());
+            }
+            assert!(max_err > 0.1, "{max_err}");
+
+            if (d1 - d0 - 360.0).abs() < 1e-9 {
+                assert!(legacy.step_interval().length() < 1e-9);
+                let valid = legacy
+                    .assert_valid(&k_def, None, false, ObjectKey(1), ObjectKey(2))
+                    .unwrap();
+                assert!(!valid);
+            }
+        }
+
+        // Ellipse in the YZ plane rotated 45 deg: parallel new_x == new_y == (0, +-1, 0)
+        // makes SetCanonical's MakeUnitOrthoVectors fallback pick y_axis = (0, 0, 1).
+        let s = 0.5_f64.sqrt();
+        let yz_x = Vec3::new(0.0, s, s);
+        let yz_y = Vec3::new(0.0, s, -s);
+        let mut yz_def = Ellipse::new(
+            &k_def,
+            center,
+            yz_x,
+            yz_y,
+            Extent1d::from_min_max(0.0, 180.0),
+            3.0,
+            1.0,
+            &EllipseOptions::default(),
+        )
+        .unwrap();
+        yz_def.convert_to_2d(&k_def).unwrap();
+        assert!(yz_def.position().y_axis().z.abs() > 0.99);
+    }
+
+    /// `WR-31` (#2140): with `ellipse_convert_to_2d_uses_both_axes` enabled, tilted 3D
+    /// ellipses with both `+Z` and `-Z` orientations (trimmed arcs and full turns)
+    /// project to exact 2D semi-axes, preserve `z_axis` orientation, and pass
+    /// `AssertValid`.
+    #[test]
+    fn wr31_tilted_ellipse_opt_in_matches_xy_projection_both_orientations() {
+        let mut k_fix = kernel();
+        k_fix.fixes.ellipse_convert_to_2d_uses_both_axes = true;
+        let center = Point3::new(1.5, -2.5, 4.0);
+
+        for flip_z in [false, true] {
+            let (ux, uy) = tilted_axes(45.0, 60.0, flip_z);
+            let expected_z = if flip_z { -1.0 } else { 1.0 };
+
+            for (d0, d1) in [(20.0, 230.0), (0.0, 360.0), (-180.0, 180.0)] {
+                let orig = Ellipse::new(
+                    &k_fix,
+                    center,
+                    ux,
+                    uy,
+                    Extent1d::from_min_max(d0, d1),
+                    3.0,
+                    1.0,
+                    &EllipseOptions::default(),
+                )
+                .unwrap();
+
+                let mut proj = orig.clone();
+                proj.convert_to_2d(&k_fix).unwrap();
+
+                let rx = proj.x_radius();
+                let ry = proj.y_radius();
+                assert!((rx - ry).abs() > 1.0, "{rx} vs {ry}");
+                assert!((rx * ry - 1.5).abs() < 1e-12);
+                assert!((rx * rx + ry * ry - 6.25).abs() < 1e-12);
+                assert!((proj.position().z_axis().z - expected_z).abs() < 1e-12);
+
+                if (d1 - d0 - 360.0).abs() < 1e-9 {
+                    let dom = proj.step_interval();
+                    assert!((dom.length() - 360.0).abs() < 1e-12);
+                    assert!(dom.min() >= -360.0 - 1e-12 && dom.max() <= 360.0 + 1e-12);
+                }
+
+                assert_projected_matches_3d(&k_fix, &orig, &mut proj);
+
+                let mut crv = Curve::from(orig.clone());
+                crv.convert_to_2d(&k_fix).unwrap();
+                match crv.kind() {
+                    CurveKind::Ellipse(e2) => {
+                        assert!((e2.x_radius() - rx).abs() < 1e-12);
+                        assert!((e2.y_radius() - ry).abs() < 1e-12);
+                    }
+                    _ => panic!("expected ellipse"),
+                }
+            }
+        }
+    }
+
+    /// `WR-31` (#2140): a 3D `SmCircle` (`r = 2`) tilted 60 deg from the XY plane with
+    /// rotated in-plane axes projects to semi-axes `{1, 2}` under the opt-in fix,
+    /// including `inside_out` circles.
+    #[test]
+    fn wr31_tilted_circle_projection_unequal_semi_axes() {
+        let k_def = kernel();
+        let mut k_fix = kernel();
+        k_fix.fixes.ellipse_convert_to_2d_uses_both_axes = true;
+
+        let (ux, uy) = tilted_axes(30.0, 60.0, false);
+        let center = Point3::new(-3.0, 2.0, 5.0);
+
+        for (d0, d1, inside_out) in [
+            (0.0, 360.0, false),
+            (0.0, 360.0, true),
+            (-40.0, 110.0, false),
+        ] {
+            let opts = EllipseOptions {
+                inside_out,
+                ..EllipseOptions::default()
+            };
+            let orig = Ellipse::new_circle(
+                &k_fix,
+                center,
+                ux,
+                uy,
+                Extent1d::from_min_max(d0, d1),
+                2.0,
+                &opts,
+            )
+            .unwrap();
+
+            let mut c_def = orig.clone();
+            c_def.convert_to_2d(&k_def).unwrap();
+            assert!((c_def.x_radius() - c_def.y_radius()).abs() < 1e-15);
+
+            let mut c_fix = orig.clone();
+            c_fix.convert_to_2d(&k_fix).unwrap();
+            assert!(c_fix.is_circle_class());
+            assert!(!c_fix.is_circle());
+            let min_r = c_fix.x_radius().min(c_fix.y_radius());
+            let max_r = c_fix.x_radius().max(c_fix.y_radius());
+            assert!((min_r - 1.0).abs() < 1e-12, "{min_r}");
+            assert!((max_r - 2.0).abs() < 1e-12, "{max_r}");
+
+            assert_projected_matches_3d(&k_fix, &orig, &mut c_fix);
+        }
+    }
+
+    /// `WR-31` (#2140): perpendicular projected axes, edge-on degenerate projections,
+    /// and the single-root linear quadratic fallback (`radius_y == 0` with nonzero
+    /// `x_dot_y`).
+    #[test]
+    fn wr31_perpendicular_and_edge_on_degenerate_projections() {
+        let k_def = kernel();
+        let mut k_fix = kernel();
+        k_fix.fixes.ellipse_convert_to_2d_uses_both_axes = true;
+        let center = Point3::new(0.5, -1.0, 2.0);
+
+        // 1. Projected axes remain perpendicular (|x_dot_y| < EFF_ZERO): default and
+        // opt-in agree and preserve [-360, 0] full-turn domains.
+        let perp_x = Vec3::new(1.0, 0.0, 0.0);
+        let perp_y = Vec3::new(0.0, 0.5, 0.75_f64.sqrt());
+        for (d0, d1) in [(15.0, 200.0), (-360.0, 0.0)] {
+            let orig = Ellipse::new(
+                &k_fix,
+                center,
+                perp_x,
+                perp_y,
+                Extent1d::from_min_max(d0, d1),
+                4.0,
+                1.5,
+                &EllipseOptions::default(),
+            )
+            .unwrap();
+            let mut e_def = orig.clone();
+            let mut e_fix = orig.clone();
+            e_def.convert_to_2d(&k_def).unwrap();
+            e_fix.convert_to_2d(&k_fix).unwrap();
+            assert!((e_fix.x_radius() - 4.0).abs() < 1e-12);
+            assert!((e_fix.y_radius() - 0.75).abs() < 1e-12);
+            assert!((e_def.x_radius() - e_fix.x_radius()).abs() < 1e-15);
+            assert!((e_def.y_radius() - e_fix.y_radius()).abs() < 1e-15);
+            assert!(e_def.step_interval().are_same(&e_fix.step_interval()));
+            assert_projected_matches_3d(&k_fix, &orig, &mut e_fix);
+        }
+
+        // 2. Edge-on 3D ellipses (plane perpendicular to XY with rotated axes so
+        // |x_dot_y| == 0.5): one semi-axis collapses to 0 and both axes stay in XY.
+        let (edge_x, edge_y) = tilted_axes(45.0, 90.0, false);
+        let mut edge = Ellipse::new(
+            &k_fix,
+            center,
+            edge_x,
+            edge_y,
+            Extent1d::from_min_max(0.0, 180.0),
+            3.0,
+            2.0,
+            &EllipseOptions::default(),
+        )
+        .unwrap();
+        edge.convert_to_2d(&k_fix).unwrap();
+        let edge_min = edge.x_radius().min(edge.y_radius());
+        let edge_max = edge.x_radius().max(edge.y_radius());
+        assert!(edge_min < 1e-14, "{edge_min}");
+        assert!((edge_max - 6.5_f64.sqrt()).abs() < 1e-12, "{edge_max}");
+        let edge_pos = edge.position();
+        assert_eq!(edge_pos.x_axis().z, 0.0);
+        assert_eq!(edge_pos.y_axis().z, 0.0);
+        assert!(edge_pos.x_axis().dot(edge_pos.y_axis()).abs() < 1e-12);
+
+        let s = 0.5_f64.sqrt();
+        let mut yz_fix = Ellipse::new(
+            &k_fix,
+            center,
+            Vec3::new(0.0, s, s),
+            Vec3::new(0.0, s, -s),
+            Extent1d::from_min_max(0.0, 180.0),
+            3.0,
+            1.0,
+            &EllipseOptions::default(),
+        )
+        .unwrap();
+        yz_fix.convert_to_2d(&k_fix).unwrap();
+        let yz_min = yz_fix.x_radius().min(yz_fix.y_radius());
+        let yz_max = yz_fix.x_radius().max(yz_fix.y_radius());
+        assert!(yz_min < 1e-14, "{yz_min}");
+        assert!((yz_max - 5.0_f64.sqrt()).abs() < 1e-12, "{yz_max}");
+        assert_eq!(yz_fix.position().x_axis().z, 0.0);
+        assert_eq!(yz_fix.position().y_axis().z, 0.0);
+
+        // 3. Linear quadratic (sols.len() == 1 when radius_y == 0 with |x_dot_y| > 0):
+        // uses theta_x_rad + HALF_PI without reading a missing second root.
+        let (lin_x, lin_y) = tilted_axes(45.0, 60.0, false);
+        let mut lin = Ellipse::new(
+            &k_fix,
+            center,
+            lin_x,
+            lin_y,
+            Extent1d::from_min_max(0.0, 180.0),
+            3.0,
+            1.0,
+            &EllipseOptions::default(),
+        )
+        .unwrap();
+        lin.radius_y = 0.0;
+        lin.convert_to_2d(&k_fix).unwrap();
+        assert!((lin.x_radius() - 3.0 * 0.625_f64.sqrt()).abs() < 1e-12);
+        assert!(lin.y_radius() < 1e-14, "{}", lin.y_radius());
+        let lin_pos = lin.position();
+        assert_eq!(lin_pos.x_axis().z, 0.0);
+        assert_eq!(lin_pos.y_axis().z, 0.0);
+        assert!(lin_pos.x_axis().dot(lin_pos.y_axis()).abs() < 1e-12);
+    }
+
+    /// WR-741's near-line ellipse as the part's last cut leaves it: a slanted face meets a
+    /// notch cylinder of radius 8 whose axis it nearly holds, in an ellipse of radii 1.8e7
+    /// and 8 over 1.3e-4 degrees (SolidCraft's `periph_case_R` minus `t24`; its data as the
+    /// cut made them), with its NURB's middle control point moved by `moved` across the
+    /// line (along y, the ellipse's minor axis).
+    fn near_line_ellipse(k: &Kernel, moved: f64) -> Ellipse {
+        let w = |x: f64, y: f64, z: f64, w: f64| crate::nurbs::math::CPoint { x, y, z, w };
+        let mut pw = [
+            w(
+                13.253602627358246,
+                1.4999999999963078,
+                -16.00000000516967,
+                0.999999999999005,
+            ),
+            w(
+                14.619122958128635,
+                1.4999999999894964,
+                -35.49973670088171,
+                0.9999999999989054,
+            ),
+            w(
+                15.984680084201354,
+                1.499999999965369,
+                -54.99999883617046,
+                1.0,
+            ),
+        ];
+        pw[1].y += moved * pw[1].w;
+        let t = 0.4545515805799034;
+        let nurb = BSplineCurve::from_data(3, 2, 5, 2, &pw, &[t, t, t, 1.0, 1.0, 1.0]).unwrap();
+        Ellipse::new(
+            k,
+            Point3::new(12.307600253960118, -6.499999999999879, -2.4910124205052853),
+            Vec3::new(
+                -0.0698565549801471,
+                2.2800287367674085e-15,
+                0.997557046853114,
+            ),
+            Vec3::new(
+                1.1061963785363063e-13,
+                1.0000000000000002,
+                5.460818600824158e-15,
+            ),
+            Extent1d::from_min_max(90.00004337355625, 90.00016859157368),
+            17888859.871344022,
+            8.0,
+            &EllipseOptions {
+                nurb: Some(&nurb),
+                ..EllipseOptions::default()
+            },
+        )
+        .unwrap()
+    }
+
+    /// WR-741: the near-line ellipse's NURB is exact, but its analytic form is
+    /// evaluated to about `rx` times an ulp of its angle. At one of the check's samples its
+    /// NURB and STEP points lie farther apart than upstream's `100 SM_EFF_ZERO (1 + |p|)`
+    /// (4.6e-9 against 1.7e-9 at its start), within the rounding the evaluation carries,
+    /// and the check passes it; moved 1e-6 or 1e-3 off the line, it is refused. An ordinary ellipse
+    /// (radii 8 and 5) whose NURB has a control point moved 1e-8, about 5e-9 off the curve,
+    /// is still refused: the rounding is 2.5e-14 there.
+    #[test]
+    fn a_near_line_ellipse_passes_with_the_rounding_its_radii_carry() {
+        let k = kernel();
+        let mut e = near_line_ellipse(&k, 0.0);
+        let beyond_upstream = (0..5).any(|ii| {
+            let step_t = e.anal_domain.evaluate(f64::from(ii) / 4.0);
+            let nurb_t = e
+                .polar
+                .convert_to_nurbs_parameter_or_written(&k, &e, step_t, 0.0)
+                .unwrap()
+                .unwrap();
+            let p = e.base.evaluate_point(nurb_t).unwrap();
+            (p - e.step_point(step_t)).length() > EFF_ZERO * 100.0 * (1.0 + p.max_dimension())
+        });
+        assert!(beyond_upstream, "upstream's tolerance passes it");
+        assert!(e
+            .assert_valid(&k, None, false, ObjectKey(0), ObjectKey(0))
+            .unwrap());
+        // The same ellipse with its NURB moved 1e-3 off the line at its middle control point
+        // (about 5e-4 off the curve, far beyond the 5.6e-8 the rounding allows) is refused.
+        assert!(
+            !near_line_ellipse(&k, 1e-3)
+                .assert_valid(&k, None, false, ObjectKey(0), ObjectKey(0))
+                .unwrap(),
+            "a near-line ellipse whose NURB is moved 1e-3"
+        );
+        // Just above the bound: moved 1e-6 it is refused too (1.16e-6 against 5.88e-8, 20x), so the
+        // bound is tight; measured, 1e-7 is already refused (1.12e-7, 1.9x) and 1e-8 passes.
+        assert!(
+            !near_line_ellipse(&k, 1e-6)
+                .assert_valid(&k, None, false, ObjectKey(0), ObjectKey(0))
+                .unwrap(),
+            "a near-line ellipse whose NURB is moved 1e-6"
+        );
+
+        let (o, x, y) = (
+            Point3::new(1.0, 2.0, 3.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        let arc = Extent1d::from_min_max(0.0, 90.0);
+        let exact = Ellipse::new(&k, o, x, y, arc, 8.0, 5.0, &EllipseOptions::default()).unwrap();
+        let made = exact.base.nurb.as_ref().unwrap();
+        let mut pw = made.cpts().to_vec();
+        pw[1].z += 1e-8 * pw[1].w;
+        let off = BSplineCurve::from_data(3, made.n(), made.m(), made.degree(), &pw, made.knots())
+            .unwrap();
+        let mut e = Ellipse::new(
+            &k,
+            o,
+            x,
+            y,
+            arc,
+            8.0,
+            5.0,
+            &EllipseOptions {
+                nurb: Some(&off),
+                ..EllipseOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            !e.assert_valid(&k, None, false, ObjectKey(0), ObjectKey(0))
+                .unwrap(),
+            "an ordinary ellipse whose NURB is moved 1e-8"
+        );
+    }
+
+    /// The trimmed arc of the fork's capi test `scenario_ellipse_trimmed_just_short_of_its_seam`
+    /// (tangency-labs/smlib 4e0d0e8): radii 0.5 and sqrt(0.5) over 313.53 to 360 degrees,
+    /// trimmed 2.57e-8 of its NURBS parameter (1.17e-6 degrees) short of its end. Returns
+    /// the STEP domain's end, the trimmed end's own polar angle and the largest distance
+    /// between the STEP and NURBS points at 65 STEP angles.
+    fn trimmed_just_short_of_its_seam(k: &Kernel) -> (f64, f64, f64) {
+        let o = Point3::new(79.95, 1.0, 29.5);
+        let (x, y) = (Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 0.0));
+        let (rx, ry) = (0.5, 0.5_f64.sqrt());
+        let arc = Extent1d::from_min_max(313.531_199_289_226_44, 360.0);
+        let mut e = Ellipse::new(k, o, x, y, arc, rx, ry, &EllipseOptions::default()).unwrap();
+        let nat = e.base.natural_interval();
+        let mut piece = Extent1d::from_min_max(nat.min(), nat.evaluate(0.999_999_974_279_909_61));
+        e.trim(k, &mut piece, TrimMode::Notify).unwrap();
+        let (nurb, step) = (e.base.natural_interval(), e.step_interval());
+        let d = e.base.evaluate_point(nurb.max()).unwrap() - o;
+        let mut angle = (rx / ry * d.dot(y)).atan2(d.dot(x)) * 180.0 / PI;
+        if angle < 0.0 {
+            angle += 360.0;
+        }
+        let mut off = 0.0_f64;
+        for i in 0..=64 {
+            let deg = step.evaluate(f64::from(i) / 64.0);
+            let t = e.convert_t_from_step_to_nurbs(k, deg).unwrap();
+            let a = e.base.evaluate_point(t).unwrap();
+            let b = e.evaluate_step_point(deg).unwrap();
+            off = off.max((a - b).length());
+        }
+        (step.max(), angle, off)
+    }
+
+    /// WR-719 (the fork's cbeb14b): with `ellipse_open_arc_keeps_end_angle` an open arc
+    /// trimmed just short of its seam ends its STEP domain at its end's own angle, its
+    /// STEP and NURBS points within the fork test's 1e-10. The pinned set-up snaps the
+    /// end to 360 and the points are ~1.4e-8 apart.
+    #[test]
+    fn open_arc_trimmed_short_of_its_seam_keeps_its_end_angle() {
+        let mut k = kernel();
+        let (end, angle, off) = trimmed_just_short_of_its_seam(&k);
+        assert_eq!(end, 360.0);
+        assert!(angle < 360.0 - 1e-6, "{angle}");
+        assert!(off > 1e-8, "{off}");
+
+        k.fixes.ellipse_open_arc_keeps_end_angle = true;
+        let (end, angle, off) = trimmed_just_short_of_its_seam(&k);
+        assert!((end - angle).abs() <= 1e-9, "{end} against {angle}");
+        assert!(off <= 1e-10, "{off}");
+    }
+}

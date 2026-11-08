@@ -1,0 +1,384 @@
+{
+ "cases": [
+  {
+   "name": "cov_unitize_tan_tiny_d2_uses_gap",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:4590 (coverage: crates/solidcore/src/curve/curve/p2.rs:2457)",
+   "inputs": {
+    "op": "unitize_tan",
+    "pvv": [
+     [
+      1,
+      2,
+      3
+     ],
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1e-13,
+      0,
+      0
+     ]
+    ],
+    "gap": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cov_proj_angle_pt1_at_center",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:8453 (coverage: crates/solidcore/src/curve/curve/p2.rs:2483)",
+   "inputs": {
+    "op": "proj_angle",
+    "p1": [
+     1,
+     1,
+     0
+    ],
+    "p2": [
+     2,
+     0,
+     0
+    ],
+    "c": [
+     1,
+     1,
+     0
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "side": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cov_test_step_zero_tangent_angle",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:20981 (coverage: crates/solidcore/src/curve/curve/p2.rs:2574)",
+   "inputs": {
+    "op": "test_step",
+    "cur_t": 0.0,
+    "step": 0.5,
+    "cur": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0
+     ]
+    ],
+    "next": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ]
+    ],
+    "chord": 0.0,
+    "angle": 5.0,
+    "dsq": 0.0
+   }
+  },
+  {
+   "name": "cov_flush_empty",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:468 (coverage: crates/solidcore/src/curve/curve/p2.rs:2257)",
+   "inputs": {
+    "op": "flush",
+    "tol": 1e-06,
+    "analytics": true,
+    "knots": [],
+    "pts": []
+   }
+  },
+  {
+   "name": "cov_best_subdiv_angle_child1_on_axis",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:12043 (coverage: crates/solidcore/src/curve/curve/p2.rs:3267)",
+   "inputs": {
+    "op": "solver",
+    "kind": "property",
+    "trees": [
+     [
+      {
+       "p": -1,
+       "c1": 1,
+       "c2": 2,
+       "aux": 0,
+       "data": true,
+       "bbox": [
+        -10,
+        -10,
+        -10,
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "p": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 0,
+       "data": true,
+       "bbox": [
+        -1,
+        -1,
+        1,
+        1,
+        1,
+        3
+       ]
+      },
+      {
+       "p": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 0,
+       "data": true,
+       "bbox": [
+        2,
+        -1,
+        1,
+        4,
+        1,
+        3
+       ]
+      }
+     ]
+    ],
+    "sop": 5,
+    "tol": 0.0,
+    "best": 1e+20,
+    "opt": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ]
+    ],
+    "prop": 17,
+    "value": 0.0,
+    "which": 1,
+    "nodes": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "cov_best_subdiv_angle_child2_on_axis",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:12063 (coverage: crates/solidcore/src/curve/curve/p2.rs:3274)",
+   "inputs": {
+    "op": "solver",
+    "kind": "property",
+    "trees": [
+     [
+      {
+       "p": -1,
+       "c1": 1,
+       "c2": 2,
+       "aux": 0,
+       "data": true,
+       "bbox": [
+        -10,
+        -10,
+        -10,
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "p": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 0,
+       "data": true,
+       "bbox": [
+        2,
+        -1,
+        1,
+        4,
+        1,
+        3
+       ]
+      },
+      {
+       "p": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 0,
+       "data": true,
+       "bbox": [
+        -1,
+        -1,
+        1,
+        1,
+        1,
+        3
+       ]
+      }
+     ]
+    ],
+    "sop": 5,
+    "tol": 0.0,
+    "best": 1e+20,
+    "opt": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ]
+    ],
+    "prop": 18,
+    "value": 0.0,
+    "which": 1,
+    "nodes": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "cov_may_contain_proj_point_max_false",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:12174 (coverage: crates/solidcore/src/curve/curve/p2.rs:3341)",
+   "inputs": {
+    "op": "solver",
+    "kind": "property",
+    "trees": [
+     [
+      {
+       "p": -1,
+       "c1": -1,
+       "c2": -1,
+       "aux": 0,
+       "data": true,
+       "bbox": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ]
+      }
+     ]
+    ],
+    "sop": 5,
+    "tol": 0.0,
+    "best": 100.0,
+    "opt": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ]
+    ],
+    "prop": 21,
+    "value": 0.0,
+    "which": 0,
+    "nodes": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "cov_may_contain_proj_point_max_true",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:12174 (coverage: crates/solidcore/src/curve/curve/p2.rs:3343)",
+   "inputs": {
+    "op": "solver",
+    "kind": "property",
+    "trees": [
+     [
+      {
+       "p": -1,
+       "c1": -1,
+       "c2": -1,
+       "aux": 0,
+       "data": true,
+       "bbox": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ]
+      }
+     ]
+    ],
+    "sop": 5,
+    "tol": 0.0,
+    "best": 0.5,
+    "opt": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ]
+    ],
+    "prop": 21,
+    "value": 0.0,
+    "which": 0,
+    "nodes": [
+     0
+    ]
+   }
+  }
+ ]
+}

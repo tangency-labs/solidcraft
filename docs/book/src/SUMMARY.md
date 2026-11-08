@@ -32,7 +32,7 @@
   - [Local scalar libraries](dev/local-libraries.md)
 - [The command engine](dev/commands.md)
   - [Command schemas](dev/schemas.md)
-- [The kernel boundary and truck](dev/kernel.md)
+- [The kernel boundary](dev/kernel.md)
 - [Persistent naming](dev/naming.md)
 - [Test harnesses](dev/testing.md)
 - [Control protocol](dev/control-protocol.md)

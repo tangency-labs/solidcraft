@@ -5181,6 +5181,7 @@ fn render_workspace_compact_browser_card_and_focus_preserve_remembered_widths() 
 
 #[test]
 fn render_workspace_focus_messages_have_five_complete_locales() {
+    crate::i18n::install();
     let keys = [
         "cmd.view.render_focus",
         "cmd.view.render_browser",
@@ -7643,6 +7644,7 @@ fn render_assign_gestures_grid_drag_modifiers_cancel_and_context_menu() {
 
 #[test]
 fn render_assign_gestures_labels_translate_in_all_five_catalogs() {
+    crate::i18n::install();
     for language in ["en", "ja", "zh", "de", "ko"] {
         let locale = solidcraft_ui_text::Locale::for_language(language);
         for id in [
