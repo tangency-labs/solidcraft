@@ -782,3 +782,25 @@ mod component {
         assert_eq!(rig.click_target("nav:context:remove"), Some(NavAction::Context(ContextItem::Remove(3))), "a folded slot too");
     }
 }
+
+#[test]
+fn the_view_menu_slot_is_named_nav_view_on_the_bar_and_in_more() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.ui.show_browser = false;
+    h.app.ui.show_timeline = false;
+    h.call("ui.prefs", json!({"navigation_bar":{"slots":["display","fit","home"]}}));
+    h.settle();
+    let on_bar = solidcraft_ui_registry::handle_at("nav:slot:display").expect("the View slot is on the bar");
+    assert_eq!(solidcraft_ui_registry::handle_at("nav:view"), Some(on_bar));
+    // Many slots before it in a narrow view fold the View slot into More.
+    h.call(
+        "ui.prefs",
+        json!({"navigation_bar":{"slots":["pan","fit","home","visual_style","grid","ground_shadow","ambient_occlusion","projection","spin","orbit","zoom","display"]}}),
+    );
+    h.call("ui.resize", json!({"width":300,"height":600}));
+    h.settle();
+    assert!(solidcraft_ui_registry::handle_at("nav:slot:display").is_none() && solidcraft_ui_registry::handle_at("nav:view").is_none(), "folded");
+    h.step(&json!({"click":{"handle":"nav:more"}})).unwrap();
+    let in_more = solidcraft_ui_registry::handle_at("nav:slot:display").expect("More lists the View slot");
+    assert_eq!(solidcraft_ui_registry::handle_at("nav:view"), Some(in_more));
+}
