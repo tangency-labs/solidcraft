@@ -3231,6 +3231,7 @@ impl SolveApp {
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
         params_dialog::install_expressions(ctx);
+        ui_kit::set_viewport_half_height(ctx, self.cam.half_height());
         // Shortcuts run here, before `ui` installs the language scope: a tool started by its
         // key must build its translated hint in the user's language, not in English.
         let _language = solidcraft_ui_text::scope(&self.preferences.language);
@@ -3408,6 +3409,7 @@ impl SolveApp {
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         params_dialog::install_expressions(ui.ctx());
+        ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
         prefs::prepare_blur(self, ui.ctx());
         render_workspace::displayed::begin(self);
         let blur_source = !self.home.open && !render_workspace::result_active(self);
