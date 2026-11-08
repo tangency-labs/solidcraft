@@ -1349,7 +1349,8 @@ impl JsonSchema for MatrixTolerance {
 }
 
 /// `occurrence.move`'s `base_transform`: the 4×4 matrix a move starts from, as the Browser's
-/// drag passes it: finite, affine (a last row of 0, 0, 0, 1) and invertible.
+/// drag passes it, in the layout of a placement's `transform` (4 columns of 4 numbers): finite,
+/// affine (the fourth number of the first three columns is 0, of the last 1) and invertible.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BaseTransform(pub solidcraft_doc::Mat);
 
@@ -1366,7 +1367,7 @@ impl JsonSchema for BaseTransform {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         let row = json!({"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4});
         json_schema!({
-            "description": "A 4x4 matrix as 4 rows of 4 numbers: finite, affine (a last row of 0, 0, 0, 1) and invertible.",
+            "description": "A 4x4 matrix as 4 columns of 4 numbers, as a placement's `transform` is given (the translation is the last column): finite, affine (the fourth number of the first three columns is 0, of the last column 1) and invertible.",
             "type": "array",
             "items": row,
             "minItems": 4,
