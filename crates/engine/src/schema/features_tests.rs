@@ -89,7 +89,10 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ScaleParams>(), &["bodies", "factor", "factors", "name", "origin", "participants"]);
     assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
     assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
-    assert_keys(input_schema_for::<MirrorParams>(), &["bodies", "body_name", "body_names", "combine", "features", "name", "participants", "plane"]);
+    assert_keys(
+        input_schema_for::<MirrorParams>(),
+        &["bodies", "body_name", "body_names", "combine", "features", "name", "participants", "plane", "touching"],
+    );
     assert_keys(
         input_schema_for::<FilletParams>(),
         &[
@@ -424,6 +427,10 @@ fn mirror_check_takes_what_the_schema_allows() {
         (json!({"bodies": [1], "plane": "XY"}), false),
         (json!({"features": 5, "plane": "XY"}), false),
         (json!({"bodies": ["B"], "plane": "XY", "combine": "yes"}), false),
+        (json!({"features": ["Join1"], "plane": "XY", "touching": "one_body"}), true),
+        (json!({"bodies": ["B"], "plane": "XY", "touching": null}), true),
+        (json!({"features": ["Join1"], "plane": "XY", "touching": "merged"}), false),
+        (json!({"features": ["Join1"], "plane": "XY", "touching": true}), false),
         (json!({"bodies": ["B"], "plane": "XY", "colour": "red"}), false),
     ] {
         let issues = crate::schema::issues("solid.mirror", &p);
@@ -434,8 +441,8 @@ fn mirror_check_takes_what_the_schema_allows() {
 
 /// #12893: Mirror replies with `FeatureResult`, with the keys it gave before, in each of its forms:
 /// bodies and features, across an origin plane by name and alias, a construction plane by name
-/// and by id, and explicit planes, combined or not. In Warn, without warnings, so its contract
-/// takes each call.
+/// and by id, and explicit planes, combined or not, and with `touching`. In Warn, without
+/// warnings, so its contract takes each call.
 #[test]
 fn mirror_replies_with_feature_result() {
     let schema = output_schema_for::<FeatureResult>();
@@ -455,6 +462,8 @@ fn mirror_replies_with_feature_result() {
         json!({"bodies": ["B"], "plane": "YZ"}),
         json!({"bodies": "B", "plane": "front", "name": "Flip"}),
         json!({"features": [box_name], "plane": plane_name}),
+        json!({"features": [box_name], "plane": plane_id, "touching": "one_body"}),
+        json!({"bodies": ["B"], "plane": "XZ", "touching": null}),
         json!({"bodies": ["B"], "plane": plane_id}),
         json!({"bodies": ["B"], "plane": {"origin": [10, 0, "0 mm"], "normal": [1, 0, 0]}, "combine": true}),
         json!({"bodies": ["B"], "plane": {"x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "features": null, "combine": null}),

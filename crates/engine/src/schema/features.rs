@@ -539,6 +539,11 @@ pub struct MirrorParams {
     /// Join each copy to its original. Default: false.
     #[serde(default)]
     pub combine: Option<bool>,
+    /// What a replayed join makes of pieces that share no face: the copies of a join among
+    /// `features` are joined with this setting, not their source's. Mirrored bodies don't use it.
+    /// Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
