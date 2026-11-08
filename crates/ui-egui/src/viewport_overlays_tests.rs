@@ -1,5 +1,5 @@
 use super::*;
-use crate::{scenario::Harness, shell::LayoutMode};
+use crate::{scenario::Harness, ui_kit::LayoutMode};
 
 #[test]
 fn details_descriptions_are_pure_and_live_edits_preserve_custom_companions() {
@@ -1012,7 +1012,7 @@ fn toast_buttons_wrap_inside_the_card_and_are_dead_behind_an_issue_report() {
     let labels = [("Calibrate…", ToastKind::Primary), ("Use Direct Driver", ToastKind::Secondary), ("Never show again", ToastKind::Dismiss)];
     for width in [260.0_f32, 360.0, 600.0, 1000.0] {
         for blocked in [false, true] {
-            crate::issue_report::set_cad_input_blocked_for_test(blocked);
+            crate::ui_kit::set_input_blocked(blocked);
             let ctx = crate::fonts::test_context();
             let free = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 300.0));
             let run = |events: Vec<egui::Event>| {
@@ -1048,7 +1048,7 @@ fn toast_buttons_wrap_inside_the_card_and_are_dead_behind_an_issue_report() {
                     }
                 }
             }
-            crate::issue_report::set_cad_input_blocked_for_test(false);
+            crate::ui_kit::set_input_blocked(false);
             if blocked {
                 assert!(hits.is_empty(), "width {width}: a button worked behind a report: {hits:?}");
             } else {
@@ -2335,10 +2335,10 @@ fn the_status_toast_closes_with_its_x_and_shows_its_time_left() {
     assert!((swept(&arc, close) - 0.5).abs() < 0.05, "about half a turn left: {}", swept(&arc, close));
     assert!(h.widget("Close").is_some(), "the × has an accessible name");
     // Behind an issue report it does nothing.
-    crate::issue_report::set_cad_input_blocked_for_test(true);
+    crate::ui_kit::set_input_blocked(true);
     h.step(&json!({"click": {"handle": "toast:status:close"}})).unwrap();
     h.frames(2);
-    crate::issue_report::set_cad_input_blocked_for_test(false);
+    crate::ui_kit::set_input_blocked(false);
     assert!(h.app.status.is_some(), "not closed behind a report");
     h.step(&json!({"click": {"handle": "toast:status:close"}})).unwrap();
     h.frames(2);

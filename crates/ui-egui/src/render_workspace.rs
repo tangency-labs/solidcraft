@@ -2757,7 +2757,7 @@ fn preview_error(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, error:
     ui.scope_builder(egui::UiBuilder::new().max_rect(bounded), |ui| {
         ui.set_clip_rect(ui.clip_rect().intersect(bounded));
         ui.set_max_width(bounded.width().min(t.form_card_width * 2.0));
-        crate::ui_kit::Panel::feature_frame(ui.ctx(), crate::shell::LayoutMode::Floating, crate::frame::Side::Left).inner_margin(t.space_8).show(
+        crate::ui_kit::Panel::feature_frame(ui.ctx(), crate::ui_kit::LayoutMode::Floating, crate::frame::Side::Left).inner_margin(t.space_8).show(
             ui,
             |ui| {
                 crate::ui_kit::text(ui, error, crate::ui_kit::Text::Error("render.preview_failure"));

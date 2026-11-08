@@ -259,7 +259,7 @@ fn render_workspace_shot_lens_saves_only_lens_and_orthographic_keeps_faded_contr
 fn inspector_dispatch_has_one_editor_per_selection_independent_of_every_stage() {
     use super::super::{RenderSelection, Stage};
     for dark in [false, true] {
-        for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+        for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
             let mut h = fixture();
             h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
             h.app.ui.layout = layout;
@@ -313,7 +313,7 @@ fn inspector_dispatch_has_one_editor_per_selection_independent_of_every_stage() 
                     assert!(h.app.render_workspace.view.job.is_none());
                     assert!(h.app.render_workspace.view.completed.is_none());
                 }
-                if !dark && layout == crate::shell::LayoutMode::Floating {
+                if !dark && layout == crate::ui_kit::LayoutMode::Floating {
                     appearance_inspector_capture(&mut h, &format!("dispatch-{kind}"));
                 }
             }
@@ -514,7 +514,7 @@ fn stage_catalogs_fill_a_290_by_530_panel_and_keep_two_line_labels_inside_tiles(
             crate::theme::set_dark(dark);
             h.ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
             // A resizable 290 pt card needs the floating, wide-screen policy.
-            h.app.ui.layout = crate::shell::LayoutMode::Floating;
+            h.app.ui.layout = crate::ui_kit::LayoutMode::Floating;
             h.app.preferences.render_browser_width = 290.0;
             h.app.preferences.render_browser_side = "left".into();
             super::super::select_image_method(&mut h.app, method);
@@ -1032,7 +1032,7 @@ fn ribbon_navigation_reuses_inspector_and_preserves_exact_unsaved_intent() {
 #[test]
 fn render_stage_bar_keeps_actions_and_personal_preferences_in_both_layouts() {
     assert!(crate::workspace::panels("RENDER").is_empty());
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let mut h = fixture();
         h.app.ui.layout = layout;
         h.app.toolbar_custom.panels.insert("DESIGN/RENDER/RESULT".into(), vec!["render.export".into()]);
@@ -1299,7 +1299,7 @@ fn wear_selection_precedes_output_page_and_appearance_selection_chrome() {
             "inspector title has missing, empty or out-of-header bounds: {context}, bounds={bounds:?}"
         );
     }
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let mut h = fixture();
         h.app.ui.layout = layout;
         h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: "Subject".into() }];

@@ -68,7 +68,7 @@ impl<'a> Confirm<'a> {
     pub(crate) fn show(self, ctx: &egui::Context, valid: bool, message: impl FnOnce(&mut Ui)) -> (bool, Action) {
         // Reviewed reports and native pickers temporarily own input. Keep the pending
         // answer untouched and resume the modal when that boundary closes.
-        if crate::issue_report::cad_input_blocked() {
+        if super::input_blocked() {
             return (false, Action::None);
         }
         self.window.surface(ctx, true, |ui| self.content(ui, valid, message))

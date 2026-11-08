@@ -1735,7 +1735,7 @@ mod tests {
 
     #[test]
     fn playback_shows_each_feature_in_every_history_layout() {
-        for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for (dock, width) in
                 [("bottom", 130.0), ("left", 56.0), ("left", crate::ui_kit::history_width(true)), ("left", 320.0), ("under_browser", 170.0)]
             {
@@ -2750,13 +2750,13 @@ mod tests {
     #[test]
     fn both_strips_keep_selection_reorder_marker_and_transport() {
         use crate::scenario::{handle_at, rect_of};
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = two_boxes(false);
             h.app.ui.layout = mode;
             h.settle();
             let viewport = h.app.viewport.rect.unwrap();
-            if mode == crate::shell::LayoutMode::Floating {
-                assert_eq!(rect_of("history:card").unwrap().bottom(), viewport.bottom() - crate::shell::SHELL_GAP);
+            if mode == crate::ui_kit::LayoutMode::Floating {
+                assert_eq!(rect_of("history:card").unwrap().bottom(), viewport.bottom() - crate::ui_kit::SHELL_GAP);
             } else {
                 let strip = rect_of("history:strip").unwrap();
                 assert_eq!(strip.top(), viewport.bottom());

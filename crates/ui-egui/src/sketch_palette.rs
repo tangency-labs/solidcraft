@@ -820,7 +820,7 @@ mod tests {
     /// most visibly docked against the window's edge (#9457).
     #[test]
     fn pane_stays_still_while_the_pointer_moves_at_fractional_scale() {
-        for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for (scale, width, height) in [(1.0, 1600.0, 1000.0), (1.25, 1536.0, 921.6), (1.25, 1522.4, 904.8), (1.5, 1280.0, 800.0)] {
                 let mut h = crate::scenario::Harness::new();
                 h.app.ui.layout = layout;
@@ -878,7 +878,7 @@ mod tests {
     /// it sits at the left is not squeezed to nothing beside it.
     #[test]
     fn the_header_drags_the_palette_and_it_keeps_its_place() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = crate::scenario::Harness::new();
             h.call("ui.set", json!({"layout":mode}));
             h.call("ui.resize", json!({"width":1400,"height":900}));

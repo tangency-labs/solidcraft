@@ -355,7 +355,7 @@ fn thin_rotated_bounds_fit_using_the_original_full_projection() {
 
 #[test]
 fn measured_palette_fit_exposes_endpoints_and_layout_changes_preserve_manual_view() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -666,7 +666,7 @@ fn legacy_usable_space_does_not_silently_ignore_obstacles_after_sixteen() {
 
 #[test]
 fn fit_home_animation_and_manual_takeover_use_one_layout_solution() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -694,7 +694,7 @@ fn fit_home_animation_and_manual_takeover_use_one_layout_solution() {
 
 #[test]
 fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         for style in crate::prefs::NavigatorStyle::ALL {
             for (scale, width, height) in [(1.0, 900.0, 720.0), (2.0, 700.0, 475.0), (2.0, 700.0, 385.0)] {
                 let mut h = Harness::new();
@@ -786,7 +786,7 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
 
 #[test]
 fn immediate_standard_view_cancels_fit_before_the_measured_frame() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
@@ -833,7 +833,7 @@ fn navigation_anchors_ignore_positioned_resized_and_covering_dialogs() {
 
 #[test]
 fn opening_different_command_dialogs_keeps_published_navigation_positions() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
@@ -913,7 +913,7 @@ fn the_corner_pair_takes_the_top_right_and_the_view_navigator_moves_below_it() {
 /// axis view below it, and the pointer over it reaching neither picking nor navigation.
 #[test]
 fn the_corner_pair_follows_the_dialog_and_keeps_the_pointer_from_the_model() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();

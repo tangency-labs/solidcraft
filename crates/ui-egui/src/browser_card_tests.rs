@@ -1,7 +1,7 @@
 use super::*;
 use crate::scenario::{Harness, handle_at, rect_of};
 use crate::semantic_content::{self, ContentOwner, ContentRequest};
-use crate::shell::{LayoutMode, SHELL_GAP};
+use crate::ui_kit::{LayoutMode, SHELL_GAP};
 
 #[test]
 fn clicked_browser_folders_toggle_visibility_with_v() {
@@ -646,7 +646,7 @@ fn browser_width_rejects_hostile_preferences_and_tiny_windows_still_fit() {
     assert_eq!(browser_width(-100.0), MIN_BROWSER_WIDTH);
     assert_eq!(browser_width(f32::MAX), MAX_BROWSER_WIDTH);
     let available = Rect::from_min_size(Pos2::ZERO, vec2(100.0, 300.0));
-    for top_gap in [0.0, crate::shell::SHELL_GAP] {
+    for top_gap in [0.0, crate::ui_kit::SHELL_GAP] {
         let bounds = panel_bounds(available, None, MAX_BROWSER_WIDTH, top_gap);
         assert!(available.contains_rect(bounds));
     }

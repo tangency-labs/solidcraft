@@ -1202,7 +1202,7 @@ mod tests {
 
     #[test]
     fn common_forms_fit_both_layouts_and_scales_and_pin_footer_at_small_heights() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for scale in [1.0, 2.0] {
                 for height in [950.0, 720.0] {
                     let mut h = Harness::new();
@@ -1244,7 +1244,7 @@ mod tests {
 
     #[test]
     fn tiny_windows_do_not_panic_or_publish_non_finite_cards() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for size in [(1.0, 1.0), (40.0, 80.0), (180.0, 240.0)] {
                 let mut h = Harness::new();
                 h.call("ui.set", json!({"layout": mode}));

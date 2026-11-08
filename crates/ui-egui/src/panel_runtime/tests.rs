@@ -1273,7 +1273,7 @@ fn allocation_invisible_physical_edges_and_measured_tab_halves_preserve_rtl_and_
 
 #[test]
 fn allocation_shared_shell_gap_controls_allocation_and_keeps_compact_sashes_and_free_origins() {
-    for mode in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for mode in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         for direction in [Direction::Ltr, Direction::Rtl] {
             for zone in [Zone::Left, Zone::Right] {
                 let gap = crate::ui_kit::Container::for_layout(mode, crate::ui_kit::Surface::Panel).gap();
@@ -3191,13 +3191,13 @@ fn raw_host_wider_perimeters_win_over_cards_tabs_and_clear_below_without_fallbac
                     // Exercise both actual shell gaps without multiplying all
                     // selection cases by an unrelated rendering-mode matrix.
                     let mode = if matches!(case, "side-edge" | "bottom-clear" | "empty") {
-                        crate::shell::LayoutMode::Docked
+                        crate::ui_kit::LayoutMode::Docked
                     } else {
-                        crate::shell::LayoutMode::Floating
+                        crate::ui_kit::LayoutMode::Floating
                     };
                     mode.publish(&raw.ctx);
                     let gap = crate::ui_kit::Container::for_layout(mode, crate::ui_kit::Surface::Panel).gap();
-                    assert_eq!(gap, if mode == crate::shell::LayoutMode::Docked { 0.0 } else { 7.0 });
+                    assert_eq!(gap, if mode == crate::ui_kit::LayoutMode::Docked { 0.0 } else { 7.0 });
                     let mut options = priority_host_options();
                     options.metrics.gap = gap;
                     options.metrics.inline_max_height = 0.0;
@@ -3435,7 +3435,7 @@ fn raw_host_perimeter_anchors_survive_source_detach_and_commit_the_exact_preview
 #[test]
 fn raw_host_drag_and_pair_resize_dispatch_once_even_when_egui_repeats_the_release_pass() {
     for (mode, resize) in
-        [(crate::shell::LayoutMode::Floating, false), (crate::shell::LayoutMode::Floating, true), (crate::shell::LayoutMode::Docked, true)]
+        [(crate::ui_kit::LayoutMode::Floating, false), (crate::ui_kit::LayoutMode::Floating, true), (crate::ui_kit::LayoutMode::Docked, true)]
     {
         let h = host_logs(2, Zone::Left);
         let mut raw = RawPanelHost::new(h, 2.0);
@@ -12395,7 +12395,7 @@ fn app_atomic_workspace_replacements_accept_distinct_incoming_contexts_and_match
 
 #[test]
 fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates_owned_geometry() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let (mut h, _, _) = boundary_app();
         h.app.ui.layout = mode;
         h.frames(2);
@@ -12413,7 +12413,7 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
             assert_eq!(card.paint_alpha, Some(255), "Classic's default opaque policy is preserved");
         }
         let gap = crate::ui_kit::Container::for_layout(mode, crate::ui_kit::Surface::Panel).gap();
-        assert_eq!(gap, if mode == crate::shell::LayoutMode::Floating { 7.0 } else { 0.0 });
+        assert_eq!(gap, if mode == crate::ui_kit::LayoutMode::Floating { 7.0 } else { 0.0 });
         assert_eq!(painted.metrics.gap, gap);
         assert_eq!(painted.allocation_environment.gap, gap);
         let domain = egui_rect(painted.render_domain);

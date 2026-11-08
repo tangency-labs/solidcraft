@@ -790,7 +790,7 @@ fn revolve_layout_fixture_builds_a_valid_solid() {
 
 #[test]
 fn new_cards_settle_before_the_first_click_in_both_layouts() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         for command in ["solid.box", "solid.revolve", "solid.shell", "joint.create"] {
             let mut h = fixture();
             h.call("ui.set", json!({"layout":mode}));

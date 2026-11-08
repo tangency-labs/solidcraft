@@ -347,7 +347,7 @@ pub const ORTHO_FACE_TOLERANCE: f64 = 1.0_f64.to_radians();
 #[serde(default, rename_all = "camelCase")]
 pub struct UiState {
     /// Effective shell mode; automation can override the saved preference for this session.
-    pub layout: shell::LayoutMode,
+    pub layout: ui_kit::LayoutMode,
     /// Ribbon tab; SHEET METAL and the contextual SKETCH join the seven design tabs.
     pub tab: String,
     /// The toolbar tab a sketch was started from; finishing the sketch goes back to it (#3250).
@@ -1496,7 +1496,7 @@ impl SolveApp {
             }
             if id == "view.layout" {
                 let layout =
-                    if v.get("mode").and_then(Value::as_str) == Some("compact") { shell::LayoutMode::Docked } else { shell::LayoutMode::Floating };
+                    if v.get("mode").and_then(Value::as_str) == Some("compact") { ui_kit::LayoutMode::Docked } else { ui_kit::LayoutMode::Floating };
                 self.preferences.layout = layout;
                 self.ui.layout = layout;
             }
@@ -1977,7 +1977,7 @@ impl SolveApp {
             return;
         }
         if id == "view.layout" {
-            let mode = if self.ui.layout == shell::LayoutMode::Floating { "compact" } else { "floating" };
+            let mode = if self.ui.layout == ui_kit::LayoutMode::Floating { "compact" } else { "floating" };
             let _ = self.run(id, json!({"mode":mode}));
             return;
         }
@@ -3470,14 +3470,14 @@ impl SolveApp {
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
         if self.embedded {
-            self.ui.layout = shell::LayoutMode::Docked;
+            self.ui.layout = ui_kit::LayoutMode::Docked;
             self.home.open = false;
             self.ui.show_browser = true;
             self.ui.show_timeline = true;
         }
         if self.embed_editor {
             // The host shows one design and has its own way to start one.
-            self.ui.layout = shell::LayoutMode::Docked;
+            self.ui.layout = ui_kit::LayoutMode::Docked;
             self.home.open = false;
         }
         self.ui.layout.publish(ui.ctx());

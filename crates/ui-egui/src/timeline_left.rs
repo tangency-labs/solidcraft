@@ -471,7 +471,7 @@ pub(crate) fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response
                 }
                 Dock::Left => {
                     let mut rect = available;
-                    let gap = if Container::for_layout(app.ui.layout, Surface::Panel).floating() { crate::shell::SHELL_GAP } else { 0.0 };
+                    let gap = if Container::for_layout(app.ui.layout, Surface::Panel).floating() { crate::ui_kit::SHELL_GAP } else { 0.0 };
                     rect.min.x += gap;
                     rect.max.x = (rect.left() + strip_width(app)).min(available.right() - gap);
                     rect.max.y -= gap;
@@ -1735,7 +1735,7 @@ mod tests {
 
     #[test]
     fn docking_previews_match_all_three_destinations_and_stacked_collapse_shares_height() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = Harness::new();
             h.app.home.open = false;
             h.app.ui.layout = mode;
@@ -1775,7 +1775,7 @@ mod tests {
                     "{mode:?} {dock}: preview={preview:?} card={card:?}"
                 );
                 assert_eq!(h.app.session.doc.to_json(), design);
-                if mode == crate::shell::LayoutMode::Floating {
+                if mode == crate::ui_kit::LayoutMode::Floating {
                     assert_eq!(h.app.viewport.rect, projection);
                 }
             }
@@ -1815,13 +1815,13 @@ mod tests {
             h.frames(5);
             assert!(h.app.preferences.timeline_left_browser_collapsed && h.app.preferences.timeline_collapsed);
             assert!((h.app.shell.browser.unwrap().top() - browser.top()).abs() < 1.0);
-            assert!(h.app.shell.history.unwrap().bottom() < browser.top() + header_outer_height() * 2.0 + crate::shell::SHELL_GAP + 1.0);
+            assert!(h.app.shell.history.unwrap().bottom() < browser.top() + header_outer_height() * 2.0 + crate::ui_kit::SHELL_GAP + 1.0);
         }
     }
 
     #[test]
     fn folding_cards_follow_their_bounds_through_the_last_animation_frame() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = Harness::new();
             h.app.home.open = false;
             h.app.ui.layout = mode;
@@ -1855,7 +1855,7 @@ mod tests {
 
     #[test]
     fn all_four_transport_buttons_move_to_their_named_positions_in_every_layout() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for (dock, width) in
                 [("bottom", 130.0), ("left", 56.0), ("left", crate::ui_kit::history_width(true)), ("left", 320.0), ("under_browser", 170.0)]
             {
@@ -1877,7 +1877,7 @@ mod tests {
                 for control in crate::ui_kit::HistoryTransport::ALL {
                     let button = crate::scenario::rect_of(&format!("history:{}", control.id())).unwrap();
                     let header = crate::scenario::rect_of(if dock == "bottom" {
-                        if mode == crate::shell::LayoutMode::Floating { "history:card" } else { "history:strip" }
+                        if mode == crate::ui_kit::LayoutMode::Floating { "history:card" } else { "history:strip" }
                     } else {
                         "history:header"
                     })
@@ -1961,7 +1961,7 @@ mod tests {
         let previous = crate::theme::is_dark();
         for dark in [false, true] {
             crate::theme::set_dark(dark);
-            for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+            for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
                 for names in [false, true] {
                     let mut h = Harness::new();
                     h.app.ui.dark = dark;
@@ -1990,7 +1990,7 @@ mod tests {
 
     #[test]
     fn rendered_strip_content_never_exceeds_the_viewport_during_resize() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for width in [70.0, 100.0, 130.0, 200.0] {
                 for drag_width in [None, Some(60.0), Some(112.0), Some(160.0)] {
                     let ctx = crate::fonts::test_context();
@@ -2067,7 +2067,7 @@ mod tests {
 
     #[test]
     fn history_is_left_of_the_browser_in_both_layouts_widths_and_browser_states() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for names in [false, true] {
                 for collapsed in [false, true] {
                     let mut h = Harness::new();
@@ -2147,7 +2147,7 @@ mod tests {
     #[test]
     fn the_seam_between_browser_and_history_drags_their_split_and_is_remembered() {
         // #7371: under the browser, History took exactly half the column; the seam now moves it.
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = Harness::new();
             h.app.home.open = false;
             h.app.ui.layout = mode;
@@ -2207,7 +2207,7 @@ mod tests {
             (false, false, true, opaque),
         ] {
             let mut h = Harness::new();
-            h.app.ui.layout = if floating { crate::shell::LayoutMode::Floating } else { crate::shell::LayoutMode::Docked };
+            h.app.ui.layout = if floating { crate::ui_kit::LayoutMode::Floating } else { crate::ui_kit::LayoutMode::Docked };
             h.app.ui.show_timeline = true;
             h.app.preferences.timeline_left = true;
             h.app.preferences.timeline_under_browser = under_browser;
@@ -2219,7 +2219,7 @@ mod tests {
 
     #[test]
     fn floating_browser_sits_over_the_workspace_and_docks_again() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut harness = Harness::new();
             harness.app.ui.layout = mode;
             harness.app.preferences.browser_float = true;
