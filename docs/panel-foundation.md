@@ -306,18 +306,20 @@ reparent the window.
 
 The default adapter truthfully advertises no native windows. Actual Window
 placement needs the native sibling's monitor/DPI, focus and close/redock services.
-The renderer retains the shared Container's fill alpha; captured `paint_alpha`
-reports it separately from declarative surface intent. Input and occlusion remain
-reserved regardless of alpha. Unsupported translucent effective policies still
-refuse. Contrast proof, comprehensive accessibility/keyboard bindings, production
-workspace rollout and real content adapters remain their named peers' work.
+The renderer resolves surface intent through the shared Container, raising its
+fill alpha when canonical text needs more contrast. Captured `paint_alpha` and
+`contrast` report the effective paint and any readable fallback separately from
+declarative intent. Input and occlusion remain reserved regardless of alpha.
+Comprehensive accessibility/keyboard bindings, production workspace rollout and
+real content adapters remain their named peers' work.
 
 ## Specimens and verification boundary
 
 `ui.panel_fixture` is authenticated, off by default, and refuses to replace another
 runtime. Presets: `docks`, `tabs`, `collapsed`, `floating`, `overflow` (24 instances),
 `pinned`, `columns` (three independent Left columns), `stack_tabs`, `content_fill`
-(short Content versus Fill), and `inline` (one editable total row). The old `rails`
+(short Content versus Fill), `inline` (one editable total row), and `surfaces`
+(declared surface preferences with the existing synthetic bodies). The old `rails`
 preset is replaced by `collapsed`; it is not an alias to the retired experience.
 The optional `remember:true` enable parameter attaches the application preference
 catalogue for isolated restart review. A restart must explicitly enable the same
@@ -325,6 +327,50 @@ specimen with `remember:true`; loading preferences alone never starts it. Saved
 restoration waits for valid host dimensions and uses normal runtime admission.
 Fixture workspace/preset registrations remain synthetic evidence, not shipping
 production registrations.
+
+### Surface review specimen
+
+The `surfaces` preset alone opts out of the host's compatibility opaque default.
+It contains an inactive text-heavy editor tab beside an active log tab, explicit
+Opaque and Translucent side members, and FollowZone Bottom and Floating members.
+The same existing content, commands and translated captions remain in use.
+Other presets retain their previous opaque presentation.
+
+`ui.panel_fixture {"preset":"surfaces","translucency_percent":50}` requests
+50% translucency for this explicitly enabled specimen. The optional value is a
+finite number from 0 to 100; opacity is `1 - translucency_percent / 100`.
+Zero requests an opaque surface and 100 requests a fully transparent surface
+before readability protection. The override is not a saved preference.
+`ui.panel_fixture {"translucency_percent":100}` updates the already enabled
+specimen host in place, preserving retained controllers, drafts and layout.
+It refuses when no specimen host is enabled or another provider owns the runtime.
+The parameter is also accepted with other explicitly enabled specimen presets;
+their compatibility opaque policy still applies. Omitting the
+override uses current theme/preferences rather than a specimen colour palette.
+
+Surface resolution uses every registered tab's metadata, including inactive tabs.
+Explicit Opaque wins, then explicit Translucent. Otherwise FollowZone is opaque
+for Bottom/Window or a multi-tab group containing a text-heavy member, and
+translucent elsewhere. Effective opacity may increase to protect both primary
+and muted text at 4.5:1 over possible viewport backgrounds. When the authored
+token pair cannot meet that guarantee even at full opacity, the renderer uses a
+known accessible opaque fallback pair and reports the failure, rather than
+describing the authored pair as compliant. Existing blur infrastructure remains
+independent of opacity and input capture.
+
+Section inspection reports declarative `surface`, actual `paint_alpha`, and
+optional `contrast`. The latter preserves `ContrastOutcome`, including the
+fallback reason; fallback is not a successful proof for the original pair.
+Actual clipped surface footprints continue to own input even when translucent.
+Uncovered short-panel gaps remain navigable, while content scrolling and actual
+controls shield the model. Temporary popup shielding is not a Fit/Centre obstacle.
+
+This is shared surface policy and an opt-in review seam, not a production content
+migration or a new appearance preset. Classic and shipping defaults remain.
+Future approved docked adapters are Browser, History, Assistant and their allowed
+RenderSceneBrowser counterpart; other content conversions require a separate
+scope decision. Persistent legacy forms retain their existing hosts and continue
+to contribute their actual footprints until their own migrations.
 The original synthetic controllers expose draft, transaction, action, lifecycle,
 render and service counters plus process-local equality tokens. They do not expose
 fake production actions or pretend to perform CAD work.
