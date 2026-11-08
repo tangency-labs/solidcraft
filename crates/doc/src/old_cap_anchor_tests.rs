@@ -30,7 +30,10 @@ fn a_sketch_on_a_cap_that_a_join_left_uncertified_is_found_by_its_name() {
     }
     let state = model.state();
     let sketch = &state.sketch(5).expect("Sketch3 should be built").plane;
-    assert!(sketch.normal().dot(solidcore_record::Vec3::new(0.0, 1.0, 0.0)) > 1.0 - 1e-9, "{sketch:?}");
+    // The plane the file saved: origin (0, 0, 0), x direction (-1, 0, 0), normal +Y.
+    assert!(sketch.origin.len() < 1e-9, "{sketch:?}");
+    assert!((sketch.x - solidcore_record::Vec3::new(-1.0, 0.0, 0.0)).len() < 1e-9, "{sketch:?}");
+    assert!((sketch.normal() - solidcore_record::Vec3::new(0.0, 1.0, 0.0)).len() < 1e-9, "{sketch:?}");
 }
 
 #[test]
