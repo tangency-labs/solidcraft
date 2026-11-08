@@ -1,0 +1,7 @@
+# Code owners: a pull request that changes these paths needs an approving review from an owner
+# listed here when the branch ruleset requires review from Code Owners. Later lines take
+# precedence over earlier ones.
+
+# The vendored SolidCore kernel, owned as in SolidCore's own CODEOWNERS
+# (solidcore/.github/CODEOWNERS, which GitHub reads only at a repository's root).
+/solidcore/ @jyviko
