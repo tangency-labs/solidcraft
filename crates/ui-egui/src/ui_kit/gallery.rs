@@ -1145,6 +1145,7 @@ const ELEMENTS: &[Element] = &[
                 radius: CommandSearch::field_radius(1.0, true),
                 progress: 1.0,
             },
+            Some("S"),
             4096,
         );
         ui.add_space(Tokens::get().space_6);

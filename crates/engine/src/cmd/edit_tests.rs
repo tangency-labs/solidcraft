@@ -1687,6 +1687,12 @@ fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
     assert_eq!((s.doc.to_json(), s.undo.len()), before);
     let spec = crate::find_command("ui.assistant").unwrap();
     assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("Ctrl+Shift+A"), "", false));
+    // Command search likewise (#12190): S is its default key, not a reserved one.
+    let error = s.execute("ui.palette", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("headless session"), "{error}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    let spec = crate::find_command("ui.palette").unwrap();
+    assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("S"), "", false));
 }
 
 #[test]

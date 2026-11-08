@@ -17,7 +17,6 @@ pub(crate) const DRAG_ZOOM: &str = "view.tool.zoom";
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] = &[
     "Escape",
-    "S",
     "V",
     "F2",
     "F6",
@@ -1883,6 +1882,43 @@ mod tests {
         h.step(&json!({"key": "R", "shift": true})).unwrap();
         h.frames(1);
         assert!(h.app.ui.palette_open && h.app.dialog.is_none(), "typing in a field never repeats");
+    }
+
+    /// Command search is an ordinary command (#12190): S opens it out of the box, Preferences ›
+    /// Shortcuts can move it, and S is then free for another command.
+    #[test]
+    fn command_search_can_move_off_s_and_s_can_start_another_command() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(2);
+        assert_eq!(effective(&h.app, "ui.palette").as_deref(), Some("S"));
+        h.step(&json!({"key": "S"})).unwrap();
+        assert!(h.app.ui.palette_open, "S opens command search by default");
+        h.call("ui.palette", json!({"open": false}));
+        h.frames(2);
+        bind(&mut h.app, "ui.palette", "Shift+J", true).unwrap();
+        h.step(&json!({"key": "S"})).unwrap();
+        assert!(!h.app.ui.palette_open, "S no longer opens command search");
+        h.step(&json!({"key": "J", "shift": true})).unwrap();
+        assert!(h.app.ui.palette_open, "its new key does");
+        h.call("ui.palette", json!({"open": false}));
+        h.frames(2);
+        // The closed field shows the key command search has now, and no key once it has none.
+        let width = || crate::scenario::rect_of("ribbon:search").map(|r| r.width());
+        let shown = display_for(&h.app, "ui.palette");
+        assert_eq!(shown.as_deref(), Some("Shift+J"));
+        assert_eq!(width(), Some(crate::ui_kit::CommandSearch::closed_width(&h.ctx, shown.as_deref())));
+        assert!(width() > Some(crate::ui_kit::CommandSearch::closed_width(&h.ctx, Some("S"))), "not the old S");
+        bind(&mut h.app, "ui.palette", "", false).unwrap();
+        h.frames(2);
+        assert_eq!(width(), Some(crate::ui_kit::CommandSearch::closed_width(&h.ctx, None)));
+        bind(&mut h.app, "ui.palette", "Shift+J", true).unwrap();
+        h.frames(2);
+        bind(&mut h.app, "solid.box", "S", true).unwrap();
+        h.step(&json!({"key": "S"})).unwrap();
+        h.frames(1);
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.box"), "S starts the command given it");
+        assert!(!h.app.ui.palette_open);
     }
 }
 

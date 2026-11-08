@@ -275,9 +275,9 @@ fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32, vers
 /// The closed search field in the application bar, ending `right`: whole when the document tabs
 /// keep the room Report a bug's label leaves them (`tabs_room`: theirs without the field), else
 /// just its magnifier.
-fn header_search_rect(ctx: &egui::Context, bar: Rect, right: f32, tabs_room: f32) -> Rect {
+fn header_search_rect(app: &SolveApp, ctx: &egui::Context, bar: Rect, right: f32, tabs_room: f32) -> Rect {
     let height = 26.0;
-    let full = crate::ui_kit::CommandSearch::closed_width(ctx);
+    let full = crate::ui_kit::CommandSearch::closed_width(ctx, crate::keymap::display_for(app, "ui.palette").as_deref());
     let whole = bar.width() >= 640.0 && tabs_room - full - HEADER_SEARCH_GAP >= 216.0;
     let width = if whole { full } else { crate::ui_kit::CommandSearch::compact_width(height) };
     Rect::from_min_size(pos2(right - width, bar.center().y - height / 2.0), vec2(width, height))
@@ -536,7 +536,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // moves the assistant button and the end of the document tabs left by its width.
         let gear_left = report.left() - 68.0;
         let search = (search_in_header(app) && design_shown(app))
-            .then(|| header_search_rect(ui.ctx(), r, gear_left - HEADER_SEARCH_GAP, report.left() - CLUSTER_BUTTONS - tabs_start));
+            .then(|| header_search_rect(app, ui.ctx(), r, gear_left - HEADER_SEARCH_GAP, report.left() - CLUSTER_BUTTONS - tabs_start));
         let search_shift = search.map_or(0.0, |s| s.width() + HEADER_SEARCH_GAP);
         if let Some(search) = search {
             // shortcut_box::show draws the one search editor wherever this rectangle is.
@@ -1384,7 +1384,8 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
     // The application bar may hold the search field instead ([`HeaderLayout`]): the tabs then
     // run to the row's end.
     let in_ribbon = !search_in_header(app);
-    let search_width = if in_ribbon { crate::ui_kit::CommandSearch::closed_width(ui.ctx()) } else { 0.0 };
+    let search_width =
+        if in_ribbon { crate::ui_kit::CommandSearch::closed_width(ui.ctx(), crate::keymap::display_for(app, "ui.palette").as_deref()) } else { 0.0 };
     // The first tab and the search field sit the same distance from the card's top, left and right
     // edges, so their outer corners are concentric with the card's corners.
     let floating = Container::for_layout(app.ui.layout, Surface::Panel).floating();
@@ -3741,9 +3742,6 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // A single Esc with nothing left to cancel keeps the sketch open (#1804); a quick
                 // second press finishes it (above).
             }
-            Key::S if !mods.shift && !mods.alt => {
-                app.start("ui.palette");
-            }
             // With a menu open, V runs that menu's Show/Hide on what the menu is for.
             Key::V => {
                 if !crate::context_menu::press_shortcut(app, "V") {
@@ -4473,7 +4471,7 @@ mod header_report_tests {
         let search = rect("ribbon:search");
         assert!(search.top() >= APP_BAR_HEIGHT, "search is in the ribbon: {search:?}");
         assert_eq!(search.height(), TAB_ROW_HEIGHT - 2.0 * RIBBON_TAB_INSET);
-        assert_eq!(search.width(), crate::ui_kit::CommandSearch::closed_width(&h.ctx));
+        assert_eq!(search.width(), crate::ui_kit::CommandSearch::closed_width(&h.ctx, Some("S")));
         assert!(crate::scenario::rect_of("titlebar:search").is_none());
         let report = rect("titlebar:report");
         // A pre-release's longer version takes more room than RIGHT_GROUP and moves the button left.
@@ -4506,7 +4504,7 @@ mod header_report_tests {
         let (search, prefs) = (rect("titlebar:search"), rect("titlebar:preferences"));
         assert_eq!(search.right(), prefs.left() - HEADER_SEARCH_GAP, "search sits immediately left of Settings");
         assert!(search.bottom() <= APP_BAR_HEIGHT && (search.center().y - prefs.center().y).abs() < 0.5);
-        assert_eq!(search.width(), crate::ui_kit::CommandSearch::closed_width(&h.ctx), "the whole field where there is room");
+        assert_eq!(search.width(), crate::ui_kit::CommandSearch::closed_width(&h.ctx, Some("S")), "the whole field where there is room");
         assert_eq!(rect("ribbon:search"), search, "the one search field is drawn in the bar");
         // Report a bug: an icon the size of Settings and Help, still named for assistive tools.
         let report = rect("titlebar:report");

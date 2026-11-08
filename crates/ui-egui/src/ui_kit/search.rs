@@ -51,20 +51,20 @@ impl CommandSearch {
     }
 
     /// Reserve the translated hint at the exact editor font, plus compact controls.
-    /// The small text allowance covers pixel rounding and the editor's caret.
-    pub(crate) fn closed_width(ctx: &egui::Context) -> f32 {
+    /// The small text allowance covers pixel rounding and the editor's caret. `key` is command
+    /// search's own key (#12190): its cap, or none when the user took it away.
+    pub(crate) fn closed_width(ctx: &egui::Context, key: Option<&str>) -> f32 {
         let t = Tokens::get();
         let spacing = FieldSpacing::at(0.0);
-        let (hint, key) = ctx.fonts_mut(|fonts| {
+        let (hint, cap) = ctx.fonts_mut(|fonts| {
             (
-                fonts
-                    .layout_no_wrap(solidcraft_ui_text::tr_label("Search commands").to_owned(), FontId::proportional(t.font_button), t.form_dim)
-                    .size()
-                    .x,
-                fonts.layout_no_wrap("S".to_owned(), FontId::monospace(t.font_small), t.form_dim).size().x,
+                fonts.layout_no_wrap(solidcraft_ui_text::tr_label("Search commands").to_owned(), FontId::proportional(t.font_button), t.form_dim).size().x,
+                key.map_or(0.0, |key| {
+                    fonts.layout_no_wrap(key.to_owned(), FontId::monospace(t.font_small), t.form_dim).size().x + spacing.key_gap + spacing.key_padding
+                }),
             )
         });
-        (spacing.left + t.space_16 + spacing.icon_gap + hint + spacing.key_gap + key + spacing.key_padding + spacing.right + t.space_2).ceil()
+        (spacing.left + t.space_16 + spacing.icon_gap + hint + cap + spacing.right + t.space_2).ceil()
     }
 
     /// The closed field as just its magnifier, for a bar short of room: a square button.
@@ -92,6 +92,7 @@ impl CommandSearch {
         focus: bool,
         open: bool,
         geometry: SearchFieldGeometry,
+        key: Option<&str>,
         limit: usize,
     ) -> Response {
         let t = Tokens::get();
@@ -124,7 +125,7 @@ impl CommandSearch {
             bevel.paint(ui.painter(), r.shrink(if focused || invalid { 1.0 } else { 0.0 }), radius, true, ui.is_enabled());
         }
         // Closed with less room than its hint takes (a narrow bar): just the magnifier.
-        if !open && progress == 0.0 && r.width() + 0.5 < Self::closed_width(ui.ctx()) {
+        if !open && progress == 0.0 && r.width() + 0.5 < Self::closed_width(ui.ctx(), key) {
             icons::paint_icon(ui.painter(), Rect::from_center_size(r.center(), vec2(t.space_16, t.space_16)), "zoom", 1.0);
             solidcraft_ui_registry::publish_target("ribbon:search", r);
             solidcraft_ui_registry::publish_target("shortcut:search", r);
@@ -139,13 +140,11 @@ impl CommandSearch {
             "zoom",
             1.0,
         );
-        let cap = if open { "Esc" } else { "S" };
-        let key_width = Self::key_with_padding(ui, r.right_center() - vec2(spacing.right, 0.0), cap, spacing.key_padding);
+        let cap = if open { Some("Esc") } else { key };
+        let key_width = cap
+            .map_or(0.0, |cap| Self::key_with_padding(ui, r.right_center() - vec2(spacing.right, 0.0), cap, spacing.key_padding) + spacing.key_gap);
         let editor_left = (r.left() + spacing.left + t.space_16 + spacing.icon_gap).min(r.right());
-        let editor = Rect::from_min_max(
-            pos2(editor_left, r.top()),
-            pos2((r.right() - spacing.right - key_width - spacing.key_gap).max(editor_left), r.bottom()),
-        );
+        let editor = Rect::from_min_max(pos2(editor_left, r.top()), pos2((r.right() - spacing.right - key_width).max(editor_left), r.bottom()));
         let mono = value.contains('{');
         let response = ui
             .scope_builder(egui::UiBuilder::new().max_rect(editor), |ui| {
@@ -389,7 +388,7 @@ mod tests {
                 let ctx = crate::fonts::test_context();
                 let mut query = String::new();
                 let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                    CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, 4096);
+                    CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, Some("S"), 4096);
                 });
                 output.textures_delta.clear();
                 let shapes: Vec<_> = output
@@ -423,7 +422,7 @@ mod tests {
                 let ctx = crate::fonts::test_context();
                 let mut query = String::new();
                 let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                    CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, 4096);
+                    CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, Some("S"), 4096);
                 });
                 output.textures_delta.clear();
                 for shape in output.shapes {
