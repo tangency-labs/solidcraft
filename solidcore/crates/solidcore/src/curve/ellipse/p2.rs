@@ -2331,6 +2331,40 @@ mod tests {
     }
 
     #[test]
+    fn issue_1518_short_arc_inverts_each_point_to_itself() {
+        // The 70.9232 x 16 ellipse of #1518 on an arc 7e-5 degrees long, shorter than
+        // the angular tolerance (1e-4 degrees); atan2 puts its points a period up.
+        let k = kernel();
+        let (d0, d1) = (-10.0, -10.0 + 7.0e-5);
+        let e = Ellipse::new(
+            &k,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent1d::from_min_max(d0, d1),
+            70.9232,
+            16.0,
+            &EllipseOptions::default(),
+        )
+        .expect("ellipse");
+        let fractions = [0.25, 0.5, 0.75, 1.0];
+        let points: Vec<(f64, Point3)> = fractions
+            .iter()
+            .map(|f| {
+                let a = d0 + f * (d1 - d0);
+                (a, e.evaluate_step_point(a).expect("step point"))
+            })
+            .collect();
+
+        // each point inverts to its own angle, not to the arc's start (the pinned C++
+        // returns -10 for all four)
+        for &(a, p) in &points {
+            let t = e.step_inversion(&k, p, false, 0.0).0;
+            assert!((t - a).abs() <= 1e-9 * a.abs(), "{a}: {t}");
+        }
+    }
+
+    #[test]
     fn step_and_nurb_parameters_agree() {
         let k = kernel();
         for io in [false, true] {
