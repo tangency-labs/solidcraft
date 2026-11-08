@@ -2,12 +2,16 @@
 //! (`solidcraft_ui_egui::window_chrome::native_menu`), each with a command id or a `ui.*` id, run
 //! through the same actions as the application bar's File menu (`toolbar::FileAction`).
 //!
-//! The `ui.*` ids of entries that are not commands, defined here:
-//! `ui.app.preferences`, `ui.app.shortcuts`, `ui.app.quit`, `ui.file.new`, `ui.file.open`,
-//! `ui.file.open_recent {path}`, `ui.file.clear_recent`, `ui.file.save`, `ui.file.save_as`,
-//! `ui.file.save_json`, `ui.file.export {format}`, `ui.file.export_mesh {format}`,
-//! `ui.window.agent_chat`, `ui.help.<item>` (the Help menu's items, `help::run`). Undo and Redo
-//! are the commands `edit.undo` and `edit.redo`.
+//! Entries that are control actions use their ids: `app.quit`, `ui.prefs {open}` (Settings and
+//! Keyboard Shortcuts), `ui.agent_chat`, `ui.help {item}`. Undo and Redo are the commands
+//! `edit.undo` and `edit.redo`. The other entries' ids are defined here: `ui.file.new`,
+//! `ui.file.open`, `ui.file.open_recent {path}`, `ui.file.clear_recent`, `ui.file.save`,
+//! `ui.file.save_as`, `ui.file.save_json`, `ui.file.export {format}`,
+//! `ui.file.export_mesh {format}`. Menus are `menu.file`, `menu.file.recent`, `menu.edit`,
+//! `menu.window` and `menu.help`.
+//!
+//! The menu bar itself is macOS's; the entries and their ids build everywhere, so their tests run
+//! on every system.
 
 use serde_json::{Value, json};
 use solidcraft_ui_egui::{
@@ -18,9 +22,10 @@ use solidcraft_ui_egui::{
 };
 
 /// The Open Recent submenu, refilled when the recent designs change.
-const RECENT: &str = "ui.file.recent_menu";
+const RECENT: &str = "menu.file.recent";
 const OPEN_RECENT: &str = "ui.file.open_recent";
 /// Recent designs listed.
+#[cfg(target_os = "macos")]
 const RECENT_COUNT: usize = 32;
 
 /// File > Insert entries.
@@ -60,6 +65,8 @@ const FIXED: [FileAction; 13] = [
     FileAction::AgentChat,
 ];
 
+/// The Help menu's entries: the control channel's `ui.help {item}`.
+const HELP_ID: &str = "ui.help";
 /// The Help menu's items (`help::run`), top to bottom.
 const HELP: [&str; 7] = ["docs", "updates", "shortcuts", "messages", "report", "crashes", "install_cli"];
 
@@ -86,9 +93,9 @@ enum Entry {
 fn id_of(action: &FileAction) -> (String, Option<Value>) {
     let fixed = |id: &str| (id.to_string(), None);
     match action {
-        FileAction::Settings => fixed("ui.app.preferences"),
-        FileAction::Shortcuts => fixed("ui.app.shortcuts"),
-        FileAction::Quit => fixed("ui.app.quit"),
+        FileAction::Settings => ("ui.prefs".into(), Some(json!({ "open": "General" }))),
+        FileAction::Shortcuts => ("ui.prefs".into(), Some(json!({ "open": "Shortcuts" }))),
+        FileAction::Quit => fixed("app.quit"),
         FileAction::New => fixed("ui.file.new"),
         FileAction::Open => fixed("ui.file.open"),
         FileAction::OpenRecent(path) => (OPEN_RECENT.into(), Some(json!({ "path": path }))),
@@ -101,7 +108,7 @@ fn id_of(action: &FileAction) -> (String, Option<Value>) {
         FileAction::Command(command) => fixed(command),
         FileAction::Undo => fixed("edit.undo"),
         FileAction::Redo => fixed("edit.redo"),
-        FileAction::AgentChat => fixed("ui.window.agent_chat"),
+        FileAction::AgentChat => fixed("ui.agent_chat"),
     }
 }
 
@@ -110,15 +117,29 @@ fn entry_of(id: &str, params: Option<&Value>) -> Option<Entry> {
     if id == OPEN_RECENT {
         return params.and_then(|p| p.get("path")).and_then(Value::as_str).map(|path| Entry::File(FileAction::OpenRecent(path.to_string())));
     }
-    if let Some(item) = id.strip_prefix("ui.help.") {
-        return HELP.into_iter().find(|h| *h == item).map(Entry::Help);
+    if id == HELP_ID {
+        let item = params.and_then(|p| p.get("item")).and_then(Value::as_str);
+        return HELP.into_iter().find(|h| Some(*h) == item).map(Entry::Help);
     }
     let wanted = (id.to_string(), params.cloned());
     FIXED.into_iter().chain(INSERTS.map(|(_, a)| a)).chain(EXPORTS.map(|(_, a)| a)).find(|a| id_of(a) == wanted).map(Entry::File)
 }
 
-fn item(label: &str, action: &FileAction, shortcut: &str) -> Item {
+/// The entries with a key, as menu accelerators.
+const SHORTCUTS: [(FileAction, &str); 8] = [
+    (FileAction::Settings, "Cmd+,"),
+    (FileAction::Quit, "Cmd+Q"),
+    (FileAction::New, "Cmd+N"),
+    (FileAction::Open, "Cmd+O"),
+    (FileAction::Save, "Cmd+S"),
+    (FileAction::SaveAs, "Cmd+Shift+S"),
+    (FileAction::Undo, "Cmd+Z"),
+    (FileAction::Redo, "Cmd+Shift+Z"),
+];
+
+fn item(label: &str, action: &FileAction) -> Item {
     let (id, params) = id_of(action);
+    let shortcut = SHORTCUTS.iter().find(|(a, _)| a == action).map_or("", |(_, k)| *k);
     let mut item = Item::action(&id, label, "").key(shortcut);
     item.params = params;
     item
@@ -131,53 +152,55 @@ fn submenu(id: &str, label: &str, children: Vec<Item>) -> Item {
 }
 
 fn recent_items(app: &SolveApp, paths: &[String]) -> Vec<Item> {
-    let mut items: Vec<Item> = paths.iter().map(|path| item(path, &FileAction::OpenRecent(path.clone()), "")).collect();
+    let mut items: Vec<Item> = paths.iter().map(|path| item(path, &FileAction::OpenRecent(path.clone()))).collect();
     items.push(Item::sep());
-    items.push(item(app.tr("ui.clear_recent"), &FileAction::ClearRecent, ""));
+    items.push(item(app.tr("ui.clear_recent"), &FileAction::ClearRecent));
     items
 }
 
 fn menu_bar(app: &SolveApp, recent: &[String]) -> MenuBar {
     let more = |key: &str| format!("{}\u{2026}", app.tr(key));
     let mut file = vec![
-        item(app.tr("ui.new_design"), &FileAction::New, "Cmd+N"),
-        item(&more("ui.open"), &FileAction::Open, "Cmd+O"),
+        item(app.tr("ui.new_design"), &FileAction::New),
+        item(&more("ui.open"), &FileAction::Open),
         submenu(RECENT, app.tr("ui.open_recent"), recent_items(app, recent)),
         Item::sep(),
     ];
-    file.extend(INSERTS.iter().map(|(label, action)| item(app.tr_label(label), action, "")));
+    file.extend(INSERTS.iter().map(|(label, action)| item(app.tr_label(label), action)));
     file.extend([
         Item::sep(),
-        item(app.tr("ui.save"), &FileAction::Save, "Cmd+S"),
-        item(&more("ui.save_as"), &FileAction::SaveAs, "Cmd+Shift+S"),
-        item(app.tr_label("Save As JSON\u{2026}"), &FileAction::SaveJson, ""),
+        item(app.tr("ui.save"), &FileAction::Save),
+        item(&more("ui.save_as"), &FileAction::SaveAs),
+        item(app.tr_label("Save As JSON\u{2026}"), &FileAction::SaveJson),
         Item::sep(),
     ]);
-    file.extend(EXPORTS.iter().map(|(label, action)| item(app.tr_label(label), action, "")));
-    file.extend([Item::sep(), item(app.tr_label("Design Properties"), &DESIGN_PROPERTIES, "")]);
-    let edit = vec![item(app.tr("ui.undo"), &FileAction::Undo, "Cmd+Z"), item(app.tr("ui.redo"), &FileAction::Redo, "Cmd+Shift+Z")];
-    let window = vec![item(app.tr_label("Agent Chat"), &FileAction::AgentChat, "")];
-    let help = HELP.iter().map(|h| Item::action(&format!("ui.help.{h}"), help_label(app, h), "")).collect();
+    file.extend(EXPORTS.iter().map(|(label, action)| item(app.tr_label(label), action)));
+    file.extend([Item::sep(), item(app.tr_label("Design Properties"), &DESIGN_PROPERTIES)]);
+    let edit = vec![item(app.tr("ui.undo"), &FileAction::Undo), item(app.tr("ui.redo"), &FileAction::Redo)];
+    let window = vec![item(app.tr_label("Agent Chat"), &FileAction::AgentChat)];
+    let help = HELP.iter().map(|h| Item::action(HELP_ID, help_label(app, h), "").with(json!({ "item": h }))).collect();
     MenuBar {
         title: "SolidCraft".into(),
         version: env!("CARGO_PKG_VERSION").into(),
-        app: vec![item(&more("ui.preferences"), &FileAction::Settings, "Cmd+,"), item(&more("ui.keyboard_shortcuts"), &FileAction::Shortcuts, "")],
-        quit: item(&format!("{} SolidCraft", app.tr("ui.quit")), &FileAction::Quit, "Cmd+Q"),
+        app: vec![item(&more("ui.preferences"), &FileAction::Settings), item(&more("ui.keyboard_shortcuts"), &FileAction::Shortcuts)],
+        quit: item(&format!("{} SolidCraft", app.tr("ui.quit")), &FileAction::Quit),
         menus: vec![
-            submenu("ui.file", app.tr("ui.file"), file),
-            submenu("ui.edit", app.tr_label("Edit"), edit),
+            submenu("menu.file", app.tr("ui.file"), file),
+            submenu("menu.edit", app.tr_label("Edit"), edit),
             submenu(native_menu::WINDOW, "Window", window),
-            submenu("ui.help", app.tr("ui.help"), help),
+            submenu("menu.help", app.tr("ui.help"), help),
         ],
     }
 }
 
 /// The menu bar, owned and updated on eframe's main thread.
+#[cfg(target_os = "macos")]
 pub struct NativeMenu {
     menu: native_menu::NativeMenu,
     recent_paths: Vec<String>,
 }
 
+#[cfg(target_os = "macos")]
 impl NativeMenu {
     pub fn new(app: &SolveApp, ctx: &egui::Context) -> Result<Self, String> {
         let recent_paths: Vec<String> = app.home.recent.iter().take(RECENT_COUNT).cloned().collect();
@@ -231,18 +254,86 @@ impl NativeMenu {
 mod tests {
     use super::*;
 
-    fn leaves(items: &[Item], out: &mut Vec<Item>) {
-        for item in items {
-            if item.children.is_empty() {
-                out.push(item.clone());
-            } else {
-                leaves(&item.children, out);
-            }
+    /// Every action the menu offers, Open Recent with a path.
+    fn actions() -> Vec<FileAction> {
+        let mut all: Vec<FileAction> = FIXED.into_iter().chain(INSERTS.map(|(_, a)| a)).chain(EXPORTS.map(|(_, a)| a)).collect();
+        all.push(FileAction::OpenRecent("/work/a.solidcraft".into()));
+        all
+    }
+
+    #[test]
+    fn every_action_and_help_item_round_trips_through_its_id() {
+        let mut seen = vec![];
+        for action in actions() {
+            let (id, params) = id_of(&action);
+            assert!(!seen.contains(&(id.clone(), params.clone())), "two actions share `{id}` {params:?}");
+            assert_eq!(entry_of(&id, params.as_ref()), Some(Entry::File(action)), "`{id}` {params:?}");
+            seen.push((id, params));
+        }
+        for h in HELP {
+            assert_eq!(entry_of(HELP_ID, Some(&json!({ "item": h }))), Some(Entry::Help(h)));
+        }
+        // The control channel's ids where it has one.
+        assert_eq!(id_of(&FileAction::Quit), ("app.quit".to_string(), None));
+        assert_eq!(id_of(&FileAction::Settings), ("ui.prefs".to_string(), Some(json!({"open": "General"}))));
+        assert_eq!(id_of(&FileAction::Shortcuts), ("ui.prefs".to_string(), Some(json!({"open": "Shortcuts"}))));
+        assert_eq!(id_of(&FileAction::AgentChat), ("ui.agent_chat".to_string(), None));
+        assert_eq!(entry_of("ui.file.export", Some(&json!({"format": "step"}))), Some(Entry::File(FileAction::Export("step"))));
+        for (id, params) in [
+            ("ui.file.export", None),
+            ("ui.file.export", Some(json!({"format": "dwg"}))),
+            (HELP_ID, Some(json!({"item": "nothing"}))),
+            (HELP_ID, None),
+            ("ui.prefs", None),
+            ("solid.nothing", None),
+            (OPEN_RECENT, None),
+            (RECENT, None),
+            (native_menu::WINDOW, None),
+        ] {
+            assert_eq!(entry_of(id, params.as_ref()), None, "{id} {params:?}");
         }
     }
 
     #[test]
-    fn every_menu_entry_maps_back_to_its_action() {
+    fn every_shortcut_is_one_actions_and_the_menu_shows_it() {
+        for (i, (action, key)) in SHORTCUTS.iter().enumerate() {
+            assert!(SHORTCUTS.iter().skip(i + 1).all(|(a, k)| a != action && k != key), "{action:?} {key}");
+            assert_eq!(item("label", action).shortcut, *key);
+        }
+        assert_eq!(item("label", &FileAction::SaveJson).shortcut, "");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn menu_shortcuts_parse_as_the_keys_they_were() {
+        use muda::accelerator::{Accelerator, Code, Modifiers};
+        let (cmd, shift) = (Modifiers::META, Modifiers::META | Modifiers::SHIFT);
+        let want = [
+            Accelerator::new(cmd, Code::Comma),
+            Accelerator::new(cmd, Code::KeyQ),
+            Accelerator::new(cmd, Code::KeyN),
+            Accelerator::new(cmd, Code::KeyO),
+            Accelerator::new(cmd, Code::KeyS),
+            Accelerator::new(shift, Code::KeyS),
+            Accelerator::new(cmd, Code::KeyZ),
+            Accelerator::new(shift, Code::KeyZ),
+        ];
+        for ((action, key), want) in SHORTCUTS.iter().zip(want) {
+            assert_eq!(key.parse::<Accelerator>().ok(), Some(want), "{action:?}");
+        }
+    }
+
+    #[test]
+    fn every_entry_of_the_menu_bar_runs_its_action() {
+        fn leaves(items: &[Item], out: &mut Vec<Item>) {
+            for item in items {
+                if item.children.is_empty() {
+                    out.push(item.clone());
+                } else {
+                    leaves(&item.children, out);
+                }
+            }
+        }
         let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         let bar = menu_bar(&app, &["/work/a.solidcraft".to_string()]);
         let mut entries = vec![];
@@ -254,45 +345,8 @@ mod tests {
         // 7 exports, Properties; Edit 2; Window 1; Help 7.
         assert_eq!(entries.len(), 3 + 4 + 3 + 3 + 7 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
         for item in &entries {
-            let entry = entry_of(&item.id, item.params.as_ref());
-            assert!(entry.is_some(), "`{}` {:?} runs nothing", item.id, item.params);
-            if let Some(Entry::File(action)) = entry {
-                assert_eq!(id_of(&action), (item.id.clone(), item.params.clone()));
-            }
+            assert!(entry_of(&item.id, item.params.as_ref()).is_some(), "`{}` {:?} runs nothing", item.id, item.params);
         }
-        assert_eq!(
-            entry_of(OPEN_RECENT, Some(&json!({"path": "/work/a.solidcraft"}))),
-            Some(Entry::File(FileAction::OpenRecent("/work/a.solidcraft".into())))
-        );
-        assert_eq!(entry_of("ui.file.export", Some(&json!({"format": "step"}))), Some(Entry::File(FileAction::Export("step"))));
-        assert_eq!(entry_of("ui.help.docs", None), Some(Entry::Help("docs")));
-        for unknown in ["ui.file.export", "ui.help.nothing", "solid.nothing", OPEN_RECENT] {
-            assert_eq!(entry_of(unknown, None), None, "{unknown}");
-        }
-    }
-
-    #[test]
-    fn menu_shortcuts_keep_their_keys() {
-        use muda::accelerator::{Accelerator, Code, Modifiers};
-        let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        let bar = menu_bar(&app, &[]);
-        let mut entries = vec![];
-        leaves(&bar.app, &mut entries);
-        leaves(std::slice::from_ref(&bar.quit), &mut entries);
-        leaves(&bar.menus, &mut entries);
-        let key = |id: &str| entries.iter().find(|i| i.id == id).and_then(|i| i.shortcut.parse::<Accelerator>().ok());
-        let (cmd, shift) = (Modifiers::META, Modifiers::META | Modifiers::SHIFT);
-        for (id, want) in [
-            ("ui.app.preferences", Accelerator::new(cmd, Code::Comma)),
-            ("ui.app.quit", Accelerator::new(cmd, Code::KeyQ)),
-            ("ui.file.new", Accelerator::new(cmd, Code::KeyN)),
-            ("ui.file.open", Accelerator::new(cmd, Code::KeyO)),
-            ("ui.file.save", Accelerator::new(cmd, Code::KeyS)),
-            ("ui.file.save_as", Accelerator::new(shift, Code::KeyS)),
-            ("edit.undo", Accelerator::new(cmd, Code::KeyZ)),
-            ("edit.redo", Accelerator::new(shift, Code::KeyZ)),
-        ] {
-            assert_eq!(key(id), Some(want), "{id}");
-        }
+        assert!(bar.menus.iter().all(|m| m.id.starts_with("menu.")), "menu ids are never actions");
     }
 }

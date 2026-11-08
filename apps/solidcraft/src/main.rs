@@ -35,7 +35,7 @@ mod native_crash;
 mod native_crash_macos;
 #[cfg(target_os = "windows")]
 mod native_frame;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 mod native_menu;
 mod nav_bridge;
 #[cfg(target_os = "macos")]
