@@ -90,11 +90,8 @@ sketch.inspect
 sketch.intersect
 sketch.intersection_curve
 sketch.isoparametric_curve
-sketch.line3d
-sketch.move3d
 sketch.move_point
 sketch.options
-sketch.point3d
 sketch.polygon.circumscribed
 sketch.polygon.edge
 sketch.polygon.inscribed
@@ -108,7 +105,6 @@ sketch.slot.center_to_center
 sketch.slot.overall
 sketch.snap
 sketch.solve
-sketch.spline3d
 sketch.spun_profile
 sketch.toggle_driven
 solid.align
