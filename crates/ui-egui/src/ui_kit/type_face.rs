@@ -46,8 +46,11 @@ pub fn with_weight_families(mut fonts: FontDefinitions) -> FontDefinitions {
 }
 
 /// Make `ctx` ready for the kit's type with egui's default faces: the one call a host that installs
-/// no faces of its own makes before the kit draws. A host that installs faces passes its
-/// definitions through [`with_weight_families`] (or binds the weight families itself) instead.
+/// no faces of its own makes before the kit draws. It replaces the context's font definitions with
+/// egui's defaults: egui offers no way to read the definitions a context will use (those set this
+/// frame stay private until the next one), so it cannot merge into them. A host that installs
+/// faces passes its own definitions through [`with_weight_families`] (or binds the weight families
+/// itself) instead.
 /// Without either, egui finds no face for a weight family (it logs the family as not bound) and
 /// draws no glyphs for the kit's weighted text.
 pub fn install_weight_families(ctx: &egui::Context) {
