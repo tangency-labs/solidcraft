@@ -219,7 +219,9 @@ fn exact_pieces(seg: Seg2) -> Result<Vec<Seg2>> {
                 })
                 .collect())
         }
-        Seg2::Line { a, b } if a.dist(b) < 1e-12 => Ok(Vec::new()),
+        // A line shorter than sketch coincidence is the gap between two pieces that meet (a few 1e-12
+        // apart in a saved design), not a piece: it has no tangent (#11597).
+        Seg2::Line { a, b } if a.dist(b) < 1e-9 => Ok(Vec::new()),
         other => Ok(vec![other]),
     }
 }
