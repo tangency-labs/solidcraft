@@ -41,7 +41,6 @@ sketch.slot.center_to_center
 sketch.slot.overall
 solid.align
 solid.chamfer
-solid.coil
 solid.draft
 solid.emboss
 solid.hole

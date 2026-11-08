@@ -18,7 +18,10 @@ use serde_json::Value;
 use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
-use super::types::{FeatureCommon, IdOrName, LengthExpr, OperationParam, Point3, RibDirectionParam, TouchingParam, feature_common, present};
+use super::types::{
+    AngleExpr, AxisDir, CoilSectionParam, CoilSectionPositionParam, FeatureCommon, IdOrName, LengthExpr, NumberExpr, OperationParam, Point3,
+    PointExpr3, ProfilesParam, RibDirectionParam, SketchRef, StringList, TouchingParam, feature_common, present,
+};
 use crate::params::{self, MAX_STRING_LIST};
 
 /// The most curves a rib or web follows, and the most cells Boundary Fill fills, as
@@ -192,6 +195,72 @@ pub struct BoundaryFillParams {
     /// What a join makes of pieces that share no face. Default: separate.
     #[serde(default)]
     pub touching: Option<TouchingParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Add a coil: a section swept along a helix. Give two of `revolutions` (or `turns`), `height` and
+/// `pitch`. The section is either made from `diameter` and `section_size`, or taken from `sketch`.
+/// One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CoilParams {
+    /// The helix's diameter, greater than zero. Required without `sketch`; refused with it.
+    #[serde(default)]
+    pub diameter: Option<LengthExpr>,
+    /// The number of turns, greater than zero; it may be fractional.
+    #[serde(default)]
+    pub revolutions: Option<NumberExpr>,
+    /// The number of turns, when `revolutions` is not given.
+    #[serde(default)]
+    pub turns: Option<NumberExpr>,
+    /// The height of the helix along `axis`. Not used when `revolutions` (or `turns`) and `pitch`
+    /// are both given.
+    #[serde(default)]
+    pub height: Option<LengthExpr>,
+    /// The distance along `axis` between one turn and the next.
+    #[serde(default)]
+    pub pitch: Option<LengthExpr>,
+    /// The section's diameter when circular, or its side when square, greater than zero. The
+    /// section must stay clear of the coil's axis. Required without `sketch`; refused with it.
+    #[serde(default)]
+    pub section_size: Option<LengthExpr>,
+    /// Refused with `sketch`.
+    #[serde(default)]
+    pub section: Option<CoilSectionParam>,
+    /// Refused with `sketch`.
+    #[serde(default)]
+    pub section_position: Option<CoilSectionPositionParam>,
+    /// A point on the helix's axis, where it starts. Default: the origin.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PointExpr3")]
+    pub base: Option<PointExpr3>,
+    /// The direction the helix climbs. Default: Z.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "AxisDir")]
+    pub axis: Option<AxisDir>,
+    /// Where around the axis the section starts. Default: 0. Refused with `sketch`.
+    #[serde(default)]
+    pub start_angle: Option<AngleExpr>,
+    /// A left-handed coil, turning the other way while still climbing along `axis`. Default: false.
+    #[serde(default)]
+    pub clockwise: Option<bool>,
+    /// A sketch whose profile is the section. Its plane is the section plane, so its placement
+    /// sets the radius and the start phase.
+    #[serde(default)]
+    pub sketch: Option<SketchRef>,
+    /// Which profile of `sketch` to sweep: exactly one closed profile without holes must result.
+    /// Default: all of them. Needs `sketch`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// How the coil combines with existing bodies. Default: new.
+    #[serde(default)]
+    pub operation: Option<OperationParam>,
+    /// The bodies a join, cut or intersect works on. Default: every body in the active component.
+    /// Ignored when `participants` lists bodies.
+    #[serde(default)]
+    pub targets: Option<StringList>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

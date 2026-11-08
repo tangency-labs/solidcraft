@@ -500,6 +500,22 @@ keyword_param!(
     "Which way the wall grows from the curves: in_plane (the default; plane is an alias), across the sketch plane, or normal, along the sketch plane's normal. Matching ignores case."
 );
 keyword_param!(
+    /// `solid.coil`'s `section`.
+    CoilSectionParam,
+    "section",
+    &["circular", "circle", "square"],
+    "circular or square",
+    "The shape swept along the helix: circular (the default; circle is an alias) or square. Any case."
+);
+keyword_param!(
+    /// `solid.coil`'s `section_position`.
+    CoilSectionPositionParam,
+    "section position",
+    &["inside", "center", "on", "on_center", "outside"],
+    "inside, center or outside",
+    "Where the section sits against the coil's diameter: center (the default; on and on_center are aliases) on it, inside it or outside it. Any case."
+);
+keyword_param!(
     /// `solid.fillet`'s `type`.
     FilletTypeParam,
     "fillet type",

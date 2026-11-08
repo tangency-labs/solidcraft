@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::{BoundaryFillParams, RemoveParams, RibParams};
+use super::{BoundaryFillParams, CoilParams, RemoveParams, RibParams};
 use crate::Session;
 use crate::schema::features::FeatureResult;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -40,6 +40,22 @@ fn boxes(level: ParamCheck) -> Session {
     )
 }
 
+/// `Section`, a 1 mm square 10 mm from the Z axis on a plane through it, to coil.
+fn coil_section(level: ParamCheck) -> Session {
+    session(
+        level,
+        &[
+            ("sketch.create", json!({"plane": "YZ", "name": "Section"})),
+            ("sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]})),
+            ("sketch.finish", json!({})),
+        ],
+    )
+}
+
+fn coil() -> Value {
+    json!({"diameter": 40, "revolutions": 2, "pitch": 8, "section_size": 4})
+}
+
 fn rib() -> Value {
     json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4})
 }
@@ -61,6 +77,31 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<BoundaryFillParams>(),
         &["body_name", "body_names", "cells", "name", "operation", "participants", "remove_tools", "tools", "touching"],
+    );
+    assert_keys(
+        input_schema_for::<CoilParams>(),
+        &[
+            "axis",
+            "base",
+            "body_name",
+            "body_names",
+            "clockwise",
+            "diameter",
+            "height",
+            "name",
+            "operation",
+            "participants",
+            "pitch",
+            "profiles",
+            "revolutions",
+            "section",
+            "section_position",
+            "section_size",
+            "sketch",
+            "start_angle",
+            "targets",
+            "turns",
+        ],
     );
 }
 
@@ -115,6 +156,16 @@ fn strict_keeps_todays_errors() {
         ("solid.rib", json!({"sketch": true, "curves": ["l1"], "thickness": 1})),
         ("solid.rib", json!({"sketch": "Nope", "curves": ["l1"], "thickness": 1})),
         ("solid.web", json!({"curves": [], "thickness": 1})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "section": "Hexagon"})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "section_position": "Middle"})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "base": null})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "base": [1, 2]})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "axis": null})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "axis": [0, 0, 0]})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "profiles": [0]})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "operation": "glue"})),
+        ("solid.coil", json!({"sketch": "Nope", "revolutions": 2, "pitch": 8})),
         ("solid.remove", json!({})),
         ("solid.remove", json!({"bodies": null})),
         ("solid.remove", json!({"bodies": []})),
@@ -219,6 +270,12 @@ fn the_schemas_take_what_the_handlers_take() {
         input_schema_for::<RemoveParams>(),
         &[json!({"bodies": "B"}), json!({"bodies": ["A", "B"], "name": "Gone"}), json!({"bodies": []}), json!({"bodies": [5]}), json!({})],
     );
+    agree(
+        coil_section,
+        "solid.coil",
+        input_schema_for::<CoilParams>(),
+        &[coil(), with(&coil(), "section", json!("hexagon")), with(&coil(), "section_position", json!("middle"))],
+    );
 }
 
 /// #12655: each command replies as a feature command does, in Warn without warnings: a rib and a
@@ -242,6 +299,29 @@ fn the_features_reply_with_their_schemas() {
     assert_eq!(r["created_bodies"], json!(["Lens"]), "{r}");
     let r = check(&mut s, "solid.remove", json!({"bodies": "Lens"}));
     assert_eq!(r["removed_bodies"], json!(["Lens"]), "{r}");
+    // Every form Coil takes: the three ways to give its length, each option, and a sketch section.
+    for p in [
+        coil(),
+        json!({"diameter": 40, "turns": 2, "height": 16, "section_size": 4, "body_name": "Spring"}),
+        json!({"diameter": "40 mm", "height": 16, "pitch": "8 mm", "section_size": 4, "section": "Square", "section_position": "outside"}),
+        json!({"diameter": 40, "revolutions": 2, "pitch": 8, "section_size": 4, "section": "circle", "section_position": "on_center", "base": [50, "2 mm", 0], "axis": "Y", "start_angle": "30 deg", "clockwise": true}),
+        json!({"diameter": 40, "revolutions": 2, "pitch": 8, "section_size": 4, "axis": [0, 0, 1], "section_position": "inside", "operation": "new", "name": "Helix"}),
+    ] {
+        check(&mut Session { param_check: ParamCheck::Warn, ..Session::default() }, "solid.coil", p);
+    }
+    for p in [
+        json!({"sketch": "Section", "revolutions": 3, "pitch": 8}),
+        json!({"sketch": "Section", "profiles": [0], "revolutions": 3, "pitch": 8, "clockwise": true}),
+    ] {
+        check(&mut coil_section(ParamCheck::Warn), "solid.coil", p);
+    }
+    let mut s = boxes(ParamCheck::Warn);
+    let r = check(
+        &mut s,
+        "solid.coil",
+        json!({"diameter": 12, "revolutions": 2, "pitch": 6, "section_size": 3, "base": [10, 10, 4], "operation": "join", "targets": ["A"]}),
+    );
+    assert_eq!(r["changed_bodies"], json!(["A"]), "{r}");
     // A misspelt key.
     let p = with(&rib(), "flp", json!(true));
     let r = bracket(ParamCheck::Warn).execute("solid.rib", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
