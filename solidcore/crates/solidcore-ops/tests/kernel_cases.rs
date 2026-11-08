@@ -231,31 +231,38 @@ fn f64s<const N: usize>(v: &Value) -> Option<[f64; N]> {
     (a.len() == N).then_some(out)
 }
 
-/// A pick's record indices, optionally bounded by its record order's length.
+/// A pick's record indices, optionally bounded by its record order's length. Every pick's shape
+/// and range is checked first, so bad data fails wherever it sits; only then is a traced miss
+/// reported as unsupported (#2993).
 fn picked(op: &str, selection: &Value, length: Option<usize>) -> Result<Vec<usize>, Stop> {
     let bad = |what: &str| Stop::Fail(format!("{op}: parameter {what}"));
-    selection["picked"]
+    let picks = selection["picked"]
         .as_array()
-        .ok_or_else(|| bad("picked"))?
-        .iter()
-        .map(|pick| {
-            if let Some(miss) = pick.get("miss") {
-                let why = miss.as_str().ok_or_else(|| bad("miss"))?;
-                if pick.get("index").is_some() {
-                    return Err(bad("pick must hit or miss"));
-                }
-                return Err(Stop::Unsupported(format!("{op}: pick missed: {why}")));
+        .ok_or_else(|| bad("picked"))?;
+    let mut indices = Vec::with_capacity(picks.len());
+    let mut missed = None;
+    for pick in picks {
+        if let Some(miss) = pick.get("miss") {
+            let why = miss.as_str().ok_or_else(|| bad("miss"))?;
+            if pick.get("index").is_some() {
+                return Err(bad("pick must hit or miss"));
             }
-            let index = pick["index"]
-                .as_u64()
-                .and_then(|i| usize::try_from(i).ok())
-                .ok_or_else(|| bad("index"))?;
-            if length.is_some_and(|length| index >= length) {
-                return Err(bad("pick outside record order"));
-            }
-            Ok(index)
-        })
-        .collect()
+            missed.get_or_insert(why);
+            continue;
+        }
+        let index = pick["index"]
+            .as_u64()
+            .and_then(|i| usize::try_from(i).ok())
+            .ok_or_else(|| bad("index"))?;
+        if length.is_some_and(|length| index >= length) {
+            return Err(bad("pick outside record order"));
+        }
+        indices.push(index);
+    }
+    match missed {
+        Some(why) => Err(Stop::Unsupported(format!("{op}: pick missed: {why}"))),
+        None => Ok(indices),
+    }
 }
 
 /// Parses typed record picks without reordering them: misses are unsupported; bad data fails.
@@ -3904,6 +3911,36 @@ fn record_picks_preserve_order_and_duplicate_parameter_alignment() {
     assert!(matches!(
         record_picks("blend", &picks, "vertex", 2),
         Err(Stop::Fail(_))
+    ));
+}
+
+/// Bad pick data fails wherever it sits in the list; a traced miss is unsupported only when
+/// every other pick is well formed (#2993).
+#[test]
+fn a_traced_miss_is_unsupported_only_among_well_formed_picks() {
+    let list = |picked: Value| serde_json::json!({"kind": "edge", "picked": picked});
+    for bad in [
+        serde_json::json!([{"miss": "none"}, {"index": 999}]),
+        serde_json::json!([{"index": 999}, {"miss": "none"}]),
+        serde_json::json!([{"miss": "none"}, {}]),
+        serde_json::json!([{"miss": "none"}, {"miss": "none", "index": 0}]),
+    ] {
+        assert!(
+            matches!(
+                record_picks("blend", &list(bad.clone()), "edge", 2),
+                Err(Stop::Fail(_))
+            ),
+            "{bad}"
+        );
+    }
+    assert!(matches!(
+        record_picks(
+            "blend",
+            &list(serde_json::json!([{"index": 0}, {"miss": "none"}])),
+            "edge",
+            2
+        ),
+        Err(Stop::Unsupported(_))
     ));
 }
 
