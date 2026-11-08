@@ -3508,6 +3508,49 @@ fn fold_at_a_tab_root_names_the_real_cause() {
     }
 }
 
+/// An outline is its exact curves, so a corner of 5° in the bend zone is a corner like any other.
+/// The right edge turns 5° outward where the fold line runs: the zone (BA = π/2·(0.8 + 0.44·0.8)
+/// = 1.810, half of it on each side of the line) holds that corner, so the fold is refused with
+/// main's words and the sheet stays as it was. Where the edge is an S of two arcs meeting tangent
+/// at the same place, it is smooth, and the fold goes ahead. The S is symmetric about the point
+/// where the arcs meet, so the zone's mean width is that point's x, 120 − 10√3, and the bend adds
+/// θ·T²·(½ − K) per mm of it.
+#[test]
+fn a_corner_of_five_degrees_in_the_zone_is_refused_and_two_arcs_meeting_smoothly_there_fold() {
+    let fold = json!({"points": [[0, 40, 0.8], [100, 40, 0.8]], "fixed": [50, 10, 0.8]});
+    let mut s = Session::default();
+    outline_blank(&mut s, json!([[0, 0], [100, 0], [100, 40], [100.0 + 20.0 * 5f64.to_radians().tan(), 60], [0, 60]]));
+    let before = s.doc.to_json();
+    let e = s.execute("sheet.fold", &fold).unwrap_err().to_string();
+    assert!(
+        e.contains(
+            "the bend zone (1.810 mm wide) reaches a corner of the sheet's outline at (100.000, 40.000, 0.800): \
+             move the fold line at least 0.905 mm toward the side that folds or 0.905 mm toward the side that stays"
+        ),
+        "{e}"
+    );
+    assert_eq!(s.doc.to_json(), before);
+    // Arcs of radius 20 about (120, 30) and (120 − 20√3, 50), each turning 30° from upright, meet
+    // at (120 − 10√3, 40).
+    let (c, a) = (3f64.sqrt() / 2.0, 15f64.to_radians());
+    let (p, q) = ([120.0 - 20.0 * c, 40.0], [140.0 - 40.0 * c, 50.0]);
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Steel 0.8", "thickness": "0.8", "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+    run(&mut s, "sketch.line", json!({"points": [q, [q[0], 60.0], [0.0, 60.0], [0.0, 0.0], [100.0, 0.0], [100.0, 30.0]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [100, 30], "through": [120.0 - 20.0 * a.cos(), 30.0 + 20.0 * a.sin()], "end": p}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": p, "through": [120.0 - 40.0 * c + 20.0 * a.cos(), 50.0 - 20.0 * a.sin()], "end": q}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Blank"}));
+    // 100 x 30, then 10 at x 120 less the first arc's bite, 10 at 120 − 20√3 plus the second
+    // arc's, which is the same, and 10 at 140 − 20√3: 6800 − 400√3, 0.8 thick.
+    let flat = (6800.0 - 400.0 * 3f64.sqrt()) * 0.8;
+    assert!(rel(volume(&mut s), flat) < 1e-12, "{} vs {flat}", volume(&mut s));
+    run(&mut s, "sheet.fold", fold);
+    let want = flat + FRAC_PI_2 * (120.0 - 10.0 * 3f64.sqrt()) * 0.8 * 0.8 * (0.5 - 0.44);
+    assert!(rel(volume(&mut s), want) < 1e-8, "{} vs {want}", volume(&mut s));
+}
+
 /// The sheet of the folds across slanted edges below: 2 mm thick, R 1, K 0.4.
 fn t2_blank(s: &mut Session, outline: Value) {
     run(s, "sheet.manage_rules", json!({"name": "T2", "thickness": "2 mm", "bend_radius": "1 mm", "k_factor": "0.4", "active": true}));

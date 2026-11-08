@@ -39,9 +39,11 @@ fn straight(e: &FreeEdge) -> Result<(Vec2, Vec2, Vec2)> {
     Ok((e.a, e.b, d))
 }
 
-/// A turn sharper than this (its sine) between two edges of an outline is a corner. Edges that
-/// meet smoothly, as a line running on into an arc, turn less.
-const CORNER_TURN: f64 = 0.17;
+/// A turn sharper than this (its sine) between two edges of an outline is a corner. The outline is
+/// the sheet's own curves, not chords of them, so edges that meet smoothly (a line running on into
+/// an arc, an arc into another) turn only by round-off: any turn above it, however small, is a
+/// corner.
+const CORNER_TURN: f64 = 1e-6;
 
 /// Where two edges of an outline meet at a corner, read from the edges' own tangents.
 fn outline_corners(outline: &Loop2) -> Vec<Vec2> {
