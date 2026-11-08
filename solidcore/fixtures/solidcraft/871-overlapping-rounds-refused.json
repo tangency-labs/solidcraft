@@ -1,0 +1,397 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/871",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/949",
+ "test": "crates/kernel/src/issue_871_tests.rs: overlapping_rounds_are_refused, rounds_that_fit_are_closed",
+ "summary": "A fillet that opened holes in the model must be refused, not accepted (#871). The part is a plate with a narrower block on top and a window through both; every edge of both end faces is rounded. At r 1 the rounds on the window's edges and on the block's sides overlap across the 1.26 mm wall between them: the pinned SMLib returns success with a non-manifold body and all of the part's volume gone (WR-460), fillet_refuse_crossing_rails refuses it. At r 0.5 they fit: one closed manifold solid (its volume has no closed form here).",
+ "cases": [
+  {
+   "name": "overlapping_rounds_are_refused",
+   "note": "r 1 on the 24 end-face edges: the rounds overlap across the 1.26 mm wall.",
+   "fixes": [
+    "fillet_refuse_crossing_rails"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "base",
+     "origin": [
+      9.5,
+      8,
+      0
+     ],
+     "size": [
+      14,
+      21.5,
+      10
+     ]
+    },
+    {
+     "op": "box",
+     "id": "top",
+     "origin": [
+      9.5,
+      12.74437365538526,
+      10
+     ],
+     "size": [
+      14,
+      9.9483859782841,
+      10
+     ]
+    },
+    {
+     "op": "union",
+     "id": "joined",
+     "a": "base",
+     "b": "top"
+    },
+    {
+     "op": "box",
+     "id": "window",
+     "origin": [
+      9.5,
+      14,
+      7
+     ],
+     "size": [
+      14,
+      5.2,
+      7.1
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "joined",
+     "b": "window"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       23.5,
+       12.74437365538526,
+       15.0
+      ],
+      [
+       23.5,
+       10.37218682769263,
+       10.0
+      ],
+      [
+       23.5,
+       8.0,
+       5.0
+      ],
+      [
+       23.5,
+       18.75,
+       0.0
+      ],
+      [
+       23.5,
+       29.5,
+       5.0
+      ],
+      [
+       23.5,
+       26.09637981683468,
+       10.0
+      ],
+      [
+       23.5,
+       22.69275963366936,
+       15.0
+      ],
+      [
+       23.5,
+       17.71856664452731,
+       20.0
+      ],
+      [
+       23.5,
+       16.6,
+       7.0
+      ],
+      [
+       23.5,
+       14.0,
+       10.55
+      ],
+      [
+       23.5,
+       16.6,
+       14.100000000000001
+      ],
+      [
+       23.5,
+       19.200000000000003,
+       10.55
+      ],
+      [
+       9.5,
+       12.74437365538526,
+       15.0
+      ],
+      [
+       9.5,
+       10.37218682769263,
+       10.0
+      ],
+      [
+       9.5,
+       8.0,
+       5.0
+      ],
+      [
+       9.5,
+       18.75,
+       0.0
+      ],
+      [
+       9.5,
+       29.5,
+       5.0
+      ],
+      [
+       9.5,
+       26.09637981683468,
+       10.0
+      ],
+      [
+       9.5,
+       22.69275963366936,
+       15.0
+      ],
+      [
+       9.5,
+       17.71856664452731,
+       20.0
+      ],
+      [
+       9.5,
+       16.6,
+       7.0
+      ],
+      [
+       9.5,
+       14.0,
+       10.55
+      ],
+      [
+       9.5,
+       16.6,
+       14.100000000000001
+      ],
+      [
+       9.5,
+       19.200000000000003,
+       10.55
+      ]
+     ],
+     "radius": 1.0
+    }
+   ],
+   "expect": {
+    "refused": {
+     "step": "result",
+     "error": "status 1001"
+    }
+   }
+  },
+  {
+   "name": "rounds_that_fit_are_closed",
+   "note": "r 0.5, below half the wall: one closed manifold solid.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "base",
+     "origin": [
+      9.5,
+      8,
+      0
+     ],
+     "size": [
+      14,
+      21.5,
+      10
+     ]
+    },
+    {
+     "op": "box",
+     "id": "top",
+     "origin": [
+      9.5,
+      12.74437365538526,
+      10
+     ],
+     "size": [
+      14,
+      9.9483859782841,
+      10
+     ]
+    },
+    {
+     "op": "union",
+     "id": "joined",
+     "a": "base",
+     "b": "top"
+    },
+    {
+     "op": "box",
+     "id": "window",
+     "origin": [
+      9.5,
+      14,
+      7
+     ],
+     "size": [
+      14,
+      5.2,
+      7.1
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "joined",
+     "b": "window"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       23.5,
+       12.74437365538526,
+       15.0
+      ],
+      [
+       23.5,
+       10.37218682769263,
+       10.0
+      ],
+      [
+       23.5,
+       8.0,
+       5.0
+      ],
+      [
+       23.5,
+       18.75,
+       0.0
+      ],
+      [
+       23.5,
+       29.5,
+       5.0
+      ],
+      [
+       23.5,
+       26.09637981683468,
+       10.0
+      ],
+      [
+       23.5,
+       22.69275963366936,
+       15.0
+      ],
+      [
+       23.5,
+       17.71856664452731,
+       20.0
+      ],
+      [
+       23.5,
+       16.6,
+       7.0
+      ],
+      [
+       23.5,
+       14.0,
+       10.55
+      ],
+      [
+       23.5,
+       16.6,
+       14.100000000000001
+      ],
+      [
+       23.5,
+       19.200000000000003,
+       10.55
+      ],
+      [
+       9.5,
+       12.74437365538526,
+       15.0
+      ],
+      [
+       9.5,
+       10.37218682769263,
+       10.0
+      ],
+      [
+       9.5,
+       8.0,
+       5.0
+      ],
+      [
+       9.5,
+       18.75,
+       0.0
+      ],
+      [
+       9.5,
+       29.5,
+       5.0
+      ],
+      [
+       9.5,
+       26.09637981683468,
+       10.0
+      ],
+      [
+       9.5,
+       22.69275963366936,
+       15.0
+      ],
+      [
+       9.5,
+       17.71856664452731,
+       20.0
+      ],
+      [
+       9.5,
+       16.6,
+       7.0
+      ],
+      [
+       9.5,
+       14.0,
+       10.55
+      ],
+      [
+       9.5,
+       16.6,
+       14.100000000000001
+      ],
+      [
+       9.5,
+       19.200000000000003,
+       10.55
+      ]
+     ],
+     "radius": 0.5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true
+   }
+  }
+ ]
+}

@@ -83,7 +83,7 @@ fn a_port_picked_by_index_stays_a_cut_after_a_width_change() {
 fn a_lost_profile_is_an_error_not_another_pick() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10], "ids": ["a", "b", "c", "d"]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
     run(&mut s, "sketch.circle.center", json!({"center": [30, 5], "radius": 3, "id": "ring"}));
     run(&mut s, "sketch.finish", json!({}));
     let ring = s.model.state().sketches[0].profiles.iter().position(|p| p.outer_curves == ["ring"]).unwrap();

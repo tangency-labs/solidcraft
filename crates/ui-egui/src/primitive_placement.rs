@@ -16,10 +16,10 @@ use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::PlaneGeom as _;
 
-use crate::i18n::tr;
 use crate::selection::{EDGES, EXTERNAL_POINTS, FACES, ORIGIN, POINTS, SelInput, VERTICES};
 use crate::ui_kit::{self, choice_row, expr_row};
 use solidcraft_engine::Sel;
+use solidcraft_ui_text::tr;
 
 /// The placement keys a primitive's dialog offers, the choice's first option first.
 fn keys(cmd: &str) -> &'static [&'static str] {
