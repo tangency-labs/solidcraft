@@ -3933,21 +3933,6 @@ fn theme_file(app: &SolveApp, id: &str, system_dark: bool) -> serde_json::Value 
 /// reports rather than spinning the view.
 pub fn migrate(mut p: Prefs) -> Prefs {
     migrate_gruvbox(&mut p);
-    // Normalize legacy dimensions before retaining them for shared-panel import.
-    let defaults = Prefs::default();
-    for (width, fallback) in [
-        (&mut p.browser_width, defaults.browser_width),
-        (&mut p.timeline_left_width, defaults.timeline_left_width),
-        (&mut p.agent_chat_width, defaults.agent_chat_width),
-        (&mut p.render_browser_width, defaults.render_browser_width),
-    ] {
-        if !width.is_finite() || *width <= 0.0 || *width > solidcraft_engine::panels::MAX_LOGICAL {
-            *width = fallback;
-        }
-    }
-    if !p.browser_share.is_finite() || !(0.0..=1.0).contains(&p.browser_share) {
-        p.browser_share = defaults.browser_share;
-    }
     // Every saved file carries the old default limit; it reads as no limit.
     if p.agent_chat_turn_limit == crate::agent_chat::gate::OLD_DEFAULT_TURN_LIMIT {
         p.agent_chat_turn_limit = 0;
@@ -4308,24 +4293,27 @@ mod tests {
     fn invalid_legacy_panel_preferences_recover_before_shared_host_setup() {
         let mut app = SolveApp::new(Default::default(), Default::default());
         app.load_prefs(
-            &json!({"preferences":{"shared_panel_layout":true,"browser_width":0.0,"timeline_left_width":-1.0,
+            &json!({"preferences":{"browser_width":0.0,"timeline_left_width":-1.0,
                 "agent_chat_width":1e9,"render_browser_width":0.0,"browser_share":2.0}})
             .to_string(),
         );
         let defaults = Prefs::default();
-        assert_eq!(app.preferences.browser_width, defaults.browser_width);
-        assert_eq!(app.preferences.timeline_left_width, defaults.timeline_left_width);
-        assert_eq!(app.preferences.agent_chat_width, defaults.agent_chat_width);
-        assert_eq!(app.preferences.render_browser_width, defaults.render_browser_width);
-        assert_eq!(app.preferences.browser_share, defaults.browser_share);
+        assert_eq!(app.preferences.browser_width, 0.0);
+        assert_eq!(crate::browser::browser_width(app.preferences.browser_width), 170.0, "Classic keeps its existing saved-width behavior");
+        app.preferences.shared_panel_layout = true;
         crate::panel_runtime::sync_production_setting(&mut app).unwrap();
         assert!(app.panel_runtime().is_some(), "malformed legacy sizes must not leave setup retrying each frame");
-
-        let valid = Prefs { browser_width: 333.0, browser_share: 0.75, ..Default::default() };
-        let kept = migrate(valid);
-        assert_eq!((kept.browser_width, kept.browser_share), (333.0, 0.75));
-        let nonfinite = migrate(Prefs { browser_width: f32::NAN, browser_share: f32::INFINITY, ..Default::default() });
-        assert_eq!((nonfinite.browser_width, nonfinite.browser_share), (defaults.browser_width, defaults.browser_share));
+        let imported = crate::panel_runtime::preferences_value(&app).unwrap();
+        for (name, expected) in [
+            ("browser_width", defaults.browser_width),
+            ("history_width", defaults.timeline_left_width),
+            ("assistant_width", defaults.agent_chat_width),
+            ("render_width", defaults.render_browser_width),
+            ("browser_share", defaults.browser_share),
+        ] {
+            assert_eq!(imported["legacy"][name], json!(expected));
+        }
+        assert_eq!((app.preferences.browser_width, app.preferences.browser_share), (0.0, 2.0), "shared import never rewrites Classic preferences");
     }
 
     #[test]
