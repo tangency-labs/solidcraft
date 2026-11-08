@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn the_kit_sets_type_with_egui_faces_when_no_host_fonts_are_installed() {
         let ctx = egui::Context::default();
-        ctx.set_fonts(with_weight_families(egui::FontDefinitions::default()));
+        install_weight_families(&ctx);
         let ink = egui::Color32::from_rgb(10, 20, 30);
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             for (text, expected) in [
