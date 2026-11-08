@@ -847,6 +847,7 @@ impl Extent1d {
 
         contained = map > self.min - zero && map < self.max + zero;
 
+        let mut kept_down = false;
         if !contained && are_same_to_tol(map, ivl.max(), zero) {
             // a period down, kept where it lies in the interval; the C++ sets it to the
             // start instead (WR-509, #1518; tangency-labs/smlib#46)
@@ -854,6 +855,7 @@ impl Extent1d {
             if down > self.min - zero && down < self.max + zero {
                 map = down;
                 contained = true;
+                kept_down = true;
             }
         }
 
@@ -866,6 +868,12 @@ impl Extent1d {
                 map
             };
         let mut dist_to_min = map - self.min;
+        if kept_down {
+            // it can lie up to the tolerance below the start: its distance from it, not a
+            // signed offset (assert_valid takes min2 of the two). Only this new case: other
+            // inputs keep the signed value upstream gives them.
+            dist_to_min = dist_to_min.abs();
+        }
         if dist_to_min > period / 2.0 {
             dist_to_min = period - dist_to_min;
         }
@@ -1174,6 +1182,8 @@ mod tests {
         let c = r.contains_periodic_value(w, 360.0, -1.0);
         assert!(c.contained);
         assert_eq!(c.periodic_value, w - 360.0);
+        // its distance to the start is a distance, not the signed offset -5e-5
+        assert!((c.dist_to_min - 5.0e-5).abs() < 1e-12, "{}", c.dist_to_min);
     }
 
     #[test]
