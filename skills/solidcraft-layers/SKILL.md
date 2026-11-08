@@ -13,7 +13,7 @@ The authority is `solidcore/docs/layers.md`; this is its short form. Every job l
 3. **Is it state, selection, commands, settings, history or UI?** Then it is SolidCraft (`crates/`, `apps/`), which computes no geometry.
 
 ## What SolidCraft may use
-- `solidcore-ops` (modelling), `solidcore-tess` (display meshes, polylines) and `solidcore-record` (geometry as data). `crates/smlib` is the one wrapper that calls `solidcore` itself; `cargo xtask layers` keeps it that way, and review flags a new dependency on any other solidcore crate.
+- `solidcore-ops` (modelling), `solidcore-tess` (display meshes, polylines) and `solidcore-record` (geometry as data). CI enforces this seam through `cargo xtask layers` (#13498): solidcore's public API is listed in xtask/solidcore-public.txt, and the remaining direct uses in xtask/solidcore-seam.txt, a list that only shrinks.
 - Before writing STEP, meshing, surface intersection, tangent chains or frames, look for solidcore's: a second implementation is flagged.
 
 ## Lists that only shrink
