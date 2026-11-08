@@ -66,6 +66,19 @@ pub struct OdeOptions<'a> {
     /// integration is refused as unachievable ([`estimate_rounding`]). `None` (the
     /// rounding is not known): upstream's step control.
     pub rounding: Option<&'a [f64]>,
+    /// The integral's size per unit of `x` over the whole range it is part of, when
+    /// known (`r >= 0`). Each step of `h` is then held to the accuracy relative to its
+    /// share of the range, `|h| r`, plus its own increment `|y_(k+1) - y_k|` (error per
+    /// unit step), instead of upstream's scale `|y| + |h y'|`, the integral so far, and
+    /// the owed errors to the accuracy relative to `r |x2 - x1| + |y|`. Against the
+    /// integral so far, each of `N` steps may err by the accuracy relative to nearly all
+    /// of it, and together by up to `N` times the accuracy; against their shares, the
+    /// steps' errors add up to at most the accuracy times `r |x2 - x1| + ∫ |y'|`, over
+    /// the whole range `r` was measured on at most twice the integral when `r` is a lower
+    /// bound on its mean and the integrand is non-negative, as a curve's speed is
+    /// ([`integrate_rounded_with_kernel`]). A lower bound in `scale` still floors each
+    /// step's scale.
+    pub rate: Option<f64>,
 }
 
 /// Accepted full-size and reduced steps (`nok`, `nbad`).
@@ -143,6 +156,7 @@ impl OdeIntegrator {
             .iter()
             .all(|v| v.is_finite())
             || options.accuracy.is_nan()
+            || options.rate.is_some_and(|r| !(r.is_finite() && r >= 0.0))
         {
             return Err(SolidError::invalid_input(
                 OP,
@@ -176,7 +190,13 @@ impl OdeIntegrator {
             evaluate(x, &y, &mut dydx)?;
             finite(&dydx)?;
             for (i, s) in scale.iter_mut().enumerate() {
-                *s = at(&y, i)?.abs() + (at(&dydx, i)? * h).abs() + self.tiny;
+                // (with `rate`, the step's share of the range and its own increment are
+                // added to this floor in `step_in`, for the step it takes)
+                *s = if options.rate.is_some() {
+                    self.tiny
+                } else {
+                    at(&y, i)?.abs() + (at(&dydx, i)? * h).abs() + self.tiny
+                };
                 if let Some(lower) = options.scale {
                     *s = s.max(at(lower, i)?);
                 }
@@ -198,8 +218,11 @@ impl OdeIntegrator {
                 &mut scale,
                 &mut evaluate,
                 &mut scratch,
-                options.quadrature,
-                options.rounding,
+                StepControl {
+                    quadrature: options.quadrature,
+                    rounding: options.rounding,
+                    rate: options.rate,
+                },
             )
             .map_err(|e| match e {
                 SolidError::Upstream {
@@ -226,10 +249,14 @@ impl OdeIntegrator {
             core::mem::swap(&mut y, &mut scratch.temp);
             if (x - x2) * (x2 - x1) >= 0.0 {
                 // The steps accepted through the rounding floor: their errors, together,
-                // within the accuracy relative to the integral (or its scale's lower
-                // bound), or the accuracy is below what the integrand resolves.
+                // within the accuracy relative to the integral (with `rate`, plus the
+                // range's share; or its scale's lower bound), or the accuracy is below what
+                // the integrand resolves.
                 for (i, owed) in debt.iter().enumerate() {
                     let mut size = at(&y, i)?.abs();
+                    if let Some(rate) = options.rate {
+                        size += rate * (x2 - x1).abs();
+                    }
                     if let Some(lower) = options.scale {
                         size = size.max(at(lower, i)?);
                     }
@@ -273,8 +300,11 @@ impl OdeIntegrator {
             scale,
             &mut evaluate,
             &mut scratch,
-            false,
-            None,
+            StepControl {
+                quadrature: false,
+                rounding: None,
+                rate: None,
+            },
         )?;
         Ok(OdeStep {
             values: core::mem::take(&mut scratch.temp),
@@ -287,9 +317,9 @@ impl OdeIntegrator {
     /// [`OdeIntegrator::step`] into `scratch`: the new values are left in
     /// `scratch.temp`, so the steps of one integration allocate nothing. `end` is the
     /// end of a step of `htry` (the step's last node, exactly; a smaller retry ends at
-    /// `x + h`). `quadrature` and `rounding` as [`OdeOptions::quadrature`] and
-    /// [`OdeOptions::rounding`]: a step whose estimate is above the accuracy but within
-    /// its own rounding is accepted, its error owed (`scratch.debt`, [`estimate_rounding`]).
+    /// `x + h`). `control` as [`OdeOptions::quadrature`], [`OdeOptions::rounding`] and
+    /// [`OdeOptions::rate`]: a step whose estimate is above the accuracy but within its
+    /// own rounding is accepted, its error owed (`scratch.debt`, [`estimate_rounding`]).
     #[allow(clippy::too_many_arguments)] // `step`'s arguments plus the scratch arrays
     fn step_in<F>(
         y: &[f64],
@@ -301,8 +331,7 @@ impl OdeIntegrator {
         scale: &mut [f64],
         evaluate: &mut F,
         scratch: &mut CashKarpScratch,
-        quadrature: bool,
-        rounding: Option<&[f64]>,
+        control: StepControl<'_>,
     ) -> Result<StepEnd>
     where
         F: FnMut(f64, &[f64], &mut [f64]) -> Result<()>,
@@ -320,6 +349,11 @@ impl OdeIntegrator {
                 "invalid step controls or dimensions",
             ));
         }
+        let StepControl {
+            quadrature,
+            rounding,
+            rate,
+        } = control;
         // (`y.len()` is bounded by `validate` above)
         scratch.resize(y.len());
         let mut h = htry;
@@ -341,6 +375,12 @@ impl OdeIntegrator {
                 if s.abs() < EFF_ZERO {
                     *s = EFF_ZERO;
                 }
+                // this try's share of the range and its own increment
+                let s = if let Some(rate) = rate {
+                    s.max(h.abs() * rate + (at(&scratch.temp, i)? - at(y, i)?).abs())
+                } else {
+                    *s
+                };
                 let embedded = at(&scratch.errors, i)?;
                 let samples = step_samples(dydx, scratch, i)?;
                 let delta = sample_rounding(accuracy, rounding, i)?;
@@ -348,15 +388,15 @@ impl OdeIntegrator {
                     delta.map_or(0.0, |delta| estimate_rounding(weights, h, delta, samples))
                 };
                 let embedded_rounding = rounding_of(EMBEDDED_ERROR_WEIGHTS);
-                let mut raw = (embedded / *s).abs();
-                let mut ratio = (embedded / floored(*s, embedded_rounding / accuracy)).abs();
+                let mut raw = (embedded / s).abs();
+                let mut ratio = (embedded / floored(s, embedded_rounding / accuracy)).abs();
                 embedded_max = embedded_max.max(ratio);
                 let mut bound = embedded_rounding;
                 if quadrature {
                     let estimate = quadrature_estimate(h, samples)?;
                     let rounding = rounding_of(QUADRATURE_ERROR_WEIGHTS);
-                    raw = raw.max((estimate / *s).abs());
-                    ratio = ratio.max((estimate / floored(*s, rounding / accuracy)).abs());
+                    raw = raw.max((estimate / s).abs());
+                    ratio = ratio.max((estimate / floored(s, rounding / accuracy)).abs());
                     bound = bound.max(rounding);
                 }
                 errmax = errmax.max(ratio);
@@ -394,6 +434,15 @@ impl OdeIntegrator {
         }
         Err(SolidError::sm_err(OP_STEP_CONTROL))
     }
+}
+
+/// How [`OdeIntegrator::step_in`] controls a step: [`OdeOptions::quadrature`],
+/// [`OdeOptions::rounding`] and [`OdeOptions::rate`].
+#[derive(Clone, Copy)]
+struct StepControl<'a> {
+    quadrature: bool,
+    rounding: Option<&'a [f64]>,
+    rate: Option<f64>,
 }
 
 fn at(values: &[f64], i: usize) -> Result<f64> {
@@ -744,20 +793,25 @@ pub fn integrate_with_kernel<F>(
 where
     F: FnMut(f64) -> Result<f64>,
 {
-    integrate_rounded_with_kernel(k, a, b, accuracy, None, evaluate)
+    integrate_rounded_with_kernel(k, a, b, accuracy, None, None, evaluate)
 }
 
 /// [`integrate_with_kernel`] for an integrand whose samples are each within `rounding`
 /// of its exact value, when that is known ([`OdeOptions::rounding`]): its value is within
 /// the accuracy by the step control's estimates, or, where the accuracy asks for less
 /// than the integrand resolves, the integration is refused as unachievable (`SM_ERR`,
-/// [`OP_STEP_CONTROL`]; a zero without failure propagation, as every failure).
+/// [`OP_STEP_CONTROL`]; a zero without failure propagation, as every failure). With
+/// `rate`, the integral's size per unit of `x` over the whole range `[a, b]` is part of
+/// ([`OdeOptions::rate`]), each step is held to its share of that range plus its own
+/// increment, so the steps of every piece of the range err together by at most the
+/// accuracy times `rate` × the range plus the integral; `None`: upstream's error scale.
 pub fn integrate_rounded_with_kernel<F>(
     k: &Kernel,
     a: f64,
     b: f64,
     accuracy: f64,
     rounding: Option<f64>,
+    rate: Option<f64>,
     mut evaluate: F,
 ) -> Result<f64>
 where
@@ -770,6 +824,7 @@ where
         b,
         accuracy,
         rounding,
+        rate,
         k.fixes.integrator_propagates_failure,
         |t| {
             eval_calls += 1;
@@ -803,15 +858,17 @@ pub fn integrate_opt_in<F>(
 where
     F: FnMut(f64) -> Result<f64>,
 {
-    integrate_scalar(a, b, accuracy, None, propagate_failure, evaluate)
+    integrate_scalar(a, b, accuracy, None, None, propagate_failure, evaluate)
 }
 
-/// [`integrate_opt_in`] with the samples' rounding bound `rounding`, when known.
+/// [`integrate_opt_in`] with the samples' rounding bound `rounding` and the integral's
+/// size per unit of `x` `rate` ([`OdeOptions::rate`]), when known.
 fn integrate_scalar<F>(
     a: f64,
     b: f64,
     accuracy: f64,
     rounding: Option<f64>,
+    rate: Option<f64>,
     propagate_failure: bool,
     mut evaluate: F,
 ) -> Result<f64>
@@ -830,6 +887,7 @@ where
         // `evaluate` reads `t` alone: the steps are accepted on the quadrature estimate
         quadrature: true,
         rounding: rounding.as_ref().map(core::slice::from_ref),
+        rate,
     };
     match OdeIntegrator::default().integrate(&mut y, a, b, options, |t, _, dy| {
         let value = evaluate(t)?;
@@ -868,6 +926,7 @@ mod tests {
                         scale: Some(&[scale]),
                         quadrature: false,
                         rounding: None,
+                        rate: None,
                     },
                     |_, _, dy| {
                         dy[0] = 1.0;
@@ -891,6 +950,7 @@ mod tests {
                         scale: Some(&[f64::NAN]),
                         quadrature: false,
                         rounding: None,
+                        rate: None,
                     },
                     |_, _, _| panic!("early return must not evaluate")
                 )
@@ -909,6 +969,7 @@ mod tests {
             scale: None,
             quadrature: false,
             rounding: None,
+            rate: None,
         };
         OdeIntegrator::default()
             .integrate(&mut y, 0.0, 1.0, opt, |_, _, dy| {
@@ -1168,6 +1229,7 @@ mod tests {
             scale: None,
             quadrature: false,
             rounding: None,
+            rate: None,
         };
         let mut y = [0.0];
         let nan = OdeIntegrator::default().integrate(&mut y, 0.0, 1.0, options(1e-6), |x, _, d| {
@@ -1274,6 +1336,7 @@ mod tests {
                         scale: Some(&[1.0]),
                         quadrature,
                         rounding: None,
+                        rate: None,
                     },
                     |t, _, dy| {
                         dy[0] = t.powi(5) + a * t.powi(4);
@@ -1314,6 +1377,7 @@ mod tests {
                         scale: None,
                         quadrature: true,
                         rounding: None,
+                        rate: None,
                     },
                     |t, _, dy| {
                         if !(x1 <= t && t <= x2) {

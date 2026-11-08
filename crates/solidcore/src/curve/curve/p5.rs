@@ -1812,10 +1812,18 @@ impl Curve {
     /// with its distance from the origin, and a span whose control points are one point
     /// has length 0 exactly.
     ///
-    /// The contract: each span's integral is within its share of `desired_accuracy`
-    /// by the step control's estimates, the steps accepted at the rounding of the
-    /// computed speed included (their errors, together, within that share of the
-    /// span's length: [`crate::mass::integrator::OdeOptions::rounding`]), or the span is
+    /// The contract: the length is within `desired_accuracy` relative to itself by the
+    /// step control's estimates. Not upstream: each step is held to half the accuracy relative
+    /// to its share of the curve, its parameter step times the 5-sample length estimate
+    /// (a chord polygon: at most the length) per unit of parameter, plus its own
+    /// increment ([`crate::mass::integrator::OdeOptions::rate`]). Over the whole curve
+    /// those shares add up to at most twice the length, so the steps' errors together
+    /// stay within the accuracy asked. Upstream held each span to `desired_accuracy /
+    /// spans` relative to the span's integral so far, so each of its `N` steps could err
+    /// by nearly that and the steps together by up to `N` times it. The steps accepted
+    /// at the rounding of the computed speed are included (their errors, together,
+    /// within half the accuracy of the span's share of the curve and its length:
+    /// [`crate::mass::integrator::OdeOptions::rounding`]), or the span is
     /// refused (`SM_ERR`, operation `mass::integrator::step_control`): the accuracy asks
     /// for less than the computed speed resolves. The refusal is returned with
     /// [`crate::kernel::UpstreamFixes::integrator_propagates_failure`] and is a zero
@@ -1895,8 +1903,11 @@ impl Curve {
 
         let mut total_length = 0.0;
         let span_count = cache.span_count();
-        // (dSpanAccuracy = dDesiredAccuracy / span count: the integration tolerance)
-        let span_accuracy = desired_accuracy / span_count as f64;
+        // Not upstream (`dDesiredAccuracy / span count` relative to each span's integral
+        // so far): every step held to half the accuracy relative to its share of the
+        // estimated length, per unit of parameter, plus its own increment.
+        let span_accuracy = desired_accuracy / 2.0;
+        let rate = length / interval.length();
 
         let bsp = cache.curve();
         // (a kind with control points; a Hermite curve tessellates without them, and its
@@ -1932,6 +1943,7 @@ impl Curve {
                 seg_ivl.max(),
                 span_accuracy,
                 speed.as_ref().map(SpanSpeed::rounding_bound),
+                Some(rate),
                 |t| {
                     if let Some(speed) = &speed {
                         // the span's own piece, its end (a knot) included

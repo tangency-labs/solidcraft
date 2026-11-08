@@ -104,6 +104,7 @@ impl UnitDiff for Runner {
                         scale: if scale.is_empty() { None } else { Some(&scale) },
                         quadrature: false,
                         rounding: None,
+                        rate: None,
                     },
                     |t, y, dy| eval(&i, t, y, dy),
                 )
@@ -773,6 +774,7 @@ mod tests {
                         scale: Some(&[floor]),
                         quadrature: false,
                         rounding: None,
+                        rate: None,
                     },
                     |_, _, dy| {
                         dy[0] = 1.0;
@@ -797,6 +799,7 @@ mod tests {
                     scale: Some(&[f64::NAN]),
                     quadrature: false,
                     rounding: None,
+                    rate: None,
                 },
                 |_, _, dy| {
                     dy[0] = f64::NAN;

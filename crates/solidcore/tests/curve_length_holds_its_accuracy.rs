@@ -11,6 +11,11 @@
 //!   degree 3 that vanishes where `g''''` changes sign; they are now accepted on the
 //!   larger of it and the fifth divided difference (`OdeOptions::quadrature`, as the
 //!   precise-property integrals).
+//! - each step's error was held to the accuracy relative to the length so far, so the
+//!   steps' errors could add up past the accuracy asked for the whole curve. Each step
+//!   is now held to half the accuracy relative to its share of the curve (its parameter
+//!   step times the estimated length per unit of parameter) plus its own increment
+//!   (`OdeOptions::rate`), shares that add up to at most twice the length.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)]
 use solidcore::curve::curve::Curve;
 use solidcore::geom::extent1d::Extent1d;
@@ -334,6 +339,32 @@ fn a_near_point_curve_has_length_within_its_rounding() {
                      length {length:e} beyond polygon {polygon:e} + rounding {rounding:e}"
                 );
             }
+        }
+    }
+}
+
+/// The parabola `(x, x^2)`, `0 <= x <= a`, as a rational quadratic whose weights
+/// `1, w, w^2` reparametrise it by `x(t) = a w^2 t / (1 + (w^2 - 1) t)`: the same curve,
+/// so the same length, whatever `w`. Stored homogeneous, its points are exact.
+fn rational_parabola(a: f64, w: f64) -> Curve {
+    let cpw = [
+        CPoint::new(0.0, 0.0, 0.0, 1.0),
+        CPoint::new(w * a / 2.0, 0.0, 0.0, w),
+        CPoint::new(w * w * a, w * w * a * a, 0.0, w * w),
+    ];
+    let knots = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    Curve::from(BSplineCurve::from_data(3, 2, 5, 2, &cpw, &knots).unwrap())
+}
+
+/// Rational reparametrisations of the parabola hold every requested accuracy down to
+/// 1e-12, as the polynomial one does. At `a = 16` with weights `1, 4, 16` the length was
+/// 1.16e-12 off at 1e-12.
+#[test]
+fn a_rationally_parametrised_parabola_holds_every_requested_accuracy() {
+    for a in [1.0_f64, 4.0, 10.0, 16.0] {
+        let exact = a * (1.0 + 4.0 * a * a).sqrt() / 2.0 + (2.0 * a).asinh() / 4.0;
+        for w in [1.0, 2.0, 4.0, 0.5, 0.25] {
+            holds_down_to(&rational_parabola(a, w), exact, 12);
         }
     }
 }
