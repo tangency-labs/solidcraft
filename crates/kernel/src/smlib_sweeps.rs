@@ -1478,11 +1478,9 @@ mod imp {
         let st = crate::sweep_path::controlled_stations(plane, &[start, a0], &[first_t, t0], &[], &law)?;
         let want = st.last().map(|s| s.apply(plane.x)).ok_or_else(|| KernelError::Invalid("sweep path".into()))?;
         let have = affine_turn(at_start, plane.x);
-        // About the section's normal, pointing the way the run leaves it (the twist's axis).
-        let n = affine_turn(at_start, plane.normal());
-        let axis = (if n.dot(t0) < 0.0 { n * -1.0 } else { n })
-            .normalized()
-            .ok_or_else(|| KernelError::Invalid("the sweep's section is degenerate".into()))?;
+        // About the run's direction (the twist's axis, as `controlled_stations` turns about the
+        // path where it leaves the profile).
+        let axis = t0.normalized().ok_or_else(|| KernelError::Invalid("the sweep's section is degenerate".into()))?;
         let flat = |v: Vec3| (v - axis * v.dot(axis)).normalized();
         let (Some(w), Some(h)) = (flat(want), flat(have)) else {
             return Err(KernelError::Invalid("the profile lies along the sweep path at a corner".into()));

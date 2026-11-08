@@ -238,7 +238,7 @@ pub(crate) fn crossing_check(plane: &Plane, tangents: &[Vec3]) -> Result<()> {
 }
 
 /// Stations shaped by sweep options: each maps a world vector at the first station to its image
-/// at its own (twisted and scaled about the profile's normal through the first station, then
+/// at its own (twisted and scaled about the path's start tangent through the first station, then
 /// turned by the orientation's frames), optionally stretched across a corner (mitre). Twist and
 /// scale grow with the length run along `pts`.
 pub(crate) fn controlled_stations(
@@ -259,9 +259,10 @@ pub(crate) fn controlled_stations(
         SweepOrientation::Direction(d) => frames_toward(tangents, d)?,
     };
     let f0 = *f.first().ok_or_else(bad)?;
-    // Twist and scale act about the profile's normal, pointing the way the path leaves it.
-    let n = plane.normal().normalized().ok_or_else(|| KernelError::Invalid("sweep frame".into()))?;
-    let axis = if n.dot(t0) < 0.0 { n * -1.0 } else { n };
+    // Twist and scale act about the path where it leaves the profile (its start tangent): the
+    // same axis whatever plane the profile was drawn on (solidcraft#12337). Where the profile is
+    // square to the path this is its normal, pointing the way the path leaves it.
+    let axis = t0.normalized().ok_or_else(|| KernelError::Invalid("sweep frame".into()))?;
     if ctl.orientation == SweepOrientation::Parallel {
         crossing_check(plane, tangents)?;
     }
