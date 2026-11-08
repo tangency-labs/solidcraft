@@ -1,10 +1,5 @@
 {
   "blend.feature_executive": {
-    "add_by_faces_extrusion": "tangency-labs/solidcore#3093: the base body is a closed solid or an open 9-face body depending on a few ulps of the extrusion surface's extended domain, with success either way",
-    "attributes_add_by_faces_extrusion": "tangency-labs/solidcore#3093: the base body is a closed solid or an open 9-face body depending on a few ulps of the extrusion surface's extended domain, with success either way",
-    "multi_feature_adv_extrusion": "tangency-labs/solidcore#3093: the base body is a closed solid or an open 9-face body depending on a few ulps of the extrusion surface's extended domain, with success either way",
-    "multi_feature_extrusion": "tangency-labs/solidcore#3093: the base body is a closed solid or an open 9-face body depending on a few ulps of the extrusion surface's extended domain, with success either way",
-    "multi_rebuild_0_extrusion": "tangency-labs/solidcore#3093: the base body is a closed solid or an open 9-face body depending on a few ulps of the extrusion surface's extended domain, with success either way",
     "single_face_fillet1019_6": "tangency-labs/solidcore#3093: success with a body that fails check_brep level 2 (11 lines, the first Bad Repeated CPts)"
   },
   "blend.fillet_executive_p3": {
