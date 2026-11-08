@@ -470,7 +470,7 @@ mod imp {
                         None => String::new(),
                     };
                     if let Some(why) = why {
-                        beside = format!("{beside}: {}", why.words());
+                        beside = format!("{beside}: {}", why.words_for(kind));
                     }
                     let fits = match kind {
                         solidcraft_smlib::FitKind::Scale => {

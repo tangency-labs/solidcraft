@@ -122,7 +122,8 @@ pub enum RoomReason {
 }
 
 impl RoomReason {
-    /// The reason in words, as a fillet's message gives it.
+    /// The reason in words, as a fillet's message gives it ([`RoomReason::words_for`] for a
+    /// chamfer's).
     pub fn words(self) -> &'static str {
         match self {
             RoomReason::BallDoesNotFit => "the rolling ball does not fit a face it rolls on",
@@ -138,6 +139,23 @@ impl RoomReason {
             }
             RoomReason::CornersTakeWholeEdge => "its corners take the whole of the edge",
             RoomReason::RunsIntoMaterial => "the blend runs off a face into the material",
+        }
+    }
+
+    /// The reason in words for a blend whose size is `kind`: a chamfer (a distance or a scale)
+    /// has no rolling ball, so its reasons speak of its offset instead (#12128); a round's are
+    /// [`RoomReason::words`].
+    pub fn words_for(self, kind: FitKind) -> &'static str {
+        if !matches!(kind, FitKind::Distance | FitKind::Scale) {
+            return self.words();
+        }
+        match self {
+            RoomReason::BallDoesNotFit => "the chamfer's offset does not fit a face it runs along",
+            RoomReason::RailLeavesFace => "the chamfer's contact line leaves the face it runs along",
+            RoomReason::FaceConsumed => "the chamfers take the whole of a face they run along",
+            RoomReason::BallsFold => "the chamfer's offsets fold over each other along the edge",
+            RoomReason::OffsetCollapses => "the offset is as wide as a face it runs along, so the chamfer cannot end at the edge's end",
+            other => other.words(),
         }
     }
 }
@@ -185,7 +203,7 @@ impl std::fmt::Display for Error {
                     write!(f, " at the edge at ({x:.3}, {y:.3}, {z:.3})")?;
                 }
                 if let Some(why) = why {
-                    write!(f, ": {}", why.words())?;
+                    write!(f, ": {}", why.words_for(*kind))?;
                 }
                 write!(f, "; the largest {} that fits is {size}", kind.word())
             }
