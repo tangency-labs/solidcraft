@@ -220,6 +220,40 @@ mod tests {
         assert_eq!(follow(e, (1, 1), Vec2::new(20.0, 15.0), true), [-20.0, -15.0, 20.0, 15.0]);
     }
 
+    /// A handle let go in the same frame as its last move keeps the size it was let go at, the
+    /// same as when the release comes a frame later (#8265).
+    #[test]
+    fn a_release_in_the_frame_of_the_last_move_keeps_where_it_was_let_go() {
+        let drag = |one_frame: bool| {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Lid"})).unwrap();
+            h.app.session.selection = vec![Sel::Plane { name: "Lid".into() }];
+            h.frames(3);
+            let at = h.at(&json!({"handle": "plane_size_1_0"})).unwrap();
+            let pos = |dx: f64| egui::pos2((at[0] + dx) as f32, at[1] as f32);
+            let button = |dx: f64, pressed: bool| egui::Event::PointerButton {
+                pos: pos(dx),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            h.frame_with(vec![egui::Event::PointerMoved(pos(0.0))]);
+            h.frame_with(vec![button(0.0, true)]);
+            h.frame_with(vec![egui::Event::PointerMoved(pos(20.0))]);
+            if one_frame {
+                h.frame_with(vec![egui::Event::PointerMoved(pos(60.0)), button(60.0, false)]);
+            } else {
+                h.frame_with(vec![egui::Event::PointerMoved(pos(60.0))]);
+                h.frame_with(vec![button(60.0, false)]);
+            }
+            h.frames(2);
+            let id = h.app.session.doc.find_feature("Lid").unwrap().id;
+            h.app.session.doc.plane_extents.get(&id).copied()
+        };
+        let apart = drag(false).expect("the drag gives the plane a size");
+        assert_eq!(drag(true), Some(apart), "let go in the frame of the last move");
+    }
+
     /// The highlight follows a handle as it is dragged: its key changes with the live size.
     #[test]
     fn the_highlight_key_follows_a_dragged_handle() {
