@@ -1865,6 +1865,12 @@ mod tests {
     /// vertices.
     #[test]
     fn a_pyramid_side_moved_past_its_apex_splits_it_on_the_planes_beside() {
+        assert_pyramid_split_on_its_five_planes([2, 1]);
+    }
+
+    /// Both selections describe the same five-plane convex solid. Check its
+    /// independent plane-intersection vertices as well as its volume and validity.
+    fn assert_pyramid_split_on_its_five_planes(selection: [usize; 2]) {
         use crate::topology::brep::validation::{check_brep, CheckLevel};
         let mut k = Kernel::default();
         let mut b = bicubic_pyramid(&mut k);
@@ -1882,14 +1888,15 @@ mod tests {
             })
             .collect();
         // faces: the base, then the sides along y = -y0, x = x0, y = y0, x = -x0
-        let (kept, moved, distance) = (2_usize, 1_usize, 0.407_738_046_172_282_6);
+        let (moved, distance) = (1_usize, 0.407_738_046_172_282_6);
         let mut given = planes.clone();
         given[moved].0 = given[moved].0 + given[moved].1 * distance;
-        let surfaces = [kept, moved]
+        let surfaces = selection
             .map(|i| Surface::from(Plane::from_normal(given[i].0, given[i].1)))
             .to_vec();
+        let selected_faces = selection.map(|i| all[i]);
         with_notifications(&mut b, |b, notes| {
-            local_operation(&mut k, b, &[all[kept], all[moved]], surfaces, notes)
+            local_operation(&mut k, b, &selected_faces, surfaces, notes)
         })
         .unwrap();
         let (v, manifold) = volume_and_manifold(&k, &mut b);
@@ -1899,10 +1906,14 @@ mod tests {
             (5, 9, 6)
         );
         b.use_arena_naming().unwrap();
-        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
-            .unwrap()
-            .lines();
-        assert!(lines.is_empty(), "{lines:?}");
+        for level in [CheckLevel::Level0, CheckLevel::Level1, CheckLevel::Level2] {
+            let check = check_brep(&mut k, &mut b, level).unwrap();
+            assert!(
+                check.is_valid() && check.failure_count() == 0,
+                "{selection:?} {level:?}: {:?}",
+                check.lines()
+            );
+        }
         // the convex solid of the five planes: its corners, and its volume from its faces'
         // fans about the base's centre
         let meet = |[i, j, l]: [usize; 3]| {
@@ -1913,6 +1924,25 @@ mod tests {
         let corner = |i: usize, j: usize| meet([0, i, j]);
         let (b0, b1, b2, b3) = (corner(4, 1), corner(1, 2), corner(2, 3), corner(3, 4));
         let (apex, top) = (meet([2, 3, 4]), meet([1, 2, 4]));
+        let expected_vertices = [b0, b1, b2, b3, apex, top];
+        let actual_vertices: Vec<_> = b.vertices().iter().map(|(_, v)| v.point).collect();
+        let scale = expected_vertices
+            .iter()
+            .map(|p| p.max_dimension())
+            .fold(0.0, f64::max);
+        let same_point = |p: Vec3, q: Vec3| p.distance(q) <= 1e-9 * scale;
+        for &p in &actual_vertices {
+            assert!(
+                expected_vertices.iter().any(|&q| same_point(p, q)),
+                "{selection:?}: unexpected vertex {p:?}"
+            );
+        }
+        for &p in &expected_vertices {
+            assert!(
+                actual_vertices.iter().any(|&q| same_point(p, q)),
+                "{selection:?}: missing plane intersection {p:?}"
+            );
+        }
         let faces: [&[Vec3]; 5] = [
             &[b0, b3, b2, b1],
             &[b0, b1, top],
@@ -2352,33 +2382,12 @@ mod tests {
         }
     }
 
-    /// gen0091 of the difftest unit with the default fixes: the pyramid's side moved past
-    /// its apex needs the four-face vertex split (opt-in), without which every end merges
-    /// into one vertex grown to cover the split: not sound, refused.
+    /// The former flag-off refusal is no longer a default behaviour. With the same
+    /// two replacement planes selected in reverse order, the unconditional split
+    /// must still build the analytically checked five-plane solid, not just succeed.
     #[test]
-    fn a_pyramid_side_moved_past_its_apex_is_refused_without_the_four_face_split() {
-        let mut k = Kernel::default();
-        let mut b = bicubic_pyramid(&mut k);
-        let all = bp1::faces(&b, None).unwrap();
-        let plane_of = |b: &Brep, k: &Kernel, f: FaceId, d: f64| {
-            let s = face_ops::surface(b, f).unwrap().unwrap();
-            let uv = b.face(f).unwrap().uv_domain.evaluate(0.5, 0.5);
-            let p = s.evaluate_point(k, uv).unwrap();
-            let n = s.evaluate_normal(k, uv, Side::Left, Side::Left).unwrap();
-            let n = if n.dot(p - Vec3::new(0.0, 0.0, 25.0)) > 0.0 {
-                n
-            } else {
-                n * -1.0
-            };
-            Surface::from(Plane::from_normal(p + n * d, n))
-        };
-        // faces: the base, then the sides along y = -y0, x = x0, y = y0, x = -x0
-        let surfaces = vec![
-            plane_of(&b, &k, all[2], 0.0),
-            plane_of(&b, &k, all[1], 0.407_738_046_172_282_6),
-        ];
-        let why = refused_unchanged_or_returned(&mut k, &mut b, &[all[2], all[1]], surfaces);
-        assert_eq!(why, Some(unsound_check(2, 61)));
+    fn a_pyramid_side_split_is_independent_of_replacement_selection_order() {
+        assert_pyramid_split_on_its_five_planes([1, 2]);
     }
 
     /// A 20 mm cube of bilinear B-spline faces whose bottom (z = 0) carries a defect of its
