@@ -5401,6 +5401,9 @@ fn feature_tools_with_constructor(
             let name = |k: usize| f.face_names.get(k).map(String::as_str);
             let (to_name, from_name) = if extent.to.is_some() { (name(0), name(1)) } else { (None, name(0)) };
             let to_face = extent.to.and_then(|p| object_face(&tst, to_name, p.0, Some(n)));
+            // A vertex or an edge point where a plane the extrusion runs along meets another face:
+            // its own level is the end (#12968), not the surface of one of the faces there.
+            let to_end_face = to_face.filter(|face| !extent.to.is_some_and(|p| on_edge_without_cap(&tst, *face, p.0, n)));
             // The body the extent runs to: a Join to it joins that body too (#6424), unless the
             // design was built before it did (#8151).
             *to_body = to_face.filter(|_| !extent.to_body_apart).and_then(|(bi, _)| tst.bodies.get(bi)).map(|b| b.name.clone());
@@ -5419,7 +5422,7 @@ fn feature_tools_with_constructor(
                         Some(e) => val(vals, e, Kind::Length)?,
                         None => 0.0,
                     };
-                    let h = height_at(&tst, to_face, &ss.plane, centre, p.0);
+                    let h = height_at(&tst, to_end_face, &ss.plane, centre, p.0);
                     let start = from + extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
                     // Past the face by the offset, in the direction travelled.
                     let to = h + if h >= start { off } else { -off };
@@ -5504,7 +5507,7 @@ fn feature_tools_with_constructor(
             let (mut lo, mut hi) = if a <= b { (a, b) } else { (b, a) };
             // To a curved (or slanted) face: run right through the target body, then keep what
             // lies before its surface (the tool less the body, the piece at the start).
-            let curved = curved_face(&tst, to_face, Some(n));
+            let curved = curved_face(&tst, to_end_face, Some(n));
             if let Some(bi) = curved
                 && let Some(tb) = tst.bodies.get(bi)
             {
@@ -7176,6 +7179,29 @@ fn object_face(st: &ModelState, name: Option<&str>, p: Vec3, normal: Option<Vec3
     face_at(st, p, normal)
 }
 
+/// Whether `p` lies where a plane parallel to `n` meets another face of the body of `face`, and no
+/// plane square to `n` is there: the pick is then a vertex or an edge point, whose level is the
+/// end, not the surface of whichever neighbour came first (#12968).
+fn on_edge_without_cap(st: &ModelState, face: (usize, usize), p: Vec3, n: Vec3) -> bool {
+    let Some(b) = st.bodies.get(face.0) else { return false };
+    let tol = (b.body.size() * 1e-3).max(1e-3);
+    let Ok(faces) = b.body.faces(tol) else { return false };
+    let mesh = b.mesh();
+    let near: std::collections::BTreeSet<usize> = mesh
+        .triangles
+        .iter()
+        .zip(&mesh.tri_face)
+        .filter_map(|(tri, fi)| {
+            let [a, b, c] = mesh.tri(tri)?;
+            (crate::appearance::closest_on_triangle(p, a, b, c).dist(p) <= tol).then_some(*fi as usize)
+        })
+        .collect();
+    // Only where a plane the extrusion runs along meets another face: the seam of a curved wall,
+    // or the corner of two slanted facets, is a place on a surface to run to.
+    let normals: Vec<Vec3> = near.iter().filter_map(|fi| faces.iter().find(|f| f.index == *fi).and_then(|f| f.plane_normal)).collect();
+    near.len() > 1 && normals.iter().any(|fnrm| fnrm.dot(n).abs() < 1e-6) && !normals.iter().any(|fnrm| fnrm.cross(n).len() < 1e-6)
+}
+
 /// The body of `face` when that face is not a plane (with `n`: not a plane square to `n`), so To
 /// Object must follow its shape.
 fn curved_face(st: &ModelState, face: Option<(usize, usize)>, n: Option<Vec3>) -> Option<usize> {
@@ -8673,16 +8699,23 @@ pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, com
     Ok(pts
         .iter()
         .map(|p| {
-            fst.bodies
+            let hit = fst
+                .bodies
                 .iter()
-                .filter(|b| !b.body.is_mesh())
-                .filter_map(|b| {
+                .enumerate()
+                .filter(|(_, b)| !b.body.is_mesh())
+                .filter_map(|(bi, b)| {
                     let (d, fi) = nearest_object_face(b, *p, normal)?;
-                    (d <= (b.body.size() * 1e-3).max(1e-3)).then_some((d, b, fi))
+                    (d <= (b.body.size() * 1e-3).max(1e-3)).then_some((d, bi, fi))
                 })
-                .min_by(|a, b| a.0.total_cmp(&b.0))
-                .and_then(|(_, b, fi)| crate::naming::face_names(b).get(fi).cloned())
-                .unwrap_or_default()
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            let Some((_, bi, fi)) = hit else { return String::new() };
+            // A vertex or an edge point names no face: the name would move the point onto one of
+            // the faces that meet there when the design is rebuilt (#12968).
+            if normal.is_some_and(|n| on_edge_without_cap(&fst, (bi, fi), *p, n)) {
+                return String::new();
+            }
+            fst.bodies.get(bi).and_then(|b| crate::naming::face_names(b).get(fi).cloned()).unwrap_or_default()
         })
         .collect())
 }

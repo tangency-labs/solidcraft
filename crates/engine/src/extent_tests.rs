@@ -234,3 +234,22 @@ fn cut_to_the_far_side_of_a_curved_wall() {
     assert!((removed - want).abs() < want * 2e-2, "removed {removed}, want {want}");
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
 }
+
+/// A To point on the edge of a hole in a vertical wall (a vertex there) ends the extrude at that
+/// point's height, whichever faces meet there (#12968).
+#[test]
+fn extrude_to_a_vertex_on_a_hole_in_a_wall_ends_at_its_height() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 400], "length": 100, "width": 60, "height": 250, "body_name": "Base"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [100, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 640], "radius": 5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "20 mm", "direction": "negative", "operation": "cut", "targets": ["Base"]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 650], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [120, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"to": [100, 35, 640], "operation": "new", "body_name": "T"}));
+    let b = body(&mut s, "T");
+    let z = |k: &str| b["bbox"][k][2].as_f64().unwrap_or(f64::NAN);
+    assert!((z("min") - 640.0).abs() < 1e-6 && (z("max") - 650.0).abs() < 1e-6, "{b}");
+}
