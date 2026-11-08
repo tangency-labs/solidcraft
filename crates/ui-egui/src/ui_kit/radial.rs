@@ -1,5 +1,6 @@
 //! Analytic rounded annular sectors, following the board's offset-and-round construction.
-use crate::{context_menu::Item, theme::Tokens};
+use super::Item;
+use crate::theme::Tokens;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2, vec2};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 

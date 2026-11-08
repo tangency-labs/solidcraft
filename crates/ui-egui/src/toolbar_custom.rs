@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 use solidcraft_engine::{CommandSpec, command_specs};
 
-use crate::context_menu::Item;
+use crate::ui_kit::Item;
 use crate::{SolveApp, ui_kit};
 
 /// The only workspace so far.

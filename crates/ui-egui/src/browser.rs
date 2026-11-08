@@ -148,8 +148,9 @@ use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{BrowserEntry, Document, FeatureKind};
 
-use crate::context_menu::{Item, Target};
+use crate::context_menu::Target;
 use crate::theme::Tokens;
+use crate::ui_kit::Item;
 
 use crate::SolveApp;
 

@@ -11,7 +11,7 @@
 //! state; [`items`] lists them and [`run_item`] runs one, so the control channel (`ui.menu`,
 //! `ui.menuPick`) and tests reach everything a click does.
 
-use crate::ui_kit::{BackingTooltipExt as _, Container, Surface};
+use crate::ui_kit::{BackingTooltipExt as _, Container, Item, LIST_W, Surface};
 use egui::{Color32, Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -127,88 +127,6 @@ pub enum Target {
     },
 }
 
-/// One menu entry: a command id (run with `params` when given, else started like a toolbar
-/// click) or a `ui.*` action. `-` is a separator, `#…` a section heading.
-#[derive(Clone, Debug, Serialize)]
-pub struct Item {
-    pub id: String,
-    pub label: String,
-    pub shortcut: String,
-    pub enabled: bool,
-    pub icon: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub params: Option<Value>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub children: Vec<Item>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub swatch: Option<[u8; 3]>,
-    /// Why the entry is off: shown on hover, and in the control channel's report.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tip: Option<String>,
-}
-
-impl Item {
-    /// A view action (`ui.*`).
-    pub fn action(id: &str, label: &str, icon: &str) -> Item {
-        act(id, label, icon)
-    }
-    pub fn sep() -> Item {
-        Item {
-            id: "-".into(),
-            label: String::new(),
-            shortcut: String::new(),
-            enabled: false,
-            icon: String::new(),
-            params: None,
-            children: Vec::new(),
-            swatch: None,
-            tip: None,
-        }
-    }
-    pub(crate) fn heading(label: &str) -> Item {
-        Item {
-            id: format!("#{label}"),
-            label: label.into(),
-            shortcut: String::new(),
-            enabled: false,
-            icon: String::new(),
-            params: None,
-            children: Vec::new(),
-            swatch: None,
-            tip: None,
-        }
-    }
-    fn is_sep(&self) -> bool {
-        self.id == "-"
-    }
-    fn is_heading(&self) -> bool {
-        self.id.starts_with('#')
-    }
-    pub fn with(mut self, params: Value) -> Item {
-        self.params = Some(params);
-        self
-    }
-    pub fn on_if(self, enabled: bool) -> Item {
-        self.on(enabled)
-    }
-    pub(crate) fn on(mut self, enabled: bool) -> Item {
-        self.enabled &= enabled;
-        self
-    }
-    /// Off, saying why, when there is a reason.
-    pub(crate) fn off_because(mut self, why: Option<String>) -> Item {
-        if let Some(why) = why {
-            self.enabled = false;
-            self.tip = Some(why);
-        }
-        self
-    }
-    pub fn key(mut self, k: &str) -> Item {
-        self.shortcut = k.into();
-        self
-    }
-}
-
 /// A command entry: label, icon, shortcut and enablement come from the registry.
 pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
     let info = solidcraft_engine::find_command(id).map(|c| c.info(&app.session));
@@ -232,17 +150,7 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
 
 /// A view action (`ui.*`).
 pub(crate) fn act(id: &str, label: &str, icon: &str) -> Item {
-    Item {
-        id: id.into(),
-        label: label.into(),
-        shortcut: String::new(),
-        enabled: true,
-        icon: icon.into(),
-        params: None,
-        children: Vec::new(),
-        swatch: None,
-        tip: None,
-    }
+    Item::action(id, label, icon)
 }
 
 /// Menu state kept between frames. The anchor is `app.viewport.context_menu`.
@@ -2534,9 +2442,6 @@ fn list_place(c: Pos2, h: f32, screen: Rect) -> Pos2 {
     }
     pos2((c.x - RX - 12.0 - LIST_W).max(screen.left() + 4.0), y)
 }
-
-/// Width of list menus.
-pub const LIST_W: f32 = 250.0;
 
 /// Where a menu of `size` opened at `at` goes: right of and below the point (`gap` away) when it
 /// fits in `screen`, flipped to the left or above it when it would run past that edge, and

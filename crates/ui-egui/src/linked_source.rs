@@ -292,7 +292,7 @@ mod tests {
         (app, component, occurrence, folder, moved)
     }
 
-    fn menu(app: &SolveApp, target: Target) -> Option<context_menu::Item> {
+    fn menu(app: &SolveApp, target: Target) -> Option<crate::ui_kit::Item> {
         context_menu::entries(app, &target).into_iter().find(|i| i.id == "ui.relinkSource")
     }
 

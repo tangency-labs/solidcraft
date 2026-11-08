@@ -759,7 +759,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
                 ui.visuals_mut().widgets.hovered.weak_bg_fill = Tokens::get().hover;
                 let item_if = |ui: &mut egui::Ui, label: &str, key: &str, icon: &str, enabled: bool| {
-                    crate::context_menu::list_row(ui, &crate::context_menu::Item::action(label, label, icon).key(key).on_if(enabled)).is_some()
+                    crate::context_menu::list_row(ui, &crate::ui_kit::Item::action(label, label, icon).key(key).on_if(enabled)).is_some()
                 };
                 let item = |ui: &mut egui::Ui, label: &str, key: &str, icon: &str| item_if(ui, label, key, icon, true);
                 // Insert, Save and Export act on the design, which Home hides.

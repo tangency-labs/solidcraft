@@ -1189,7 +1189,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 crate::context_menu::menu_frame(ui, |ui| {
                     let mut chosen = None;
                     for (id, label) in items {
-                        let mut item = crate::context_menu::Item::action(id, label, "");
+                        let mut item = crate::ui_kit::Item::action(id, label, "");
                         if id == "ui.closeTab" && i == app.docs.active {
                             item = item.key("Ctrl+W");
                         }

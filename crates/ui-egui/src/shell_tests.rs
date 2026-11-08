@@ -2527,7 +2527,7 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
     assert_eq!(h.app.session.undo.len(), undo);
     // An unknown mapping changes nothing.
     let before = serde_json::to_value(&h.app.preferences).unwrap();
-    let hostile = crate::context_menu::Item::action("ui.navPreset", "Nope", "").with(json!({"preset": "nope"}));
+    let hostile = crate::ui_kit::Item::action("ui.navPreset", "Nope", "").with(json!({"preset": "nope"}));
     crate::context_menu::run_item(&mut h.app, &hostile, egui::pos2(0.0, 0.0));
     assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), before);
     // A second click on the button closes the menu it opened.

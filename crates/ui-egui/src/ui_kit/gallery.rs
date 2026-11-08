@@ -2783,7 +2783,7 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
                         radial_menu(
                             ui,
                             egui::pos2(180.0, 180.0),
-                            &[crate::context_menu::Item::action("solid.extrude", "Extrude", icon)],
+                            &[super::Item::action("solid.extrude", "Extrude", icon)],
                             (surface == "radial_hover").then_some(0),
                         );
                     }

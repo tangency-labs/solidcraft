@@ -19,11 +19,12 @@ use solidcore_record::Vec3;
 use solidcraft_engine::geom::{Mesh, Vec3Geom};
 
 use crate::SolveApp;
-use crate::context_menu::{Item, act};
+use crate::context_menu::act;
 use crate::dialogs::Kind;
 use crate::prefs::{NavigatorStyle, NavigatorTexture};
 use crate::selection::{BODIES, SelInput};
 use crate::ui_kit;
+use crate::ui_kit::Item;
 use solidcraft_engine::Sel;
 
 /// Bodies with more triangles cannot be the gizmo: the snapshot of one at the limit stays well

@@ -13,8 +13,8 @@ use solidcraft_engine::doc::{
 use solidcraft_engine::schema::edit::PlaybackAction;
 
 use crate::SolveApp;
-use crate::context_menu::Item;
 use crate::theme::Tokens;
+use crate::ui_kit::Item;
 
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
 /// empty design. All orientations reach the same rollback command.
@@ -65,14 +65,14 @@ pub(crate) fn transport_response(app: &mut SolveApp, control: crate::ui_kit::His
 
 /// The History controls' menu: shows or hides the Play button, and — when the design marks any
 /// component out of the bar — shows or hides those components' entries (#10393).
-pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::context_menu::Item> {
+pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
     let show = !app.preferences.history_play_button;
     let label = crate::i18n::tr(if show { "ui.history_play_button_show" } else { "ui.history_play_button_hide" });
-    let mut items = vec![crate::context_menu::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))];
+    let mut items = vec![crate::ui_kit::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))];
     if app.session.doc.components.iter().any(|c| c.history_hidden) {
         let show_hidden = !app.tree.history_show_hidden;
         let label = crate::i18n::tr(if show_hidden { "ui.history_show_hidden" } else { "ui.history_hide_hidden" });
-        items.push(crate::context_menu::Item::action("ui.historyShowHidden", label, "eye").with(json!({ "show": show_hidden })));
+        items.push(crate::ui_kit::Item::action("ui.historyShowHidden", label, "eye").with(json!({ "show": show_hidden })));
     }
     items
 }
@@ -1422,7 +1422,7 @@ mod tests {
         assert!(handle_at("timeline:CopyBox").is_none(), "the hidden copy leaves the bar");
         assert!(handle_at("timeline:PartBox").is_some(), "the rest of the design stays");
         // The History controls' menu shows them anyway, and hides them again (#10393).
-        fn toggle(h: &Harness) -> context_menu::Item {
+        fn toggle(h: &Harness) -> crate::ui_kit::Item {
             let items = context_menu::items(&h.app, &Target::HistoryControls);
             items.into_iter().find(|i| i.id == "ui.historyShowHidden").expect("the bar offers to show hidden entries").clone()
         }

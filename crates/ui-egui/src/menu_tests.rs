@@ -7,7 +7,8 @@ use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::geom::prelude::*;
 
-use crate::context_menu::{self, Item, Target};
+use crate::context_menu::{self, Target};
+use crate::ui_kit::Item;
 use crate::viewport::Hit;
 use crate::{Services, SolveApp};
 
@@ -2053,7 +2054,7 @@ fn a_flyout_inside_a_flyout_that_opened_to_the_left_opens_to_the_left() {
     use crate::scenario::rect_of;
     let (mut h, c) = component_menu();
     let right = h.ctx.content_rect().right();
-    context_menu::open_for(&mut h.app, pos2(right - context_menu::LIST_W - 50.0, 60.0), Target::Component { id: c });
+    context_menu::open_for(&mut h.app, pos2(right - crate::ui_kit::LIST_W - 50.0, 60.0), Target::Component { id: c });
     h.frames(2);
     h.step(&json!({"move":{"handle":"menu:ui.group.component"}})).unwrap();
     h.frames(2);

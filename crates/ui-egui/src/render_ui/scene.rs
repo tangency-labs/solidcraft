@@ -3,9 +3,9 @@ use super::{ImageMethod, RenderSelection, cpu, hdr, inspector, setups, studio};
 use crate::{
     SolveApp,
     browser::{self, Row},
-    context_menu::{self, Item},
+    context_menu,
     theme::Tokens,
-    ui_kit,
+    ui_kit::{self, Item},
 };
 use egui::Color32;
 use serde_json::json;
