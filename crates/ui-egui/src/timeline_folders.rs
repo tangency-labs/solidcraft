@@ -87,18 +87,6 @@ impl Folders {
     pub(crate) fn name(&self, id: u64) -> &str {
         self.names.get(&id).map_or("Folder", String::as_str)
     }
-
-    /// The deepest folder whose run holds the slot between features `slot - 1` and `slot` (a
-    /// slot at a folder's edge is outside it), as a dropped feature joins it.
-    pub(crate) fn at_slot(&self, slot: usize) -> Option<u64> {
-        let mut level = &self.spans;
-        let mut found = None;
-        while let Some(span) = level.iter().find(|s| s.start < slot && slot < s.end) {
-            found = Some(span.id);
-            level = &span.children;
-        }
-        found
-    }
 }
 
 /// A folder's items, and those of the folders in it, into `count`. Returns them.
@@ -228,6 +216,21 @@ pub(crate) fn group(app: &mut SolveApp, features: &[u64], parent: Option<u64>, a
     Some(folder)
 }
 
+/// How many items a folder's chip counts. While the bar shows one component's features, a folder
+/// counts those and its own joints.
+fn count(folder: &Folder, history: &History) -> usize {
+    let own_joints = history.folders.joints.get(&folder.id).map_or(0, Vec::len);
+    match history.within {
+        Some(_) => folder.end - folder.start + own_joints,
+        None => history.folders.count.get(&folder.id).copied().unwrap_or(folder.end - folder.start),
+    }
+}
+
+/// The width of a folder's chip (`folder_chip`).
+pub(crate) fn folder_chip_width(p: &egui::Painter, folder: &Folder, history: &History) -> f32 {
+    HistoryGroupChip::width_of(p, history.folders.name(folder.id), count(folder, history))
+}
+
 /// Draws a folder's chip with its top left at `at`; a click shows what it holds or folds it, and
 /// its menu also renames, ungroups or selects it, or rolls the marker after it. Returns its width.
 pub(crate) fn folder_chip(
@@ -240,12 +243,7 @@ pub(crate) fn folder_chip(
     strip: &Strip,
 ) -> f32 {
     let name = history.folders.name(folder.id).to_string();
-    // While the bar shows one component's features, a folder counts those and its own joints.
-    let own_joints = history.folders.joints.get(&folder.id).map_or(0, Vec::len);
-    let count = match history.within {
-        Some(_) => folder.end - folder.start + own_joints,
-        None => history.folders.count.get(&folder.id).copied().unwrap_or(folder.end - folder.start),
-    };
+    let count = count(folder, history);
     let joints = count.saturating_sub(folder.end - folder.start);
     let state = history.inside(folder.start, folder.end, folder.open);
     let picked = app.tree.picked_timeline_groups.contains(&folder.id)
@@ -324,13 +322,12 @@ fn folder_menu(app: &mut SolveApp, ui: &mut egui::Ui, folder: &Folder, view: &cr
     }
 }
 
-/// Where a feature dropped at `slot` goes: `timeline.reorder` while it stays in its folder (or
-/// out of every folder), else `timeline.move_many` into the folder the slot is in (or out of
-/// folders), so a feature dropped between an open folder's features joins it.
+/// Where a feature dropped at `slot` into folder `target` (none: out of every folder) goes:
+/// `timeline.reorder` while it stays in its folder, else `timeline.move_many` into `target`, so a
+/// feature dropped in an open folder's tray joins it.
 /// `active`: the drop lands before the history marker, which sits at `marker_slot`; crossing it
 /// rolls the feature back or forward in the same step.
-pub(crate) fn drop_feature(app: &mut SolveApp, folders: &Folders, id: u64, slot: usize, active: bool, marker_slot: usize) {
-    let target = folders.at_slot(slot);
+pub(crate) fn drop_feature(app: &mut SolveApp, id: u64, slot: usize, target: Option<u64>, active: bool, marker_slot: usize) {
     let from = app.session.doc.feature_index(id).unwrap_or(0);
     let home = app.session.doc.timeline_groups.iter().find(|g| g.features.contains(&id)).map(|g| g.id);
     if home == target {

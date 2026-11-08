@@ -1991,6 +1991,18 @@ pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter,
     joint_chips(app, ui, p, x + 8.0, r, &loose, JointRun::Loose)
 }
 
+/// How wide `joint_chips` lays out the joints `ids`.
+pub(crate) fn joint_chips_width(app: &SolveApp, p: &egui::Painter, ids: &[u64], set: JointRun) -> f32 {
+    let wanted: HashSet<u64> = ids.iter().copied().collect();
+    let count = app.session.doc.assembly.joints.iter().filter(|j| wanted.contains(&j.id)).count();
+    let each = 32.0 * count as f32;
+    if !grouped(app, count) {
+        return each;
+    }
+    let button = crate::ui_kit::HistoryGroupChip::width_of(p, "", count) + 4.0;
+    if joints_open(app, count, set) { button + each } else { button }
+}
+
 /// The joints `ids` as chips from `x` on, grouped into one chip (open to show each) when there
 /// are many. Returns the x after them.
 pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, mut x: f32, r: egui::Rect, ids: &[u64], set: JointRun) -> f32 {

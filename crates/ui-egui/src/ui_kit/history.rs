@@ -194,6 +194,35 @@ pub(crate) fn history_marker(p: &Painter, rect: Rect, vertical: bool, accent: Ta
     p.circle(centre, outer_radius - t.space_2 / 2.0, if vertical { t.panel } else { t.timeline }, Stroke::new(t.space_2, accent.color));
 }
 
+/// History while it changes (a move, reorder or rollback computing): a veil with stripes that
+/// drift across it, unlike the plain fade of the features after the marker. The pointer over it
+/// shows the busy cursor; the viewport's Computing notice shows the progress.
+pub(crate) fn history_busy_veil(ui: &egui::Ui, rect: Rect, accent: TabAccent) {
+    let t = Tokens::get();
+    if !rect.is_finite() || rect.width() < 1.0 || rect.height() < 1.0 {
+        return;
+    }
+    crate::scenario::publish_rect("history:busy", rect);
+    let p = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    p.rect_filled(rect, t.radius_sm, t.timeline.gamma_multiply(0.55));
+    let spacing = t.space_12;
+    let moving = ui.style().animation_time > 0.0;
+    let phase = if moving { (ui.input(|i| i.time) as f32 * t.space_16) % spacing } else { 0.0 };
+    let stroke = Stroke::new(t.space_3, accent.color.gamma_multiply(0.16));
+    let rise = rect.height();
+    let mut x = rect.left() - rise + phase;
+    while x < rect.right() {
+        p.line_segment([pos2(x, rect.bottom()), pos2(x + rise, rect.top())], stroke);
+        x += spacing;
+    }
+    if ui.rect_contains_pointer(rect) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Progress);
+    }
+    if moving {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+    }
+}
+
 /// The same controls are used in every History orientation: first, previous, Play History, next
 /// and last, or the four without Play when `history_play_button` is off.
 #[derive(Clone, Copy, PartialEq)]
