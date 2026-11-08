@@ -35,6 +35,9 @@
 //! | [`test_for_iso_circles`], [`IsoCircles`]          | `sm_TestForIsoCircles`                           |
 //!
 //! Deviations:
+//! - **A whole turn within rounding (#2928, not upstream).** `MakeNurbWithSweepParams` sweeps
+//!   a window past 360° by no more than `SM_EFF_ZERO` of a turn as the whole turn, where
+//!   upstream asks `CreateCircleSegment` for the span as is and is refused past 360°.
 //! - **Meridians keep their kind (opt-in, not upstream).** With
 //!   `fixes.plane_first_torus_section_exact` (WR-721, #2405), `IntersectWithPlane` through the
 //!   axis rotates a circle generator (a torus's) as the circle it is, where upstream rotates
@@ -679,7 +682,7 @@ impl SurfOfRevolution {
             line_vector,
             self.position.origin(),
             self.position.z_axis(),
-            surf_sweep_step_ivl.length(),
+            sweep_span_deg(surf_sweep_step_ivl.length()),
             self.swap_uv,
             opt_sweep_curve,
         )?;
@@ -2699,5 +2702,22 @@ mod circles_in_one_plane_tests {
             1e-7,
             1e-6
         ));
+    }
+}
+
+/// The rotation a sweep window of `span_deg` degrees makes (#2928): a revolution turns
+/// at most once, so a window past a whole turn by no more than the rounding of its
+/// ends' angles (`SM_EFF_ZERO` relative to the turn, the scale of its ends, which lie
+/// within [-360, 360]) is that whole turn. A STEP window of a whole turn whose ends sit
+/// a rounding error either side of ±180° (u -180.0000000000005 to 179.99999999999955)
+/// spans 360.00000000000006: built as is, its sweep circle is refused past 360.
+/// Any other span is kept, so a window more than a rounding error past a turn is
+/// still refused by the circle.
+fn sweep_span_deg(span_deg: f64) -> f64 {
+    const TURN: f64 = 360.0;
+    if span_deg > TURN && span_deg - TURN <= EFF_ZERO * TURN {
+        TURN
+    } else {
+        span_deg
     }
 }
