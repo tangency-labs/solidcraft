@@ -211,6 +211,7 @@ mod tests {
 
     #[test]
     fn sketch_states_take_their_texts_and_the_window_themes_sketch_colours() {
+        crate::i18n::install();
         let t = Tokens::light();
         assert_eq!(SketchState::Full.text(), "Fully constrained");
         assert_eq!(SketchState::Conflict.text(), "Constraints conflict");

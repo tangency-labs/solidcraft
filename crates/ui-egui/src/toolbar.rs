@@ -4777,6 +4777,7 @@ mod home_tests {
     /// The disabled buttons' tooltip is translated in every catalog (not English fallback).
     #[test]
     fn needs_design_tooltip_is_translated() {
+        crate::i18n::install();
         let english = solidcraft_ui_text::Locale::for_language("en").text("ui.needs_design");
         assert!(english.contains("{command}"));
         for catalog in crate::i18n::LOCALES.iter().filter(|c| !matches!(c.id, "en" | "en-GB")) {

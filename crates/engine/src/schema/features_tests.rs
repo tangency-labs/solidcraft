@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 use super::{
-    BoundingSolidParams, BoxParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, FilletParams,
-    FilletResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
+    BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams, FeatureResult,
+    FilletParams, FilletResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms, sketch_rectangle};
@@ -112,6 +112,10 @@ fn schemas_and_the_key_check_agree() {
             "turn",
             "type",
         ],
+    );
+    assert_keys(
+        input_schema_for::<ChamferParams>(),
+        &["angle", "body", "body_name", "body_names", "distance", "distance2", "edges", "flip", "name", "participants", "tangent_chain"],
     );
 }
 
@@ -222,6 +226,17 @@ fn strict_keeps_todays_errors() {
         ("solid.combine", json!({"target": "A", "tools": ["B"], "operation": "new"})),
         ("solid.combine", json!({"target": "A", "tools": ["B"], "operation": "bogus"})),
         ("solid.combine", json!({"target": "A", "tools": ["B"]})),
+        // #12884: Chamfer's edges and distances; giving both `distance2` and `angle`, and a
+        // distance that doesn't evaluate as a length, stay the handler's to refuse.
+        ("solid.chamfer", json!({"edges": [], "distance": 1})),
+        ("solid.chamfer", json!({"edges": 5, "distance": 1})),
+        ("solid.chamfer", json!({"edges": [[1, 2]], "distance": 1})),
+        ("solid.chamfer", json!({"edges": [[0, 0, 0]], "distance": true})),
+        ("solid.chamfer", json!({"edges": [[0, 0, 0]], "distance": "  "})),
+        ("solid.chamfer", json!({"edges": [[0, 0, 0]], "distance": 1e9})),
+        ("solid.chamfer", json!({"edges": [[0, 0, 0]], "distance": "no_such_parameter"})),
+        ("solid.chamfer", json!({"edges": [[0, 0, 0]], "distance": 1, "angle": "5 mm"})),
+        ("solid.chamfer", json!({"edges": [[0, 0, 0]], "distance": 1, "distance2": 1, "angle": 30})),
     ]);
 }
 
@@ -386,6 +401,65 @@ fn fillet_replies_match_its_output_schema() {
         assert!(crate::schema::Contract::check(&crate::schema::TypedContract::<FilletParams>::new(), &p).is_empty(), "{p}");
     }
     run(json!({"edges": [[20, 0, 10], [40, 15, 10], [40, 0, 5]], "radius": 2, "corner": "g2", "setbacks": [{"vertex": [40, 0, 10], "distance": 4}]}));
+}
+
+/// #12884: Chamfer's contract takes what its input schema allows: each call's check finds no issue
+/// exactly when the call matches the schema. Both `distance2` and `angle` match it; the handler
+/// refuses them together.
+#[test]
+fn chamfer_check_takes_what_the_schema_allows() {
+    let schema = input_schema_for::<ChamferParams>();
+    let schema = schema.as_value();
+    for (p, takes) in [
+        (json!({"edges": [[0, 0, 0]], "distance": 1}), true),
+        (json!({"edges": [{"body": "B", "index": 0}], "distance": "2 mm", "distance2": 3}), true),
+        (json!({"edges": [[0, 0, 0]], "distance": 1, "angle": "30 deg", "flip": true, "tangent_chain": false, "body": "B", "name": "Bevel"}), true),
+        (json!({"edges": [[0, 0, 0]], "distance": 1, "distance2": null, "angle": null, "flip": null, "body": null, "tangent_chain": null}), true),
+        (json!({"edges": [[0, 0, 0]], "distance": 1, "distance2": 1, "angle": 30}), true),
+        (json!({"edges": [[0, 0, 0]]}), false),
+        (json!({"distance": 1}), false),
+        (json!({"edges": [], "distance": 1}), false),
+        (json!({"edges": [[0, 0, 0]], "distance": true}), false),
+        (json!({"edges": [[0, 0, 0]], "distance": 1, "distance2": true}), false),
+        (json!({"edges": [[0, 0, 0]], "distance": 1, "angle": [30]}), false),
+        (json!({"edges": [[0, 0, 0]], "distance": 1, "flip": "yes"}), false),
+        (json!({"edges": [[0, 0, 0]], "distance": 1, "tangent_chain": 1}), false),
+        (json!({"edges": [[0, 0, 0]], "distance": 1, "body": 5}), false),
+        (json!({"edges": [[0, 0, 0]], "distance": 1, "colour": "red"}), false),
+    ] {
+        let issues = crate::schema::issues("solid.chamfer", &p);
+        assert_eq!(issues.is_empty(), takes, "{p}: {issues:?}");
+        assert_eq!(conforms(schema, schema, &p), takes, "{p}");
+    }
+}
+
+/// #12884: Chamfer replies with `FeatureResult`, with the keys it gave before, in each of its
+/// forms: one distance, two, a distance and an angle, flipped, an edge by index, and every
+/// optional key `null`. In Warn, without warnings, so its contract takes each call.
+#[test]
+fn chamfer_replies_with_feature_result() {
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    let before = BTreeSet::from(["feature", "name", "bodies", "created_bodies", "changed_bodies", "removed_bodies", "warning", "ms"]);
+    // A 40 x 30 x 10 plate with a 10 x 10 x 5 boss on it, whose top edges `boss` are.
+    let run = |p: Value| {
+        let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "B"})).unwrap_or_else(|e| panic!("{e}"));
+        s.execute("solid.box", &json!({"corner": [15, 10, 10], "length": 10, "width": 10, "height": 5, "operation": "join"}))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let r = s.execute("solid.chamfer", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        let keys: BTreeSet<&str> = r.as_object().into_iter().flatten().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(keys, before, "{p}: {r}");
+        assert_eq!(r["changed_bodies"], json!(["B"]), "{p}: {r}");
+    };
+    let boss = json!([[20, 10, 15], [25, 15, 15], [20, 20, 15], [15, 15, 15]]);
+    run(json!({"edges": [[20, 0, 10]], "distance": 1}));
+    run(json!({"edges": boss, "distance": 1, "distance2": "0.5 mm", "flip": true, "tangent_chain": true, "body": "B", "name": "Bevel"}));
+    run(json!({"edges": [[40, 15, 10]], "distance": "1 mm", "angle": "30 deg"}));
+    run(json!({"edges": [{"body": "B", "index": 0}], "distance": 0.5, "tangent_chain": false}));
+    run(json!({"edges": [[20, 30, 10]], "distance": 1, "distance2": null, "angle": null, "flip": null, "body": null, "tangent_chain": null}));
 }
 
 /// The feature commands converted after box and extrude answer with `FeatureResult` too, and

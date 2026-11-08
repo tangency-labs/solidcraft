@@ -9,8 +9,6 @@
 # add each REGRESSION line with its cause, from the test's failure message.
 solidcraft-cli::action_matrix::action_matrix_sample 2 baseline actions fail: 2 shells (Bad Loop Orient on issue-616-lid-ribs; status 1001 on filleted-shelled-box)
 solidcraft-cli::naming_corpus::corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone oracle/83-boundary-loop-thicken does not load: step 8, the offset of face 0 by -1 is not proved regular, so thicken is refused with no size named
-solidcraft-doc::eval::cost_tests::a_tap_marking_searches_only_the_bodies_near_it main's mesh-based version (#10303) not taken; the exact replacement is to come
-solidcraft-doc::eval::cost_tests::a_tap_marking_still_searches_the_bodies_within_its_reach main's mesh-based version (#10303) not taken; the exact replacement is to come
 solidcraft-engine::cmd::edit::tests::inserting_variable_fillet_control_preserves_parameters_at_existing_positions solidcore refuses a variable fillet whose law has a corner (solidcore#430)
 solidcraft-engine::extent_tests::cut_to_the_far_side_of_a_curved_wall main's mesh-based version (#8634) not taken; the exact replacement is to come
 solidcraft-engine::face_name_tests::a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone main's edge lookup by a stored point (#11286) finds the edge on the display mesh (edge_near on the body's mesh), not taken; the exact replacement is to come

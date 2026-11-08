@@ -2218,6 +2218,7 @@
   "material.editor.preserved_appearance": "Bề mặt hiển thị giữ lại",
   "material.editor.public_reference": "Tài liệu tham khảo công khai",
   "material.editor.reference": "Tham khảo",
+  "material.editor.remove": "Xóa",
   "material.editor.save_or_discard": "Lưu hoặc hủy bản nháp vật liệu trước khi gán vật liệu.",
   "material.editor.saved": "Đã lưu vật liệu. Gán vật liệu cho khối không đổi.",
   "material.editor.scope": "Lưu sẽ lưu trữ vật liệu này mà không gán cho khối. Các thuộc tính và điều kiện để trống vẫn chưa xác định. Khối lượng riêng trên thẻ không làm thay đổi khối lượng riêng hay khối lượng đã gán.",

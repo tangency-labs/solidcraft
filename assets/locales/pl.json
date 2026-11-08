@@ -2204,6 +2204,7 @@
   "material.editor.preserved_appearance": "Zachowany wygląd",
   "material.editor.public_reference": "Publiczne źródło",
   "material.editor.reference": "Źródło",
+  "material.editor.remove": "Usuń",
   "material.editor.save_or_discard": "Zapisz lub odrzuć szkic materiału przed przypisaniem materiału.",
   "material.editor.saved": "Zapisano materiał. Przypisania do brył pozostają bez zmian.",
   "material.editor.scope": "Zapisz przechowuje ten materiał bez przypisywania go do brył. Puste właściwości i warunki pozostają nieznane. Gęstość z karty nie zmienia przypisanej gęstości ani masy.",

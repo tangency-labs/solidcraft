@@ -1889,6 +1889,7 @@
   "material.editor.preserved_appearance": "Korunan görünüm",
   "material.editor.public_reference": "Herkese açık referans",
   "material.editor.reference": "Referans",
+  "material.editor.remove": "Kaldır",
   "material.editor.save_or_discard": "Malzeme atamadan önce malzeme taslağını kaydedin veya atın.",
   "material.editor.saved": "Malzeme kaydedildi. Gövde atamaları değişmedi.",
   "material.editor.scope": "Kaydetme, bu malzemeyi gövdelere atamadan saklar. Boş özellikler ve koşullar bilinmez kalır. Kart yoğunluğu, atanan yoğunluğu veya kütleyi değiştirmez.",
