@@ -11,9 +11,6 @@ file.export
 file.insert_mesh
 file.insert_step
 file.new
-file.save
-file.save_as
-file.save_mesh
 file.slicers
 motion.export_animation
 motion.trace
