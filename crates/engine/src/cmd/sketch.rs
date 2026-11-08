@@ -47,7 +47,7 @@ macro_rules! connect_doc {
 
 macro_rules! model_operand_doc {
     () => {
-        "; any of them may be a model edge {edge: [x,y,z], body?} or vertex {vertex: [x,y,z], body?}, projected into the sketch first (reported in created)"
+        "; any of them may be a model edge {edge: [x,y,z], body?} or vertex {vertex: [x,y,z], body?}, or another sketch's curve {sketch, curve} or point {sketch, point}, projected into the sketch first (reported in created)"
     };
 }
 

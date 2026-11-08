@@ -581,19 +581,34 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
 }
 
 /// A model's reference among a command's operands (#6348): an `{edge: [x,y,z], body?}` or a
-/// `{vertex: [x,y,z], body?}`.
+/// `{vertex: [x,y,z], body?}`, or another sketch's `{sketch, curve}` or `{sketch, point}`: a
+/// constraint to a sketch of another component projects what it ties to, as an edge does.
 fn model_ref(v: &Value) -> bool {
-    v.get("edge").is_some() || v.get("vertex").is_some()
+    v.get("edge").is_some() || v.get("vertex").is_some() || (v.get("sketch").is_some() && (v.get("curve").is_some() || v.get("point").is_some()))
 }
 
 /// Project one model reference into the sketch and report the entity it stands for: an edge's
-/// projected curve (a point when it is seen end on) or a vertex's projected point.
+/// or another sketch's curve's projected curve (a point when it is seen end on), or a vertex's
+/// or another sketch's point's projected point.
 fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Value, cmd: &str) -> Result<String> {
     let src = source(s, v, cmd)?;
     let what = src.describe();
-    let link = add_link(s, doc, id, sk, LinkKind::Project, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
-    // An edge stands for its curve (a point when it is seen end on), a vertex for its point.
-    let curve = if v.get("edge").is_some() { sk.link_curves(&link).first().and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone()) } else { None };
+    // Another sketch's curve or point projected here already is used again: tying a second
+    // point to the same line adds no second copy of it.
+    let present = matches!(src, LinkSource::SketchCurve { .. } | LinkSource::SketchPoint { .. })
+        .then(|| sk.links.iter().find(|l| l.kind == LinkKind::Project && l.source == src).map(|l| l.id.clone()))
+        .flatten();
+    let link = match present {
+        Some(link) => link,
+        None => add_link(s, doc, id, sk, LinkKind::Project, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?,
+    };
+    // An edge or a curve stands for its curve (a point when it is seen end on), a vertex or a
+    // point for its point.
+    let curve = if v.get("edge").is_some() || v.get("curve").is_some() {
+        sk.link_curves(&link).first().and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone())
+    } else {
+        None
+    };
     curve
         .or_else(|| sk.link_points(&link).first().and_then(|q| sk.points.get(*q)).map(|q| q.id.clone()))
         .ok_or_else(|| bad(cmd, format!("{what} projects to nothing on this sketch")))

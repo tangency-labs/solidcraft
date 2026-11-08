@@ -1,6 +1,7 @@
 //! The Symmetry tool's third pick may be the origin point or an origin axis (#1075); with three
 //! lines, the construction line between the other two is the symmetry line in any pick order (#1796).
-//! A constraint tool's pick may be a body's edge, a mirrored copy's too (#6348).
+//! A constraint tool's pick may be a body's edge, a mirrored copy's too (#6348), or a curve or
+//! point of another sketch, projected the same way.
 
 use serde_json::json;
 use solidcore_record::Vec2;
@@ -97,6 +98,79 @@ fn three_selected_lines_take_the_construction_line_as_the_symmetry_line() {
     // Without a construction line among them, the last one stays the symmetry line.
     let params = crate::tools::constraint_preselection("sketch.constraint.symmetry", &sel(["left", "right", "mid"]), None).unwrap();
     assert_eq!(params["line"], "mid");
+}
+
+/// A finished sketch "Guide" with a vertical line at x = 4 and a point g at (`gx`, 5), then an
+/// XY sketch with points p (10, 5) and q (-12, -3) open for editing, the origin hidden.
+fn guide_and_points(gx: f64) -> Harness {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Guide"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[4,-20],[4,20]],"ids":["axis"],"connect":false})).unwrap();
+    h.app.run("sketch.point", json!({"point":[gx,5],"id":"g"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Own"})).unwrap();
+    h.app.run("sketch.point", json!({"point":[10,5],"id":"p"})).unwrap();
+    h.app.run("sketch.point", json!({"point":[-12,-3],"id":"q"})).unwrap();
+    h.app.cam.distance = 120.0;
+    h.settle();
+    h
+}
+
+/// Symmetry with another sketch's line picked first, then the two points: the projected line is
+/// the symmetry line, as one of the sketch's own lines would be, whatever the pick order.
+#[test]
+fn symmetry_about_another_sketchs_line_picked_first() {
+    for line_first in [true, false] {
+        let mut h = guide_and_points(30.0);
+        h.app.start("sketch.constraint.symmetry");
+        let mut picks = vec![[10, 5], [-12, -3]];
+        if line_first {
+            picks.insert(0, [4, 12]);
+        } else {
+            picks.push([4, 12]);
+        }
+        for xy in picks {
+            let at = h.call("ui.at", json!({ "sketch": xy }))["result"].clone();
+            h.step(&json!({ "click": at })).unwrap();
+        }
+        let (p, q) = (point(&h, "p"), point(&h, "q"));
+        assert!((p.x + q.x - 8.0).abs() < 1e-6 && (p.y - q.y).abs() < 1e-6, "line first {line_first}: mirrored in x = 4: {p:?} {q:?}");
+    }
+}
+
+/// With a constraint tool, the sketch's own point within reach is under the pointer before
+/// another sketch's point that is nearer to it: the other sketch's point is projected only where
+/// the sketch has none.
+#[test]
+fn a_constraint_tool_takes_the_sketchs_own_point_before_a_nearer_point_of_another_sketch() {
+    use crate::viewport::Hit;
+    let mut h = guide_and_points(10.8);
+    let own = h.app.session.active_sketch.unwrap();
+    h.app.start("sketch.constraint.coincident");
+    let g = h.call("ui.at", json!({"sketch":[10.8,5]}))["result"].clone();
+    let p = h.call("ui.at", json!({"sketch":[10,5]}))["result"].clone();
+    let apart = ((g[0].as_f64().unwrap() - p[0].as_f64().unwrap()).powi(2) + (g[1].as_f64().unwrap() - p[1].as_f64().unwrap()).powi(2)).sqrt();
+    assert!(apart > 2.5 && apart < 7.0, "p is within reach of the pointer on g, but not on top of it: {apart} px");
+    h.step(&json!({ "move": g })).unwrap();
+    h.settle();
+    assert!(
+        matches!(&h.app.viewport.hover, Some(Hit::SketchPoint { sketch, id, .. }) if *sketch == own && id == "p"),
+        "the sketch's own point: {:?}",
+        h.app.viewport.hover
+    );
+    // Away from p, g itself is taken.
+    let mut h = guide_and_points(30.0);
+    let own = h.app.session.active_sketch.unwrap();
+    h.app.start("sketch.constraint.coincident");
+    let g = h.call("ui.at", json!({"sketch":[30,5]}))["result"].clone();
+    h.step(&json!({ "move": g })).unwrap();
+    h.settle();
+    assert!(
+        matches!(&h.app.viewport.hover, Some(Hit::SketchPoint { sketch, id, .. }) if *sketch != own && id == "g"),
+        "the other sketch's point: {:?}",
+        h.app.viewport.hover
+    );
 }
 
 /// A plate from x = 20 to 120 (y 0..50, 20 thick) mirrored about YZ, a sketch on its top with the
