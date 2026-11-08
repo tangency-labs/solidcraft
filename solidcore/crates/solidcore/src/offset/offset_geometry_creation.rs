@@ -1581,7 +1581,18 @@ fn passes_through(
     let err = || sm_err("offset_geometry_creation::passes_through");
     let pv = curve.evaluate(k, t, 2, true, true)?;
     let (d1, d2) = (*pv.get(1).ok_or_else(err)?, *pv.get(2).ok_or_else(err)?);
-    let s = surface.evaluate(k, uv, 2, 2, EvaluateFlags::default())?;
+    // Only the total-order-two jet is used below. The full rectangle would also
+    // request D(2, 2), beyond an implicit offset's derivative limit.
+    let s = surface.evaluate(
+        k,
+        uv,
+        2,
+        2,
+        EvaluateFlags {
+            only_upper_half: true,
+            ..EvaluateFlags::default()
+        },
+    )?;
     let at = |i: usize, j: usize| s.get(i).and_then(|r| r.get(j)).copied().ok_or_else(err);
     let (du, dv, duu, duv, dvv) = (at(1, 0)?, at(0, 1)?, at(2, 0)?, at(1, 1)?, at(0, 2)?);
     let n = du.cross(dv).unitize().map_err(|_| err())?;
@@ -6069,6 +6080,36 @@ mod tests {
         assert!(passes_through(&k, &lifted, at(1e-3), &plane, uv, tol).unwrap());
         let shallow = over_the_plane(0.6_f64.to_radians().tan(), 0.0, false);
         assert!(passes_through(&k, &shallow, 0.5, &plane, uv, tol).unwrap());
+    }
+
+    /// The crossing test uses only the second-order jet. An implicit offset keeps
+    /// its three-total-derivative limit, yet must classify the same plane's touch
+    /// and shallow crossing (the unsupported request prevented #1818's rim mating).
+    #[test]
+    fn a_curve_passes_through_an_implicit_offset_using_only_second_order() {
+        use crate::surface::offset_surface::OffsetSurface;
+        use crate::surface::plane::Plane;
+
+        let k = Kernel::default();
+        let base = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, -0.5), Vec3::Z));
+        let surface = Surface::from(OffsetSurface::new(&k, 0.5, base, true, 0).unwrap());
+        let uv = Point2::new(0.0, 0.0);
+        assert!(surface.evaluate_point(&k, uv).unwrap().distance(Vec3::ZERO) < 1e-15);
+        assert_eq!(
+            surface
+                .evaluate(&k, uv, 2, 2, EvaluateFlags::default())
+                .unwrap_err(),
+            SolidError::sm_err("surface::offset_surface::OffsetSurface::evaluate")
+        );
+
+        let tol = 1e-5;
+        let at = |e: f64| (1.0 + (6.0 * e).sqrt()) / 2.0;
+        let touching = over_the_plane(1e-6, 1.0 / 3.0, true);
+        assert!(!passes_through(&k, &touching, at(1e-6), &surface, uv, tol).unwrap());
+        let lifted = over_the_plane(1e-3, 1.0 / 3.0, true);
+        assert!(passes_through(&k, &lifted, at(1e-3), &surface, uv, tol).unwrap());
+        let shallow = over_the_plane(0.6_f64.to_radians().tan(), 0.0, false);
+        assert!(passes_through(&k, &shallow, 0.5, &surface, uv, tol).unwrap());
     }
 
     #[test]
