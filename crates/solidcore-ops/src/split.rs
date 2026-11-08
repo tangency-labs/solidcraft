@@ -136,6 +136,10 @@ fn cut_face(
     let surface = surface.clone_for_evaluation()?;
     let domain = face_p2::uv_domain(b, face)?;
     // the intersection's accuracy: a quarter of the body's, as the kernel's plane cutter asks
+    #[allow(
+        clippy::float_arithmetic,
+        reason = "a tolerance ops chooses: a quarter of the body's"
+    )]
     let approx = approx_tol3d(k, approx_tol3d(k, tol) / 4.0);
     let bx = match calculate_bounding_box(k, &mut *b, face, false) {
         Ok(bx) => bx,
@@ -166,9 +170,14 @@ fn cut_face(
     // strip, like any other tool, is intersected over its own domain.
     if let Some(plane) = &tool.plane {
         let margin = plane.box_margin(&bx);
-        let covers = if margin.lower >= -tol {
+        #[allow(
+            clippy::float_arithmetic,
+            reason = "the tolerance as a lower bound: a sign, not geometry"
+        )]
+        let below = -tol;
+        let covers = if margin.lower >= below {
             true
-        } else if margin.upper < -tol {
+        } else if margin.upper < below {
             false
         } else {
             return Ok(Err(Error::Unsupported(

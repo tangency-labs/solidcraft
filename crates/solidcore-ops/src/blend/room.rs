@@ -75,6 +75,10 @@ pub(crate) fn refusal(b: &Brep, e: SolidError, reversed: bool) -> Error {
             }
         }
         RoundRefusal::FacesCloseAtBothEnds { .. } => Error::FacesCloseAtBothEnds,
+        #[allow(
+            clippy::float_arithmetic,
+            reason = "the parameter on the reversed edge, 1 - u: a choice of parameter, not a geometric quantity"
+        )]
         RoundRefusal::RoomRunsOut { at, largest, .. } => Error::RoomRunsOut {
             at: if reversed { 1.0 - at } else { at },
             largest,
@@ -119,6 +123,10 @@ pub fn band_room(body: &Body, edge: usize, start: usize, stations: &[f64]) -> Re
         let Some(reversed) = runs_back(b, e, v)? else {
             return Ok(Err(Error::Argument));
         };
+        #[allow(
+            clippy::float_arithmetic,
+            reason = "the parameter on the reversed edge, 1 - u: a choice of parameter, not a geometric quantity"
+        )]
         let asked: Vec<f64> = stations
             .iter()
             .map(|&u| if reversed { 1.0 - u } else { u })

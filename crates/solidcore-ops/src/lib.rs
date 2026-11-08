@@ -26,6 +26,7 @@
 //! its input copies it first ([`Body::copy`]).
 #![forbid(unsafe_code)]
 #![deny(clippy::disallowed_methods)]
+#![cfg_attr(not(test), deny(clippy::float_arithmetic))]
 
 pub mod blend;
 pub mod body;

@@ -873,6 +873,119 @@ pub fn curve_on_frame(k: &Kernel, frame: &Frame, level: f64, seg: &Seg2) -> Resu
     }
 }
 
+/// A segment placed on a frame: its curve as a description, in world coordinates, for a caller
+/// that keeps its own curve record ([`seg_on_frame`]).
+#[derive(Clone, Debug, PartialEq)]
+pub enum PlacedSeg {
+    /// The line from `a` to `b`.
+    Line {
+        /// Its start.
+        a: Point3,
+        /// Its end.
+        b: Point3,
+    },
+    /// The circular arc about `center` in the plane square to the unit `axis`, of `radius`,
+    /// from angle `start` to `end` (radians, `start < end`) measured from the unit `reference`
+    /// towards `axis × reference`: counter-clockwise about `axis`.
+    Arc {
+        /// Its centre.
+        center: Point3,
+        /// The normal it turns counter-clockwise about.
+        axis: Vec3,
+        /// Where its angles are measured from.
+        reference: Vec3,
+        /// Its radius.
+        radius: f64,
+        /// Its start angle.
+        start: f64,
+        /// Its end angle.
+        end: f64,
+    },
+    /// The Bézier of `points` (`[x, y, z, weight]`, weights positive) on the clamped knots
+    /// `knots`, of degree `degree`.
+    Nurbs {
+        /// Its degree.
+        degree: usize,
+        /// Its control points with their weights.
+        points: Vec<[f64; 4]>,
+        /// Its clamped knot vector, `0` and `1` each `degree + 1` times.
+        knots: Vec<f64>,
+    },
+}
+
+/// `seg` placed on `frame` at `level` as a [`PlacedSeg`], in the direction it runs: each point
+/// by [`to_world`]; an arc about the frame's normal `x × y`, its angles from `x`, or, swept
+/// clockwise, about the reversed normal with its angles negated so it still runs from its
+/// start (the same arc [`curve_on_frame`] builds); a cubic, conic or Bézier with its control
+/// points and weights. `None` for an arc of no sweep, a conic whose weight is not finite and
+/// positive, or a Bézier whose degree is outside `1 ..=` [`MAX_BEZIER_DEGREE`].
+#[must_use]
+pub fn seg_on_frame(frame: &Frame, level: f64, seg: &Seg2) -> Option<PlacedSeg> {
+    let at = |p: Point2| to_world(frame, p, level);
+    let nurbs = |degree: usize, points: Vec<[f64; 4]>| {
+        let mut knots = vec![0.0; degree + 1];
+        knots.extend(std::iter::repeat_n(1.0, degree + 1));
+        PlacedSeg::Nurbs {
+            degree,
+            points,
+            knots,
+        }
+    };
+    let weighted = |p: Point2, w: f64| {
+        let q = at(p);
+        [q.x, q.y, q.z, w]
+    };
+    match *seg {
+        Seg2::Line { a, b } => Some(PlacedSeg::Line { a: at(a), b: at(b) }),
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => {
+            if sweep == 0.0 {
+                return None;
+            }
+            let (_, x, _, normal) = axes(frame);
+            let (axis, start, end) = if sweep < 0.0 {
+                (-normal, -start, -start - sweep)
+            } else {
+                (normal, start, start + sweep)
+            };
+            Some(PlacedSeg::Arc {
+                center: at(center),
+                axis,
+                reference: x,
+                radius,
+                start,
+                end,
+            })
+        }
+        Seg2::Cubic { p0, p1, p2, p3 } => Some(nurbs(
+            3,
+            [p0, p1, p2, p3].iter().map(|&p| weighted(p, 1.0)).collect(),
+        )),
+        Seg2::Conic { a, apex, b, w } => (w.is_finite() && w > 0.0).then(|| {
+            nurbs(
+                2,
+                vec![weighted(a, 1.0), weighted(apex, w), weighted(b, 1.0)],
+            )
+        }),
+        Seg2::Bezier { n, p } => {
+            let degree = usize::from(n);
+            (1..=MAX_BEZIER_DEGREE).contains(&degree).then(|| {
+                nurbs(
+                    degree,
+                    p.iter()
+                        .take(degree + 1)
+                        .map(|&q| weighted(q, 1.0))
+                        .collect(),
+                )
+            })
+        }
+    }
+}
+
 /// The B-spline curve of the knot vector `knots` (with its repeats) and the homogeneous control
 /// points `[x w, y w, z w, w]` (all weights one: polynomial), by the kernel's canonical
 /// constructor.

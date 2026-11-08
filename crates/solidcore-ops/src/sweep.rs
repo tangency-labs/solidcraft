@@ -30,6 +30,7 @@ use solidcore::kernel::Kernel;
 use solidcore::math::Transform;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::primitive::primitive_creation::SweepOptions;
+use solidcore::prism::profile as kp;
 use solidcore::sweep::api_brep::{
     create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep,
     CornerRefusal as KRefusal, OffsetCornerType, TaperExtrude,
@@ -51,6 +52,7 @@ use solidcore::topology::brep::p8::{
 use solidcore::topology::brep::planar_section::{PlanarSectionOptions, SectionOutputs};
 use solidcore::topology::{Brep, FaceId};
 use solidcore::SolidError;
+use solidcore_convert as convert;
 
 pub use solidcore::curve::arc::{Join, OnOneCircle};
 /// Which comparison of a path the kernel left undecided ([`Error::PathUndecided`]).
@@ -90,6 +92,20 @@ pub const CURVE_MAX_DEGREE: usize = 25;
 
 /// Most control points of a [`Curve::Nurbs`].
 pub const CURVE_MAX_POINTS: usize = 100_000;
+
+/// The steepest draft an extrude takes, radians: just short of a quarter turn.
+#[allow(
+    clippy::float_arithmetic,
+    reason = "an input bound ops chooses, not a geometric quantity"
+)]
+const DRAFT_LIMIT: f64 = PI / 2.0 - 1e-6;
+
+/// The largest angle a revolve takes, radians: a whole turn, to rounding.
+#[allow(
+    clippy::float_arithmetic,
+    reason = "an input bound ops chooses, not a geometric quantity"
+)]
+const TURN_LIMIT: f64 = std::f64::consts::TAU * (1.0 + 1e-12);
 
 /// Most turns of a screw sweep.
 pub const SCREW_MAX_TURNS: f64 = 200.0;
@@ -171,101 +187,51 @@ impl Curve {
         segment: &solidcore_record::Seg2,
         plane: &solidcore_record::Plane,
     ) -> Option<Curve> {
-        let world = |p: solidcore_record::Vec2| {
-            [
-                plane.origin.x + plane.x.x * p.x + plane.y.x * p.y,
-                plane.origin.y + plane.x.y * p.x + plane.y.y * p.y,
-                plane.origin.z + plane.x.z * p.x + plane.y.z * p.y,
-            ]
-        };
-        match *segment {
-            solidcore_record::Seg2::Line { a, b } => Some(Curve::Line {
-                start: world(a),
-                end: world(b),
-            }),
-            solidcore_record::Seg2::Arc {
-                center,
-                radius,
-                start,
-                sweep,
-            } => {
-                let x = plane.x;
-                let y = plane.y;
-                let normal = [
-                    x.y * y.z - x.z * y.y,
-                    x.z * y.x - x.x * y.z,
-                    x.x * y.y - x.y * y.x,
-                ];
-                let axis = if sweep < 0.0 {
-                    [-normal[0], -normal[1], -normal[2]]
-                } else {
-                    normal
-                };
-                let (start, end) = if sweep < 0.0 {
-                    (-start, -start - sweep)
-                } else {
-                    (start, start + sweep)
-                };
-                (sweep != 0.0).then(|| Curve::Arc {
-                    center: world(center),
+        let v3 = |p: Point3| [p.x, p.y, p.z];
+        // the kernel places the segment ([`solidcore::prism::profile::seg_on_frame`]); this
+        // is its record, field for field
+        Some(
+            match kp::seg_on_frame(&convert::plane(plane), 0.0, &convert::seg2(segment))? {
+                kp::PlacedSeg::Line { a, b } => Curve::Line {
+                    start: v3(a),
+                    end: v3(b),
+                },
+                kp::PlacedSeg::Arc {
+                    center,
                     axis,
-                    reference: [plane.x.x, plane.x.y, plane.x.z],
+                    reference,
                     radius,
                     start,
                     end,
-                })
-            }
-            solidcore_record::Seg2::Cubic { p0, p1, p2, p3 } => {
-                let points = [p0, p1, p2, p3]
-                    .iter()
-                    .map(|p| {
-                        let q = world(*p);
-                        [q[0], q[1], q[2], 1.0]
-                    })
-                    .collect();
-                Some(Curve::Nurbs {
-                    degree: 3,
-                    points,
-                    knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
-                })
-            }
-            solidcore_record::Seg2::Conic { a, apex, b, w } => {
-                if !w.is_finite() || w <= 0.0 {
-                    return None;
-                }
-                let point = |p: solidcore_record::Vec2, weight: f64| {
-                    let q = world(p);
-                    [q[0], q[1], q[2], weight]
-                };
-                Some(Curve::Nurbs {
-                    degree: 2,
-                    points: vec![point(a, 1.0), point(apex, w), point(b, 1.0)],
-                    knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-                })
-            }
-            solidcore_record::Seg2::Bezier { n, p } => {
-                let degree = usize::from(n);
-                if !(1..=solidcore_record::MAX_BEZIER_DEGREE).contains(&degree) {
-                    return None;
-                }
-                let points = p
-                    .iter()
-                    .take(degree + 1)
-                    .map(|p| {
-                        let q = world(*p);
-                        [q[0], q[1], q[2], 1.0]
-                    })
-                    .collect();
-                let mut knots = vec![0.0; degree + 1];
-                knots.extend(std::iter::repeat_n(1.0, degree + 1));
-                Some(Curve::Nurbs {
+                } => Curve::Arc {
+                    center: v3(center),
+                    axis: v3(axis),
+                    reference: v3(reference),
+                    radius,
+                    start,
+                    end,
+                },
+                kp::PlacedSeg::Nurbs {
                     degree,
                     points,
                     knots,
-                })
-            }
-        }
+                } => Curve::Nurbs {
+                    degree,
+                    points,
+                    knots,
+                },
+            },
+        )
     }
+}
+
+/// `radians` in degrees, for the kernel calls that take degrees: `radians * 180 / PI`.
+#[allow(
+    clippy::float_arithmetic,
+    reason = "the kernel call takes degrees: a unit conversion, not geometry (ruled in #3145)"
+)]
+fn degrees(radians: f64) -> f64 {
+    radians * 180.0 / PI
 }
 
 /// How a drafted [`extrude`] closes the gap its offset opens at a sharp corner of the profile.
@@ -449,7 +415,12 @@ fn nurbs(degree: usize, points: &[[f64; 4]], knots: &[f64]) -> Out<KCurve> {
     else {
         return Err(Error::Argument);
     };
-    if unique.len() < 2 || m0 != degree + 1 || m1 != degree + 1 || !(last - first > 1e-12) {
+    #[allow(
+        clippy::float_arithmetic,
+        reason = "an input check: the knots span more than 1e-12"
+    )]
+    let spans = last - first > 1e-12;
+    if unique.len() < 2 || m0 != degree + 1 || m1 != degree + 1 || !spans {
         return Err(Error::Argument);
     }
     if mult
@@ -681,14 +652,14 @@ pub fn extrude(
     if !distance.is_finite()
         || !(distance > 1e-9 && distance < MAX_COORD)
         || !draft.is_finite()
-        || draft.abs() >= PI / 2.0 - 1e-6
+        || draft.abs() >= DRAFT_LIMIT
     {
         return Err(Error::Argument);
     }
     making("extrude", |k| {
         let made = parsed!(parse(k, profile));
         let drafted = (draft != 0.0).then(|| Draft {
-            angle_deg: draft * 180.0 / PI,
+            angle_deg: degrees(draft),
             corner: match corner {
                 DraftCorner::Curvature => OffsetCornerType::CurveExtension,
                 DraftCorner::Tangent => OffsetCornerType::LinearExtension,
@@ -738,15 +709,13 @@ pub fn revolve(
     angle: f64,
     cap: bool,
 ) -> Result<Body> {
-    if !coord_ok(&origin)
-        || !angle.is_finite()
-        || !(angle > 1e-9 && angle <= std::f64::consts::TAU * (1.0 + 1e-12))
-    {
+    if !coord_ok(&origin) || !angle.is_finite() || !(angle > 1e-9 && angle <= TURN_LIMIT) {
         return Err(Error::Argument);
     }
     making("revolve", |k| {
         let made = parsed!(parse(k, profile));
-        let degrees = (angle * 180.0 / PI).min(360.0);
+        // a whole turn at most
+        let degrees = degrees(angle).min(360.0);
         match directed::revolve(k, &made.refs(), v3(origin), v3(axis), degrees, cap) {
             Ok(r) => finish(k, r, if cap { Expect::SOLID } else { Expect::FACES }),
             Err(e) => Ok(Err(directed_or_status(e))),
@@ -839,7 +808,8 @@ pub fn sweep_placed(
         if frame == SweepFrame::Follow {
             match path::path_as_arc(k, pieces, &PATH)? {
                 PathShape::Is(a) => {
-                    let degrees = (a.angle * 180.0 / PI).min(360.0);
+                    // a whole turn at most
+                    let degrees = degrees(a.angle).min(360.0);
                     let r = match create_rotational_sweep(k, &refs, a.centre, a.axis, degrees, cap)
                     {
                         Ok(r) => r,

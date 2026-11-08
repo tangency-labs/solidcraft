@@ -410,6 +410,10 @@ fn sized_on(
         // the offset is linear in the distance along an edge: the distance that fits is the
         // asked one scaled as the fitting offset is to the asked offset
         return Ok(match chamfered.iter().find(|(e, ..)| *e == edge) {
+            #[allow(
+                clippy::float_arithmetic,
+                reason = "until the kernel returns the distance that fits (#3145, its second part)"
+            )]
             Some(&(_, distance, offset)) if offset > 0.0 => Error::TooLarge {
                 size: size / offset * distance,
                 kind: FitKind::Distance,
@@ -428,6 +432,10 @@ fn sized_on(
 }
 
 /// The parameter half way between `lo` and `hi`: the sample position ops chooses.
+#[allow(
+    clippy::float_arithmetic,
+    reason = "a sample parameter ops chooses, not a geometric quantity (docs/layers.md)"
+)]
 fn middle(lo: f64, hi: f64) -> f64 {
     0.5 * (lo + hi)
 }
@@ -906,7 +914,12 @@ fn setbacks_fit(k: &Kernel, b: &Brep, setbacks: &[(VertexId, f64)]) -> solidcore
                     other = d;
                 }
             }
-            if distance + other >= length {
+            #[allow(
+                clippy::float_arithmetic,
+                reason = "until the kernel owns the setback fit (#3145, its second part)"
+            )]
+            let fits = distance + other < length;
+            if !fits {
                 return Ok(false);
             }
         }
@@ -1705,6 +1718,10 @@ fn fillet_variable_impl(
         };
         let law = FilletLaw::of_radii(degree, knots, radii, reversed)?;
         // the band's room along a straight edge between planes, at evenly spaced stations
+        #[allow(
+            clippy::float_arithmetic,
+            reason = "the stations' parameters ops chooses, not a geometric quantity (docs/layers.md)"
+        )]
         let stations: Vec<f64> = (0..=LAW_STATIONS)
             .map(|i| i as f64 / LAW_STATIONS as f64)
             .collect();

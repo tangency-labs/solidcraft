@@ -153,8 +153,13 @@ pub fn shell(body: &Body, order: &Order, open: &[usize], thickness: f64) -> Resu
         if is_manifold_solid(b)? && !expect.solid() {
             return Ok(Err(Error::Argument));
         }
+        #[allow(
+            clippy::float_arithmetic,
+            reason = "the asked thickness's size: a sign, not geometry"
+        )]
+        let inward = -thickness;
         if thickness < 0.0 && expect.solid() {
-            if let Err(e) = room(k, b, &open, -thickness)? {
+            if let Err(e) = room(k, b, &open, inward)? {
                 return Ok(Err(e));
             }
         }
@@ -199,7 +204,12 @@ pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) 
                 .copied()
                 .filter(|f| !picked.contains(f))
                 .collect();
-            if let Err(e) = room(k, b, &others, -distance)? {
+            #[allow(
+                clippy::float_arithmetic,
+                reason = "the asked distance's size: a sign, not geometry"
+            )]
+            let inward = -distance;
+            if let Err(e) = room(k, b, &others, inward)? {
                 return Ok(Err(e));
             }
         }
@@ -236,8 +246,13 @@ pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<()> {
         }
         // a thickened sheet must be a closed solid, whatever the sheet
         let expect = Expect::SOLID;
+        #[allow(
+            clippy::float_arithmetic,
+            reason = "half the asked thickness back for a symmetric thicken: a choice of parameter"
+        )]
+        let back = -0.5 * thickness;
         if symmetric {
-            match offset_brep_simple(k, b, offset_options(-0.5 * thickness)) {
+            match offset_brep_simple(k, b, offset_options(back)) {
                 Ok(moved) => *b = moved,
                 Err(e) => return Ok(Err(status(e))),
             }

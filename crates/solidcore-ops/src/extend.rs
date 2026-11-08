@@ -39,6 +39,10 @@ pub enum Continuation {
 const SAMPLES: u32 = 9;
 
 /// The parameters `0, 1 / SAMPLES, ..., 1` along a side.
+#[allow(
+    clippy::float_arithmetic,
+    reason = "the sample parameters ops chooses, not a geometric quantity (docs/layers.md)"
+)]
 fn along() -> impl Iterator<Item = f64> {
     (0..=SAMPLES).map(|i| f64::from(i) / f64::from(SAMPLES))
 }
@@ -180,6 +184,10 @@ pub fn extend_sheet(
         if !edges.contains(&picked) {
             return Ok(Err(Error::Argument));
         }
+        #[allow(
+            clippy::float_arithmetic,
+            reason = "a tolerance ops chooses: ten of the body's"
+        )]
         let on = 10.0 * b.tolerance().max(1e-9);
         let dom = face_p2::uv_domain(b, f)?;
         // the face is its surface's whole box, as the kernel's extension decides it
@@ -225,6 +233,10 @@ pub fn extend_sheet(
         // the face and each side stand for the face and side they continue
         copy_attributes(b, EntityRef::Face(f), &mut r, EntityRef::Face(nf))?;
         let made = face_p4::edges(&r, nf, None, false, None)?;
+        #[allow(
+            clippy::float_arithmetic,
+            reason = "a tolerance ops chooses: ten of the body's"
+        )]
         let new_on = 10.0 * r.tolerance().max(1e-9);
         let rdom = face_p2::uv_domain(&r, nf)?;
         for (s, to_s) in BoxSide::ALL.into_iter().zip(mapped) {
