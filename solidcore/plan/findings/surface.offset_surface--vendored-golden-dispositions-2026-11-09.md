@@ -65,7 +65,9 @@ Likewise, the later directed-roundoff record for `gen2214` supersedes the older 
 | `gen0067` | 0.6193188316866117 | 0.6193234789530428 | Status remains 1001 with no surface; retained replay includes the sphere-pole step-off. |
 | `gen0332` | 3020.541840829664 | 2509.1913228189733 | Four interior bicubic controls change with the corrected twist; boundaries, weights and patch layout remain unchanged. Retained directed tensor-Bernstein geometry bound is 5069.04236 against requested 10000 over the full patch. |
 
-![Retained before and after fitted surfaces, same projection and scale](surface.offset_surface--gen0332-before-after-2026-11-08.svg)
+![Retained before and after fitted surfaces, same projection and scale](https://raw.githubusercontent.com/altvnk/solidcraft/5171b3edb9001831f29f309e8897ebd312089f59/solidcore/plan/findings/surface.offset_surface--gen0332-before-after-2026-11-08.svg)
+
+This review image is hosted at its already-published immutable revision, not added to the final PR diff. This session cannot upload a GitHub attachment: its managed browser is signed out and the signed-in native browser is inaccessible. The image shows retained fitted control-net geometry, not an application screenshot.
 
 The picture evaluates the actual retained before/after 4×4 bicubic control nets. The newly blessed vendored `gen0332` golden encoding equals the retained after encoding; this binds the picture at the golden representation level, not by claiming a new full raw-bit identity proof. The retained geometry certificate is conditional on its independently derived target coefficients; it does not certify the fitting algorithm generally.
 
