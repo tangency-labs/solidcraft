@@ -165,6 +165,8 @@ mod feature_walk_tests;
 #[cfg(test)]
 mod named_projection_tests;
 #[cfg(test)]
+mod old_cap_anchor_tests;
+#[cfg(test)]
 mod tests;
 
 mod anchor_frame;
