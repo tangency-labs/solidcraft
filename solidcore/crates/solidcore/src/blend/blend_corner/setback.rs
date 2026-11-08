@@ -1952,11 +1952,13 @@ fn corner_springs(
     };
     let mut springs = Vec::new();
     for (f, plane) in planes.planes.iter().enumerate() {
-        let before = (f + n - 1) % n;
+        // (no face: no corner, refused by the checked remainders)
+        let before = (f + n - 1).checked_rem(n).ok_or_else(nul)?;
+        let after = (f + 1).checked_rem(n).ok_or_else(nul)?;
         let mut ends = [(Point3::ZERO, None); 2];
         // S_f with its mate M_(f+1) on F_(f+1); M_f with its mate S_(f-1) on F_(f-1)
         for (slot, (blend, at, mate, other)) in ends.iter_mut().zip([
-            (f, 3 * f + 2, 3 * ((f + 1) % n), (f + 1) % n),
+            (f, 3 * f + 2, 3 * after, after),
             (before, 3 * f, 3 * before + 2, before),
         ]) {
             let e = eu1::edge(target, *all.get(blend).ok_or_else(nul)?)?.ok_or_else(nul)?;
