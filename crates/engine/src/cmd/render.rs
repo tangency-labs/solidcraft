@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_doc::render_settings::{RenderSettings, RenderSetup};
 
 use super::CommandSpec;
@@ -451,6 +451,8 @@ fn backends(s: &mut Session, params: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+
+    use serde_json::json;
 
     use super::*;
 
