@@ -23,8 +23,8 @@ use solidcraft_io::Format;
 use super::CommandSpec;
 use super::print_face;
 use crate::params::{bad, bool_, num, str_, string_list};
-use crate::schema::slicers::{SlicerInfo, SlicersParams, SlicersResult};
 use crate::schema::save::{SaveAsParams, SaveParams, SaveResult};
+use crate::schema::slicers::{SlicerInfo, SlicersParams, SlicersResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
