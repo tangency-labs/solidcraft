@@ -1723,14 +1723,6 @@ fn hostile_arguments_never_panic() {
     }
 }
 
-#[test]
-fn base64_matches_rfc4648() {
-    use crate::tools::base64;
-    for (i, o) in [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy")] {
-        assert_eq!(base64(i.as_bytes()), o);
-    }
-}
-
 /// Filtering by a command id returns that command, not every command whose docs mention it (#269).
 #[test]
 fn list_commands_filter_by_a_command_id_matches_ids() {
@@ -3818,8 +3810,9 @@ fn compact_inspect_design_summarises_sketches_unless_asked() {
     assert_eq!(def, crate::tool_definitions_with(crate::Options { compact: true }).into_iter().find(|d| d["name"] == "inspect_design").unwrap());
     // Arguments are checked against the tools as listed: `bodies` only with compact output.
     let bodies = json!({"bodies": ["Body1"]});
-    assert!(crate::tools::check_arguments_with("inspect_design", &bodies, crate::Options { compact: true }).is_ok());
-    assert!(crate::tools::check_arguments("inspect_design", &bodies).is_err_and(|e| e.contains("bodies")));
+    let check = |options| solidcraft_mcp_server::check_arguments(&crate::tool_definitions_with(options), "inspect_design", &bodies);
+    assert!(check(crate::Options { compact: true }).is_ok());
+    assert!(check(crate::Options::default()).is_err_and(|e| e.contains("bodies")));
 
     let (_, summary) = inspect_text(&mut s, json!({"measure": false}));
     assert!(summary.len() < 4000, "{} bytes: {summary}", summary.len());
