@@ -2502,11 +2502,12 @@ mod tests {
             .failure_classes()
     }
 
-    /// The unpicked bottom is rebuilt too: its defective edge curves get new ids.
-    /// Their failures therefore cannot be inherited from the old bottom by class count.
-    /// Refusal rolls the entire body back, including the original failure sites.
+    /// The gate holds the operation to what it adds: a cube whose bottom fails its check
+    /// on its own, its top raised by 5, is returned (the bottom untouched, its failure
+    /// the input's), a manifold solid of the raised volume whose check has no failure
+    /// class beyond the input's.
     #[test]
-    fn a_failure_on_a_rebuilt_unpicked_face_is_new() {
+    fn a_failure_the_input_has_on_an_untouched_face_is_not_the_operations() {
         let mut k = Kernel::default();
         let mut b = cube_with_a_defective_bottom(&mut k);
         let had = failure_classes(&mut k, &b);
@@ -2522,22 +2523,19 @@ mod tests {
         );
         let (v0, manifold) = volume_and_manifold(&k, &mut b);
         assert!(manifold && (v0 - 8000.0).abs() <= 1e-9 * 8000.0, "{v0}");
-        let input =
-            validation::standing(&mut k, &mut b.clone_standing_for_self().unwrap()).unwrap();
-        refuse_unsound(&mut k, &b, &input).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 25.0), Vec3::Z));
-        let why = refused_unchanged_or_returned(&mut k, &mut b, &[top], vec![raised]);
+        with_notifications(&mut b, |b, notes| {
+            local_operation(&mut k, b, &[top], vec![raised], notes)
+        })
+        .unwrap();
+        let (v, manifold) = volume_and_manifold(&k, &mut b);
+        assert!(manifold && (v - 10000.0).abs() <= 1e-9 * 10000.0, "{v}");
+        let has = failure_classes(&mut k, &b);
         assert!(
-            matches!(
-                why,
-                Some(OffsetFailure::Unsound {
-                    what: crate::error::offset::Unsoundness::Check { failures: 1.., .. }
-                })
-            ),
-            "{why:?}"
+            has.iter().all(|(c, n)| had.get(c).is_some_and(|m| n <= m)),
+            "{has:?} vs {had:?}"
         );
-        assert_eq!(failure_classes(&mut k, &b), had);
     }
 
     /// The same cube, its top given a roof with a ridge: a degree-1 B-spline patch whose
