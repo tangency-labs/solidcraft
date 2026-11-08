@@ -513,6 +513,10 @@ impl JobHandle {
     pub fn id(&self) -> JobId {
         self.0.id
     }
+    /// Time since submission, including queueing and preparation.
+    pub fn elapsed(&self) -> std::time::Duration {
+        self.0.started.elapsed()
+    }
     /// True only after queued/running captures, tasks and their work reservations
     /// have been dropped. A terminal phase alone does not prove resource release.
     /// Retained final/preview images and status-input leases remain owned by their
@@ -2753,7 +2757,7 @@ mod retained_request_tests {
         assert!(frame.linear_exr().is_some());
         let color = [128, 64, 255].map(|v| {
             let x = crate::surface::srgb8_to_linear(v) as f32 as f64;
-            solidcraft_geom::srgb::encode8(x / (1.0 + x))
+            solidcraft_color::srgb::encode8(x / (1.0 + x))
         });
         assert_eq!(image::load_from_memory(frame.png()).unwrap().to_rgba8().get_pixel(0, 0).0, [color[0], color[1], color[2], 255]);
         let held = job.clone();

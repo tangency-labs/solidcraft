@@ -1873,6 +1873,7 @@ mod tests {
             opacity: 0.5,
             flip: false,
             visible: true,
+            locked: false,
             component: 0,
         });
         doc

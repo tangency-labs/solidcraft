@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_doc::Document;
 use solidcraft_doc::joints::JointKind;
@@ -17,6 +17,7 @@ use super::analysis::checked_pairs;
 use super::contact_sweep::{ContactGeometry, Gap};
 use super::{drive_with_contact, joint_id, value};
 use crate::params::{bad, bool_};
+use crate::schema::joint_sweep::{NearestGap, SampleGap, SweepResult, SweepSample};
 use crate::schema::motion::{FindLimitsResult, FoundLimits, Overlap, Stop, Why};
 use crate::{EngineError, Result, Session};
 
@@ -87,7 +88,7 @@ struct Swept {
     /// The last value clear of contact (or where a loop or limit stopped it), and what stopped
     /// it; `None`: it reached `to`.
     stop: Option<(f64, Stop)>,
-    samples: Vec<Value>,
+    samples: Vec<SweepSample>,
     nearest: BTreeMap<String, Nearest>,
     touching: Vec<[String; 2]>,
     /// Pairs of parts passing into each other at the start deeper than a touch: (a, b, mm).
@@ -168,24 +169,28 @@ pub(super) fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
         doc.assembly.contact_enabled = s.doc.assembly.contact_enabled;
         *s.doc_mut() = doc;
     }
-    let by = |stop: &Stop| serde_json::to_value(stop).map_err(|e| EngineError::Other(e.to_string()));
-    let mut out = json!({
-        "joint": id, "name": name, "index": index, "unit": if angle { "deg" } else { "mm" },
-        "from": shown(from), "to": shown(to),
-        "stopped_at": r.stop.as_ref().map(|(v, _)| shown(*v)),
-        "stopped_by": r.stop.as_ref().map(|(_, stop)| by(stop)).transpose()?,
-        "samples": r.samples,
-        "refine_mm": refine,
-        "gap_method": "mesh", "gap_tolerance_mm": r.chord,
-        "pairs": r.pairs,
-        "touching_at_start": r.touching,
-        "applied": applied,
-    });
-    if report_gaps {
-        out["min_gap"] =
-            r.nearest.into_iter().map(|(k, g)| (k, json!({"mm": g.mm, "at_value": g.at, "to": g.to}))).collect::<serde_json::Map<_, _>>().into();
-    }
-    Ok(out)
+    let (stopped_at, stopped_by) = r.stop.map(|(v, stop)| (shown(v), stop)).unzip();
+    let min_gap = report_gaps.then(|| r.nearest.into_iter().map(|(part, g)| (part, NearestGap { mm: g.mm, at_value: g.at, to: g.to })).collect());
+    let reply = SweepResult {
+        joint: id,
+        name,
+        index,
+        unit: if angle { "deg" } else { "mm" },
+        from: shown(from),
+        to: shown(to),
+        stopped_at,
+        stopped_by,
+        samples: r.samples,
+        refine_mm: refine,
+        gap_method: "mesh",
+        gap_tolerance_mm: r.chord,
+        pairs: r.pairs,
+        touching_at_start: r.touching,
+        applied,
+        min_gap,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 pub(super) fn find_limits(s: &mut Session, p: &Value) -> Result<Value> {
@@ -372,18 +377,19 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
     let targets: Vec<f64> =
         (1..=n).map(|k| from + (sample_to - from) * k as f64 / n as f64).chain(((sample_to - to).abs() > 1e-9).then_some(to)).collect();
 
-    let mut samples: Vec<Value> = Vec::new();
+    let mut samples: Vec<SweepSample> = Vec::new();
     let mut nearest: BTreeMap<String, Nearest> = BTreeMap::new();
     let mut record = |t: &Session, v: f64, work: &mut usize, geometry: &ContactGeometry| -> Result<()> {
         if !report_gaps {
-            samples.push(json!({"value": shown(v)}));
+            samples.push(SweepSample { value: shown(v), gap: None });
             return Ok(());
         }
         let gaps = geometry.gaps(t, f64::INFINITY, work, budget)?;
-        match gaps.first() {
-            Some(g) => samples.push(json!({"value": shown(v), "min_gap_mm": g.mm, "pair": [g.a.1, g.b.1]})),
-            None => samples.push(json!({"value": shown(v), "min_gap_mm": null, "pair": null})),
-        }
+        let gap = match gaps.first() {
+            Some(g) => SampleGap { min_gap_mm: Some(g.mm), pair: Some([g.a.1.clone(), g.b.1.clone()]) },
+            None => SampleGap { min_gap_mm: None, pair: None },
+        };
+        samples.push(SweepSample { value: shown(v), gap: Some(gap) });
         for g in &gaps {
             for (me, other) in [(&g.a.1, &g.b.1), (&g.b.1, &g.a.1)] {
                 if nearest.get(me).is_none_or(|x| g.mm < x.mm) {

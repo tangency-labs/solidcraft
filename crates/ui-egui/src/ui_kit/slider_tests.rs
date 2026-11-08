@@ -1,6 +1,7 @@
 use super::*;
-use crate::{scenario, theme::Tokens};
+use crate::scenario;
 use egui::{Rect, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 #[test]
 fn theme_notice_actions_fit_wrap_and_accept_native_pointer_clicks_in_both_themes() {
@@ -44,19 +45,19 @@ fn theme_notice_actions_fit_wrap_and_accept_native_pointer_clicks_in_both_themes
         clicked
     }
 
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for language in ["en", "de"] {
-            let _language = crate::i18n::scope(language);
+            let _language = solidcraft_ui_text::scope(language);
             let t = Tokens::get();
             let mut undo_width = 0.0;
             let mut dismiss_width = 0.0;
             let mut label_wrap_width = 0.0;
             test_support::frame(&crate::fonts::test_context(), vec![], |ui| {
-                undo_width = ContentWidth::button(ui, crate::i18n::tr("ui.undo"));
-                dismiss_width = ContentWidth::button(ui, crate::i18n::tr("prefs.theme_notice_dismiss"));
-                label_wrap_width = (ContentWidth::label(ui, crate::i18n::tr("prefs.theme_notice_dismiss")) / 3.0).ceil();
+                undo_width = ContentWidth::button(ui, solidcraft_ui_text::tr("ui.undo"));
+                dismiss_width = ContentWidth::button(ui, solidcraft_ui_text::tr("prefs.theme_notice_dismiss"));
+                label_wrap_width = (ContentWidth::label(ui, solidcraft_ui_text::tr("prefs.theme_notice_dismiss")) / 3.0).ceil();
             });
             let actions_width = undo_width + dismiss_width + t.space_8 * 2.0;
             let narrow_width = undo_width.max(dismiss_width);
@@ -102,7 +103,7 @@ fn theme_notice_actions_fit_wrap_and_accept_native_pointer_clicks_in_both_themes
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -111,16 +112,17 @@ fn blur_meter_boundaries_and_off_thumb() {
         assert_eq!(blur_cost_bars(radius), bars, "{radius}");
     }
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for radius in [0.0, 18.25, 40.0] {
             let ctx = crate::fonts::test_context();
             let t = Tokens::get();
             let mut value = radius;
-            let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 scope(ui, |ui| {
                     slider(ui, &mut value, 0.0..=40.0, Slider { step: Some(1.0), show_value: false, off_endpoint: true, ..Default::default() });
                 });
             });
+            out.textures_delta.clear();
             assert_eq!(value, radius, "drawing cannot round persisted fractional values");
             assert_eq!(out.shapes.iter().filter(|s| matches!(s.shape, egui::Shape::Circle(_))).count(), 1, "off/solid thumb has no native duplicate");
             let hit = scenario::rect_of("dialog:slider_track:").expect("blur slider track");
@@ -146,9 +148,9 @@ fn blur_meter_boundaries_and_off_thumb() {
 
 #[test]
 fn every_slider_option_uses_the_same_token_thumb_in_both_themes() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for (show_value, integer, enabled) in [(true, false, true), (true, false, false), (false, true, true)] {
             for formatted in [false, true] {
                 let ctx = crate::fonts::test_context();
@@ -196,7 +198,7 @@ fn every_slider_option_uses_the_same_token_thumb_in_both_themes() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -302,9 +304,9 @@ fn a_sliders_value_box_takes_typed_numbers_and_clamps_them_to_its_range() {
 /// last column used to survive beside the value box at the maximum (#5708).
 #[test]
 fn slider_endpoints_have_no_duplicate_native_handle_or_rail_and_keep_the_editor() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for show_value in [false, true] {
             for endpoint in [0.0, 2.0] {
                 let ctx = crate::fonts::test_context();
@@ -318,14 +320,14 @@ fn slider_endpoints_have_no_duplicate_native_handle_or_rail_and_keep_the_editor(
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn narrow_sliders_do_not_retain_native_chrome_when_the_handle_range_reverses() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for width in [24.0, 28.0] {
             for saved in [0.0, 0.73123456789, 2.0] {
                 let ctx = crate::fonts::test_context();
@@ -341,7 +343,7 @@ fn narrow_sliders_do_not_retain_native_chrome_when_the_handle_range_reverses() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 fn slider_test_frame(ctx: &egui::Context, events: Vec<egui::Event>, mut add: impl FnMut(&mut Ui)) -> egui::FullOutput {
@@ -396,16 +398,16 @@ fn assert_slider_paint(shapes: &[egui::epaint::ClippedShape], hit: Rect, t: Toke
 
 #[test]
 fn slider_preserves_translucent_parent_paints_and_inherited_opacity_without_a_backing_rectangle() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for translucent in [false, true] {
             let mut t = Tokens::get();
             if translucent {
                 t.apply_panel_opacity(40.0);
                 assert!(t.dialog_body.a() < 255);
             }
-            let _tokens = crate::theme::scoped_tokens(t);
+            let _tokens = solidcraft_theme::scoped_tokens(t);
             for opacity in [1.0, 0.45] {
                 for show_value in [false, true] {
                     for saved in [0.0, 0.73123456789, 2.0] {
@@ -448,14 +450,14 @@ fn slider_preserves_translucent_parent_paints_and_inherited_opacity_without_a_ba
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn clipping_out_the_native_track_preserves_the_editor_when_the_paint_signature_differs() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let ctx = crate::fonts::test_context();
         let mut value = 1.0;
         slider_test_frame(&ctx, vec![], |ui| {
@@ -473,20 +475,20 @@ fn clipping_out_the_native_track_preserves_the_editor_when_the_paint_signature_d
         assert_eq!(output.shapes.iter().filter(|s| matches!(s.shape, egui::Shape::Circle(_))).count(), 1, "only the clipped custom thumb is added");
         assert_eq!(value, 1.0);
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn slider_keyboard_focus_and_accessibility_keep_native_steps_and_editor_focus() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for translucent in [false, true] {
             let mut t = Tokens::get();
             if translucent {
                 t.apply_panel_opacity(40.0);
             }
-            let _tokens = crate::theme::scoped_tokens(t);
+            let _tokens = solidcraft_theme::scoped_tokens(t);
             for show_value in [false, true] {
                 let ctx = crate::fonts::test_context();
                 ctx.enable_accesskit();
@@ -544,14 +546,14 @@ fn slider_keyboard_focus_and_accessibility_keep_native_steps_and_editor_focus() 
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn disabled_and_invisible_sliders_keep_native_input_and_paint_suppression() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for show_value in [false, true] {
             for visible in [false, true] {
                 let ctx = crate::fonts::test_context();
@@ -596,5 +598,5 @@ fn disabled_and_invisible_sliders_keep_native_input_and_paint_suppression() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }

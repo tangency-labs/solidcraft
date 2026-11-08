@@ -16,8 +16,13 @@ use super::joints::{cannot_move, effective_values, joint_id, occurrence_id, plac
 use crate::params::{bad, bool_, str_, vec3};
 use crate::schema::motion::{
     ContactCheck, ContactCollision, ContactCreateParams, ContactEditParams, ContactEnableParams, ContactNoParams, ContactSetChange,
-    ContactSetCreated, ContactSetEdited, ContactSetInfo, ContactSets, ContactSwitch, FindLimitsParams, FindLimitsResult, MotionListParams,
-    MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted, MotionStudyInfo, MotionStudyKeyInfo, MotionStudyParams, MotionStudySaved,
+    ContactSetCreated, ContactSetEdited, ContactSetInfo, ContactSets, ContactSwitch, ExplodeCreateParams, ExplodeCreated, ExplodeDeleteParams,
+    ExplodeDeleted, ExplodeListParams, ExplodeMoveInfo, ExplodeShowParams, ExplodeShown, ExplodeViews, ExplodedViewInfo, FindLimitsParams,
+    FindLimitsResult, MotionListParams, MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted, MotionStudyInfo, MotionStudyKeyInfo,
+    MotionStudyParams, MotionStudySaved,
+};
+use crate::schema::motion_play::{
+    DriveReport, ExportParams, PartPose, PlayParams, Pose, StudyExport, StudyExported, StudyPlayed, StudySample, UnmovedJoint,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -50,6 +55,12 @@ const CONTACT_EDIT_CONTRACT: TypedContract<ContactEditParams> = TypedContract::n
 const STUDY_CONTRACT: TypedContract<MotionStudyParams> = TypedContract::new();
 const STUDY_DELETE_CONTRACT: TypedContract<MotionStudyDeleteParams> = TypedContract::new();
 const STUDY_LIST_CONTRACT: TypedContract<MotionListParams> = TypedContract::new();
+const EXPLODE_CREATE_CONTRACT: TypedContract<ExplodeCreateParams> = TypedContract::new();
+const EXPLODE_SHOW_CONTRACT: TypedContract<ExplodeShowParams> = TypedContract::new();
+const EXPLODE_LIST_CONTRACT: TypedContract<ExplodeListParams> = TypedContract::new();
+const EXPLODE_DELETE_CONTRACT: TypedContract<ExplodeDeleteParams> = TypedContract::new();
+const PLAY_CONTRACT: TypedContract<PlayParams> = TypedContract::new();
+const EXPORT_CONTRACT: TypedContract<ExportParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("contact.enable_sets", "Enable Contact Sets", crate::checked!("contact.enable_sets", enable_sets))
@@ -105,15 +116,21 @@ pub static COMMANDS: &[CommandSpec] = &[
             "name?; study? (edit an existing one); steps? (timeline length, default 100); keys: [{joint, index?, points: [[step, value], …]}] \
          (values: degrees for angles, mm for distances, or expressions)",
         ),
-    CommandSpec::new("motion.play", "Play Motion Study", play).icon("play").params(
-        "study: id|name; step (0…steps) — sets the joints to the study's values there (contact sets stop them); quiet?: bool \
+    CommandSpec::new("motion.play", "Play Motion Study", crate::checked!("motion.play", play))
+        .icon("play")
+        .contract(&PLAY_CONTRACT)
+        .output(output_schema_for::<StudyPlayed>)
+        .params(
+            "study: id|name; step (0…steps) — sets the joints to the study's values there (contact sets stop them); quiet?: bool \
          (positions of only the occurrences that moved) → values: [{joint, values: [{name, value, unit}]}], positions, moved: whether \
          any occurrence moved, unmoved: [{joint, name, reason}] (keyed joints that can move nothing, such as a chain joined to \
          nothing grounded)",
-    ),
-    CommandSpec::new("motion.export", "Export Motion Study", export)
+        ),
+    CommandSpec::new("motion.export", "Export Motion Study", crate::checked!("motion.export", export))
         .icon("export")
         .noundo()
+        .contract(&EXPORT_CONTRACT)
+        .output(output_schema_for::<StudyExported>)
         .params("study; samples? (default steps + 1); path? (.json or .csv) → occurrence positions per step (the design is not changed)"),
     CommandSpec::new("motion.export_animation", "Export Motion Animation", animation::export).icon("export").noundo().params(
         "study: id|name, or joint: id|name with from and to (degrees for angles, mm for distances, or expressions) and index?, or \
@@ -142,12 +159,23 @@ pub static COMMANDS: &[CommandSpec] = &[
         "sketch: id|name; joint? with from and to, or study?; index?; samples? (2…500); auto_update?: false to detach. \
          Edits a saved associative trace's driving conditions in one undo step",
     ),
-    CommandSpec::new("motion.plot", "Plot Motion Study", analysis::plot).icon("graph").noundo().params(analysis::PLOT_DOC),
-    CommandSpec::new("motion.interference", "Motion Interference", analysis::interference)
+    CommandSpec::new("motion.plot", "Plot Motion Study", crate::checked!("motion.plot", analysis::plot))
+        .contract(&TypedContract::<crate::schema::motion_analysis::PlotParams>::new())
+        .output(output_schema_for::<crate::schema::motion_analysis::MotionPlot>)
+        .icon("graph")
+        .noundo()
+        .params(analysis::PLOT_DOC),
+    CommandSpec::new("motion.interference", "Motion Interference", crate::checked!("motion.interference", analysis::interference))
+        .contract(&TypedContract::<crate::schema::motion_analysis::InterferenceParams>::new())
+        .output(output_schema_for::<crate::schema::motion_analysis::MotionInterference>)
         .icon("interference")
         .noundo()
         .params(analysis::INTERFERENCE_DOC),
-    CommandSpec::new("joint.sweep", "Sweep Joint", sweep::sweep).icon("interference").params(sweep::SWEEP_DOC),
+    CommandSpec::new("joint.sweep", "Sweep Joint", crate::checked!("joint.sweep", sweep::sweep))
+        .icon("interference")
+        .contract(&TypedContract::<crate::schema::joint_sweep::SweepParams>::new())
+        .output(output_schema_for::<crate::schema::joint_sweep::SweepResult>)
+        .params(sweep::SWEEP_DOC),
     CommandSpec::new("joint.find_limits", "Find Joint Limits", crate::checked!("joint.find_limits", sweep::find_limits))
         .icon("interference")
         .noundo()
@@ -164,16 +192,32 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&STUDY_DELETE_CONTRACT)
         .output(output_schema_for::<MotionStudyDeleted>)
         .params("study"),
-    CommandSpec::new("explode.create", "Exploded View", explode_create).at("SOLID", "ASSEMBLE").icon("explode").enabled(has_parts_to_explode).params(
-        "name?; scale? (automatic: each occurrence pushed away from the assembly's centre by scale × its offset, default 1); \
-         moves?: [{occurrence, translate: [x,y,z]}] (instead of automatic)",
-    ),
-    CommandSpec::new("explode.show", "Show Exploded View", explode_show)
+    CommandSpec::new("explode.create", "Exploded View", crate::checked!("explode.create", explode_create))
+        .at("SOLID", "ASSEMBLE")
+        .icon("explode")
+        .enabled(has_parts_to_explode)
+        .contract(&EXPLODE_CREATE_CONTRACT)
+        .output(output_schema_for::<ExplodeCreated>)
+        .params(
+            "name?; scale? (automatic: each occurrence pushed away from the assembly's centre by scale × its offset, default 1); \
+             moves?: [{occurrence, translate: [x,y,z]}] (instead of automatic)",
+        ),
+    CommandSpec::new("explode.show", "Show Exploded View", crate::checked!("explode.show", explode_show))
         .icon("explode")
         .noundo()
+        .contract(&EXPLODE_SHOW_CONTRACT)
+        .output(output_schema_for::<ExplodeShown>)
         .params("view: id|name (or none: back to the assembled placement) — shown only; the design keeps its placements"),
-    CommandSpec::new("explode.list", "List Exploded Views", explode_list).icon("list").noundo(),
-    CommandSpec::new("explode.delete", "Delete Exploded View", explode_delete).icon("delete").params("view"),
+    CommandSpec::new("explode.list", "List Exploded Views", crate::checked!("explode.list", explode_list))
+        .icon("list")
+        .noundo()
+        .contract(&EXPLODE_LIST_CONTRACT)
+        .output(output_schema_for::<ExplodeViews>),
+    CommandSpec::new("explode.delete", "Delete Exploded View", crate::checked!("explode.delete", explode_delete))
+        .icon("delete")
+        .contract(&EXPLODE_DELETE_CONTRACT)
+        .output(output_schema_for::<ExplodeDeleted>)
+        .params("view"),
 ];
 
 const MAX_ITEMS: usize = 10_000;
@@ -798,8 +842,15 @@ pub(super) fn moved<'a>(before: &'a [(String, Mat)], after: &'a [(String, Mat)])
     after.iter().zip(before).filter(|((_, a), (_, b))| a.iter().flatten().zip(b.iter().flatten()).any(|(x, y)| (x - y).abs() > 1e-9)).map(|(a, _)| a)
 }
 
-fn pose_json(m: &Mat) -> Value {
-    json!({"origin": [m[3][0], m[3][1], m[3][2]], "x": [m[0][0], m[0][1], m[0][2]], "y": [m[1][0], m[1][1], m[1][2]], "z": [m[2][0], m[2][1], m[2][2]]})
+/// Where occurrence `name` is placed by `m`: its origin and axes.
+fn part_pose(name: &str, m: &Mat) -> PartPose {
+    let row = |i: usize| m.get(i).map_or([0.0; 3], |r| [r[0], r[1], r[2]]);
+    PartPose { occurrence: name.to_string(), pose: Pose { origin: row(3), x: row(0), y: row(1), z: row(2) } }
+}
+
+/// `drive_with_contact`'s report, typed. Its other callers read it as JSON, so it stays JSON there.
+fn drive_report(cmd: &str, out: Value) -> Result<DriveReport> {
+    serde_json::from_value(out).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn play(s: &mut Session, p: &Value) -> Result<Value> {
@@ -809,22 +860,23 @@ fn play(s: &mut Session, p: &Value) -> Result<Value> {
     let step = p.get("step").and_then(Value::as_f64).filter(|x| x.is_finite()).ok_or_else(|| bad(cmd, "`step` must be a number"))?;
     let want = values_at(s, &m, step.clamp(0.0, f64::from(m.steps)));
     let before = positions(s);
-    let (mut out, sol) = drive_with_contact(s, &want, &keyed(&m))?;
+    let (out, sol) = drive_with_contact(s, &want, &keyed(&m))?;
+    let drive = drive_report(cmd, out)?;
     let after = positions(s);
     let moved: Vec<&(String, Mat)> = moved(&before, &after).collect();
-    out["moved"] = json!(!moved.is_empty());
+    let any_moved = !moved.is_empty();
     let shown: Vec<&(String, Mat)> = if bool_(p, "quiet").unwrap_or(false) { moved } else { after.iter().collect() };
-    out["positions"] = shown.iter().map(|(n, t)| json!({"occurrence": n, "pose": pose_json(t)})).collect();
+    let positions = shown.iter().map(|(n, t)| part_pose(n, t)).collect();
     let joints: BTreeSet<u64> = m.keys.iter().map(|k| k.joint).collect();
-    out["unmoved"] = joints
+    let unmoved = joints
         .iter()
         .filter_map(|id| {
-            let (why, _) = cannot_move(s, &sol, *id)?;
+            let (reason, _) = cannot_move(s, &sol, *id)?;
             let name = s.doc.assembly.joints.iter().find(|j| j.id == *id).map(|j| j.name.clone());
-            Some(json!({"joint": id, "name": name, "reason": why}))
+            Some(UnmovedJoint { joint: *id, name, reason })
         })
         .collect();
-    Ok(out)
+    typed_reply(cmd, StudyPlayed { drive, moved: any_moved, positions, unmoved, param_warnings: Vec::new() })
 }
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
@@ -842,49 +894,55 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         let step = f64::from(m.steps) * k as f64 / (samples - 1) as f64;
         let want = values_at(&t, &m, step);
         let (r, _) = drive_with_contact(&mut t, &want, &keyed(&m))?;
-        rows.push(json!({
-            "step": step,
-            "stopped_by_contact": r["stopped_by_contact"],
-            "stopped_by_loop": r["stopped_by_loop"],
-            "positions": positions(&t).iter().map(|(n, x)| json!({"occurrence": n, "pose": pose_json(x)})).collect::<Vec<_>>(),
-        }));
+        let r = drive_report(cmd, r)?;
+        rows.push(StudySample {
+            step,
+            stopped_by_contact: r.stopped_by_contact,
+            stopped_by_loop: r.stopped_by_loop,
+            positions: positions(&t).iter().map(|(n, x)| part_pose(n, x)).collect(),
+        });
     }
-    let out = json!({"study": m.name, "steps": m.steps, "samples": rows});
     if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096) {
+        let count = rows.len();
         let text = if path.to_ascii_lowercase().ends_with(".csv") {
             let mut c = String::from("step,occurrence,x,y,z,xx,xy,xz,yx,yy,yz,zx,zy,zz\n");
             for r in &rows {
-                for p in r["positions"].as_array().into_iter().flatten() {
-                    let pose = &p["pose"];
-                    let n = |k: &str, i: usize| pose[k][i].as_f64().unwrap_or(0.0);
+                for at in &r.positions {
+                    let [o, x, y, z] = [at.pose.origin, at.pose.x, at.pose.y, at.pose.z];
+                    // The step as JSON writes it (`0.0`, not `0`), as the file always had it.
                     c += &format!(
                         "{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
-                        r["step"],
-                        p["occurrence"].as_str().unwrap_or_default().replace(',', " "),
-                        n("origin", 0),
-                        n("origin", 1),
-                        n("origin", 2),
-                        n("x", 0),
-                        n("x", 1),
-                        n("x", 2),
-                        n("y", 0),
-                        n("y", 1),
-                        n("y", 2),
-                        n("z", 0),
-                        n("z", 1),
-                        n("z", 2)
+                        Value::from(r.step),
+                        at.occurrence.replace(',', " "),
+                        o[0],
+                        o[1],
+                        o[2],
+                        x[0],
+                        x[1],
+                        x[2],
+                        y[0],
+                        y[1],
+                        y[2],
+                        z[0],
+                        z[1],
+                        z[2]
                     );
                 }
             }
             c
         } else {
-            serde_json::to_string_pretty(&out).unwrap_or_default()
+            // Through a `Value`, whose keys are sorted, so the file reads as it always did.
+            let samples = StudyExport::Samples { study: m.name, steps: m.steps, samples: rows };
+            serde_json::to_value(&samples).and_then(|v| serde_json::to_string_pretty(&v)).unwrap_or_default()
         };
         solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
         solidcraft_io::write_atomic(std::path::Path::new(path), text.as_bytes(), false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-        return Ok(json!({"path": path, "samples": rows.len()}));
+        return typed_reply(
+            cmd,
+            StudyExported { export: StudyExport::Written { path: path.to_string(), samples: count }, param_warnings: Vec::new() },
+        );
     }
-    Ok(out)
+    typed_reply(cmd, StudyExported { export: StudyExport::Samples { study: m.name, steps: m.steps, samples: rows }, param_warnings: Vec::new() })
 }
 
 /// Most samples of a motion trace: each is a solve, and a kept trace keeps every one as a fit
@@ -1208,7 +1266,8 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
     let name =
         str_(p, "name").map(str::to_string).unwrap_or_else(|| free_name("Exploded View", s.doc.assembly.exploded.iter().map(|v| v.name.as_str())));
     s.doc_mut().assembly.exploded.push(ExplodedView { id, name: name.clone(), moves: moves.clone() });
-    Ok(json!({"view": id, "name": name, "moves": moves.iter().map(|(o, t)| json!({"occurrence": o, "translate": t})).collect::<Vec<_>>()}))
+    let moves = moves.iter().map(ExplodeMoveInfo::from).collect();
+    typed_reply(cmd, ExplodeCreated { view: id, name, moves, param_warnings: Vec::new() })
 }
 
 fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1217,7 +1276,7 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
         s.pending_moves.clear();
         s.exploded.clear();
         s.revision += 1;
-        return Ok(json!({"view": null}));
+        return typed_reply(cmd, ExplodeShown { view: None, name: None, param_warnings: Vec::new() });
     }
     let i = view_index(s, p, cmd)?;
     let v = s.doc.assembly.exploded.get(i).cloned().ok_or_else(|| bad(cmd, "view"))?;
@@ -1229,7 +1288,7 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     s.exploded.clone_from(&moves);
     s.pending_moves = moves;
     s.revision += 1;
-    Ok(json!({"view": v.id, "name": v.name}))
+    typed_reply(cmd, ExplodeShown { view: Some(v.id), name: Some(v.name), param_warnings: Vec::new() })
 }
 
 /// Whether the pending moves are an exploded view shown (`explode.show`), which places the
@@ -1262,13 +1321,14 @@ fn exploded_at(moves: &[(u64, Mat, Vec3)], amount: f64) -> std::collections::BTr
 }
 
 fn explode_list(s: &mut Session, _p: &Value) -> Result<Value> {
-    Ok(json!({"views": s.doc.assembly.exploded}))
+    let views = s.doc.assembly.exploded.iter().map(ExplodedViewInfo::from).collect();
+    typed_reply("explode.list", ExplodeViews { views, param_warnings: Vec::new() })
 }
 
 fn explode_delete(s: &mut Session, p: &Value) -> Result<Value> {
     let i = view_index(s, p, "explode.delete")?;
     let v = s.doc_mut().assembly.exploded.remove(i);
-    Ok(json!({"deleted": v.name}))
+    typed_reply("explode.delete", ExplodeDeleted { deleted: v.name, param_warnings: Vec::new() })
 }
 
 /// World position of a point of an occurrence (tests).

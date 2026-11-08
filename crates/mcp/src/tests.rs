@@ -426,9 +426,6 @@ fn handshake_and_tools_list() {
     assert_eq!(init["result"]["serverInfo"]["name"], "solidcraft");
     assert!(init["result"]["capabilities"]["tools"].is_object());
     assert!(init["result"]["instructions"].as_str().unwrap().contains("headless"));
-    // An unknown version gets ours.
-    let init = call(&mut s, 2, "initialize", json!({"protocolVersion": "1999-01-01"}));
-    assert_eq!(init["result"]["protocolVersion"], PROTOCOL_VERSION);
     assert!(s.handle_line(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).is_none());
     assert!(s.is_initialized());
     assert_eq!(call(&mut s, 3, "ping", json!({}))["result"], json!({}));
@@ -1535,14 +1532,6 @@ fn unknown_tools_and_bad_arguments_are_clean_errors() {
     assert_eq!(r["result"]["isError"], true, "{r}");
     let r = raw_tool(&mut s, "execute", json!({"command": "NoSuchCommand"}));
     assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("unknown command"));
-    // Framing errors.
-    assert!(s.handle_line("{not json").unwrap().contains("-32700"));
-    assert!(s.handle_line("[]").unwrap().contains("-32600"));
-    assert!(s.handle_line("42").unwrap().contains("-32600"));
-    assert!(s.handle_line("   ").is_none());
-    assert!(s.handle_line(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#).is_none());
-    let both = s.handle_line(r#"[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/x"}]"#).unwrap();
-    assert_eq!(serde_json::from_str::<Value>(&both).unwrap().as_array().unwrap().len(), 1);
 }
 
 #[test]
@@ -1720,14 +1709,6 @@ fn hostile_arguments_never_panic() {
     for v in hostile_values().into_iter().filter(|v| !v.is_object() && !v.is_null()) {
         let r = call(&mut s, 1, "tools/call", json!({"name": "measure", "arguments": v}));
         assert_eq!(r["error"]["code"], -32602, "{r}");
-    }
-}
-
-#[test]
-fn base64_matches_rfc4648() {
-    use crate::tools::base64;
-    for (i, o) in [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy")] {
-        assert_eq!(base64(i.as_bytes()), o);
     }
 }
 
@@ -3605,9 +3586,14 @@ fn a_bridged_server_checks_calls_at_its_param_check_level() {
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     assert!(text(&r).contains(&format!("invalid parameters for `solid.box`: {warning}")), "{r}");
     assert_eq!(sent("engine.execute solid.box"), 0, "refused unsent");
-    let r = raw_tool(&mut s, "execute", json!({"command": "solid.chamfer", "params": {"nonsense": 1}}));
-    assert_ne!(r["result"]["isError"], json!(true), "{r}");
-    assert_eq!(sent("engine.execute solid.chamfer"), 1, "no contract here: the app decides");
+    // A body command with no contract yet: the first stands for them all, so converting a command
+    // doesn't break this.
+    let unchecked = solidcraft_engine::cmd::command_specs().into_iter().find(|c| c.contract.is_none() && c.id.starts_with("solid."));
+    if let Some(id) = unchecked.map(|c| c.id) {
+        let r = raw_tool(&mut s, "execute", json!({"command": id, "params": {"nonsense": 1}}));
+        assert_ne!(r["result"]["isError"], json!(true), "{id}: {r}");
+        assert_eq!(sent(&format!("engine.execute {id}")), 1, "{id}: no contract here, so the app decides");
+    }
     let r = raw_tool(&mut s, "batch", json!({"commands": [good, misspelt]}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     let reply: Value = serde_json::from_str(&text(&r)).unwrap();
@@ -3818,8 +3804,9 @@ fn compact_inspect_design_summarises_sketches_unless_asked() {
     assert_eq!(def, crate::tool_definitions_with(crate::Options { compact: true }).into_iter().find(|d| d["name"] == "inspect_design").unwrap());
     // Arguments are checked against the tools as listed: `bodies` only with compact output.
     let bodies = json!({"bodies": ["Body1"]});
-    assert!(crate::tools::check_arguments_with("inspect_design", &bodies, crate::Options { compact: true }).is_ok());
-    assert!(crate::tools::check_arguments("inspect_design", &bodies).is_err_and(|e| e.contains("bodies")));
+    let check = |options| solidcraft_mcp_server::check_arguments(&crate::tool_definitions_with(options), "inspect_design", &bodies);
+    assert!(check(crate::Options { compact: true }).is_ok());
+    assert!(check(crate::Options::default()).is_err_and(|e| e.contains("bodies")));
 
     let (_, summary) = inspect_text(&mut s, json!({"measure": false}));
     assert!(summary.len() < 4000, "{} bytes: {summary}", summary.len());

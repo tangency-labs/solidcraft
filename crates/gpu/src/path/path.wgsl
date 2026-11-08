@@ -1059,7 +1059,7 @@ fn direct_light(t: Triangle, position: vec3<f32>, physical: PrecisePoint, o: vec
         let emitter_limit=shadow_distance-select(u.lighting.x*2.0,0.0,punctual);
         if !studio || emitter_hit_precise(shadow_origin,shadow_origin_low,shadow_direction,shadow_minimum).distance>=emitter_limit {
             visibility = shadow_transmittance(shadow_origin,shadow_origin_low,shadow_direction,shadow_distance,shadow_minimum);
-            if studio && u.volume_min.w>0.0 {
+            if !OPAQUE_SCENE && studio && u.volume_min.w>0.0 {
                 var attenuation=volume_transmittance_precise(shadow_origin,shadow_origin_low,shadow_direction,shadow_distance);
                 if punctual { attenuation=volume_transmittance_precise(physical.hi,physical.lo,sample.direction,physical_distance); }
                 visibility.transmittance*=attenuation;
@@ -1174,9 +1174,14 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         if !OPAQUE_SCENE && u.lighting.w>0.0 && bounce>0u && medium_count==0u && hit.triangle!=0xffffffffu {
             if !initialize_media_spectral(hit.triangle,d,&media,&medium_count,wavelength) {return medium_failure(radiance,coverage,pixel,bounce,4u);}
         }
-        if medium_count>0u && media[medium_count-1u].scatter.x>0.0 {
+        // Surface hits and both kinds of scattering share the same ray and
+        // emitter query. Keep one copy of its precise arithmetic in the shader.
+        let emitter = emitter_hit_precise(o,o_low,d,ray_minimum);
+        // Opaque jobs cannot enter a material medium or have a scene volume.
+        // Specialize both walks out before the driver compiles the mapped shader.
+        if !OPAQUE_SCENE && medium_count>0u && media[medium_count-1u].scatter.x>0.0 {
             let current=media[medium_count-1u];
-            let boundary=min(hit.distance,emitter_hit_precise(o,o_low,d,ray_minimum).distance);
+            let boundary=min(hit.distance,emitter.distance);
             let travel=-log(1.0-random(&rng))/current.scatter.x;
             if travel<boundary {
                 texture_path_length+=travel;
@@ -1207,8 +1212,8 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
             let segment=ray_segment_precise(o,o_low,previous_position,previous_position_low,d,boundary);
             previous_pdf*=exp(-current.scatter.x*length(segment));
         }
-        if u.volume_min.w>0.0 {
-            let emitter_distance=emitter_hit_precise(o,o_low,d,ray_minimum).distance;
+        if !OPAQUE_SCENE && u.volume_min.w>0.0 {
+            let emitter_distance=emitter.distance;
             var segment=vec2<f32>(0.0);
             if bounce==0u && u.eye.w<=0.5 {
                 // The orthographic camera has no physical eye plane. Its fog
@@ -1253,7 +1258,6 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
             }
         }
         if u.environment.w > 0.0 {
-            let emitter = emitter_hit_precise(o,o_low,d,ray_minimum);
             if emitter.distance < hit.distance {
                 let light = u.area_lights[emitter.index];
                 let segment = ray_segment_precise(o,o_low,previous_position,previous_position_low,d,emitter.distance);

@@ -10,9 +10,8 @@ ordinary `execute` tool: `render.preflight`, `render.start`, `render.status`,
 `render.cancel` and `render.export`. Keep the complete returned job ID; image bytes remain
 in the session until explicit PNG export. See [render jobs](render-jobs.md).
 
-For how the same command surface should work in the browser (workers, tiered storage, in-tab
-agents), see [web-runtime.md](web-runtime.md). For sandboxed plugins and parametric timeline
-features that also use `run(command, args)`, see [plugins.md](plugins.md). Desktop MCP in this
+For sandboxed plugins and parametric timeline
+features that also use `run(command, args)`, see [RFC 0002](rfcs/0002-plugins.md). Desktop MCP in this
 document remains the reference implementation today.
 
 ## Start it

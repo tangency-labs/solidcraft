@@ -8,8 +8,8 @@ use crate::ui_kit::{Container, Edge, Surface};
 use egui::{Align, Align2, Color32, Id, Layout, Rect, RichText, Sense, Stroke, pos2, vec2};
 
 use super::*;
-use crate::theme::Tokens;
 use crate::ui_kit;
+use solidcraft_theme::Tokens;
 
 pub const MIN_WIDTH: f32 = 280.0;
 pub const MAX_WIDTH: f32 = 760.0;
@@ -56,6 +56,39 @@ const PREVIEW_MAX: (f32, f32) = (560.0, 380.0);
 
 /// Show or hide the panel (a folded panel unfolds first).
 pub fn toggle(app: &mut SolveApp) {
+    use solidcraft_engine::panels::{LayoutAction, Mutation};
+
+    let shared = app.panel_runtime().filter(|_| !app.preferences.agent_chat_popped).and_then(|runtime| {
+        let layout = runtime.layout().layout();
+        let panel = layout.instances.iter().find(|panel| panel.kind.0 == "solidcraft.assistant")?;
+        let section = layout.containing(&panel.id).ok();
+        let reveal = !app.agent_chat.open || !panel.requested_open || section.is_some_and(|section| section.collapsed || section.active != panel.id);
+        let mutations = if reveal {
+            let section = section.map_or_else(|| panel.memory.section.clone(), |section| section.id.clone());
+            let mut mutations = Vec::new();
+            if !panel.requested_open {
+                mutations.push(Mutation::Open { kind: panel.kind.clone(), instance: panel.id.clone(), destination: None });
+            }
+            mutations.push(Mutation::Collapse { section, collapsed: false });
+            mutations.push(Mutation::Activate { instance: panel.id.clone() });
+            mutations
+        } else {
+            vec![Mutation::Close { instance: panel.id.clone() }]
+        };
+        Some((reveal, LayoutAction::Apply { expected_revision: None, mutations }))
+    });
+    if let Some((reveal, action)) = shared {
+        let was_open = app.agent_chat.open;
+        if reveal {
+            app.agent_chat.open = true;
+        }
+        if let Err(reason) = app.dispatch_panel_layout(action) {
+            app.agent_chat.open = was_open;
+            let _ = crate::panel_runtime::refresh_production(app);
+            app.set_status(solidcraft_engine::panels::commands::error_text(reason), true);
+        }
+        return;
+    }
     let c = &mut app.agent_chat;
     if !c.open {
         c.open = true;
@@ -80,7 +113,8 @@ pub fn tip(app: &SolveApp) -> String {
 /// panel in this window, never label selections belonging to another native viewport.
 /// Called before layout so even a click and a shortcut in the same frame are routed here.
 pub(crate) fn owns_keyboard_input(app: &mut SolveApp, ctx: &egui::Context) -> bool {
-    let rect = app.agent_chat.panel_rect.filter(|_| shown(app) && app.agent_chat.open && !app.preferences.agent_chat_minimized);
+    let shared = app.universal_panel_host_enabled() && !app.preferences.agent_chat_popped;
+    let rect = app.agent_chat.panel_rect.filter(|_| shown(app) && app.agent_chat.open && (shared || !app.preferences.agent_chat_minimized));
     let Some(rect) = rect else {
         app.agent_chat.keyboard_owned = false;
         return false;
@@ -113,12 +147,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !(app.agent_chat.open && app.preferences.agent_chat_popped) {
         app.agent_chat.window_placed = false;
     }
-    // New chat, when the chat has focus (its input, or the pointer over the panel).
-    let in_chat = ctx.memory(|m| m.has_focus(Id::unique("sc_agent_chat_input")))
-        || ctx.pointer_hover_pos().is_some_and(|p| app.agent_chat.panel_rect.is_some_and(|r| r.contains(p)));
-    if app.agent_chat.open && in_chat && ctx.input_mut(|i| i.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
-        request_new_chat(app);
-    }
+    new_chat_shortcut(app, &ctx);
     if !app.agent_chat.open {
         return;
     }
@@ -180,6 +209,48 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// Prepare the shared docked presentation without polling its retained service.
+/// Read the previous visible rectangle before clearing this frame's geometry.
+pub(crate) fn prepare_shared(app: &mut SolveApp, ctx: &egui::Context) {
+    if shown(app) {
+        new_chat_shortcut(app, ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        if app.agent_chat.open && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
+            refresh(app, ctx);
+        }
+    }
+    app.agent_chat.panel_rect = None;
+    app.agent_chat.drop_rect = None;
+    app.agent_chat.dock_space = None;
+    app.agent_chat.window_placed = false;
+}
+
+/// Independent viewers and drop feedback keep their existing window policy.
+pub(crate) fn finish_shared(app: &mut SolveApp, ctx: &egui::Context) {
+    if !shown(app) || !app.agent_chat.open {
+        app.agent_chat.keyboard_owned = false;
+        return;
+    }
+    if app.agent_chat.panel_rect.is_none() {
+        app.agent_chat.keyboard_owned = false;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    gallery_window(app, ctx);
+    show_drop_hint(app, ctx);
+}
+
+/// Existing Assistant controls and conversation, inside the shared host's body.
+pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let rect = ui.max_rect().intersect(ui.clip_rect());
+    if !shown(app) || !app.agent_chat.open || !rect.is_finite() || !rect.is_positive() {
+        return;
+    }
+    app.agent_chat.panel_rect = Some(rect);
+    app.agent_chat.drop_rect = Some(rect);
+    crate::scenario::publish_rect("agent_chat:panel", rect);
+    ui_kit::scope(ui, |ui| content(app, ui));
+}
+
 /// Horizontal room reserved before the history and browser when Assistant is on the left.
 pub(crate) fn left_inset(app: &SolveApp, available: Rect) -> f32 {
     if Container::for_layout(app.ui.layout, Surface::Panel).floating()
@@ -189,7 +260,7 @@ pub(crate) fn left_inset(app: &SolveApp, available: Rect) -> f32 {
         && app.preferences.agent_chat_side == "left"
     {
         let width = if app.preferences.agent_chat_minimized { STRIP } else { app.preferences.agent_chat_width.clamp(MIN_WIDTH, MAX_WIDTH) };
-        (width + crate::shell::SHELL_GAP).min(available.width().max(0.0))
+        (width + crate::ui_kit::SHELL_GAP).min(available.width().max(0.0))
     } else {
         0.0
     }
@@ -205,9 +276,9 @@ pub(crate) fn tool_space(app: &SolveApp, mut available: Rect) -> Rect {
         && let Some(chat) = app.agent_chat.panel_rect.filter(|r| r.is_finite() && r.is_positive())
     {
         if app.preferences.agent_chat_side == "left" {
-            available.min.x = crate::shell::within(chat.right() + crate::shell::SHELL_GAP, available.left(), available.right());
+            available.min.x = crate::ui_kit::within(chat.right() + crate::ui_kit::SHELL_GAP, available.left(), available.right());
         } else {
-            available.max.x = crate::shell::within(chat.left() - crate::shell::SHELL_GAP, available.left(), available.right());
+            available.max.x = crate::ui_kit::within(chat.left() - crate::ui_kit::SHELL_GAP, available.left(), available.right());
         }
     }
     available
@@ -216,7 +287,7 @@ pub(crate) fn tool_space(app: &SolveApp, mut available: Rect) -> Rect {
 /// The same outer rectangle is used for the floating sheet and its docking preview.
 fn floating_bounds(app: &SolveApp, available: Rect, left: bool) -> Rect {
     let t = Tokens::get();
-    let gap = crate::shell::SHELL_GAP;
+    let gap = crate::ui_kit::SHELL_GAP;
     let mut bounds = available.shrink(gap);
     // The ribbon already supplies the top gap shared by browser and history cards.
     bounds.min.y = available.top();
@@ -532,11 +603,19 @@ pub const NEW_CHAT_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::L);
 
 /// Clear the chat, asking first when something would be lost.
-fn request_new_chat(app: &mut SolveApp) {
+pub(crate) fn request_new_chat(app: &mut SolveApp) {
     if new_chat_needs_confirm(app) {
         app.agent_chat.confirm_new = true;
     } else {
         new_chat(app);
+    }
+}
+
+fn new_chat_shortcut(app: &mut SolveApp, ctx: &egui::Context) {
+    let in_chat = ctx.memory(|m| m.has_focus(Id::unique("sc_agent_chat_input")))
+        || ctx.pointer_hover_pos().is_some_and(|p| app.agent_chat.panel_rect.is_some_and(|r| r.contains(p)));
+    if app.agent_chat.open && in_chat && ctx.input_mut(|i| i.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
+        request_new_chat(app);
     }
 }
 
@@ -811,7 +890,7 @@ fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response, left: boo
             zone.center(),
             Align2::CENTER_CENTER,
             tr(if to_left { "ui.agent_chat_dock_left" } else { "ui.agent_chat_dock_right" }),
-            egui::FontId::proportional(crate::theme::Tokens::get().font_heading),
+            egui::FontId::proportional(solidcraft_theme::Tokens::get().font_heading),
             t.text,
         );
     }
@@ -825,8 +904,14 @@ fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response, left: boo
 
 fn body(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
     header(app, ui, left);
+    content(app, ui);
+}
+
+fn content(app: &mut SolveApp, ui: &mut egui::Ui) {
     #[cfg(not(target_arch = "wasm32"))]
-    ui_kit::assistant_controls(ui, |ui| switcher(app, ui));
+    if !crate::panel_runtime::shared_content_measurement(ui.ctx()) {
+        ui_kit::assistant_controls(ui, |ui| switcher(app, ui));
+    }
     #[cfg(target_arch = "wasm32")]
     {
         ui.label(tr("ui.agent_chat_desktop_only"));
@@ -837,6 +922,8 @@ fn body(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let top = ui.cursor().top();
+    let shared = crate::panel_runtime::shared_content_measurement(ui.ctx());
     if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
         refresh(app, ui.ctx());
     }
@@ -859,16 +946,34 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
     }
-    // Discovery/install guidance must leave room for the pinned composer even when
-    // several agents are listed, or when a long message grows the editor.
-    egui::ScrollArea::vertical()
+    // Shared top controls must yield scroll space to the pinned composer, including
+    // when discovery lists several agents or a long message grows the editor.
+    let picker_max = if shared {
+        let t = Tokens::get();
+        let composer = crate::panel_runtime::shared_content_composer_height(ui.ctx())
+            .unwrap_or(48.0 + t.control_height * 3.0 + t.space_8 * 2.0 + t.space_6 * 3.0);
+        (ui.available_height() - composer - ui.spacing().item_spacing.y).max(0.0)
+    } else {
+        ui.available_height() / 3.0
+    };
+    let picker = egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_picker_scroll")
-        .max_height(ui.available_height() / 3.0)
+        .min_scrolled_height(0.0)
+        .max_height(picker_max)
         .auto_shrink([false, true])
-        .show(ui, |ui| picker(app, ui));
-    if state == State::NeedsAuth {
+        .show(ui, |ui| {
+            if shared {
+                ui_kit::assistant_controls(ui, |ui| switcher(app, ui));
+            }
+            picker(app, ui);
+            if shared && state == State::NeedsAuth {
+                inset(ui, |ui| auth_box(app, ui));
+            }
+        });
+    if !shared && state == State::NeedsAuth {
         inset(ui, |ui| auth_box(app, ui));
     }
+    let top_height = ui.cursor().top() - top - picker.inner_rect.height().min(picker.content_size.y) + picker.content_size.y;
     // The input sits at the bottom of the panel and grows upwards: a long message makes its box
     // taller up to `edit_max`, then it scrolls, and the conversation takes what is left above. It
     // is a panel of its own at the bottom, as high as its content this frame, so the buttons under
@@ -887,7 +992,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut remove_picked_at = None;
     let frame = Container::new(ui.ctx(), Surface::Viewport).edge_frame(egui::Color32::TRANSPARENT);
     let composer = Container::new(ui.ctx(), Surface::Viewport).edge("sc_agent_chat_composer", Edge::Bottom);
-    composer.resizable(false).show_separator_line(false).frame(frame).show(ui, |ui| {
+    let composer = composer.resizable(false).show_separator_line(false).frame(frame).show(ui, |ui| {
         let footer = ui_kit::assistant_composer_footer(ui, |ui| {
             let boxed = ui_kit::assistant_composer(ui, focused, |ui| {
                 // What Pick context chose for this message, each item with an ×.
@@ -919,6 +1024,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     })
                     .inner;
                 crate::scenario::publish_rect("agent_chat:input", r.rect);
+                crate::panel_runtime::register_content_focus(ui.ctx(), &r);
                 // macOS shows a window's cursors only while it is the active window: over the text box of a
                 // chat window that isn't, the pointer stays an arrow. Coming from the main window, the chat
                 // window becomes active, so the text cursor shows and the first click places the caret.
@@ -1031,15 +1137,20 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_rect("agent_chat:composer_box", boxed.response.rect);
         });
         crate::scenario::publish_rect("agent_chat:composer_footer", footer.response.rect);
+        // The enclosing bottom panel can clamp its response to the remaining
+        // viewport. Reserve the actual footer content on the next frame.
+        footer.response.rect.height()
     });
+    crate::panel_runtime::report_content_composer_height(ui.ctx(), composer.inner);
     if let Some(at) = remove_picked_at {
         remove_picked(app, at);
     }
     if pick_clicked {
         start_pick(app);
     }
-    egui::ScrollArea::vertical()
+    let conversation = egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_scroll")
+        .min_scrolled_height(0.0)
         .max_height(ui.available_height())
         .auto_shrink([false, false])
         .stick_to_bottom(true)
@@ -1051,6 +1162,8 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Last, so the scroll goes to this area and not to one nested in the conversation.
             scroll_while_selecting(ui);
         });
+    crate::scenario::publish_rect("agent_chat:conversation", conversation.inner_rect);
+    crate::panel_runtime::report_content_extent(ui, top, top_height + composer.inner + conversation.content_size.y, false);
     if esc || stop_clicked {
         cancel(app);
     }
@@ -1216,7 +1329,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     });
     if let Some(a) = &app.agent_chat.auth_status {
-        ui.label(RichText::new(a).color(t.text_dim).size(crate::theme::Tokens::get().font_small));
+        ui.label(RichText::new(a).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_small));
     }
 }
 
@@ -1594,7 +1707,7 @@ fn auth_box(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::text(ui, tr("ui.agent_chat_auth_none"), ui_kit::Text::Note("auth_none"));
         }
         for m in methods {
-            ui.add_space(crate::theme::Tokens::get().space_4);
+            ui.add_space(solidcraft_theme::Tokens::get().space_4);
             let desc = m.description.trim();
             ui_kit::text(
                 ui,
@@ -1624,7 +1737,7 @@ fn auth_box(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         }
-        ui.add_space(crate::theme::Tokens::get().space_4);
+        ui.add_space(solidcraft_theme::Tokens::get().space_4);
         if ui_kit::button(ui, tr("ui.agent_chat_auth_retry"), ui_kit::Button::Normal).clicked() {
             connect(app, ui.ctx());
         }
@@ -1659,7 +1772,7 @@ fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &
         .frame(ui_kit::Menu::frame())
         .open_memory(if opened { Some(egui::SetOpenCommand::Bool(true)) } else { None })
         .show(|ui| {
-            ui_kit::Menu::show(ui, crate::context_menu::LIST_W, |ui| {
+            ui_kit::Menu::show(ui, crate::ui_kit::LIST_W, |ui| {
                 let item = ui_kit::MenuItem::new("copy_message", tr("ui.agent_chat_copy_message"), "copy");
                 let row = item.show(ui);
                 crate::scenario::publish_handle(&format!("agent_chat:copy_menu:{n}"), row.rect.center());
@@ -1872,9 +1985,9 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             Item::Changes { steps, doc, undone } => {
                 ui.horizontal(|ui| {
                     let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
-                    ui.label(RichText::new(text).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
+                    ui.label(RichText::new(text).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
                     if *undone {
-                        ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
+                        ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
                     } else if Arc::ptr_eq(doc, &current_doc) {
                         let b =
                             ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.ai_undo_tip"));
@@ -1911,7 +2024,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 let tag = if stopped && !busy { "ui.agent_chat_queued_stopped" } else { "ui.agent_chat_queued" };
-                ui.label(RichText::new(tr(tag)).color(t.accent).semibold().size(crate::theme::Tokens::get().font_small));
+                ui.label(RichText::new(tr(tag)).color(t.accent).semibold().size(solidcraft_theme::Tokens::get().font_small));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let x = ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr("ui.agent_chat_remove"));
                     crate::scenario::publish_handle(&format!("agent_chat:pending_remove:{n}"), x.rect.center());
@@ -1931,6 +2044,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (Some((i, _)), Some(buf)) if *i == n => {
                     let te = ui_kit::message_field(ui, Id::unique(("sc_agent_pending_input", n)), buf, "");
                     crate::scenario::publish_rect("agent_chat:pending_input", te.rect);
+                    crate::panel_runtime::register_content_focus(ui.ctx(), &te);
                     ui.horizontal(|ui| {
                         if ui_kit::button(ui, tr("ui.agent_chat_save"), ui_kit::Button::Normal).clicked() {
                             edit_done = Some((n, Some(buf.clone())));
@@ -1945,7 +2059,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                         super::markdown_view::selectable(ui, egui::Label::new(RichText::new(&p.text).color(t.text)).wrap());
                     }
                     if p.image {
-                        ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(crate::theme::Tokens::get().font_small));
+                        ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_small));
                     }
                     context_chips(ui, &p.context, false);
                     files_line(ui, p.files.iter().map(|f| f.name.as_str()));
@@ -2160,7 +2274,7 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
                             r.center(),
                             Align2::CENTER_CENTER,
                             f.mark(),
-                            egui::FontId::proportional(crate::theme::Tokens::get().font_micro),
+                            egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro),
                             color,
                         );
                         r.width()
@@ -2419,10 +2533,10 @@ mod tests {
     #[test]
     fn assistant_header_and_composer_keep_actions_inside_each_panel_width() {
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             for width in [280.0, 440.0, 760.0] {
                 let ctx = crate::fonts::test_context();
-                crate::theme::apply(&ctx);
+                solidcraft_theme::apply(&ctx);
                 let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
                 app.agent_chat.detection = Some(discover::Detection::default());
                 app.agent_chat.picking = Some(false);
