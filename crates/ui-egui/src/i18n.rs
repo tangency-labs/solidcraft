@@ -459,6 +459,41 @@ mod tests {
         assert_eq!(english.label("Center X"), "Center X");
     }
 
+    /// English is in US spelling (#9194, #13470): no message spells a word the British way,
+    /// and English (UK) still reads the ones it changed in British spelling.
+    #[test]
+    fn english_messages_are_in_us_spelling() {
+        install();
+        // Names keep their own spelling: a font's licence and a filament's colour name.
+        let names = ["Ubuntu Font Licence", "ABS - Grey"];
+        let british = [
+            "centre", "centres", "centred", "colour", "colours", "coloured", "moulding", "modelling", "labelled", "behaviour",
+            "cancelled", "towards", "favourite", "licence", "neighbouring", "millimetres",
+        ];
+        let mut found = Vec::new();
+        solidcraft_ui_text::each_english_message(|id, text| {
+            let mut rest = text.to_string();
+            for name in names {
+                rest = rest.replace(name, "");
+            }
+            let words = rest.split(|c: char| !c.is_ascii_alphabetic()).map(str::to_ascii_lowercase);
+            if let Some(word) = words.into_iter().find(|w| british.contains(&w.as_str())) {
+                found.push(format!("{id}: {word}"));
+            }
+        });
+        assert!(found.is_empty(), "British spelling in English: {found:#?}");
+        let uk = Locale::for_language("en-GB");
+        assert_eq!(
+            Locale::for_language("en").text("help.sketch.circle.center"),
+            "Draws a circle from its center and its diameter. Use it for holes, bosses and other round features whose center is known."
+        );
+        assert_eq!(
+            uk.text("help.sketch.circle.center"),
+            "Draws a circle from its centre and its diameter. Use it for holes, bosses and other round features whose centre is known."
+        );
+        assert!(uk.text("refused.face_flat").contains("modelling"), "{}", uk.text("refused.face_flat"));
+    }
+
     /// A new design's name, `Untitled`, is a default name like `Sketch1`: it shows translated
     /// wherever the design's name is shown (the tab, the browser's top row, the save prompt).
     #[test]
