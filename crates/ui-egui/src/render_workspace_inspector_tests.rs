@@ -1540,6 +1540,7 @@ fn clearing_physical_stage_preserves_unsaved_camera_background_and_output_intent
 
 #[test]
 fn render_camera_labels_do_not_shadow_mechanical_pitch_and_axes_remain_explicit() {
+    crate::i18n::install();
     let en = solidcraft_ui_text::Locale::for_language("en");
     let de = solidcraft_ui_text::Locale::for_language("de");
     assert_eq!(de.label("Pitch"), "Steigung");

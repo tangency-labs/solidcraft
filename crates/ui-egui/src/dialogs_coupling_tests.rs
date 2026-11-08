@@ -220,6 +220,7 @@ fn play_turns_the_angle_of_a_planar_pinion() {
 /// The dialog's rows pass their English text, which the catalogs translate by its key.
 #[test]
 fn the_dialog_labels_translate() {
+    crate::i18n::install();
     let de = solidcraft_ui_text::Locale::for_language("de");
     for (english, german) in [
         ("Gear 1", "Zahnrad 1"),

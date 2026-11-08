@@ -1714,6 +1714,7 @@ mod tests {
     /// changes not saved yet says so below, since a cut name hides the tab's bullet.
     #[test]
     fn tab_tooltip_says_where_the_design_is_saved() {
+        crate::i18n::install();
         assert_eq!(tab_tooltip("plate", Some("/srv/designs/plate.solidcraft"), false, false), "/srv/designs/plate.solidcraft");
         assert_eq!(tab_tooltip("a-long-name", Some("/srv/a-long-name.solidcraft"), true, false), "a-long-name\n/srv/a-long-name.solidcraft");
         assert_eq!(tab_tooltip("Untitled", None, false, false), "Not saved yet");
