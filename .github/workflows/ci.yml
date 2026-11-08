@@ -2,7 +2,7 @@
 # PRs test what they touch; main and nightly test everything. On a pull request the "Select
 # checks" job maps the changed files to workspace packages (scripts/ci/affected.py), adds the
 # packages that depend on them, and Clippy, the test archive and the test shards cover only
-# those. Test data under tests/, vendored crates under vendor/ and root files a crate embeds
+# those. Test data under tests/, vendored code under vendor/ and solidcore/ and root files a crate embeds
 # select the packages that read them. Changes to the lockfile, root manifest,
 # toolchain/cargo/nextest config, this workflow, scripts/ or any file no package owns select the
 # whole workspace, as do pushes to main that change code, the nightly run and Run workflow.
@@ -32,6 +32,11 @@
 # are all skipped; it gets its own concurrency group (below) so it never cancels the real run. Its
 # `ci` job still runs and reports the commit's real result (see the `ci` job): the merge queue
 # reads `ci` from the newest run of a commit, so a run without it would block a PR that passed.
+# SolidCore checks run SolidCore's own required checks (its fmt, Clippy, panic-site inventory, tests,
+# kernel rig, goldens and wasm compile, as solidcore/.github/workflows/ci.yml defines them) from
+# solidcore/, on a pull request (once approved), merge group or push to main that changes
+# solidcore/** (main saves their caches), with SolidCore's cargo-deny (licences, bans, sources,
+# advisories): solidcore/ is outside the workspace, so the workspace's cargo-deny never sees it.
 # Cross-compilation is opt-in through Run workflow; release builds remain in release.yml.
 # The release gate (release-gate.yml) calls this workflow (workflow_call) as a Run workflow with
 # cross-compilation on.
@@ -130,7 +135,6 @@ jobs:
       actions: read
     outputs:
       native: ${{ steps.paths.outputs.native }}
-      kernel: ${{ steps.paths.outputs.kernel }}
       windows: ${{ steps.paths.outputs.windows }}
       # The GPU path tests run (see the rule where it is computed). The job's `if` and the `ci` job's check both read this, so they cannot disagree.
       gpu: ${{ steps.paths.outputs.gpu }}
@@ -144,6 +148,8 @@ jobs:
       deps: ${{ steps.paths.outputs.deps }}
       # A merge group reaches the wasm build: Compile WebAssembly.
       wasm: ${{ steps.paths.outputs.wasm }}
+      # solidcore/** changed (approved pull requests, merge groups, pushes to main): SolidCore checks.
+      solidcore: ${{ steps.paths.outputs.solidcore }}
       # The passing run a merge of main carries forward (its URL), when this push is only that.
       carried: ${{ steps.paths.outputs.carried }}
     steps:
@@ -157,6 +163,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PUSH_SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
           GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -168,11 +175,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           native=false
-          kernel=false
           windows=false
           gpu_paths=false
           deps=false
           wasm=false
+          solidcore=false
           full=true
           packages=
           # Whether the NUL-separated paths in $1 reach any code: scripts/ci/affected.py selects
@@ -186,12 +193,12 @@ jobs:
           }
           # Whether the NUL-separated paths in $1 (the diff $2) reach what the Windows D3D12 jobs
           # exercise: the GPU crate and its shaders, the app and its startup, the viewport's wgpu
-          # glue, the vendored egui-wgpu, their scripts, or a lockfile change that moves the
-          # graphics stack (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
+          # glue, the vendored egui-wgpu and kernel, their scripts, or a lockfile change that moves
+          # the graphics stack (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
-                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*) windows=true ;;
+                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*|solidcore/*) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
               esac
             done < "$1"
@@ -224,9 +231,14 @@ jobs:
                 Cargo.lock|Cargo.toml|*/Cargo.toml) deps=true ;;
               esac
               case "$path" in
-                crates/*|apps/solidcraft-web/*|vendor/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml) wasm=true ;;
+                crates/*|apps/solidcraft-web/*|vendor/*|solidcore/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml) wasm=true ;;
               esac
             done < "$1"
+          }
+          # Whether the NUL-separated paths in $1 change the vendored kernel (solidcore/**): SolidCore
+          # checks run its own required checks. Pull requests, merge groups and pushes to main share it.
+          solidcore_paths() {
+            if grep -qz '^solidcore/' "$1"; then solidcore=true; fi
           }
           # Opt-in for a big render change: a pull request labelled render-tests, or a merge group
           # holding one (its pull requests are the (#N) of its squash commits), runs them whatever
@@ -240,6 +252,17 @@ jobs:
             return 1
           }
           if [ "$EVENT_NAME" = push ]; then
+            # SolidCore checks for a push to main that changes solidcore/**, whatever the queue
+            # tested: main saves their caches, which every pull request restores. A push that
+            # can't be compared (new branch, force push) runs them.
+            if [ "$GITHUB_REF_NAME" = main ]; then
+              if git diff --no-renames --name-only -z "$BEFORE_SHA" "$PUSH_SHA" > "$RUNNER_TEMP/ci-solidcore-paths" 2>/dev/null; then
+                solidcore_paths "$RUNNER_TEMP/ci-solidcore-paths"
+              else
+                solidcore=true
+              fi
+              echo "solidcore=$solidcore for $BEFORE_SHA..$PUSH_SHA"
+            fi
             # The queue lands the very commit its merge_group run tested. If that run passed,
             # testing the push again proves nothing new; otherwise (a merge that skipped the
             # queue, or the API cannot answer) test everything.
@@ -274,6 +297,7 @@ jobs:
               windows_paths "$RUNNER_TEMP/ci-paths" "$GROUP_BASE_SHA...$GROUP_HEAD_SHA"
               gpu_paths "$RUNNER_TEMP/ci-paths"
               deps_wasm_paths "$RUNNER_TEMP/ci-paths"
+              solidcore_paths "$RUNNER_TEMP/ci-paths"
               if [ "$gpu_paths" = false ] && group_has_render_label "$GROUP_BASE_SHA..$GROUP_HEAD_SHA"; then
                 gpu_paths=true
               fi
@@ -282,8 +306,9 @@ jobs:
               gpu_paths=true
               deps=true
               wasm=true
+              solidcore=true
             fi
-            echo "windows=$windows gpu_paths=$gpu_paths deps=$deps wasm=$wasm for $GROUP_BASE_SHA...$GROUP_HEAD_SHA"
+            echo "windows=$windows gpu_paths=$gpu_paths deps=$deps wasm=$wasm solidcore=$solidcore for $GROUP_BASE_SHA...$GROUP_HEAD_SHA"
           elif [ "$EVENT_NAME" != pull_request ]; then
             # The nightly run and Run workflow: everything, Windows included.
             native=true
@@ -292,15 +317,13 @@ jobs:
           else
             # Compare both old and new paths of renames; unknown paths run native checks.
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-paths"
-            while IFS= read -r -d '' path; do
-              case "$path" in crates/kernel/*|vendor/truck-*) kernel=true ;; esac
-            done < "$RUNNER_TEMP/ci-paths"
             # Computed as for a merge group, then turned off below (the fast lane).
             windows_paths "$RUNNER_TEMP/ci-paths" "$BASE_SHA...$HEAD_SHA"
             # The advisories run on the pull request itself (it builds nothing of ours: about two minutes, most of it installing cargo-deny);
             # the wasm compile waits for the merge queue.
             deps_wasm_paths "$RUNNER_TEMP/ci-paths"
             wasm=false
+            solidcore_paths "$RUNNER_TEMP/ci-paths"
             # Pull requests build and test the touched packages and their dependents; nothing
             # selected means no code changed.
             select_packages "$RUNNER_TEMP/ci-paths"
@@ -325,6 +348,7 @@ jobs:
             quick=$native
             native=false
             oracle=false
+            solidcore=false
           fi
           # A push that only merges main into the change (Merge branch 'main', Update branch) when
           # the change itself already passed: nothing new to test here, and main tests the merged
@@ -337,6 +361,7 @@ jobs:
             if [ -n "$carried" ]; then
               echo "Only a merge of main into a change that passed in $carried: repository checks only."
               native=false
+              solidcore=false
             fi
           fi
           # The GPU path tests (their own job, about 56 runner-minutes) are for render changes only:
@@ -361,12 +386,12 @@ jobs:
           {
             echo "native=$native"
             echo "gpu=$gpu"
-            echo "kernel=$kernel"
             echo "windows=$windows"
             echo "oracle=$oracle"
             echo "doctests=$doctests"
             echo "deps=$deps"
             echo "wasm=$wasm"
+            echo "solidcore=$solidcore"
             echo "carried=$carried"
             echo "full=$full"
             echo "quick=$quick"
@@ -1015,7 +1040,7 @@ jobs:
     # commit's real run instead: the merge queue reads `ci` from the newest run of a commit, so a
     # run without a passing `ci` would block a pull request that passed (#1850, #3182, #3252).
     name: ci
-    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-startup, dependency-advisories, wasm]
+    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-startup, dependency-advisories, wasm, solidcore]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
@@ -1073,6 +1098,8 @@ jobs:
           ADVISORIES: ${{ needs.dependency-advisories.result }}
           WASM_RUN: ${{ needs.changes.outputs.wasm }}
           WASM: ${{ needs.wasm.result }}
+          SOLIDCORE_RUN: ${{ needs.changes.outputs.solidcore }}
+          SOLIDCORE: ${{ needs.solidcore.result }}
         run: |
           test "$CHANGES" = success
           test "$CHECKS" = success
@@ -1110,6 +1137,10 @@ jobs:
           if [ "$WASM_RUN" = true ]; then
             test "$WASM" = success
           fi
+          # solidcore/** changed on an approved pull request, in a merge group or on main.
+          if [ "$SOLIDCORE_RUN" = true ]; then
+            test "$SOLIDCORE" = success
+          fi
       - name: Note a carried result
         if: needs.changes.outputs.carried != ''
         env:
@@ -1136,6 +1167,208 @@ jobs:
           key: wasm
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - run: cargo xtask wasm
+
+  # SolidCore's own checks (its required fmt, clippy, test, kernel-rig, goldens and wasm, and its
+  # deny and publish-dry-run, in solidcore/.github/workflows/ci.yml, which GitHub does not run from
+  # a subfolder), with its commands, its toolchain (solidcore/rust-toolchain.toml) and solidcore/ as
+  # the working directory. For a pull request, merge group or push to main that changes
+  # solidcore/** (Select checks' `solidcore`), where `ci` requires it; skipped otherwise. Its build,
+  # kernel-rig and goldens jobs are one entry here, so the rig and goldens binaries are built once
+  # without an artifact between jobs.
+  solidcore:
+    name: SolidCore checks (${{ matrix.check }})
+    needs: changes
+    if: needs.changes.outputs.solidcore == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: fmt and clippy
+            key: lint
+            runner: blacksmith-8vcpu-ubuntu-2404
+          - check: tests
+            key: tests
+            runner: blacksmith-16vcpu-ubuntu-2404
+          - check: kernel rig and goldens
+            key: rig
+            runner: blacksmith-16vcpu-ubuntu-2404
+          - check: wasm
+            key: wasm
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - check: deny
+            key: deny
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - check: publish dry run
+            key: publish
+            runner: blacksmith-4vcpu-ubuntu-2404
+    defaults:
+      run:
+        working-directory: solidcore
+    env:
+      CARGO_INCREMENTAL: 0
+      # Tests that read upstream/TestFiles fail instead of skipping when it is missing.
+      SOLIDCORE_REQUIRE_UPSTREAM: "1"
+      BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain (solidcore/rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      # Main saves the cache; every other run restores it, read-only.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: "solidcore -> bin"
+          key: solidcore-${{ matrix.key }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      # .github/actions/upstream, run from solidcore/ (a composite action's steps would run from the
+      # repository root): usd-brep at the pin in scripts/upstream-pin.env, for upstream/TestFiles.
+      - name: Upstream sources (TestFiles)
+        if: matrix.check == 'tests' || matrix.check == 'kernel rig and goldens'
+        run: |
+          while IFS='=' read -r k v; do
+            case "$k" in
+              UPSTREAM_REPO|UPSTREAM_VERSION|UPSTREAM_COMMIT) export "$k=$v" ;;
+            esac
+          done < scripts/upstream-pin.env
+          git init upstream
+          git -C upstream remote add origin "$UPSTREAM_REPO"
+          git -C upstream fetch --depth 1 origin "$UPSTREAM_COMMIT" \
+            || git -C upstream fetch origin
+          git -C upstream checkout --detach "$UPSTREAM_COMMIT"
+
+      # fmt (and SolidCore's ci-scripts job, which is cheap enough to ride along).
+      - name: Format
+        if: matrix.check == 'fmt and clippy'
+        run: cargo fmt --all --check
+      # scripts/ci/check-frozen-archives.sh reads HEAD:<path> from the repository root, which here
+      # is SolidCraft's, so the same check runs on the solidcore/ paths.
+      - name: No new entries in frozen archives (one file per finding / upstream issue)
+        if: matrix.check == 'fmt and clippy'
+        run: |
+          fail=0
+          for f in plan/findings.md plan/upstream-issues.md crates/goldens/known_mismatches.toml; do
+            if git cat-file -e "HEAD:solidcore/$f" 2>/dev/null; then
+              echo "::error file=solidcore/$f::solidcore/$f is retired and must not come back (see scripts/ci/check-frozen-archives.sh)."
+              fail=1
+            fi
+          done
+          exit $fail
+      - name: CI script tests
+        if: matrix.check == 'fmt and clippy'
+        run: |
+          python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
+          scripts/ci/test-wasm-digest.sh
+          python3 -I scripts/ci/check_record_ids.py
+      - name: Clippy
+        if: matrix.check == 'fmt and clippy'
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      # Panic-prone calls the deny lints don't see, compared with plan/panic-sites.tsv, which may
+      # only shrink. The checker reads <base>:plan/panic-sites.tsv from the repository root, so it
+      # gets a commit whose tree is the base's solidcore/ (none before solidcore/ existed: the
+      # ratchet then starts with this list, as the checker reports).
+      - name: Panic-site inventory
+        if: matrix.check == 'fmt and clippy'
+        run: |
+          if [ -n "$BASE" ]; then
+            git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch -q --no-tags --depth=1 origin "$BASE"
+          fi
+          if [ -n "$BASE" ] && tree=$(git rev-parse -q --verify "$BASE:solidcore"); then
+            base=$(GIT_AUTHOR_NAME=ci GIT_AUTHOR_EMAIL=ci@invalid GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=ci@invalid \
+              git commit-tree "$tree" -m "solidcore/ at $BASE")
+            python3 -I scripts/ci/check_panic_sites.py --base "$base"
+          else
+            python3 -I scripts/ci/check_panic_sites.py
+          fi
+
+      # test: every test once in the goldens profile, then the doctests, then the solids report
+      # (exits 1 while any primitive fails, so only a crash or a missing JSON fails).
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        if: matrix.check == 'tests'
+        with:
+          tool: cargo-nextest@0.9.150
+      - name: Workspace tests (goldens profile)
+        if: matrix.check == 'tests'
+        run: cargo nextest run --workspace --cargo-profile goldens --no-fail-fast
+      - name: Doctests (goldens profile)
+        if: matrix.check == 'tests'
+        run: cargo test --workspace --profile goldens --doc
+      - name: Solids report (primitives example)
+        if: matrix.check == 'tests'
+        run: |
+          set +e
+          cargo run --profile goldens -p solidcore --example primitives -- --json reports/solids/solids.json
+          rc=$?
+          set -e
+          [ "$rc" -le 1 ] && test -s reports/solids/solids.json
+      # main's solids report, for SolidCore's site (solidcore-pages.yml, scripts/fetch-solids.sh).
+      - name: Upload solids report
+        if: matrix.check == 'tests' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: solids-report
+          path: solidcore/reports/solids/solids.json
+          if-no-files-found: error
+          retention-days: 90
+
+      # build, kernel-rig and goldens: the rig's test binary and the goldens binary (goldens
+      # profile), the rig run from its crate's directory, then every unit against its golden.
+      - name: Build the rig and goldens binaries (goldens profile)
+        id: binaries
+        if: matrix.check == 'kernel rig and goldens'
+        run: |
+          mkdir -p dist
+          rig=$(cargo test --profile goldens -p solidcore-ops --test kernel_cases --no-run \
+                  --message-format=json \
+                | jq -r 'select(.reason == "compiler-artifact" and .target.name == "kernel_cases"
+                                and .profile.test) | .executable' | tail -n 1)
+          test -x "$rig"
+          cp "$rig" dist/kernel_cases
+          cargo build --profile goldens -p goldens
+          cp bin/goldens/goldens dist/goldens
+      - name: Kernel rig
+        if: matrix.check == 'kernel rig and goldens'
+        env:
+          KERNEL_CASES_REPORT: ${{ github.workspace }}/solidcore/reports/kernel-rig/table.md
+        run: |
+          mkdir -p reports/kernel-rig
+          cd crates/solidcore-ops
+          "$GITHUB_WORKSPACE/solidcore/dist/kernel_cases" --ignored --nocapture
+      - name: Upload the kernel rig table
+        if: always() && matrix.check == 'kernel rig and goldens'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: solidcore-kernel-rig
+          path: solidcore/reports/kernel-rig/
+          if-no-files-found: ignore
+          retention-days: 30
+      # Also when the rig failed: SolidCore runs the two as separate jobs.
+      - name: Every unit against its golden
+        if: ${{ !cancelled() && matrix.check == 'kernel rig and goldens' && steps.binaries.outcome == 'success' }}
+        run: dist/goldens --all --goldens --jobs 0 --no-report
+
+      - name: Compile solidcore for wasm32
+        if: matrix.check == 'wasm'
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo check -p solidcore --target wasm32-unknown-unknown
+
+      # SolidCore's deny job (licences, bans, sources) with its deny.toml, plus the advisories, as
+      # the workspace's Dependency advisories check them (unmaintained crates reported, not fatal).
+      - name: Install cargo-deny
+        if: matrix.check == 'deny'
+        run: cargo install cargo-deny --version 0.20.2 --locked
+      - name: Licences, bans and sources (solidcore/deny.toml)
+        if: matrix.check == 'deny'
+        run: cargo deny --locked check licenses bans sources
+      - name: Advisories
+        if: matrix.check == 'deny'
+        run: cargo deny --locked check --warn unmaintained advisories
+
+      # The packaging check SolidCore's release workflow runs before publishing (no secrets).
+      - name: Publish dry run
+        if: matrix.check == 'publish dry run'
+        run: cargo publish -p solidcore --locked --dry-run
 
   riscv64-gates:
     name: Compile RISC-V (manual)

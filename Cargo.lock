@@ -4051,7 +4051,6 @@ dependencies = [
 [[package]]
 name = "solidcore"
 version = "1.0.1"
-source = "git+https://github.com/tangency-labs/solidcore?rev=a445bdaac60a980b0e9d1dba3ee28eb7ada44f50#a445bdaac60a980b0e9d1dba3ee28eb7ada44f50"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -4060,7 +4059,6 @@ dependencies = [
 [[package]]
 name = "solidcore-record"
 version = "0.1.0"
-source = "git+https://github.com/tangency-labs/solidcore?rev=a445bdaac60a980b0e9d1dba3ee28eb7ada44f50#a445bdaac60a980b0e9d1dba3ee28eb7ada44f50"
 dependencies = [
  "serde",
  "serde_json",
@@ -4405,6 +4403,7 @@ dependencies = [
  "image",
  "log",
  "minisign-verify",
+ "muda",
  "nix 0.31.3",
  "pollster 0.4.0",
  "proc-macro2",

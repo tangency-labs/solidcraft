@@ -1,0 +1,3556 @@
+{
+ "cases": [
+  {
+   "name": "corner_points_nan_u_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     "NaN",
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_nan_v_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     "NaN"
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_inf_u_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     "inf",
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_outside_u_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     2.0,
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_outside_v_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     -1e-12
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "null_surface_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": null,
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_mid_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_corner_max_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_corner_min_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_mid_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.3505848413052427
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_min_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.0,
+     0.0634210842965636
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_max_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     1.0,
+     0.6377485983139218
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_below_u_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -1e-09,
+     0.3505848413052427
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_curve_bounded_mid_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "curve_bounded": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.3505848413052427
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_knot0_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.8262343359196858,
+     0.3
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_mid_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -2.737649966055478,
+     5.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_min_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -5.475299932110956,
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_max_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.0,
+     10.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_below_u_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -5.475299933110956,
+     5.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_curve_bounded_mid_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "curve_bounded": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -2.737649966055478,
+     5.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_knot0_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -4.061086369737861,
+     5.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_knot1_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -2.030543184868931,
+     10.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_mid_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_min_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_max_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_below_u_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -1e-09,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_curve_bounded_mid_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "point",
+    "surf": {
+     "curve_bounded": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_nan_u_normal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     "NaN",
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_nan_v_normal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     "NaN"
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_inf_u_normal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     "inf",
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_outside_u_normal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     2.0,
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_outside_v_normal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     -1e-12
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "null_surface_normal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": null,
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_mid_normal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_corner_max_normal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_corner_min_normal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_mid_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.3505848413052427
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_min_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.0,
+     0.0634210842965636
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_max_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     1.0,
+     0.6377485983139218
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_below_u_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -1e-09,
+     0.3505848413052427
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_curve_bounded_mid_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "curve_bounded": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.3505848413052427
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_knot0_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.8262343359196858,
+     0.3
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_mid_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -2.737649966055478,
+     5.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_min_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -5.475299932110956,
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_max_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.0,
+     10.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_below_u_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -5.475299933110956,
+     5.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_curve_bounded_mid_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "curve_bounded": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -2.737649966055478,
+     5.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_knot0_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -4.061086369737861,
+     5.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_knot1_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -2.030543184868931,
+     10.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_mid_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_min_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_max_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_below_u_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -1e-09,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_curve_bounded_mid_normal",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "normal",
+    "surf": {
+     "curve_bounded": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_nan_u_derivatives",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     "NaN",
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_nan_v_derivatives",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     "NaN"
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_inf_u_derivatives",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     "inf",
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_outside_u_derivatives",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     2.0,
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_outside_v_derivatives",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     -1e-12
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "null_surface_derivatives",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": null,
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_mid_derivatives",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_corner_max_derivatives",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "corner_points_corner_min_derivatives",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:219",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          1
+         ],
+         [
+          0,
+          12,
+          0,
+          1
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          1
+         ],
+         [
+          10,
+          12,
+          0,
+          1
+         ]
+        ]
+       ]
+      }
+     }
+    },
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_mid_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.3505848413052427
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_min_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.0,
+     0.0634210842965636
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_max_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     1.0,
+     0.6377485983139218
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_below_u_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -1e-09,
+     0.3505848413052427
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_curve_bounded_mid_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "curve_bounded": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.3505848413052427
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "surface_knot0_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.8262343359196858,
+     0.3
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_mid_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -2.737649966055478,
+     5.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_min_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -5.475299932110956,
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_max_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.0,
+     10.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_below_u_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -5.475299933110956,
+     5.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_curve_bounded_mid_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "curve_bounded": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -2.737649966055478,
+     5.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_knot0_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -4.061086369737861,
+     5.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_knot1_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -2.030543184868931,
+     10.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_mid_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_min_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_max_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_below_u_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "bspline": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     -1e-09,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  },
+  {
+   "name": "dropcurvesurface_curve_bounded_mid_derivatives",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "what": "derivatives",
+    "surf": {
+     "curve_bounded": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "sentinel": [
+     101.5,
+     -202.25,
+     303.125,
+     -404.0,
+     505.5,
+     -606.75,
+     707.0,
+     -808.5,
+     909.25
+    ]
+   }
+  }
+ ]
+}

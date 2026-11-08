@@ -1,0 +1,35 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-path-flange-straight-on-from-the-sheet-refused",
+  "expected": {
+    "method": "the first line's angle to the sheet makes the first bend; a line at 0 degrees to it makes none, so the path is refused with the line it is about",
+    "outcome": "refused",
+    "refusal": "line 1 of the path flange's path runs straight on from the sheet",
+    "source": "invariants",
+    "sources": [],
+    "what": "sheet.path_flange along a line that runs straight on from the sheet (in its own plane): no bend to make"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 9 (sheet.path_flange): line 1 of the path flange's path runs straight on from the sheet or back over it: each line must turn",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 9 (sheet.path_flange): line 1 of the path flange's path runs straight on from the sheet or back over it: each line must turn",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "sheet.path_flange along a line that runs straight on from the sheet (in its own plane): no bend to make",
+  "why_not": [
+    "no kernel operation ran before the failure: step 9 (sheet.path_flange): line 1 of the path flange's path runs straight on from the sheet or back over it: each line must turn"
+  ]
+}

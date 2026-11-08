@@ -1342,17 +1342,18 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         },
         "ui.prefs" => wrap(crate::prefs::control(app, p)),
         "ui.agent_chat" => wrap(crate::agent_chat::control(app, ctx, p)),
-        "ui.help" => match s("item") {
-            Some(i @ ("about" | "updates" | "shortcuts" | "report" | "crashes")) => {
-                crate::help::run(app, ctx, i);
-                ok(
-                    json!({"diagnostics": crate::help::diagnostics(app), "version": crate::help::VERSION, "commit": crate::help::COMMIT, "built": crate::help::BUILD_DATE}),
-                )
+        "ui.help" => {
+            // The Help menu's items (the macOS menu bar sends the same); none only reports.
+            const ITEMS: [&str; 8] = ["about", "updates", "shortcuts", "report", "crashes", "docs", "messages", "install_cli"];
+            match s("item") {
+                Some(i) if !ITEMS.contains(&i) => return err(format!("unknown help item `{i}` ({})", ITEMS.join(", "))),
+                Some(i) => crate::help::run(app, ctx, i),
+                None => {}
             }
-            _ => ok(
+            ok(
                 json!({"diagnostics": crate::help::diagnostics(app), "version": crate::help::VERSION, "commit": crate::help::COMMIT, "built": crate::help::BUILD_DATE}),
-            ),
-        },
+            )
+        }
         "ui.selectOther" => wrap(crate::select_other::control(app, p)),
         "ui.menuPick" => {
             let Some(key) = s("item") else { return err("missing `item` (id or label)") };

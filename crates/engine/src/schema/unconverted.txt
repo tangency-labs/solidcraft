@@ -11,8 +11,6 @@ file.export
 file.insert_mesh
 file.insert_step
 file.new
-file.save
-file.save_as
 file.save_mesh
 file.slicers
 motion.export_animation
@@ -26,10 +24,10 @@ render.preflight
 render.scene
 render.start
 sheet.export_dxf
-sketch.dimension
 sketch.draw.dimensioned
 sketch.slot.center_to_center
 sketch.slot.overall
+solid.align
 solid.coil
 solid.draft
 solid.emboss
@@ -47,7 +45,6 @@ solid.revolve
 solid.shell
 solid.split_body
 solid.split_face
-solid.sweep
 solid.thread
 surface.blend
 surface.extend
@@ -56,5 +53,4 @@ surface.loft
 surface.patch
 surface.revolve
 surface.ruled
-surface.sweep
 surface.trim

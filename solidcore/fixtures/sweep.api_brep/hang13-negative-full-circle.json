@@ -1,0 +1,202 @@
+{
+ "cases": [
+  {
+   "name": "hang13_linear_circle_cap0_neg",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": -10,
+    "cap": false
+   }
+  },
+  {
+   "name": "hang13_linear_circle_cap1_neg",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": -10,
+    "cap": true
+   }
+  },
+  {
+   "name": "hang13_linear_analytic_circle_cap0_neg",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": -10,
+    "cap": false
+   }
+  },
+  {
+   "name": "hang13_linear_analytic_circle_cap1_neg",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": -10,
+    "cap": true
+   }
+  },
+  {
+   "name": "hang13_linear_arc_360_cap0_neg",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5,
+      "start_deg": 0,
+      "end_deg": 360
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": -10,
+    "cap": false
+   }
+  },
+  {
+   "name": "hang13_linear_arc_360_cap1_neg",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5,
+      "start_deg": 0,
+      "end_deg": 360
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": -10,
+    "cap": true
+   }
+  },
+  {
+   "name": "hang13_linear_reps1_circle_cap1_neg",
+   "inputs": {
+    "op": "linear_reps",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": -10,
+    "reps": 1,
+    "cap": true
+   }
+  },
+  {
+   "name": "hang13_linear_reps2_circle_cap1_neg",
+   "inputs": {
+    "op": "linear_reps",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": -10,
+    "reps": 2,
+    "cap": true
+   }
+  }
+ ]
+}

@@ -53,6 +53,11 @@ nix = { workspace = true }
 # updated by its installer (MIT; already in the tree as a build dependency).
 winreg = "0.56"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# The macOS menu bar (window_chrome::native_menu; MIT OR Apache-2.0, already in the tree through
+# the desktop app).
+muda = { version = "0.21.2", default-features = false }
+
 [dev-dependencies]
 solidcraft-engine = { workspace = true, features = ["bundled-render-library", "profile"] }
 # Parse the source guard structurally, including code after inline test modules.

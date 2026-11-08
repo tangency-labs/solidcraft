@@ -1,0 +1,47 @@
+{
+  "area": "fillets",
+  "bodies": {},
+  "calls": [],
+  "case": "896-fillet-smooth-seam-refused",
+  "expected": {
+    "method": "box 40x30x20 with all 12 edges rounded R3 (faces: 6 planes, 12 quarter cylinders, 8 sphere octants). The line at y=3 along the top where the flat top meets the R3 round tangentially is a smooth edge (dihedral 180 degrees): there is no corner to fillet, so the pick is refused with a clean error, never a result.",
+    "outcome": "refused",
+    "refusal": "is smooth",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#896",
+      "tangency-labs/solidcraft#936"
+    ],
+    "what": "a fillet picked on the seam where a rounded edge runs tangent into the flat top has no corner to round and is refused as an invalid pick"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 3 (solid.fillet): invalid input: the edge at (20.000, 3.000, 20.000) is smooth: its faces meet tangentially, so there is nothing to round",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 3 (solid.fillet): invalid input: the edge at (20.000, 3.000, 20.000) is smooth: its faces meet tangentially, so there is nothing to round",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#896",
+    "tangency-labs/solidcraft#936"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "a fillet picked on the seam where a rounded edge runs tangent into the flat top has no corner to round and is refused as an invalid pick",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.fillet): invalid input: the edge at (20.000, 3.000, 20.000) is smooth: its faces meet tangentially, so there is nothing to round"
+  ]
+}

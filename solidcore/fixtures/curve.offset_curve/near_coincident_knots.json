@@ -1,0 +1,756 @@
+{
+ "cases": [
+  {
+   "name": "eq_copy_raw_gap1.5e-12_owns0",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63 (copy constructor shares m_pCurve when it is not owned; an owned base is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "base": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        18,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        24,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        30,
+        -6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.5,
+       0.5000000000015,
+       0.7,
+       1,
+       1,
+       1,
+       1
+      ],
+      "raw_knots": true
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 3.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": false
+    },
+    "op": "eq",
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_raw_gap1.5e-12_owns0",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63 (copy constructor shares m_pCurve when it is not owned; an owned base is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "base": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        18,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        24,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        30,
+        -6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.5,
+       0.5000000000015,
+       0.7,
+       1,
+       1,
+       1,
+       1
+      ],
+      "raw_knots": true
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 3.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": false
+    },
+    "op": "copy",
+    "probes": [
+     0.1,
+     0.5,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "eq_copy_raw_gap1.5e-12_owns1",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63 (copy constructor shares m_pCurve when it is not owned; an owned base is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "base": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        18,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        24,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        30,
+        -6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.5,
+       0.5000000000015,
+       0.7,
+       1,
+       1,
+       1,
+       1
+      ],
+      "raw_knots": true
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 3.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": true
+    },
+    "op": "eq",
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_raw_gap1.5e-12_owns1",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63 (copy constructor shares m_pCurve when it is not owned; an owned base is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "base": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        18,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        24,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        30,
+        -6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.5,
+       0.5000000000015,
+       0.7,
+       1,
+       1,
+       1,
+       1
+      ],
+      "raw_knots": true
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 3.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": true
+    },
+    "op": "copy",
+    "probes": [
+     0.1,
+     0.5,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "eq_copy_raw_gap1.9e-12_owns0",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63 (copy constructor shares m_pCurve when it is not owned; an owned base is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "base": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        18,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        24,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        30,
+        -6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.4999999999981,
+       0.5,
+       0.7,
+       1,
+       1,
+       1,
+       1
+      ],
+      "raw_knots": true
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 3.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": false
+    },
+    "op": "eq",
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_raw_gap1.9e-12_owns0",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63 (copy constructor shares m_pCurve when it is not owned; an owned base is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "base": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        18,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        24,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        30,
+        -6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.4999999999981,
+       0.5,
+       0.7,
+       1,
+       1,
+       1,
+       1
+      ],
+      "raw_knots": true
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 3.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": false
+    },
+    "op": "copy",
+    "probes": [
+     0.1,
+     0.5,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "eq_copy_raw_gap1.9e-12_owns1",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63 (copy constructor shares m_pCurve when it is not owned; an owned base is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "base": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        18,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        24,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        30,
+        -6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.4999999999981,
+       0.5,
+       0.7,
+       1,
+       1,
+       1,
+       1
+      ],
+      "raw_knots": true
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 3.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": true
+    },
+    "op": "eq",
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_raw_gap1.9e-12_owns1",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63 (copy constructor shares m_pCurve when it is not owned; an owned base is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "base": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        18,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        24,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        30,
+        -6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.4999999999981,
+       0.5,
+       0.7,
+       1,
+       1,
+       1,
+       1
+      ],
+      "raw_knots": true
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 3.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": true
+    },
+    "op": "copy",
+    "probes": [
+     0.1,
+     0.5,
+     0.9
+    ]
+   }
+  }
+ ]
+}

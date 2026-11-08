@@ -1,0 +1,1531 @@
+{
+  "cases": [
+    {
+      "name": "source-file-l_shaped_box-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/l_shaped_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-6_sided_corner-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/6_sided_corner.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-brick-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/brick.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-box_on_box-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_on_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-box_diff_cyl-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-box1x1x2-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box1x1x2.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-corner_box-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/corner_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-nurb_box-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/nurb_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-box_w_slot-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_w_slot.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-box_with_large_fillet-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "box_with_large_fillet.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-box_diff_cyl_big_rad-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-filleted_box-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/filleted_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-cyl_on_box-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/cyl_on_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-cyl_on_box_w_fillet-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/cyl_on_box_w_fillet.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-rollover_corner-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/rollover_corner.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-file-bague-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bague.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-box-union-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                0,
+                0,
+                10
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-box-difference-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_difference",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                20,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                10,
+                10,
+                -1
+              ],
+              "size": [
+                20,
+                20,
+                12
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-cylinder-all-edges",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 5,
+            "height": 10
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "source-cylinder-seam-edge0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 5,
+            "height": 10
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-cylinder-rim-edge1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 5,
+            "height": 10
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-cylinder-rim-edge2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 5,
+            "height": 10
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-box-union-edge0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                0,
+                0,
+                10
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-box-union-edge1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                0,
+                0,
+                10
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-box-union-edge2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                0,
+                0,
+                10
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-box-union-edge5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                0,
+                0,
+                10
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-box-union-edge7",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                0,
+                0,
+                10
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-box-union-edge10",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                0,
+                0,
+                10
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            10
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-box-union-edge14",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                0,
+                0,
+                10
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-l_shaped_box-edge0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/l_shaped_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-l_shaped_box-edge3",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/l_shaped_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-l_shaped_box-edge5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/l_shaped_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-l_shaped_box-edge9",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/l_shaped_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            9
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-l_shaped_box-edge12",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/l_shaped_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            12
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-l_shaped_box-edge16",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/l_shaped_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            16
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_with_large_fillet-edge0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "box_with_large_fillet.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_with_large_fillet-edge1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "box_with_large_fillet.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_with_large_fillet-edge3",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "box_with_large_fillet.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_with_large_fillet-edge4",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "box_with_large_fillet.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_with_large_fillet-edge5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "box_with_large_fillet.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_with_large_fillet-edge12",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "box_with_large_fillet.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            12
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-cyl_on_box-edge0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/cyl_on_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-cyl_on_box-edge4",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/cyl_on_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-cyl_on_box-edge7",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/cyl_on_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-cyl_on_box-edge12",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/cyl_on_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            12
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-cyl_on_box-edge14",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/cyl_on_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-corner_box-edge0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/corner_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-corner_box-edge4",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/corner_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-corner_box-edge8",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/corner_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            8
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-corner_box-edge9",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/corner_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            9
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-corner_box-edge12",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/corner_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            12
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-corner_box-edge13",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/corner_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            13
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-nurb_box-edge0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/nurb_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-nurb_box-edge5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/nurb_box.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_diff_cyl_big_rad-r0.5-edge0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_diff_cyl_big_rad-r0.5-edge6",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            6
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_diff_cyl_big_rad-r0.5-edge12",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            12
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_diff_cyl_big_rad-r0.5-edge14",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_diff_cyl_big_rad-r2.0-edge0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_diff_cyl_big_rad-r2.0-edge6",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            6
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_diff_cyl_big_rad-r2.0-edge12",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            12
+          ]
+        }
+      }
+    },
+    {
+      "name": "source-file-box_diff_cyl_big_rad-r2.0-edge14",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14
+          ]
+        }
+      }
+    },
+    {
+      "name": "surface-surface-test-sm-surface-surface-fillet",
+      "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:161",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    }
+  ]
+}

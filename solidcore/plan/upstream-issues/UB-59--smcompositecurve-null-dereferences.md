@@ -1,0 +1,11 @@
+#### UB-59. `SmCompositeCurve` NULL dereferences
+- **Severity:** Crash / undefined behaviour
+- **Area:** Curves
+- **Location:** `SmCompositeCurve.cpp:595` `ApproximateCurve` (`rpNewBSplineCurve->AssertValid()` after `CreateByJoining` fails without making a curve); `:392` `CalculateBoundingBox` (`*pBBox` is written unconditionally).
+- **What happens:** NULL dereference.
+- **Trigger:** `ApproximateCurve` on unconnected segments; `CalculateBoundingBox` with `pBBox = NULL`.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** crash/UB.
+- **Rust port:** Returns the join error / `InvalidInput`.
+- **Fuzz sweep trigger (2026-10-20):** the `AssertValid` dereference is at `SmCompositeCurve.cpp:676` (`:595` is the def.). `CreateByJoining` also fails, leaving `rpNewBSplineCurve` NULL, for connected segments when a segment's knot span vanishes in the shift `u + (lastJoinedKnot - firstSegmentKnot)` (knot `1e-300` after a joined end at `~4.24`, `curve.composite_curve_p1` fuzz `fuzz00767`: `/comp/curves/1/bspline/oob = true`, `/comp/curves/2/bspline/u/4 = 1e-300`, op `approx`, `tol = 0.01`): `CreateCanonical` rejects the repeated knot. SIGSEGV in the C++ reference run: change **Confirmed:** to yes. FFI guard: `check_approx`, `crates/solidcore-ffi/src/units/curve_composite_curve_p1.rs:338`.

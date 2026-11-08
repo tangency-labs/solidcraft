@@ -1,0 +1,146 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "shell",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              8.333333333333332,
+              0.0,
+              6.666666666666666
+            ]
+          ],
+          "tolerance": 0.034642016151377554
+        },
+        "thickness": -0.346
+      }
+    }
+  ],
+  "case": "cov-shell-up-down-joined-squares-open-at-a-side-wall",
+  "expected": {
+    "bbox": {
+      "max": [
+        10,
+        10,
+        10
+      ],
+      "min": [
+        -10,
+        -10,
+        -10
+      ]
+    },
+    "body_count": 1,
+    "method": "every wall is 10 x 10 or more and the shell thin; the body is four 10 x 10 columns, two 20 tall (x<0<y and y<0<x) and two 10 tall (x,y<0 up, x,y>0 down): V = 6000. Its faces are all axis planes, so the cavity with every kept face moved 0.346 in and extended to meet (the open face's own plane bounding it) is the set of points more than 0.346 from the outside in the max norm, with a 0.346 slab laid over the open face; summed exactly over the grid of the body's coordinates and those +-0.346: cavity 5232.76615, material 767.23385. Rounding the cavity at the 59.654 mm of concave edges instead (the true offset; where the up and down parts meet only along an edge, at the origin) enlarges it by at most (1 - pi/4) 0.346^2 per mm, with 0.346^3 at each of the 8 edge ends: 1.86396, so material 765.36989 .. 767.23385. A shell that fails to open leaves 2 shells; the full solid is 6000",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": [
+      765.36,
+      767.24
+    ],
+    "what": "four squares drawn edge to edge, three extruded 10 up and three 10 down and joined, shelled 0.346 mm open at a side wall (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): typical/up-down-join, Body1/F2:side:l1 face.shell)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 74,
+      "faces": 26,
+      "vertices": 47
+    }
+  },
+  "records": "cov-shell-up-down-joined-squares-open-at-a-side-wall.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4448.7177280000005,
+      "body_count": 1,
+      "edges": 74,
+      "faces": 26,
+      "vertices": 47,
+      "volume_mm3": 767.2338469439992
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [],
+  "what": "four squares drawn edge to edge, three extruded 10 up and three 10 down and joined, shelled 0.346 mm open at a side wall (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): typical/up-down-join, Body1/F2:side:l1 face.shell)",
+  "why_not": []
+}

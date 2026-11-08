@@ -2387,8 +2387,8 @@ fn set_config_option_checked(app: &mut SolveApp, id: &str, value: &str, listed_o
 
 /// `ui.agent_chat` on the control channel (tests and screenshots): `enabled`, `command`,
 /// `connect_at_start` and `open_at_start` (the launch preferences), `instructions` (the custom
-/// instructions, #8220), `open`,
-/// `side`, `minimized`, `width`, `refresh`, `connect`, `stop`, `attach` (a file's path, for the
+/// instructions, #8220), `open`, `toggle` (show or hide the panel as its button does, unfolding a
+/// folded one), `side`, `minimized`, `width`, `refresh`, `connect`, `stop`, `attach` (a file's path, for the
 /// next message), `remove_file` (index), `send`, `attach_view`, `attach_selection`, `pick`,
 /// `permission` (an option id, or `"cancel"`), `approve` (`true`/`false`, the oldest held
 /// request), `cancel` (Stop), `send_now` (steer: stop, then send the queue), `remove_pending` (index), `undo` (the newest message's changes); returns the panel's state.
@@ -2502,6 +2502,9 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
     }
     if let Some(o) = p.get("open").and_then(Value::as_bool) {
         app.agent_chat.open = o;
+    }
+    if p.get("toggle").and_then(Value::as_bool) == Some(true) {
+        toggle(app);
     }
     if let Some(s) = p.get("side").and_then(Value::as_str) {
         if !matches!(s, "left" | "right") {
