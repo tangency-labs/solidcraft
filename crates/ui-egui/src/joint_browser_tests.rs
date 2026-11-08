@@ -70,7 +70,7 @@ fn anything_else_puts_out_a_picked_joints_light() {
 
     // Selecting something beside the joint.
     pick(&mut h);
-    let body = h.app.session.world_state().bodies.first().unwrap().name.clone();
+    let body = h.app.session.world_state().unwrap().bodies.first().unwrap().name.clone();
     crate::viewport::select(&mut h.app, Some(solidcraft_engine::Sel::Body { name: body }), true, false);
     h.frames(2);
     assert_eq!(solid(&h), None);
@@ -328,7 +328,7 @@ fn show_joints_draws_only_that_placements_joints() {
 
     let solid = h.app.session.occurrence_bodies(&path, true).unwrap();
     assert!(!solid.is_empty());
-    let world = h.app.session.world_state();
+    let world = h.app.session.world_state().unwrap();
     let kept = crate::viewport::solid_bodies(&h.app);
     assert_eq!(kept.as_deref(), Some(&solid.iter().cloned().collect()));
     for b in &world.bodies {
