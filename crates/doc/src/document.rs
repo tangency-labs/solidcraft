@@ -61,6 +61,9 @@ pub enum PlaneRef {
     /// Another plane rotated about a line (in world coordinates) by an angle expression. With
     /// `line`, an edge or round face of the model ([`crate::construct::model_axis`]), the line is
     /// found there on each evaluation and `axis_origin`/`axis_dir` are where it was when picked.
+    /// With `direction_only`, only the axis direction is used: it is projected onto the base
+    /// (nothing of that projection is kept as geometry) and the plane turns about the line
+    /// through `pivot`, or through the base origin when `pivot` is absent.
     AtAngle {
         base: Box<PlaneRef>,
         axis_origin: Vec3,
@@ -68,6 +71,12 @@ pub enum PlaneRef {
         angle: Expr,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         line: Option<Box<GeoRef>>,
+        /// Use only the axis direction (projected onto the base), not the axis as a full line.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        direction_only: bool,
+        /// Pivot for `direction_only`; absent means the base plane's origin.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pivot: Option<Box<GeoRef>>,
     },
     /// A construction plane feature (by id).
     Construction { feature: FeatureId },
@@ -4450,7 +4459,7 @@ impl Document {
                 let b = self.resolve_plane_in(vals, base, depth + 1, st)?;
                 Ok(b.offset(Self::eval_in(vals, distance, Kind::Length)?))
             }
-            PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line } => {
+            PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot } => {
                 let b = self.resolve_plane_in(vals, base, depth + 1, st)?;
                 let a = Self::eval_in(vals, angle, Kind::Angle)?;
                 let (axis_origin, axis_dir) = match line {
@@ -4460,7 +4469,26 @@ impl Document {
                     }
                     None => (*axis_origin, *axis_dir),
                 };
-                let d = axis_dir.normalized().ok_or_else(|| DocError::Invalid("rotation axis".into()))?;
+                let (axis_origin, d) = if *direction_only {
+                    let n = b.normal();
+                    let in_plane = axis_dir - n * n.dot(axis_dir);
+                    let d = in_plane
+                        .normalized()
+                        .ok_or_else(|| DocError::Invalid("the axis is square to the plane, so it has no direction in the plane".into()))?;
+                    let pivot = match pivot {
+                        Some(g) => {
+                            let st = st.ok_or_else(|| DocError::Invalid("this plane is built from the model: evaluate first".into()))?;
+                            crate::construct::point(&crate::construct::Ctx { doc: self, vals, st, depth }, g)?
+                        }
+                        None => b.origin,
+                    };
+                    // Keep the pivot in the base so a slightly off pick still turns about an in-plane line.
+                    let pivot = pivot - n * n.dot(pivot - b.origin);
+                    (pivot, d)
+                } else {
+                    let d = axis_dir.normalized().ok_or_else(|| DocError::Invalid("rotation axis".into()))?;
+                    (axis_origin, d)
+                };
                 let rot = |v: Vec3| v * a.cos() + d.cross(v) * a.sin() + d * (d.dot(v) * (1.0 - a.cos()));
                 let o = axis_origin + rot(b.origin - axis_origin);
                 Plane::new(o, rot(b.x), rot(b.y)).ok_or_else(|| DocError::Invalid("degenerate plane".into()))

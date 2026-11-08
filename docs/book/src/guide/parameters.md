@@ -46,6 +46,11 @@ In the MANAGE tab's PARAMETERS section, click **Parameters** to open the user an
 parameter editor. The **Configurations** button in CONFIGURATIONS opens the configuration table;
 **Configure** remains in the dropdown for configuring columns.
 
+The **Filter** box lists the parameters whose name, expression, comment or group contains what
+you type, in any case. It also finds a name by the starts of its words, in order: `toodia`,
+`toofla` and `outdia` all find `tooth_outward_flange_diameter`. Underscores, hyphens and
+camelCase (`boltHoleDepth`) separate the words. Autocomplete offers parameters the same way.
+
 Press **Enter** in the new parameter's name, expression or comment field to add it.
 Valid entries return focus to the name field for the next parameter; invalid entries remain
 editable. In expression fields, type a parameter or dimension name for autocomplete,

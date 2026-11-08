@@ -248,6 +248,12 @@ pub(crate) fn text_field(ui: &mut Ui, value: &mut String, hint: &str) -> (bool, 
     (enter, changed)
 }
 
+/// Plain field reserving trailing space for an in-field value such as a counter.
+pub(crate) fn text_field_reserving(ui: &mut Ui, value: &mut String, hint: &str, reserve: f32) -> (bool, Response) {
+    let (enter, _, response) = editor_reserving(ui, value, hint, false, reserve);
+    (enter, response)
+}
+
 /// [`text_field`] with a tooltip; returns (Enter, changed). Tokens: `same as field`.
 pub(crate) fn text_field_tip(ui: &mut Ui, value: &mut String, hint: &str, tip: &str) -> (bool, bool) {
     let (enter, changed, response) = editor(ui, value, hint, false);
@@ -927,6 +933,52 @@ pub(crate) fn dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str,
     dropdown_menu_with_close_behavior(ui, id, current, egui::PopupCloseBehavior::CloseOnClick, add)
 }
 
+/// A width-bounded toolbar picker. Long selected values and popup rows truncate;
+/// callers can retain their complete labels in hover text.
+pub(crate) fn bounded_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, width: f32, add: impl FnOnce(&mut Ui)) -> Response {
+    crate::prefs_search::note_current(ui, current);
+    if crate::prefs_search::querying(ui)
+        && (!ui.is_visible() || (crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[current])))
+    {
+        return crate::prefs_search::hidden_response(ui);
+    }
+    let width = dimension(width);
+    let response = ui
+        .allocate_ui_with_layout(vec2(width, row_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.set_width(width);
+            let widget = ui.make_persistent_id(egui::IdSalt::new(&id));
+            let combo = egui::ComboBox::from_id_salt(id)
+                .width(width)
+                .height(Tokens::get().space_24 * 14.0)
+                .selected_text(current)
+                .truncate()
+                .icon(dropdown_arrow);
+            let popup = super::container::show_combo(ui, widget, combo, |ui| {
+                ui.set_max_width(width);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                add(ui);
+            });
+            let response = popup.response;
+            if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                response.request_focus();
+            }
+            response
+        })
+        .inner;
+    publish(ui, &response, egui::Role::ComboBox);
+    // The shared kit publication supplies chrome and row metadata, but omits
+    // the selected value. Restore both for the final focus/click announcement;
+    // visual truncation must not truncate the accessible captured-source name.
+    response.widget_info(|| {
+        let row_label = label(ui);
+        let name = if row_label.trim().is_empty() { current } else { crate::i18n::tr_label(row_label) };
+        let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), name);
+        info.current_text_value = Some(current.to_owned());
+        info
+    });
+    response
+}
+
 /// Dropdown with explicit dismissal behavior. For editable content use `CloseOnClickOutside`
 /// and close the popup when a choice is accepted.
 pub(crate) fn dropdown_menu_with_close_behavior(
@@ -986,6 +1038,16 @@ fn dropdown_menu_width(
         paint_dropdown_icon(ui, response.rect, icon);
     }
     publish(ui, &response, egui::Role::ComboBox);
+    // Kit chrome publishes the row label after egui's selected-text metadata.
+    // Keep that label when present, and the visible action/value for a bare
+    // dropdown, without losing its full current value in the final announcement.
+    response.widget_info(|| {
+        let row_label = label(ui);
+        let name = if row_label.trim().is_empty() { current } else { crate::i18n::tr_label(row_label) };
+        let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), name);
+        info.current_text_value = Some(current.to_owned());
+        info
+    });
     response
 }
 
@@ -1638,7 +1700,38 @@ pub(crate) fn number_field<T: egui::emath::Numeric>(
     speed: f64,
     suffix: &str,
 ) -> Response {
-    let response = ui.add(egui::DragValue::new(value).range(range).speed(speed).suffix(suffix).custom_parser(crate::prefs::parse_number));
+    bounded_number_field(ui, value, range, speed, suffix, true)
+}
+
+/// A bounded editor that preserves an existing out-of-range value until the person edits it.
+/// Useful when a selected resource profile changes the admissible range: revealing the field
+/// must not silently lower saved intent. Typing and dragging still respect the current limits.
+pub(crate) fn number_field_preserving<T: egui::emath::Numeric>(
+    ui: &mut Ui,
+    value: &mut T,
+    range: std::ops::RangeInclusive<T>,
+    speed: f64,
+    suffix: &str,
+) -> Response {
+    bounded_number_field(ui, value, range, speed, suffix, false)
+}
+
+fn bounded_number_field<T: egui::emath::Numeric>(
+    ui: &mut Ui,
+    value: &mut T,
+    range: std::ops::RangeInclusive<T>,
+    speed: f64,
+    suffix: &str,
+    clamp_existing: bool,
+) -> Response {
+    let response = ui.add(
+        egui::DragValue::new(value)
+            .range(range)
+            .clamp_existing_to_range(clamp_existing)
+            .speed(speed)
+            .suffix(suffix)
+            .custom_parser(crate::prefs::parse_number),
+    );
     if response.has_focus() {
         crate::prefs_search::note_key_sink(ui.ctx());
     }

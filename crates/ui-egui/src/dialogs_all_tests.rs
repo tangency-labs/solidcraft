@@ -375,6 +375,7 @@ fn check_form(command: &str, labels: &[&str]) {
         "joint.cam" => &["Other side"],
         "frame.member" => &["All Lines", "Mirror"],
         "solid.pattern.path" => &["Flip direction"],
+        "construct.plane.at_angle" => &["Use axis direction only"],
         _ => &[],
     };
     for label in checks {

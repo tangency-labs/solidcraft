@@ -66,6 +66,55 @@ pub struct SamplingReport {
     pub transmission_strata: u32,
 }
 
+/// Display progress for an adaptive checkpoint. Production iterations do not imply
+/// a uniform sample count: each pixel stops at its own independently chosen budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewStage {
+    Pilot,
+    Production,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct AdaptivePreview {
+    pub stage: PreviewStage,
+    pub completed: u32,
+    pub target: u32,
+    pub pilot_samples: u32,
+    pub minimum_production_samples: u32,
+    pub maximum_production_samples: u32,
+}
+impl AdaptivePreview {
+    /// Derived only from captured sampling options and an absolute completed pass.
+    pub fn at(options: super::JobOptions, completed: u32) -> Result<Option<Self>> {
+        let Some(adaptive) = options.adaptive else { return Ok(None) };
+        options.preview_target()?;
+        Ok(Some(Self::captured(adaptive, options.samples, completed)?))
+    }
+    /// The same captured statistical policy is shared by native CPU and GPU jobs.
+    /// The completed ordinal spans pilots plus production; it is not a per-pixel count.
+    pub fn captured(adaptive: AdaptiveSampling, maximum: u32, completed: u32) -> Result<Self> {
+        adaptive.validate(maximum)?;
+        let target = adaptive
+            .pilot_samples
+            .checked_add(maximum)
+            .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "adaptive checkpoint target overflow"))?;
+        if completed == 0 || completed > target {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "checkpoint exceeds captured sampling passes"));
+        }
+        Ok({
+            let pilot = completed <= adaptive.pilot_samples;
+            Self {
+                stage: if pilot { PreviewStage::Pilot } else { PreviewStage::Production },
+                completed: if pilot { completed } else { completed - adaptive.pilot_samples },
+                target: if pilot { adaptive.pilot_samples } else { maximum },
+                pilot_samples: adaptive.pilot_samples,
+                minimum_production_samples: adaptive.min_samples,
+                maximum_production_samples: maximum,
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +137,36 @@ mod tests {
         assert!(AdaptiveSampling { pilot_samples: 1, ..p }.validate(128).is_err());
         assert!(AdaptiveSampling { absolute_error: 0.0, ..p }.validate(128).is_err());
         assert!(serde_json::from_str::<AdaptiveSampling>(r#"{"noise_guarantee":true}"#).is_err());
+    }
+
+    #[test]
+    fn adaptive_checkpoint_metadata_tracks_pilots_and_variable_production_iterations() {
+        for maximum in [16, 64, 4096] {
+            for pilots in [16, 32, 256] {
+                let options = super::super::JobOptions {
+                    samples: maximum,
+                    adaptive: Some(AdaptiveSampling { pilot_samples: pilots, min_samples: 16, ..Default::default() }),
+                    ..Default::default()
+                };
+                let total = options.preview_target().unwrap();
+                assert_eq!(total, pilots + maximum);
+                assert!(AdaptivePreview::at(options, 0).is_err());
+                assert!(AdaptivePreview::at(options, total + 1).is_err());
+                for ordinal in 1..=total {
+                    let info = AdaptivePreview::at(options, ordinal).unwrap().unwrap();
+                    assert_eq!(info.pilot_samples, pilots);
+                    assert_eq!((info.minimum_production_samples, info.maximum_production_samples), (16, maximum));
+                    if ordinal <= pilots {
+                        assert_eq!((info.stage, info.completed, info.target), (PreviewStage::Pilot, ordinal, pilots));
+                    } else {
+                        assert_eq!((info.stage, info.completed, info.target), (PreviewStage::Production, ordinal - pilots, maximum));
+                    }
+                }
+            }
+        }
+        assert!(
+            AdaptivePreview::at(super::super::JobOptions::default(), 4096).unwrap().is_none(),
+            "CPU profile checkpoints do not use GPU sampling options"
+        );
     }
 }

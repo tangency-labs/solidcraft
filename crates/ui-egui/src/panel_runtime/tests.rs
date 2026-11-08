@@ -1,6 +1,690 @@
+#![cfg(test)]
+
 use solidcraft_engine::panels::*;
 
 use super::*;
+
+fn surface_test_palette(dark: bool) -> crate::theme::Tokens {
+    let mut tokens = if dark { crate::theme::Tokens::dark() } else { crate::theme::Tokens::light() };
+    tokens.panel = if dark { egui::Color32::BLACK } else { egui::Color32::WHITE };
+    let ink = if dark { egui::Color32::WHITE } else { egui::Color32::BLACK };
+    tokens.text = ink;
+    tokens.text_dim = ink;
+    tokens.form_ink = ink;
+    tokens.form_dim = ink;
+    tokens.dialog_label = ink;
+    tokens
+}
+
+#[test]
+fn panel_surface_policy_keeps_disabled_host_storage_small() {
+    assert!(
+        std::mem::size_of::<HostSurfaceStyle>() < std::mem::size_of::<crate::theme::Tokens>(),
+        "disabled host policy must not embed whole palettes in SolveApp"
+    );
+}
+
+#[test]
+fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
+    use egui::Color32;
+    use solidcraft_engine::geom::srgb::{decode8, encode8};
+    let high_contrast = crate::theme_files::resolve(crate::theme_files::find("high-contrast", &[]).unwrap());
+    // Independent stored-premultiplied source-over for both real renderer target
+    // formats. This does not call the production contrast/bounds predicate.
+    let blend = |source: Color32, ground: Color32, linear: bool| {
+        let remain = 1.0 - f64::from(source.a()) / 255.0;
+        let channel = |source: u8, ground: u8| {
+            if linear {
+                encode8(decode8(source) + decode8(ground) * remain)
+            } else {
+                (f64::from(source) + f64::from(ground) * remain).round().clamp(0.0, 255.0) as u8
+            }
+        };
+        Color32::from_rgb(channel(source.r(), ground.r()), channel(source.g(), ground.g()), channel(source.b(), ground.b()))
+    };
+    let inks = |tokens: &crate::theme::Tokens| [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label];
+    for (name, authored) in [("light", crate::theme::Tokens::light()), ("dark", crate::theme::Tokens::dark()), ("high-contrast", high_contrast)] {
+        let ctx = egui::Context::default();
+        let _scope = crate::theme::scoped_panel_tokens(authored);
+        assert!(inks(&authored).iter().all(|ink| ink.a() == 255), "these shipped canonical ink pairs are opaque: {name}");
+        for floating in [false, true] {
+            let raw = crate::ui_kit::panel_host_frame(&ctx, floating).fill.to_srgba_unmultiplied();
+            let opaque = Color32::from_rgb(raw[0], raw[1], raw[2]);
+            let impossible = inks(&authored).iter().any(|ink| crate::theme::contrast_ratio(*ink, opaque) < 4.5);
+            for translucency_percent in [0.0_f32, 50.0, 100.0] {
+                let requested = 1.0 - translucency_percent / 100.0;
+                let style = HostSurfaceStyle::capture(&ctx, false, Some(requested), None);
+                let appearance = style.appearance(PanelSurface::Translucent, floating);
+                let palette = style.palette(appearance);
+                match &appearance.contrast {
+                    ContrastOutcome::Readable { effective_background_alpha } => {
+                        assert!(!impossible, "a shipped unreadable authored pair cannot be reported compliant: {name}");
+                        assert!(*effective_background_alpha >= requested);
+                        assert_eq!(inks(palette), inks(&authored), "ordinary resolution preserves every canonical ink: {name}");
+                    }
+                    ContrastOutcome::RetainReadableFallback { reason } => {
+                        assert!(impossible, "fallback is justified by an independently checked opaque pair: {name}");
+                        assert_eq!(*reason, ContrastFailure::UnreadableAtFullOpacity);
+                        assert_eq!(appearance.fill.a(), 255);
+                    }
+                }
+                for viewport in [0, 1, 64, 117, 192, 254, 255] {
+                    for linear in [false, true] {
+                        let background = blend(appearance.fill, Color32::from_gray(viewport), linear);
+                        for ink in inks(palette) {
+                            let physical_ink = blend(ink, background, linear);
+                            assert!(
+                                crate::theme::contrast_ratio(physical_ink, background) >= 4.5,
+                                "{name}: primary/muted text at translucency {translucency_percent}, viewport {viewport}, linear={linear}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn captured_panel_surfaces_protect_all_inks_at_requested_translucencies() {
+    let ctx = egui::Context::default();
+    for dark in [false, true] {
+        let tokens = surface_test_palette(dark);
+        let _scope = crate::theme::scoped_panel_tokens(tokens);
+        for translucency_percent in [0.0_f32, 50.0, 100.0] {
+            let opacity = 1.0 - translucency_percent / 100.0;
+            let style = HostSurfaceStyle::capture(&ctx, false, Some(opacity), None);
+            for floating in [false, true] {
+                let appearance = style.appearance(PanelSurface::Translucent, floating);
+                let ContrastOutcome::Readable { effective_background_alpha } = appearance.contrast else {
+                    panic!("valid theme must remain authored")
+                };
+                assert!(effective_background_alpha >= opacity);
+                assert_eq!(effective_background_alpha, f32::from(appearance.fill.a()) / 255.0);
+                assert_eq!(style.palette(appearance), &tokens);
+                assert!(crate::theme::panel_surface_readable(appearance.fill, style.palette(appearance)));
+                if appearance.fill.a() > (opacity * 255.0).ceil() as u8 {
+                    let [r, g, b, alpha] = appearance.fill.to_srgba_unmultiplied();
+                    let previous = egui::Color32::from_rgba_unmultiplied(r, g, b, alpha - 1);
+                    assert!(!crate::theme::panel_surface_readable(previous, &tokens), "chosen byte is the first readable candidate");
+                }
+            }
+            assert_eq!(style.appearance(PanelSurface::Opaque, false).fill.a(), 255);
+        }
+    }
+}
+
+#[test]
+fn panel_contrast_checks_interior_luminance_and_translucent_muted_inks() {
+    let mut tokens = surface_test_palette(false);
+    // This ink has >=4.5 contrast against both black and white, yet an interior
+    // viewport background can match it exactly. Endpoint checks alone are false.
+    let middle = egui::Color32::from_gray(117);
+    tokens.form_dim = middle;
+    assert!(crate::theme::contrast_ratio(middle, egui::Color32::BLACK) >= 4.5);
+    assert!(crate::theme::contrast_ratio(middle, egui::Color32::WHITE) >= 4.5);
+    assert!(!crate::theme::panel_surface_readable(egui::Color32::TRANSPARENT, &tokens));
+    tokens.form_dim = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 240);
+    assert!(crate::theme::panel_surface_readable(egui::Color32::WHITE, &tokens), "RGBA ink is composited rather than rejected");
+    tokens.form_dim = egui::Color32::TRANSPARENT;
+    assert!(!crate::theme::panel_surface_readable(egui::Color32::WHITE, &tokens), "invisible muted ink cannot satisfy contrast");
+}
+
+#[test]
+fn panel_contrast_encloses_actual_premultiplied_gpu_blends() {
+    use egui::Color32;
+    use solidcraft_engine::geom::srgb::{decode8, encode8};
+    // Independent physical source-over oracle: read stored premultiplied bytes,
+    // never the production readability predicate or unpremultiplication helper.
+    let physical = |source: Color32, background: Color32, linear: bool, dither: f64| {
+        let remain = 1.0 - f64::from(source.a()) / 255.0;
+        let channel = |source: u8, background: u8| {
+            let source = f64::from(source) + dither;
+            if linear {
+                // Test source channels here are integer and undithered on the
+                // linear path; transfer-function fixtures independently cover it.
+                encode8(decode8(source.round().clamp(0.0, 255.0) as u8) + decode8(background) * remain)
+            } else {
+                (source + f64::from(background) * remain).round().clamp(0.0, 255.0) as u8
+            }
+        };
+        Color32::from_rgb(channel(source.r(), background.r()), channel(source.g(), background.g()), channel(source.b(), background.b()))
+    };
+    let premultiplied = Color32::from_rgba_premultiplied(32, 32, 32, 128);
+    let ground = Color32::from_gray(1);
+    assert_eq!(physical(premultiplied, ground, false, 0.0), Color32::from_gray(32));
+    assert_eq!(crate::theme::composite(premultiplied, ground), Color32::from_gray(33), "round-trip reconstruction is a different blend");
+    for background in [0, 1, 64, 117, 192, 254, 255] {
+        let ground = Color32::from_gray(background);
+        let (low, high) = crate::theme::panel_composite_bounds(premultiplied, ground);
+        for (linear, dither) in [(false, -0.475), (false, 0.0), (false, 0.475), (true, 0.0)] {
+            let actual = physical(premultiplied, ground, linear, dither);
+            assert!(low.r() <= actual.r() && actual.r() <= high.r(), "actual stored-byte blend lies inside conservative bounds");
+        }
+    }
+    let ctx = egui::Context::default();
+    for dark in [false, true] {
+        let mut tokens = surface_test_palette(dark);
+        tokens.form_dim = if dark { Color32::from_rgba_unmultiplied(255, 255, 255, 240) } else { Color32::from_rgba_unmultiplied(0, 0, 0, 240) };
+        let _scope = crate::theme::scoped_panel_tokens(tokens);
+        let style = HostSurfaceStyle::capture(&ctx, false, Some(0.0), None);
+        let appearance = style.appearance(PanelSurface::Translucent, false);
+        assert!(matches!(appearance.contrast, ContrastOutcome::Readable { .. }));
+        for viewport in [0, 1, 64, 117, 192, 254, 255] {
+            for linear in [false, true] {
+                let background = physical(appearance.fill, Color32::from_gray(viewport), linear, 0.0);
+                for ink in [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label] {
+                    let text = physical(ink, background, linear, 0.0);
+                    assert!(
+                        crate::theme::contrast_ratio(text, background) >= 4.5,
+                        "independent framebuffer blend preserves both primary and muted text"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn panel_surface_cache_tracks_dark_mode_even_with_identical_authored_tokens() {
+    struct RestoreDark(bool);
+    impl Drop for RestoreDark {
+        fn drop(&mut self) {
+            crate::theme::set_dark(self.0);
+        }
+    }
+    let _restore = RestoreDark(crate::theme::is_dark());
+    let ctx = egui::Context::default();
+    let mut tokens = surface_test_palette(false);
+    tokens.form_dim = tokens.panel;
+    let _scope = crate::theme::scoped_panel_tokens(tokens);
+    crate::theme::set_dark(false);
+    let light = HostSurfaceStyle::capture(&ctx, false, Some(0.5), None);
+    crate::theme::set_dark(true);
+    let dark = HostSurfaceStyle::capture(&ctx, false, Some(0.5), Some(&light));
+    let light_appearance = light.appearance(PanelSurface::Translucent, false);
+    let dark_appearance = dark.appearance(PanelSurface::Translucent, false);
+    assert_ne!(light_appearance.fill, dark_appearance.fill, "fallback family changes despite identical captured authored tokens");
+    assert_eq!(HostSurfaceStyle::capture(&ctx, false, Some(0.5), Some(&dark)), dark);
+}
+
+#[test]
+fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
+    let ctx = egui::Context::default();
+    let mut tokens = surface_test_palette(false);
+    tokens.form_dim = tokens.panel;
+    tokens.space_4 = 7.0;
+    let _scope = crate::theme::scoped_panel_tokens(tokens);
+    for override_alpha in [Some(0.5), Some(f32::NAN), Some(f32::INFINITY), Some(-0.1), Some(1.1)] {
+        let style = HostSurfaceStyle::capture(&ctx, false, override_alpha, None);
+        let appearance = style.appearance(PanelSurface::Translucent, false);
+        let expected = if override_alpha.is_some_and(|a| !a.is_finite() || !(0.0..=1.0).contains(&a)) {
+            ContrastFailure::InvalidTokens
+        } else {
+            ContrastFailure::UnreadableAtFullOpacity
+        };
+        assert_eq!(appearance.contrast, ContrastOutcome::RetainReadableFallback { reason: expected });
+        assert_eq!(appearance.fill.a(), 255);
+        assert!(crate::theme::panel_surface_readable(appearance.fill, style.palette(appearance)));
+        assert_eq!(style.palette(appearance).space_4, tokens.space_4, "fallback does not change layout metrics");
+        let cached = HostSurfaceStyle::capture(&ctx, false, override_alpha, Some(&style));
+        assert_eq!(cached, style, "even an invalid raw NaN override has a stable bitwise cache key");
+    }
+}
+
+#[test]
+fn panel_surface_capture_matches_shared_frames_and_respects_accessibility() {
+    let ctx = egui::Context::default();
+    let tokens = surface_test_palette(false);
+    let _scope = crate::theme::scoped_panel_tokens(tokens);
+    let style = HostSurfaceStyle::capture(&ctx, false, None, None);
+    for floating in [false, true] {
+        let requested = crate::ui_kit::panel_host_frame(&ctx, floating).fill;
+        assert!(style.appearance(PanelSurface::Translucent, floating).fill.a() >= requested.a());
+    }
+    assert_eq!(HostSurfaceStyle::capture(&ctx, false, None, Some(&style)), style);
+    let forced = HostSurfaceStyle::capture(&ctx, true, Some(0.0), Some(&style));
+    assert_ne!(forced, style);
+    for floating in [false, true] {
+        let appearance = forced.appearance(PanelSurface::Translucent, floating);
+        assert_eq!(appearance.fill.a(), 255);
+        assert!(crate::theme::panel_surface_readable(appearance.fill, forced.palette(appearance)));
+    }
+    let second_context = egui::Context::default();
+    assert_eq!(HostSurfaceStyle::capture(&second_context, false, None, Some(&style)), style);
+    let mut changed = tokens;
+    changed.text_dim = egui::Color32::from_gray(20);
+    let _changed = crate::theme::scoped_panel_tokens(changed);
+    assert_ne!(HostSurfaceStyle::capture(&ctx, false, None, Some(&style)), style);
+}
+
+#[test]
+fn panel_paint_palette_scope_restores_nested_tokens_without_changing_base_theme() {
+    let before = crate::theme::Tokens::get();
+    let base = crate::theme::Tokens::base();
+    let mut outer = before;
+    outer.text = outer.file_primary_ink;
+    {
+        let _outer = crate::theme::scoped_panel_tokens(outer);
+        assert_eq!(crate::theme::Tokens::get(), outer);
+        assert_eq!(crate::theme::Tokens::get_in(crate::theme::ColorVision::Off), outer);
+        assert_eq!(crate::theme::Tokens::base(), base);
+        {
+            let inner = surface_test_palette(false);
+            let _inner = crate::theme::scoped_panel_tokens(inner);
+            assert_eq!(crate::theme::Tokens::get(), inner);
+        }
+        assert_eq!(crate::theme::Tokens::get(), outer);
+    }
+    assert_eq!(crate::theme::Tokens::get(), before);
+    assert_eq!(crate::theme::Tokens::base(), base);
+}
+
+fn prepare_preference_fixture(app: &mut crate::SolveApp) {
+    app.panel_runtime
+        .as_mut()
+        .unwrap()
+        .prepare_host(&app.session, LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1600.0, height: 1000.0 } })
+        .unwrap();
+}
+
+fn remembered_preference_fixture() -> crate::SolveApp {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    super::specimen::control_specimen(&mut app, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    prepare_preference_fixture(&mut app);
+    app
+}
+
+#[test]
+fn application_panel_preferences_round_trip_named_layouts_columns_and_expansion() {
+    let mut app = remembered_preference_fixture();
+    assert!(app.panel_runtime().unwrap().layout().inspect().capabilities.persistence);
+    let document = app.session.doc.clone();
+    let revision = app.session.revision;
+    let comparison = panel_layout_snapshot(&app);
+    assert!(panel_layout_matches(&app, &comparison));
+    let group = app.panel_runtime().unwrap().layout().layout().sections.first().unwrap().id.clone();
+    app.dispatch_panel_layout(LayoutAction::Apply {
+        expected_revision: None,
+        mutations: vec![Mutation::Collapse { section: group, collapsed: true }],
+    })
+    .unwrap();
+    assert!(!panel_layout_matches(&app, &comparison), "Apply observes a committed layout change without serializing the live catalogue");
+    app.run_panel_command("layout.save", &serde_json::json!({"name":"My arrangement"})).unwrap();
+    let layout = app.panel_runtime().unwrap().layout().layout().clone();
+    let saved = app.prefs();
+    assert!(serde_json::from_str::<serde_json::Value>(&saved).unwrap()[PREFERENCES_KEY]["catalogue"].is_string());
+    assert!(std::sync::Arc::ptr_eq(&document, &app.session.doc));
+    assert_eq!(revision, app.session.revision);
+    let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    restored.load_prefs(&saved);
+    assert!(restored.panel_runtime().is_none(), "saved layouts do not enable a host or alter Classic defaults");
+    super::specimen::control_specimen(&mut restored, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    assert!(restored.panel_runtime.as_ref().unwrap().preferences.as_ref().unwrap().pending.is_some());
+    prepare_preference_fixture(&mut restored);
+    assert_eq!(restored.panel_runtime().unwrap().layout().layout(), &layout);
+    assert_eq!(user_preset_names(&restored), ["My arrangement"]);
+    restored.run_panel_command("layout.reset", &serde_json::json!({})).unwrap();
+    assert_eq!(user_preset_names(&restored), ["My arrangement"], "workspace reset retains the named library");
+}
+
+#[test]
+fn application_panel_workspace_selection_is_explicit_and_remembered() {
+    let mut app = remembered_preference_fixture();
+    let document = app.session.doc.clone();
+    let selected = app.panel_runtime().unwrap().layout().layout().workspace.clone();
+    app.ui.tab = "Render".into();
+    app.tool = crate::tools::Tool::for_command("sketch.line3d");
+    app.session.document_id = "other-document".into();
+    app.tick_panel_runtime().unwrap();
+    assert_eq!(app.panel_runtime().unwrap().layout().layout().workspace, selected);
+    app.run_panel_command("layout.workspace.select", &serde_json::json!({"workspace":"panel_fixture.workspace.review"})).unwrap();
+    assert_eq!(app.ui.tab, "Render");
+    assert_eq!(app.tool.as_ref().map(|tool| tool.cmd), Some("sketch.line3d"));
+    assert_eq!(app.session.document_id, "other-document");
+    assert!(std::sync::Arc::ptr_eq(&document, &app.session.doc));
+    let saved = app.prefs();
+    let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    restored.load_prefs(&saved);
+    super::specimen::control_specimen(&mut restored, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    prepare_preference_fixture(&mut restored);
+    assert_eq!(restored.panel_runtime().unwrap().layout().layout().workspace.0, "panel_fixture.workspace.review");
+}
+
+#[test]
+fn future_application_panel_record_is_retained_without_legacy_reimport() {
+    let future = serde_json::json!({"version":99,"future":{"exact":[1,"two",null]}});
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.load_prefs(&serde_json::json!({"panel_layout":future,"preferences":{"browser_width":777.0}}).to_string());
+    assert_eq!(preferences_value(&app), Some(future.clone()));
+    super::specimen::control_specimen(&mut app, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    assert_eq!(app.status.as_ref().map(|status| status.0.as_str()), Some(app.tr("prefs.panel_layout.recovery")));
+    prepare_preference_fixture(&mut app);
+    let value = preferences_value(&app).unwrap();
+    assert_eq!(value.get("rejected"), Some(&future));
+    assert!(value.get("legacy").is_some_and(serde_json::Value::is_null), "a present unreadable record blocks old-field migration");
+    let saved = app.prefs();
+    let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    restored.load_prefs(&saved);
+    super::specimen::control_specimen(&mut restored, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    prepare_preference_fixture(&mut restored);
+    assert_eq!(preferences_value(&restored).unwrap().get("rejected"), Some(&future), "recovery does not nest on every restart");
+}
+
+#[test]
+fn invalid_packed_catalogue_and_unknown_legacy_fields_remain_recoverable() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.load_prefs("{\"preferences\":{\"browser_width\":333}}");
+    super::specimen::control_specimen(&mut app, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    let valid = preferences_value(&app).unwrap();
+    let mut unknown_legacy = valid.clone();
+    unknown_legacy["legacy"]["future_placement"] = "keep this".into();
+    for malformed in ["!invalid!", "Zg", "Zh=="] {
+        let mut raw = valid.clone();
+        raw["catalogue"] = malformed.into();
+        let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&serde_json::json!({"panel_layout":raw}).to_string());
+        super::specimen::control_specimen(&mut restored, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+        assert_eq!(preferences_value(&restored).unwrap()["rejected"], raw);
+    }
+    let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    restored.load_prefs(&serde_json::json!({"panel_layout":unknown_legacy}).to_string());
+    super::specimen::control_specimen(&mut restored, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    assert_eq!(preferences_value(&restored).unwrap()["rejected"], unknown_legacy);
+}
+
+#[test]
+fn legacy_panel_placement_inputs_survive_unmapped_fixture_restart() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.load_prefs(&serde_json::json!({"preferences":{"browser_width":333.0,"agent_chat_popped":true}}).to_string());
+    super::specimen::control_specimen(&mut app, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    prepare_preference_fixture(&mut app);
+    let first = preferences_value(&app).unwrap();
+    assert_eq!(first["legacy"]["browser_width"], 333.0);
+    assert_eq!(first["legacy"]["imported"], serde_json::json!([]));
+    let saved = app.prefs();
+    let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    restored.load_prefs(&saved);
+    super::specimen::control_specimen(&mut restored, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    prepare_preference_fixture(&mut restored);
+    assert_eq!(preferences_value(&restored).unwrap()["legacy"], first["legacy"]);
+    migrate_legacy_placements(
+        &mut restored,
+        &[LegacyPanelBinding { role: LegacyPanelRole::Browser, instance: InstanceId::new("specimen-0").unwrap() }],
+    )
+    .unwrap();
+    assert_eq!(preferences_value(&restored).unwrap()["legacy"]["imported"], serde_json::json!(["browser"]));
+}
+
+#[test]
+fn legacy_panel_capture_uses_the_presented_collapse_and_history_location() {
+    for (left, under, card_collapsed, column_collapsed, collapsed, stacked) in
+        [(true, false, false, true, true, false), (true, true, true, false, false, true), (false, true, true, false, true, false)]
+    {
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.load_prefs(
+            &serde_json::json!({"preferences":{
+                "timeline_left":left,"timeline_under_browser":under,
+                "browser_collapsed":card_collapsed,"timeline_left_browser_collapsed":column_collapsed,
+            }})
+            .to_string(),
+        );
+        super::specimen::control_specimen(&mut app, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+        let saved = preferences_value(&app).unwrap();
+        assert_eq!(saved["legacy"]["browser_collapsed"], collapsed);
+        assert_eq!(saved["legacy"]["history_left"], left);
+        assert_eq!(saved["legacy"]["history_under_browser"], stacked);
+    }
+}
+
+#[test]
+fn panel_profiles_keep_current_placement_without_named_library_or_recovery() {
+    let mut app = remembered_preference_fixture();
+    app.run_panel_command("layout.save", &serde_json::json!({"name":"Not in profile"})).unwrap();
+    let profile = profile_value(&app).unwrap();
+    validate_profile_value(&profile).unwrap();
+    assert!(!profile.to_string().contains("Not in profile"));
+    let before = app.panel_runtime().unwrap().layout().layout().clone();
+    let group = before.sections.first().unwrap().id.clone();
+    app.dispatch_panel_layout(LayoutAction::Apply {
+        expected_revision: None,
+        mutations: vec![Mutation::Collapse { section: group, collapsed: true }],
+    })
+    .unwrap();
+    apply_profile_value(&mut app, &profile).unwrap();
+    assert_eq!(app.panel_runtime().unwrap().layout().layout(), &before);
+    assert_eq!(user_preset_names(&app), ["Not in profile"]);
+    assert!(validate_profile_value(&serde_json::json!({"version":1,"envelope":"x".repeat(256 * 1024 + 1)})).is_err());
+    let mut incoming: LayoutEnvelope = serde_json::from_str(profile["workspaces"][before.workspace.0.as_str()].as_str().unwrap()).unwrap();
+    incoming.layout.instances.first_mut().unwrap().kind = PanelKind::new("unavailable.extension").unwrap();
+    let unavailable = serde_json::json!({"version":1,"envelope":serde_json::to_string(&incoming).unwrap()});
+    validate_profile_value(&unavailable).unwrap();
+    let saved = preferences_value(&app);
+    assert_eq!(apply_profile_value(&mut app, &unavailable).unwrap_err().rule, Rule::Availability);
+    assert_eq!(preferences_value(&app), saved, "a missing extension must not silently disappear from the imported layout");
+}
+
+#[test]
+fn panel_profiles_restore_each_workspace_and_selection_without_changing_the_machine_library() {
+    let mut app = remembered_preference_fixture();
+    let first = app.panel_runtime().unwrap().layout().layout().workspace.clone();
+    let section = app.panel_runtime().unwrap().layout().layout().sections.first().unwrap().id.clone();
+    app.dispatch_panel_layout(transaction(vec![Mutation::Collapse { section, collapsed: true }])).unwrap();
+    let first_arrangement = app.panel_runtime().unwrap().layout().layout().clone();
+    app.run_panel_command("layout.workspace.select", &serde_json::json!({"workspace":"panel_fixture.workspace.review"})).unwrap();
+    prepare_preference_fixture(&mut app);
+    let selected_arrangement = app.panel_runtime().unwrap().layout().layout().clone();
+    let profile = profile_value(&app).unwrap();
+    assert_eq!(profile["version"], 2);
+    assert_eq!(profile["selected"], "panel_fixture.workspace.review");
+    assert_eq!(profile["workspaces"].as_object().unwrap().len(), 5, "unvisited workspaces contribute their defaults too");
+    assert_eq!(profile.as_object().unwrap().len(), 3, "no named library is copied into the profile");
+
+    app.run_panel_command("layout.save", &serde_json::json!({"name":"Machine-only layout"})).unwrap();
+    app.run_panel_command("layout.reset", &serde_json::json!({})).unwrap();
+    app.run_panel_command("layout.workspace.select", &serde_json::json!({"workspace":first})).unwrap();
+    prepare_preference_fixture(&mut app);
+    app.run_panel_command("layout.reset", &serde_json::json!({})).unwrap();
+    apply_profile_value(&mut app, &profile).unwrap();
+    assert_eq!(app.panel_runtime().unwrap().layout().layout(), &selected_arrangement);
+    assert_eq!(user_preset_names(&app), ["Machine-only layout"]);
+    app.run_panel_command("layout.workspace.select", &serde_json::json!({"workspace":first})).unwrap();
+    assert_eq!(app.panel_runtime().unwrap().layout().layout(), &first_arrangement, "inactive arrangements were restored atomically too");
+}
+
+#[test]
+fn panel_layout_tile_selection_tracks_complete_arrangements_and_manual_reversion() {
+    let mut app = remembered_preference_fixture();
+    let initial = layout_preferences_view(&app).unwrap();
+    assert!(initial.default_matches);
+    assert_eq!(initial.entries.iter().filter(|entry| entry.selected).count(), 1);
+    let section = initial.current_layout.sections.first().unwrap().id.clone();
+    app.dispatch_panel_layout(transaction(vec![Mutation::Collapse { section: section.clone(), collapsed: true }])).unwrap();
+    let changed = layout_preferences_view(&app).unwrap();
+    assert!(!changed.default_matches);
+    assert!(!changed.entries.iter().any(|entry| entry.selected), "manual changes show Custom instead of a stale selected tile");
+    app.dispatch_panel_layout(transaction(vec![Mutation::Collapse { section, collapsed: false }])).unwrap();
+    let reverted = layout_preferences_view(&app).unwrap();
+    assert!(reverted.default_matches);
+    assert_eq!(reverted.entries.iter().filter(|entry| entry.selected).count(), 1);
+}
+
+#[test]
+fn panel_preference_disk_projection_removes_native_geometry_without_changing_the_live_or_recovery_state() {
+    use commands::LayoutCatalogue as _;
+    let mut fixture = PanelMountHarness::new(true).unwrap();
+    fixture.command("panel.open", &panel_command_editor()).unwrap();
+    fixture.command("panel.popout", &panel_command_native_move()).unwrap();
+    fixture.command("layout.save", &serde_json::json!({"name":"Native arrangement"})).unwrap();
+    let before = fixture.runtime.layout().layout().clone();
+    assert!(before.sections.iter().any(|section| section.location.zone() == Zone::Window));
+    let rejected = serde_json::json!({"future_recovery":[1,"keep",null]});
+    let record = super::preferences::PreferenceRecord {
+        version: 1,
+        selected: before.workspace.clone(),
+        catalogue: fixture.catalogue.state().export().unwrap(),
+        rejected: Some(rejected.clone()),
+        legacy: None,
+    }
+    .value();
+    let mut observer = crate::SolveApp::new(Default::default(), Default::default());
+    let empty = PanelMountHarness::new(false).unwrap();
+    observer
+        .enable_panel_runtime(
+            empty.runtime,
+            Box::new(AppFixtureServices {
+                models: FakeModels { editable: true },
+                commands: FakeContentCommands::default(),
+                local: FakeLocalServices::default(),
+                refreshed: 0,
+            }),
+        )
+        .unwrap();
+    let portable = portable_preferences_value(&observer, Some(record.clone())).unwrap().unwrap();
+    let registry = observer.panel_runtime().unwrap().layout().registry();
+    let catalogue = super::preferences::PreferenceRecord::read(&portable, registry).unwrap().catalogue(registry).unwrap();
+    catalogue
+        .map_envelopes(registry, |_, envelope| {
+            assert!(envelope.layout.sections.iter().all(|section| section.location.zone() != Zone::Window));
+            assert!(envelope.layout.instances.iter().all(|instance| instance.memory.location.zone() != Zone::Window));
+            Ok(envelope)
+        })
+        .unwrap();
+    assert_eq!(portable["rejected"], rejected);
+    assert_eq!(fixture.runtime.layout().layout(), &before, "disk projection does not redock the live native panel");
+    assert_eq!(record["rejected"], rejected, "the exact rollback record remains untouched");
+
+    fixture.dispatch(vec![fixture_open("fixture.log", "return-0", "full-return", Zone::Left, 0).unwrap()]).unwrap();
+    let tabs = (1..MAX_TABS)
+        .map(|index| Mutation::Open {
+            kind: PanelKind::new("fixture.log").unwrap(),
+            instance: id(&format!("return-{index}")),
+            destination: Some(Destination::JoinTab { section: section("full-return"), index }),
+        })
+        .collect();
+    fixture.dispatch(tabs).unwrap();
+    let mut blocked = fixture.runtime.layout().layout().clone();
+    let column = blocked.section(&section("full-return")).unwrap().column.clone();
+    if let SectionLocation::Window { return_to, .. } =
+        &mut blocked.sections.iter_mut().find(|section| section.location.zone() == Zone::Window).unwrap().location
+    {
+        return_to.column = column;
+        return_to.join = Some(ReturnTab { section: section("full-return"), index: 0 });
+    }
+    validate(&blocked, registry).unwrap();
+    fixture.catalogue.remember(&LayoutEnvelope::new(blocked.clone()), None, registry).unwrap();
+    let blocked_record = super::preferences::PreferenceRecord {
+        version: 1,
+        selected: blocked.workspace.clone(),
+        catalogue: fixture.catalogue.state().export().unwrap(),
+        rejected: None,
+        legacy: None,
+    }
+    .value();
+    let fallback = portable_preferences_value(&observer, Some(blocked_record)).unwrap().unwrap();
+    let state = super::preferences::PreferenceRecord::read(&fallback, registry).unwrap().catalogue(registry).unwrap();
+    let envelope = state.remembered(&blocked.workspace).unwrap().envelope(registry, &blocked.workspace).unwrap();
+    let returned = envelope.layout.containing(&id("editor")).unwrap();
+    assert_eq!(
+        returned.location,
+        SectionLocation::Floating { origin: Point { x: 0.0, y: 0.0 } },
+        "a full return group uses portable Floating defaults"
+    );
+    assert_eq!(returned.size, registry.get(&PanelKind::new("fixture.editor").unwrap()).unwrap().default_size);
+}
+
+#[test]
+fn unchanged_pending_record_is_not_a_successful_restore_until_actual_admission_succeeds() {
+    let mut source = crate::SolveApp::new(Default::default(), Default::default());
+    super::specimen::control_specimen(&mut source, &serde_json::json!({"preset":"overflow","remember":true})).unwrap();
+    let saved = source.prefs();
+    let mut app = crate::SolveApp::new(Default::default(), Default::default());
+    app.load_prefs(&saved);
+    super::specimen::control_specimen(&mut app, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    let small = LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 300.0, height: 200.0 } };
+    app.panel_runtime.as_mut().unwrap().prepare_host(&app.session, small).unwrap();
+    let baseline = preferences_value(&app);
+    let fallback = app.panel_runtime().unwrap().layout().layout().clone();
+    assert!(app.panel_runtime.as_ref().unwrap().preferences.as_ref().unwrap().pending.is_some());
+    assert!(restore_preferences(&mut app, baseline.clone()).is_err(), "record equality cannot claim the fallback is the restored layout");
+    assert_eq!(preferences_value(&app), baseline);
+    assert_eq!(app.panel_runtime().unwrap().layout().layout(), &fallback);
+    assert!(app.panel_runtime.as_ref().unwrap().preferences.as_ref().unwrap().pending.is_some());
+    let large = LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 6000.0, height: 6000.0 } };
+    app.panel_runtime.as_mut().unwrap().prepare_host(&app.session, large).unwrap();
+    assert!(
+        app.panel_runtime.as_ref().unwrap().preferences.as_ref().unwrap().pending.is_none(),
+        "capacity changes retry the actual saved arrangement"
+    );
+}
+
+#[test]
+fn preference_restore_retains_live_controller_draft_and_failed_admission_is_atomic() {
+    let mut fixture = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut fixture);
+    let probe = fixture.probe.clone();
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.enable_panel_runtime(
+        fixture.runtime,
+        Box::new(AppFixtureServices {
+            models: FakeModels { editable: true },
+            commands: FakeContentCommands::default(),
+            local: FakeLocalServices::default(),
+            refreshed: 0,
+        }),
+    )
+    .unwrap();
+    app.enable_universal_panel_host(HostOptions::default()).unwrap();
+    enable_preferences(&mut app).unwrap();
+    prepare_preference_fixture(&mut app);
+    let owner = ContentOwner::Document(DocumentId::new(app.session.document_id.clone()).unwrap());
+    let key = ControllerKey { instance: id("editor"), owner };
+    probe
+        .edit(&key, |state| {
+            state.draft = "37 mm retained draft".into();
+            state.reject_cancel = true;
+        })
+        .unwrap();
+    let saved = preferences_value(&app);
+    let section = app.panel_runtime().unwrap().layout().layout().containing(&id("editor")).unwrap().id.clone();
+    app.dispatch_panel_layout(transaction(vec![Mutation::Collapse { section, collapsed: true }])).unwrap();
+    restore_preferences(&mut app, saved.clone()).unwrap();
+    let controller_count = app.panel_runtime().unwrap().controller_count();
+    assert_eq!(probe.state(&key).unwrap().draft, "37 mm retained draft");
+    assert!(probe.state(&key).unwrap().transaction_live);
+    assert_eq!(probe.state(&key).unwrap().cancels, 0);
+
+    let mut larger = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    super::specimen::control_specimen(&mut larger, &serde_json::json!({"preset":"overflow","remember":true})).unwrap();
+    let before = preferences_value(&app);
+    let layout = app.panel_runtime().unwrap().layout().inspect();
+    let document = app.session.doc.clone();
+    assert!(restore_preferences(&mut app, preferences_value(&larger)).is_err());
+    assert_eq!(preferences_value(&app), before);
+    assert_eq!(app.panel_runtime().unwrap().layout().inspect(), layout);
+    assert_eq!(app.panel_runtime().unwrap().controller_count(), controller_count);
+    assert!(std::sync::Arc::ptr_eq(&document, &app.session.doc));
+    assert_eq!(probe.state(&key).unwrap().draft, "37 mm retained draft");
+}
+
+#[test]
+fn unchanged_absent_record_cancel_preserves_deferred_legacy_and_explicit_null_recovery() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.load_prefs(&serde_json::json!({"preferences":{"browser_width":333.0}}).to_string());
+    restore_preferences(&mut app, None).unwrap();
+    super::specimen::control_specimen(&mut app, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    assert_eq!(preferences_value(&app).unwrap()["legacy"]["browser_width"], 333.0);
+    let mut broken = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    broken.load_prefs("{\"panel_layout\":null}");
+    super::specimen::control_specimen(&mut broken, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    let saved = broken.prefs();
+    let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    restored.load_prefs(&saved);
+    super::specimen::control_specimen(&mut restored, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    prepare_preference_fixture(&mut restored);
+    assert!(preferences_value(&restored).unwrap().as_object().unwrap().contains_key("rejected"));
+    assert_eq!(preferences_value(&restored).unwrap()["rejected"], serde_json::Value::Null);
+}
 
 /// Immutable analytic metrics fixture. These cases do not render bodies and do
 /// not establish visual fidelity.
@@ -11705,12 +12389,18 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
         h.app.ui.layout = mode;
         h.frames(2);
         let painted = h.app.universal_panel_frame().unwrap().layout.clone();
+        let captured_style = painted.geometry_policy.surfaces.as_ref().unwrap();
         let alpha = HostSurfaceAlpha {
-            docked: crate::ui_kit::panel_host_frame(&h.ctx, false).fill.a(),
-            floating: crate::ui_kit::panel_host_frame(&h.ctx, true).fill.a(),
+            docked: captured_style.appearance(PanelSurface::FollowZone, false).fill.a(),
+            floating: captured_style.appearance(PanelSurface::FollowZone, true).fill.a(),
         };
         assert_eq!(painted.geometry_policy.surface_alpha, Some(alpha), "the actual app captures the shared renderer policy before allocation");
-        assert!(painted.sections.iter().all(|card| card.paint_alpha == Some(alpha.docked)));
+        for card in &painted.sections {
+            let appearance = captured_style.appearance(card.surface, card.peek || card.zone == Zone::Floating);
+            assert_eq!(card.paint_alpha, Some(appearance.fill.a()));
+            assert_eq!(card.contrast.as_ref(), Some(&appearance.contrast));
+            assert_eq!(card.paint_alpha, Some(255), "Classic's default opaque policy is preserved");
+        }
         let gap = crate::ui_kit::Container::for_layout(mode, crate::ui_kit::Surface::Panel).gap();
         assert_eq!(gap, if mode == crate::shell::LayoutMode::Floating { 7.0 } else { 0.0 });
         assert_eq!(painted.metrics.gap, gap);
@@ -11753,6 +12443,17 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
             .unwrap()
         };
         let reference = resolve(&policy);
+        let mut styled_policy = policy.clone();
+        styled_policy.default_opaque = false;
+        styled_policy.surfaces = Some(HostSurfaceStyle::capture(&h.ctx, false, Some(0.5), None));
+        let styled = resolve(&styled_policy);
+        for card in &styled.sections {
+            let appearance = styled_policy.surfaces.as_ref().unwrap().appearance(card.surface, card.peek || card.zone == Zone::Floating);
+            assert_eq!(card.paint_alpha, Some(appearance.fill.a()));
+            assert_eq!(card.contrast.as_ref(), Some(&appearance.contrast));
+        }
+        assert_eq!(styled.render_domain, reference.render_domain);
+        assert_eq!(styled.controls, reference.controls, "appearance leaves all pointer bounds and identities intact");
         let action = transaction(vec![
             fixture_open("fixture.log", "alpha-dock", "alpha-dock", Zone::Right, 1).unwrap(),
             Mutation::Open {

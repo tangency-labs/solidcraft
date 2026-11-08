@@ -77,7 +77,22 @@ pub(crate) fn stage_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     crate::scenario::publish_rect("render:stage_header", Rect::from_min_max(rect.min, egui::pos2(rect.right(), split)));
     crate::scenario::publish_rect("render:stage_divider", Rect::from_min_size(egui::pos2(rect.left(), split), vec2(rect.width(), 1.0)));
     crate::scenario::publish_rect("render:stage_tools", Rect::from_min_max(egui::pos2(rect.left(), split), rect.max));
-    ui_kit::StageBar::row(ui, rect, true, |ui| stage_tools(app, ui));
+    ui_kit::StageBar::row(ui, rect, true, |ui| {
+        // Keep the renderer settings reachable before the horizontally scrolling
+        // Look tools and source text, including on a narrow window.
+        if app.render_workspace.view.stage == Stage::Look
+            && !crate::render_workspace::result_active(app)
+            && !crate::render_workspace::comparison_active(app)
+        {
+            let settings = ui_kit::StageBar::icon_action(ui, "settings", app.tr("render.live.source_settings_help"));
+            crate::scenario::publish_target("render:preview:settings", settings.rect);
+            if settings.clicked() {
+                let _ = app.run("view.render_select", serde_json::json!({"kind":"output"}));
+            }
+        }
+        crate::render_workspace::live::controls(app, ui);
+        stage_tools(app, ui);
+    });
 }
 
 fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -127,27 +142,24 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             crate::render_workspace::assign::banner(app, ui);
-            ui_kit::StageBar::separator(ui);
-            let note = ui_kit::StageBar::note(ui, app.tr("render.stage_preview_note")).backing_on_hover_text(app.tr("render.preview_lighting_help"));
-            crate::scenario::publish_rect("render:preview_note", note.rect);
-            if ui_kit::StageBar::icon_action(ui, "settings", app.tr("render.preview_image_settings_help")).clicked() {
+            if !crate::render_workspace::result_active(app) && !crate::render_workspace::comparison_active(app) {
+                ui_kit::StageBar::separator(ui);
+                let (label, help) = crate::render_workspace::live::source_note(app);
+                let t = Tokens::get();
+                let available = (ui.available_width() - (t.control_height - t.space_2) - ui.spacing().item_spacing.x).max(0.0);
+                let note = ui_kit::StageBar::note_bounded(ui, &label, available).backing_on_hover_text(format!("{label}\n\n{}", app.tr(help)));
+                crate::scenario::publish_rect("render:preview_note", note.rect);
+            }
+            if ui_kit::StageBar::icon_action(ui, "camera", app.tr("render.preview_image_settings_help")).clicked() {
                 app.start("render.settings.get");
             }
         }
         Stage::Light => {
-            ui_kit::text(ui, app.tr("render.lights_fixed_to"), ui_kit::Text::Inline);
-            ui.add_enabled_ui(false, |ui| {
-                let mut selected = usize::MAX;
-                ui_kit::segmented(
-                    ui,
-                    &mut selected,
-                    &[app.tr("render.fixed_camera"), app.tr("render.fixed_world")],
-                    ui_kit::Segments { intrinsic: true, ..Default::default() },
-                );
-            })
-            .response
-            .backing_on_disabled_hover_text(app.tr("render.light_anchor_pending"));
-            ui_kit::text(ui, app.tr("render.light_anchor_pending"), ui_kit::Text::Inline);
+            // Light geometry is authored in world coordinates, including the implicit studio.
+            // This describes the existing rig; it is not an editable coordinate-frame setting.
+            let note = ui_kit::StageBar::note_bounded(ui, app.tr("render.light_space_world"), ui.available_width())
+                .backing_on_hover_text(app.tr("render.light_space_world_help"));
+            crate::scenario::publish_rect("render:light_space_note", note.rect);
         }
         Stage::Frame => {
             let mut projection = usize::from(app.cam.fov == 0.0);
@@ -176,7 +188,9 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// Draw render controls and status above the active model or image viewport.
 pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::render_workspace::show_shader_preparation(app, ui.ctx());
     crate::shell::register_panel(app, "render:focus:exit", None, None);
     if focused(app) {
         dock_chip(app, ui, "render:focus:exit", "render.exit_focus", "view.render_focus", serde_json::json!({"on":false}));
