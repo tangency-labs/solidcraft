@@ -1135,7 +1135,7 @@ fn save_hidden_edge_evidence(h: &Harness, name: &str) {
         size,
         None,
         [0.0; 8],
-        crate::gpu::analysis_colors(&crate::theme::Tokens::get().analysis),
+        crate::gpu::analysis_colors(&solidcraft_theme::Tokens::get().analysis),
     )
     .expect("a GPU is required when evidence capture is requested");
     std::fs::create_dir_all(&dir).unwrap();

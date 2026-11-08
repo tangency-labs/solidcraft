@@ -26,6 +26,8 @@ use crate::params::{bad, bool_, num, str_, string_list};
 use crate::schema::file::ExportResult;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::schema::save_mesh::{SaveMeshResult, SlicerDelivery};
+use crate::schema::save::{SaveAsParams, SaveParams, SaveResult};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -43,15 +45,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "INSERT")
         .icon("import")
         .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept); units?: mm|cm|m|in|ft for an STL or OBJ file, or a PLY file with faces (default mm): the unit its coordinates are in, scaled to millimetres as the file is read (a 3MF or glTF file states its own). The design keeps the millimetre mesh and not the unit, so insert the file again to try another; origin?: bool (default false: the mesh keeps its file's coordinates; true: once read, scaled and stood up, the import's occurrence is moved so the box around its bodies is centred on X and Y of the active component with its lowest point on Z = 0 → moved_to_origin: [x, y, z], the shift made)"),
-    CommandSpec::new("file.save", "Save", save)
+    CommandSpec::new("file.save", "Save", crate::checked!("file.save", save))
         .icon("save")
         .key("Ctrl+S")
         .noundo()
+        .contract(&SAVE_CONTRACT)
+        .output(output_schema_for::<SaveResult>)
         .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused)"),
-    CommandSpec::new("file.save_as", "Save As", save_as)
+    CommandSpec::new("file.save_as", "Save As", crate::checked!("file.save_as", save_as))
         .icon("save")
         .key("Ctrl+Shift+S")
         .noundo()
+        .contract(&SAVE_AS_CONTRACT)
+        .output(output_schema_for::<SaveResult>)
         .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file)"),
     CommandSpec::new("doc.recovery_list", "Recoverable Designs", recovery_list).icon("restore")
         .noundo()
@@ -127,6 +133,8 @@ fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"name": name}))
 }
 
+const SAVE_CONTRACT: TypedContract<SaveParams> = TypedContract::new();
+const SAVE_AS_CONTRACT: TypedContract<SaveAsParams> = TypedContract::new();
 const EXPORT_STEP_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportStepParams> = crate::schema::TypedContract::new();
 const EXPORT_STL_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
 const EXPORT_3MF_CONTRACT: crate::schema::TypedContract<crate::schema::file::Export3mfParams> = crate::schema::TypedContract::new();
@@ -688,7 +696,15 @@ fn write_bytes(
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
     s.mark_saved();
-    let mut out = json!({"path": path, "bytes": bytes.len(), "name": s.doc.name});
+    let mut out = SaveResult {
+        path: path.to_string(),
+        bytes: bytes.len(),
+        name: s.doc.name.clone(),
+        kept_format: None,
+        warnings: None,
+        not_kept: None,
+        param_warnings: Vec::new(),
+    };
     // A newer SolidCraft's file keeps what this version can't read, and its format number. What
     // couldn't go back, because the design was changed around it, is said.
     if s.doc.newer_file.is_some() {
@@ -696,13 +712,13 @@ fn write_bytes(
         if format == "json" && s.doc.newer_file.as_ref().is_some_and(|file| file.needs_container()) {
             lost.push("the parts of the file beside the design, which plain JSON has no room for: save as .sc to keep them".to_string());
         }
-        out["kept_format"] = json!(s.doc.format);
+        out.kept_format = Some(s.doc.format.clone());
         if !lost.is_empty() {
-            out["warnings"] = json!(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")).collect::<Vec<_>>());
-            out["not_kept"] = json!(lost);
+            out.warnings = Some(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")).collect());
+            out.not_kept = Some(lost);
         }
     }
-    Ok(out)
+    serde_json::to_value(out).map_err(|e| bad("file.save", e.to_string()))
 }
 
 impl Session {
@@ -1409,12 +1425,11 @@ mod tests {
             assert!(bytes.starts_with(signature), "{cmd}");
         }
         // The triangles `file.export` writes (the 80-byte header holds the file's name), 84 + 50
-        // bytes each. The mesher lays each planar face out as a regular grid whose sides are at
-        // most a fifth of the body's diagonal (kernel test `a_box_is_a_regular_grid_on_every_face`):
-        // 22.9 / 5 = 4.58 mm, so 5 × 3 × 2 cells along 20 × 10 × 5, two triangles each.
+        // bytes each. A planar face is exact for any triangulation of its outline, so the mesher
+        // gives each of the box's six faces two triangles (kernel test `a_box_is_two_triangles_a_face`).
         s.execute("file.export", &json!({"path": at("box.stl")})).unwrap();
         assert_eq!(std::fs::read(at("StlBinary.txt")).unwrap()[80..], std::fs::read(at("box.stl")).unwrap()[80..]);
-        let triangles = 2 * 2 * (5 * 3 + 5 * 2 + 3 * 2);
+        let triangles = 6 * 2;
         let stl = std::fs::read(at("box.stl")).unwrap();
         assert_eq!(u32::from_le_bytes([stl[80], stl[81], stl[82], stl[83]]), u32::try_from(triangles).unwrap());
         assert_eq!(stl.len(), 84 + 50 * triangles);

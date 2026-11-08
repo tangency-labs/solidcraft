@@ -1,0 +1,211 @@
+{
+  "area": "ladder/07-fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  60.0,
+                  40.0,
+                  0.0
+                ],
+                [
+                  60.0,
+                  40.0,
+                  15.0
+                ]
+              ],
+              "index": 9
+            },
+            {
+              "at": [
+                [
+                  60.0,
+                  39.58257569495585,
+                  17.0
+                ],
+                [
+                  60.0,
+                  40.0,
+                  15.0
+                ]
+              ],
+              "index": 15
+            },
+            {
+              "at": [
+                [
+                  60.0,
+                  39.58257569495585,
+                  17.0
+                ],
+                [
+                  57.0,
+                  34.999999999999986,
+                  20.0
+                ]
+              ],
+              "index": 17
+            }
+          ],
+          "points": [
+            [
+              60.0,
+              40.0,
+              7.5
+            ],
+            [
+              60.0,
+              39.791287847477925,
+              16.0
+            ],
+            [
+              58.931891825700944,
+              37.559849485548405,
+              19.29401699439179
+            ]
+          ],
+          "tolerance": 3.7426573867739417
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "021-corner-three-sequential-r5-r3-r2-partial-chain",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        40,
+        20
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 11,
+    "method": "as 020 with a radius that fits (r < 3, the smaller top round): the r2 runs up the vertical edge and on along the side's arc on the r5 round and the seam between the two rounds, tapering to a point where they become tangent. Faces: the box's 6 and the two top rounds, + 3 for the r2 (along the vertical edge, up the arc, along the seam); one valid body inside the box",
+    "source": "invariants",
+    "sources": [],
+    "what": "rounds r5 and r3 on the two top edges at a corner, the r3 on its edge alone (Tangent chain off, so it ends where the edge runs on into the r5 round's end arc), then r2 on the vertical edge under them, run on up into the corner"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 8591.67500897809,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 11,
+      "vertices": 15,
+      "volume_mm3": 47589.77046707538
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 11,
+      "vertices": 15
+    }
+  },
+  "records": "021-corner-three-sequential-r5-r3-r2-partial-chain.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8591.674898537789,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 11,
+      "vertices": 15,
+      "volume_mm3": 47589.770573947935
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "rounds r5 and r3 on the two top edges at a corner, the r3 on its edge alone (Tangent chain off, so it ends where the edge runs on into the r5 round's end arc), then r2 on the vertical edge under them, run on up into the corner",
+  "why_not": []
+}

@@ -1,0 +1,1262 @@
+{
+  "cases": [
+    {
+      "name": "stubs4-blade_hub-e9-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/blade_hub.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            9
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-blade_hub-e13-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/blade_hub.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            13
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-case_ext-e1-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/case_ext.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-case_int-e1-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/case_int.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-coons_01_03_29-e0-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/coons_01_03_29.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-coons_01_03_29-e3-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/coons_01_03_29.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-coons_01_03_29-e6-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/coons_01_03_29.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            6
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-open_shell-e0-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/open_shell.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-open_shell-e5-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/open_shell.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-shell_fillet-e0-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/shell_fillet.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-shell_fillet-e3-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/shell_fillet.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-shell_fillet-e4-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/shell_fillet.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-shell_fillet2-e1-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/shell_fillet2.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-shell_fillet2-e5-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/shell_fillet2.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-sphere_plane-e3-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/sphere_plane.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-test8-e3-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/test8.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-torii_unioned-e2-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/torii_unioned.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-Heart-all-edges-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/Heart.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-bottle-e0-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-bottle-e2-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-bottle-e10-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            10
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-bottle-e13-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            13
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-brepForFillet2-e5-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/brepForFillet2.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-brepForFillet2-e7-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/brepForFillet2.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-brepForFillet2-e9-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/brepForFillet2.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            9
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-caps_coons-e5-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/caps_coons.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-nurb_cone-e1-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/nurb_cone.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-nurb_cone-e3-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/nurb_cone.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-nurb_cone-e5-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/nurb_cone.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-nurb_cone-e8-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/nurb_cone.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            8
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-nurb_cone-e11-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/nurb_cone.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            11
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-nurb_cone-e20-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/nurb_cone.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            20
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-test5-e2-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/test5.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-test5-e3-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/test5.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-test5-e5-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/test5.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-degenerate-test5-e9-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/test5.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            9
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-rollover-bague-e1-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bague.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-rollover-cap1-e3-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/cap1.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e7-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e8-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            8
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e30-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            30
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e32-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            32
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/sphere_diff_3cylinders.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/sphere_diff_3cylinders.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/sphere_diff_3cylinders.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/sphere_diff_3cylinders.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e27-r2.0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            27
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e29-r2.0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            29
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e30-r2.0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            30
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e32-r2.0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            32
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e4-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e6-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            6
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e8-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            8
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e16-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            16
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e19-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            19
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-bottle-e27-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            27
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/sphere_diff_3cylinders.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/sphere_diff_3cylinders.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/sphere_diff_3cylinders.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/sphere_diff_3cylinders.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            5
+          ]
+        }
+      }
+    }
+  ]
+}

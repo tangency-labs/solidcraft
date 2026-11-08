@@ -1,0 +1,175 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b33": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b34": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b33"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b35"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b35"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b36"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b34"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b37"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b37"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b38"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b36"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b39"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b38"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b40"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b39",
+        "b40"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b41"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "5353-through-hole-beside-a-blind-drill-tip",
+  "expected": {
+    "body_count": 1,
+    "method": "base 90x60x14 + tower 50x24x40 = 75600 + 48000; the blind hole (axis y from the tower's -y face, 15.2 to the shoulder + the point cone r/tan59 high): pi 2.1^2 15.2 + pi 2.1^2 (2.1/tan59)/3; two simple O9 holes 14 deep through the plate (the default type is simple, flat-bottomed): 2 pi 4.5^2 14",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#5353"
+    ],
+    "volume_mm3": 121602.3025,
+    "what": "a second plain O9 through hole in a 14 mm base plate, nowhere near a blind drilled O4.2 hole in the tower above: truck refused it, pointing at the blind hole's 118 deg tip ('could not be computed reliably')"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 34,
+      "faces": 15,
+      "vertices": 23
+    }
+  },
+  "records": "5353-through-hole-beside-a-blind-drill-tip.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b41"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 21660.080228461982,
+      "body_count": 1,
+      "edges": 35,
+      "faces": 15,
+      "vertices": 24,
+      "volume_mm3": 121602.30252337
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#5353"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a second plain O9 through hole in a 14 mm base plate, nowhere near a blind drilled O4.2 hole in the tower above: truck refused it, pointing at the blind hole's 118 deg tip ('could not be computed reliably')",
+  "why_not": []
+}

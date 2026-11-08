@@ -1,0 +1,343 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/11005",
+ "pr": "https://github.com/tangency-labs/solidcore/pull/2434",
+ "test": "none: the issue is open and has no fixing PR (SolidCraft's kernel work is paused, #3992), so `pr` points at the PR that adds this fixture, as the loader requires a /pull/ URL; the issue reports it on 0.30.0 with its triage comment and the reporter's design (Tpipe.zip); reproduced with solidcraft-cli 0.26.0; the numbers here are by exact slice areas and quadrature",
+ "summary": "Two tubes (outer r 7, bore r 5) joined in a tee, then a cut to open the branch into the main tube fails on SolidCraft's kernel with 'boolean Cut: the operation failed: no result' (reported on 0.30.0; reproduced with solidcraft-cli 0.26.0). The main tube lies on the X axis, x -25..25 (the reporter's 50 mm symmetric extrude of the YZ plane); the branch on -Y, y 0..-20 (20 mm negative from the XZ plane), as in the reporter's design. Joining the tubes works; what is left is the main tube's wall across the branch's opening. Cutting it with the branch's own bore (r 5 on the branch axis, 10 or 20 mm deep) fails: the tool's side lies on the branch's bore. A tool of r 4.9 cuts. Volumes: every slice z = const of these bodies is a union of axis-aligned rectangles, so its area is exact; the slice areas are integrated by Gauss-Legendre after z = 5 sin t and z = 7 sin t, and checked by Monte Carlo. The tolerance is 0.01 mm^3, as in the other boolean cases.",
+ "cases": [
+  {
+   "name": "tubes_joined",
+   "note": "#11005: the two tubes united (works on SolidCraft; the start of the failing cut).",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "main_out",
+     "origin": [
+      -25.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 7.0,
+     "height": 50.0
+    },
+    {
+     "op": "cylinder",
+     "id": "main_in",
+     "origin": [
+      -25.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 5.0,
+     "height": 50.0
+    },
+    {
+     "op": "difference",
+     "id": "main",
+     "a": "main_out",
+     "b": "main_in"
+    },
+    {
+     "op": "cylinder",
+     "id": "branch_out",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "radius": 7.0,
+     "height": 20.0
+    },
+    {
+     "op": "cylinder",
+     "id": "branch_in",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "radius": 5.0,
+     "height": 20.0
+    },
+    {
+     "op": "difference",
+     "id": "branch",
+     "a": "branch_out",
+     "b": "branch_in"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "main",
+     "b": "branch"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 5053.901881363,
+     "tol": 0.01,
+     "formula": "V = V(main) + V(branch) - I; main = pi*(7^2-5^2)*50, branch = pi*(7^2-5^2)*20; every slice z = const is a union of axis-aligned rectangles (main: |x| <= 25, sqrt(25-z^2) <= |y| <= sqrt(49-z^2); branch: -20 <= y <= 0, sqrt(25-z^2) <= |x| <= sqrt(49-z^2)), its area exact; integrated over z by Gauss-Legendre on z = 5 sin t (|z| <= 5) and z = 7 sin t (5 <= |z| <= 7), 100/200/400 nodes agree to 1e-9, Monte Carlo (4e7 points) within 1.3 standard errors"
+    }
+   }
+  },
+  {
+   "name": "branch_bore_cut_10",
+   "note": "#11005: the branch's bore cut 10 mm into the tee, through the main tube's wall: 'no result' on SolidCraft.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "main_out",
+     "origin": [
+      -25.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 7.0,
+     "height": 50.0
+    },
+    {
+     "op": "cylinder",
+     "id": "main_in",
+     "origin": [
+      -25.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 5.0,
+     "height": 50.0
+    },
+    {
+     "op": "difference",
+     "id": "main",
+     "a": "main_out",
+     "b": "main_in"
+    },
+    {
+     "op": "cylinder",
+     "id": "branch_out",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "radius": 7.0,
+     "height": 20.0
+    },
+    {
+     "op": "cylinder",
+     "id": "branch_in",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "radius": 5.0,
+     "height": 20.0
+    },
+    {
+     "op": "difference",
+     "id": "branch",
+     "a": "branch_out",
+     "b": "branch_in"
+    },
+    {
+     "op": "union",
+     "id": "tee",
+     "a": "main",
+     "b": "branch"
+    },
+    {
+     "op": "cylinder",
+     "id": "bore",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "radius": 5.0,
+     "height": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "tee",
+     "b": "bore"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 4875.22210303,
+     "tol": 0.01,
+     "formula": "V = V(tee) - V(main and bore); bore = the branch's r 5 disc, -10 <= y <= 0; the same slice quadrature with the bore's rectangle |x| < sqrt(25-z^2), -10 <= y <= 0 removed; equal to V(tee) - 178.679778333, which by the symmetry of equal radii is also the branch wall standing inside the main tube's bore"
+    }
+   }
+  },
+  {
+   "name": "branch_bore_cut_20",
+   "note": "#11005: the same cut the full length of the branch, as the reporter would make it: 'no result' on SolidCraft.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "main_out",
+     "origin": [
+      -25.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 7.0,
+     "height": 50.0
+    },
+    {
+     "op": "cylinder",
+     "id": "main_in",
+     "origin": [
+      -25.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 5.0,
+     "height": 50.0
+    },
+    {
+     "op": "difference",
+     "id": "main",
+     "a": "main_out",
+     "b": "main_in"
+    },
+    {
+     "op": "cylinder",
+     "id": "branch_out",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "radius": 7.0,
+     "height": 20.0
+    },
+    {
+     "op": "cylinder",
+     "id": "branch_in",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "radius": 5.0,
+     "height": 20.0
+    },
+    {
+     "op": "difference",
+     "id": "branch",
+     "a": "branch_out",
+     "b": "branch_in"
+    },
+    {
+     "op": "union",
+     "id": "tee",
+     "a": "main",
+     "b": "branch"
+    },
+    {
+     "op": "cylinder",
+     "id": "bore",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "radius": 5.0,
+     "height": 20.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "tee",
+     "b": "bore"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 4875.22210303,
+     "tol": 0.01,
+     "formula": "V = V(tee) - V(main and bore); bore = the branch's r 5 disc, -20 <= y <= 0; the same slice quadrature with the bore's rectangle |x| < sqrt(25-z^2), -20 <= y <= 0 removed; equal to V(tee) - 178.679778333, which by the symmetry of equal radii is also the branch wall standing inside the main tube's bore"
+    }
+   }
+  }
+ ]
+}

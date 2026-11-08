@@ -1,0 +1,202 @@
+{
+ "cases": [
+  {
+   "name": "cov_quadratic_linear_div_overflow",
+   "upstream_ref": "source/SMLib/src/NL_Math.cpp:2574 N_SolveQuadraticEq NL_NUM_ERR (coverage: nurbs/math.rs:688)",
+   "inputs": {
+    "op": "quadratic",
+    "a": 0.0,
+    "b": 1e-11,
+    "c": 1e+300
+   }
+  },
+  {
+   "name": "cov_quadratic_b0_div_overflow",
+   "upstream_ref": "source/SMLib/src/NL_Math.cpp:2588 N_SolveQuadraticEq NL_NUM_ERR (coverage: nurbs/math.rs:695)",
+   "inputs": {
+    "op": "quadratic",
+    "a": 1e-11,
+    "b": 0.0,
+    "c": 1e+300
+   }
+  },
+  {
+   "name": "cov_quadratic_c0_div_overflow",
+   "upstream_ref": "source/SMLib/src/NL_Math.cpp:2608 N_SolveQuadraticEq NL_NUM_ERR (coverage: nurbs/math.rs:707)",
+   "inputs": {
+    "op": "quadratic",
+    "a": 1e-11,
+    "b": 1e+300,
+    "c": 0.0
+   }
+  },
+  {
+   "name": "cov_quadratic_q_over_a_bad",
+   "upstream_ref": "source/SMLib/src/NL_Math.cpp:2653 N_SolveQuadraticEq NL_NUM_ERR (coverage: nurbs/math.rs:725)",
+   "inputs": {
+    "op": "quadratic",
+    "a": 1e-11,
+    "b": 1e+200,
+    "c": 1.0
+   }
+  },
+  {
+   "name": "cov_quadratic_c_over_q_bad",
+   "upstream_ref": "source/SMLib/src/NL_Math.cpp:2656 N_SolveQuadraticEq NL_NUM_ERR (coverage: nurbs/math.rs:728)",
+   "inputs": {
+    "op": "quadratic",
+    "a": 2.0,
+    "b": 1e+200,
+    "c": 1.0
+   }
+  },
+  {
+   "name": "cov_float_op_mul_second_bound",
+   "upstream_ref": "source/SMLib/src/NL_Math.cpp:2708 N_FloatOpIsBad multiplication, y > BIGD/x but x <= BIGD/y (coverage: nurbs/math.rs:798)",
+   "inputs": {
+    "op": "float_op",
+    "x": 8.10499453712534e+28,
+    "y": 2.2180065965842307e+279,
+    "flag": 3
+   }
+  },
+  {
+   "name": "cov_for_back_pts_lower_left_input_error",
+   "upstream_ref": "source/SMLib/src/NL_Math.cpp:7605 N_RealMatrixForBack triangular type NL_INP_ERR (coverage: nurbs/math.rs:1665)",
+   "inputs": {
+    "op": "for_back_pts",
+    "a": {
+     "n": 1,
+     "m": 1,
+     "mtp": "lower_left",
+     "bw": 2,
+     "rows": [
+      [
+       2.0,
+       0.0
+      ],
+      [
+       1.0,
+       3.0
+      ]
+     ]
+    },
+    "decompose": false,
+    "rhs": [
+     [
+      1,
+      2,
+      3
+     ],
+     [
+      4,
+      5,
+      6
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cov_for_back_pts_upper_right_input_error",
+   "upstream_ref": "source/SMLib/src/NL_Math.cpp:7605 N_RealMatrixForBack triangular type NL_INP_ERR (coverage: nurbs/math.rs:1665)",
+   "inputs": {
+    "op": "for_back_pts",
+    "a": {
+     "n": 1,
+     "m": 1,
+     "mtp": "upper_right",
+     "bw": 2,
+     "rows": [
+      [
+       2.0,
+       1.0
+      ],
+      [
+       0.0,
+       3.0
+      ]
+     ]
+    },
+    "decompose": false,
+    "rhs": [
+     [
+      1,
+      2,
+      3
+     ],
+     [
+      4,
+      5,
+      6
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cov_for_back_cpts_lower_left_input_error",
+   "upstream_ref": "source/SMLib/src/NL_Math.cpp:7605 N_RealMatrixForBack triangular type NL_INP_ERR (coverage: nurbs/math.rs:1665)",
+   "inputs": {
+    "op": "for_back_cpts",
+    "a": {
+     "n": 1,
+     "m": 1,
+     "mtp": "lower_left",
+     "bw": 2,
+     "rows": [
+      [
+       2.0,
+       0.0
+      ],
+      [
+       1.0,
+       3.0
+      ]
+     ]
+    },
+    "decompose": false,
+    "rhs": [
+     [
+      1,
+      2,
+      3,
+      1
+     ],
+     [
+      4,
+      5,
+      6,
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cov_right_for_back_upper_right_input_error",
+   "upstream_ref": "source/SMLib/src/NL_Math.cpp:7852 N_RealMatrixRightForBack triangular type NL_INP_ERR (coverage: nurbs/math.rs:1665)",
+   "inputs": {
+    "op": "right_for_back",
+    "a": {
+     "n": 1,
+     "m": 1,
+     "mtp": "upper_right",
+     "bw": 2,
+     "rows": [
+      [
+       2.0,
+       1.0
+      ],
+      [
+       0.0,
+       3.0
+      ]
+     ]
+    },
+    "decompose": false,
+    "y": [
+     1.0,
+     2.0
+    ]
+   }
+  }
+ ]
+}

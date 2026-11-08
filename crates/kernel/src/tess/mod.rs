@@ -179,7 +179,10 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
             .into_iter()
             .collect::<Result<_>>()?;
     let face_h = |f: usize| sizes.get(f).map_or(rules.max_len, |(h, _)| *h);
-    let edge_h: Vec<f64> = edge_faces.iter().map(|fs| fs.iter().map(|&f| face_h(f)).fold(rules.max_len, f64::min)).collect();
+    // A flat face asks for no size (infinite): an edge between flat faces is whole, one beside
+    // a curved face takes the curved face's size, so both meet at the same nodes.
+    let edge_h: Vec<f64> =
+        edge_faces.iter().map(|fs| if fs.is_empty() { rules.max_len } else { fs.iter().map(|&f| face_h(f)).fold(f64::INFINITY, f64::min) }).collect();
     let jobs: Vec<(usize, f64)> = edge_h.into_iter().enumerate().collect();
     let solved = b.edges.iter().filter(|e| matches!(e.curve, Curve::SurfaceIntersection { .. })).count();
     let mut nodes: Vec<edges::Nodes> = crate::par::map("edge nodes", &jobs, solved >= PARALLEL_CURVES || jobs.len() >= PARALLEL_EDGES, |(e, h)| {
@@ -1027,15 +1030,18 @@ fn plan_face(
     // Constrained Delaunay in (u, v) scaled to millimetres: equilateral seeds of side `h`,
     // refined where triangles leave the surface, are too long or bend too much, then shaped by
     // Ruppert refinement.
+    let planar = matches!(s, EvalSurface::Plane { .. });
+    let bare = planar && h.is_infinite();
     let polys: Vec<&[[f64; 2]]> = ranges.iter().filter_map(|r| uvs.get(r.clone())).collect();
     let step = [h / speed[0], h / speed[1]];
     let delaunay = || {
-        let seeds = cdt::lattice(bbox, step, &polys, speed);
+        // A flat face with no size asked of it: the boundary nodes alone, no interior seeds.
+        let seeds = if bare { Vec::new() } else { cdt::lattice(bbox, step, &polys, speed) };
         let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
         let sag = cdt::Sag { eval: &eval, tol, h, turn: rules.turn, scale: speed };
         let fill = cdt::Fill {
             seeds: &seeds,
-            refine: Some((sag, MAX_REFINE)),
+            refine: if bare { None } else { Some((sag, MAX_REFINE)) },
             shape: !matches!(s, EvalSurface::Plane { .. }),
             lenient: lenient == Lenient::Yes,
         };
@@ -1043,7 +1049,6 @@ fn plan_face(
     };
     // Planar and curved faces alike: a structured grid where the boundary runs along the
     // parameter box (a rectangle, a cylinder half), a Coons grid on four corners, else Delaunay.
-    let planar = matches!(s, EvalSurface::Plane { .. });
     // The lenient fill is the constrained Delaunay alone: the caller names the face in the stats.
     let (extra, triangles) = if lenient == Lenient::Yes {
         delaunay()?
@@ -1051,7 +1056,7 @@ fn plan_face(
         let mut us = uv::divide(s, 0, bbox[0], bbox[1], rules, h, MAX_LINES);
         let mut vs = uv::divide(s, 1, bbox[1], bbox[0], rules, h, MAX_LINES);
         grid::thin(&mut us, &mut vs, grid::MAX_FACE_GRID);
-        let structured = match (ranges.len(), if seamed { None } else { grid::quad(&uvs) }) {
+        let structured = match (ranges.len(), if seamed || bare { None } else { grid::quad(&uvs) }) {
             (1, Some(q)) => {
                 // Interior lines: the boundary's own where opposite sides agree (refined where the
                 // surface turns more between them inside the face), else the division.
@@ -1076,7 +1081,8 @@ fn plan_face(
             _ => None,
         };
         let structured = match structured {
-            None if ranges.len() == 1 && !seamed => {
+            // A flat face with no size asked of it is its boundary alone (the Delaunay below).
+            None if ranges.len() == 1 && !seamed && !bare => {
                 let fine = |a: [f64; 2], b: [f64; 2]| uv::fine_between(s, rules, h, a, b);
                 coons::coons(&uvs, &fixed, speed, grid::MAX_FACE_GRID, h, Some(&fine))
             }
@@ -1108,7 +1114,7 @@ fn plan_face(
                 let trimmed = if seamed || strip {
                     None
                 } else if planar {
-                    if ranges.len() == 1 { plan_pieces(&face) } else { None }
+                    if ranges.len() == 1 && h.is_finite() { plan_pieces(&face) } else { None }
                 } else {
                     plan_pieces(&face).or_else(|| {
                         let traces = motorcycle::traces(&uvs, &ranges, speed, 0.25 * h);

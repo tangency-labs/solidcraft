@@ -12,10 +12,11 @@ use solidcraft_geom::prelude::*;
 
 use super::{CommandSpec, not_in_sketch};
 use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
+use crate::schema::features::SweepParams;
 use crate::schema::features::{
-    AppliedRadius, BoundingSolidParams, BoxParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams, FeatureNotice,
-    FeatureResult, FilletParams, FilletResult, NoticeAction, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams,
-    TorusParams,
+    AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams,
+    FeatureNotice, FeatureResult, FilletParams, FilletResult, NoticeAction, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams,
+    SphereParams, TorusParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -27,12 +28,14 @@ const SPHERE_CONTRACT: TypedContract<SphereParams> = TypedContract::new();
 const TORUS_CONTRACT: TypedContract<TorusParams> = TypedContract::new();
 const CONE_CONTRACT: TypedContract<ConeParams> = TypedContract::new();
 const PIPE_CONTRACT: TypedContract<PipeParams> = TypedContract::new();
+const SWEEP_CONTRACT: TypedContract<SweepParams> = TypedContract::new();
 const BOUNDING_SOLID_CONTRACT: TypedContract<BoundingSolidParams> = TypedContract::new();
 const SCALE_CONTRACT: TypedContract<ScaleParams> = TypedContract::new();
 const COMBINE_CONTRACT: TypedContract<CombineParams> = TypedContract::new();
 const OFFSET_PLANE_CONTRACT: TypedContract<OffsetPlaneParams> = TypedContract::new();
 const PLANE_AT_ANGLE_CONTRACT: TypedContract<PlaneAtAngleParams> = TypedContract::new();
 const FILLET_CONTRACT: TypedContract<FilletParams> = TypedContract::new();
+const CHAMFER_CONTRACT: TypedContract<ChamferParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -46,9 +49,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("revolve")
         .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world) | {type: world, axis: X|Y|Z} (as returned by timeline.inspect) | construction axis name (followed when edited) | {origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (Two Sides: the other side's angle); direction?: symmetric (angle split either side, independent of axis direction); convention?: sketch_normal|legacy_axis_start (default sketch_normal; legacy retains older angular starts); to?: [x,y,z] (To Object: turn until that face, vertex or point); sketch?, profiles? | face: [x,y,z] (a planar body face as the profile) and face_body?: name (whose face, where faces of several bodies meet), operation?, touching?, targets?, name?, body_name?"),
-    CommandSpec::new("solid.sweep", "Sweep", sweep)
+    CommandSpec::new("solid.sweep", "Sweep", crate::checked!("solid.sweep", sweep))
         .at("SOLID", "CREATE")
         .icon("sweep")
+        .contract(&SWEEP_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
     CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?"),
     CommandSpec::new("solid.box", "Box", crate::checked!("solid.box", prim_box))
@@ -88,7 +93,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FILLET_CONTRACT)
         .output(output_schema_for::<FilletResult>)
         .params("edges: [[x,y,z] point on edge | {body, index}] ; radius: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is rounded with it; false: exactly the picked edges); body?: the body the edges are on (without it, each point is looked up on every placed body, shown or hidden, and a point on edges of 2 bodies is refused, naming them); type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); radius2?; start?: [x,y,z]; radii?: [expr, …]; knots?: [number, …]; mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); smooth?: bool (smooth instead of straight between the radii); corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; a curvature round's corners are always g2 patches, between its own sections; g2: each corner where three or more rounded edges meet, and every edge there is rounded, is set back (1.5 × the radius along each edge unless `setbacks` names it) and filled with a patch meeting the rounds and the faces round it to the second order (curvature-continuous seams, clear of the points where a round's section ends on a face), constant-radius exact fillets only, refused where it cannot be built); setbacks?: [{vertex: [x,y,z], distance: expr}, …] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets only; with `corner: g2`, the G2 patch's corners); turn?: mitre|swept (where two rounds turn round a sharp, straight, convex side edge square to both on a plane, such as the rounds along a boss's base at its upright edges: mitre, the default, runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus; swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent); fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused, naming the largest that fits; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)"),
-    CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}] ; distance: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is cut with it; false: exactly the picked edges); distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?: the body the edges are on (without it, each point is looked up on every placed body, shown or hidden, and a point on edges of 2 bodies is refused, naming them)"),
+    CommandSpec::new("solid.chamfer", "Chamfer", crate::checked!("solid.chamfer", chamfer))
+        .at("SOLID", "MODIFY")
+        .icon("chamfer")
+        .contract(&CHAMFER_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("edges: [[x,y,z] | {body, index}] ; distance: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is cut with it; false: exactly the picked edges); distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?: the body the edges are on (without it, each point is looked up on every placed body, shown or hidden, and a point on edges of 2 bodies is refused, naming them)"),
     CommandSpec::new("solid.combine", "Combine", crate::checked!("solid.combine", combine))
         .at("SOLID", "MODIFY")
         .icon("combine")
@@ -112,7 +122,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
+        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) (with clearance: a counterbore the screw's head sits in, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value); head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
     CommandSpec::new("solid.pipe", "Pipe", crate::checked!("solid.pipe", pipe))
         .at("SOLID", "CREATE")
         .icon("pipe")
@@ -2941,7 +2951,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
 const CLEARANCE_FITS: [&str; 6] = ["close", "fine", "normal", "medium", "loose", "coarse"];
 
 /// A value typed by the user, cut short for a message.
-fn brief(text: &str) -> String {
+pub(super) fn brief(text: &str) -> String {
     const MAX: usize = 32;
     match text.char_indices().nth(MAX) {
         Some((end, _)) => format!("{}…", &text[..end]),
@@ -2983,6 +2993,35 @@ fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
         "loose" | "coarse" => Some(row.3),
         _ => None,
     }
+}
+
+/// The counterbore a cap screw's head sits in (`head` with `clearance`): its diameter and depth.
+/// The head's dk and k come from the standard's table (ISO 4762 socket heads, ISO 7380-1 button
+/// heads, in `parts`), with `head_gap` (default 0.5 mm) added each side and below. A gap that
+/// names parameters is kept as an expression, so the recess follows them. `None` without `head`.
+fn head_recess(s: &Session, cmd: &str, p: &Value) -> Result<Option<(Expr, Expr)>> {
+    let head = match p.get("head") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(h)) => h.trim(),
+        Some(_) => return Err(bad(cmd, "`head` must be a text: `ISO 4762` (socket head) or `ISO 7380-1` (button head)")),
+    };
+    let size = str_(p, "clearance").ok_or_else(|| bad(cmd, "`head` needs `clearance`, the screw size the head belongs to (e.g. \"M4\")"))?;
+    let (dk, k) = super::parts::cap_screw_head(head, size).map_err(|e| bad(cmd, e))?;
+    let gap = match (expr(p, "head_gap"), p.get("head_gap")) {
+        (Some(g), _) => g,
+        (None, None | Some(Value::Null)) => Expr::new("0.5 mm"),
+        (None, v) => return Err(bad(cmd, format!("`head_gap` {}", expr_problem(v)))),
+    };
+    let g = s.doc.eval(gap.as_str(), Kind::Length).map_err(|e| bad(cmd, format!("head_gap: {e}")))?;
+    if !(0.0..=dk).contains(&g) {
+        return Err(bad(cmd, format!("`head_gap` must be 0 to {dk} mm (the head's diameter), not {g}")));
+    }
+    let mm = |x: f64| format!("{} mm", (x * 1e6).round() / 1e6);
+    Ok(Some(if solidcraft_doc::expr::references(gap.as_str()).is_empty() {
+        (Expr::new(mm(dk + 2.0 * g)), Expr::new(mm(k + g)))
+    } else {
+        (Expr::new(format!("{dk} mm + 2 * ({})", gap.as_str())), Expr::new(format!("{k} mm + ({})", gap.as_str())))
+    }))
 }
 
 /// The pitches to try for a plain `M<d>` that has no ISO coarse pitch, `None` for anything else.
@@ -3208,18 +3247,28 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         (None, None | Some(Value::Null)) => None,
         (None, v) => return Err(bad(cmd, format!("`bridge` {}", expr_problem(v)))),
     };
-    let kind = match str_(p, "type").unwrap_or("simple") {
+    // A counterbore sized to the screw's head: `head` with `clearance`.
+    let head = head_recess(s, cmd, p)?;
+    if head.is_some() && str_(p, "type").is_some_and(|t| t != "counterbore") {
+        return Err(bad(cmd, "`head` needs `type: counterbore` (the default with `head`); a countersink for a flat head is not supported yet"));
+    }
+    let kind = match str_(p, "type").unwrap_or(if head.is_some() { "counterbore" } else { "simple" }) {
         "simple" => match expr(p, "tip_angle") {
             Some(t) if depth.is_some() => solidcraft_doc::HoleKind::Drilled { tip_angle: t },
             _ => solidcraft_doc::HoleKind::Simple,
         },
         "drilled" => solidcraft_doc::HoleKind::Drilled { tip_angle: expr(p, "tip_angle").unwrap_or_else(|| "118 deg".into()) },
-        "counterbore" => solidcraft_doc::HoleKind::Counterbore {
-            cb_diameter: get("cb_diameter")?,
-            cb_depth: get("cb_depth")?,
-            tip_angle: expr(p, "tip_angle"),
-            bridge: bridge.clone(),
-        },
+        "counterbore" => {
+            // Sized to the screw's head unless given; a value given, even a bad one, is checked.
+            let given = |k: &str| !matches!(p.get(k), None | Some(Value::Null));
+            let (cb_diameter, cb_depth) = match &head {
+                Some((d, h)) => {
+                    (if given("cb_diameter") { get("cb_diameter")? } else { d.clone() }, if given("cb_depth") { get("cb_depth")? } else { h.clone() })
+                }
+                None => (get("cb_diameter")?, get("cb_depth")?),
+            };
+            solidcraft_doc::HoleKind::Counterbore { cb_diameter, cb_depth, tip_angle: expr(p, "tip_angle"), bridge: bridge.clone() }
+        }
         "countersink" => solidcraft_doc::HoleKind::Countersink {
             cs_diameter: get("cs_diameter")?,
             // The default only when no angle is given: a supplied one out of range is refused (#9625).
@@ -3516,17 +3565,7 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
 pub(super) fn sweep_options(s: &Session, p: &Value, cmd: &str) -> Result<(SweepOrientation, Option<Expr>, Option<Expr>)> {
     let orientation = match p.get("orientation") {
         None | Some(Value::Null) => SweepOrientation::Perpendicular,
-        Some(Value::String(o)) if o.eq_ignore_ascii_case("perpendicular") => SweepOrientation::Perpendicular,
-        Some(Value::String(o)) if o.eq_ignore_ascii_case("parallel") => SweepOrientation::Parallel,
-        Some(v) => {
-            let d = vec3(v)
-                .or_else(|| v.get("direction").and_then(vec3))
-                .ok_or_else(|| bad(cmd, "`orientation` must be perpendicular, parallel or a direction [x, y, z]"))?;
-            if !(d.len() > 1e-9) {
-                return Err(bad(cmd, "the `orientation` direction must not be zero"));
-            }
-            SweepOrientation::Direction(Dir(d))
-        }
+        Some(v) => sweep_orientation(v).map_err(|e| bad(cmd, e))?,
     };
     let twist = match p.get("twist") {
         None | Some(Value::Null) => None,
@@ -3554,6 +3593,24 @@ pub(super) fn sweep_options(s: &Session, p: &Value, cmd: &str) -> Result<(SweepO
     Ok((orientation, twist, scale))
 }
 
+/// A sweep's `orientation` as given (not `null`): perpendicular or parallel (any case), or a
+/// non-zero direction `[x, y, z]`, `{x, y, z}` or `{direction: …}`. The error is the message.
+pub(crate) fn sweep_orientation(v: &Value) -> std::result::Result<SweepOrientation, &'static str> {
+    match v {
+        Value::String(o) if o.eq_ignore_ascii_case("perpendicular") => Ok(SweepOrientation::Perpendicular),
+        Value::String(o) if o.eq_ignore_ascii_case("parallel") => Ok(SweepOrientation::Parallel),
+        v => {
+            let d = vec3(v)
+                .or_else(|| v.get("direction").and_then(vec3))
+                .ok_or("`orientation` must be perpendicular, parallel or a direction [x, y, z]")?;
+            if !(d.len() > 1e-9) {
+                return Err("the `orientation` direction must not be zero");
+            }
+            Ok(SweepOrientation::Direction(Dir(d)))
+        }
+    }
+}
+
 /// A sweep's guide `rails` and `rail_fit` (solid.sweep and surface.sweep), checked: one or two
 /// rails, each a sketch (default: the path's) and 1…1000 of its curves; a fit of scale or
 /// stretch; and no orientation, twist or scale besides, since the rails set those.
@@ -3574,9 +3631,7 @@ pub(super) fn sweep_rails(s: &Session, p: &Value, cmd: &str, path_sketch: u64) -
 pub(super) fn guide_rails(s: &Session, p: &Value, cmd: &str, what: &str, default_sketch: Option<u64>) -> Result<(Vec<SweepRail>, RailFit)> {
     let rail_fit = match p.get("rail_fit") {
         None | Some(Value::Null) => RailFit::Scale,
-        Some(Value::String(f)) if f.eq_ignore_ascii_case("scale") => RailFit::Scale,
-        Some(Value::String(f)) if f.eq_ignore_ascii_case("stretch") => RailFit::Stretch,
-        Some(_) => return Err(bad(cmd, "`rail_fit` must be scale or stretch")),
+        Some(v) => rail_fit_form(v).map_err(|e| bad(cmd, e))?,
     };
     let given = match p.get("rails") {
         None | Some(Value::Null) => return Ok((Vec::new(), rail_fit)),
@@ -3600,6 +3655,16 @@ pub(super) fn guide_rails(s: &Session, p: &Value, cmd: &str, what: &str, default
         rails.push(SweepRail { sketch: SketchId(sketch), curves });
     }
     Ok((rails, rail_fit))
+}
+
+/// Guide rails' `rail_fit` as given (not `null`): scale or stretch, in any case. The error is
+/// the message.
+pub(crate) fn rail_fit_form(v: &Value) -> std::result::Result<RailFit, &'static str> {
+    match v {
+        Value::String(f) if f.eq_ignore_ascii_case("scale") => Ok(RailFit::Scale),
+        Value::String(f) if f.eq_ignore_ascii_case("stretch") => Ok(RailFit::Stretch),
+        _ => Err("`rail_fit` must be scale or stretch"),
+    }
 }
 
 fn loft(s: &mut Session, p: &Value) -> Result<Value> {

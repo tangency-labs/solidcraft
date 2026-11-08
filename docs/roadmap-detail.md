@@ -665,7 +665,7 @@ and reference-object placement remain separate work, as do loft rails and center
   a seekable reader defers original blobs until after provisional display.
   See [container format](design-container.md) and [performance measurements](perf.md).
 - Warm saves with explicit `cache: true` can include a versioned native B-rep cache through SolidCraft-owned topology
-  and geometry records, with a separate truck adapter and bounded binary reader. Exact
+  and geometry records, with a separate kernel adapter and bounded binary reader. Exact
   face-source certificates and operation history survive codec round trips. A provisional
   picture can be generated before original blobs are read; editing and measurement wait
   for authoritative reconstruction. Cached metadata binds preview and reconstruction to
