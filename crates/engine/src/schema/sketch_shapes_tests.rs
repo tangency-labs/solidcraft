@@ -2,7 +2,8 @@ use serde_json::{Value, json};
 
 use super::{
     ArcCenterPointParams, ArcThreePointParams, CircleCenterParams, CircleThreePointParams, CircleTwoPointParams, DrawResult, LineParams, PointParams,
-    PointResult,
+    PointResult, PolygonCircumscribedParams, PolygonEdgeParams, PolygonInscribedParams, PolygonResult, RectCenterParams, RectResult,
+    RectRoundedParams, RectThreePointParams, RectTwoPointParams, RoundedRectResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, conforms};
@@ -32,6 +33,14 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<ArcCenterPointParams>(),
         &["center", "clockwise", "connect", "construction", "end", "id", "sketch", "start", "sweep"],
     );
+    assert_keys(input_schema_for::<RectTwoPointParams>(), &["connect", "construction", "p0", "p1", "sketch"]);
+    assert_keys(input_schema_for::<RectThreePointParams>(), &["connect", "construction", "p0", "p1", "p2", "sketch"]);
+    assert_keys(input_schema_for::<RectCenterParams>(), &["center", "connect", "construction", "corner", "sketch"]);
+    assert_keys(input_schema_for::<RectRoundedParams>(), &["connect", "construction", "p0", "p1", "radius", "sketch"]);
+    // The polygons draw no construction geometry: their handlers never read `construction`.
+    assert_keys(input_schema_for::<PolygonInscribedParams>(), &["angle", "center", "connect", "diameter", "radius", "sides", "sketch"]);
+    assert_keys(input_schema_for::<PolygonCircumscribedParams>(), &["angle", "center", "connect", "diameter", "radius", "sides", "sketch"]);
+    assert_keys(input_schema_for::<PolygonEdgeParams>(), &["connect", "p0", "p1", "sides", "sketch"]);
 }
 
 /// Calls the handler refuses fail in strict with the same message. (The shared helper finishes
@@ -81,6 +90,30 @@ fn strict_keeps_todays_errors() {
         ("sketch.arc.center_point", json!({"center": [0, 0], "start": [5, 0], "end": true})),
         ("sketch.arc.center_point", json!({"center": [0, 0], "start": [5, 0], "end": null})),
         ("sketch.arc.center_point", json!({"center": [0, 0], "start": [5, 0]})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [0, 5]})),
+        ("sketch.rectangle.two_point", json!({"p0": "l1.end", "p1": [5, 5]})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [5, true]})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": ["", 5]})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": ["5", true]})),
+        ("sketch.rectangle.center", json!({"center": [0, 0], "corner": [0, 5]})),
+        ("sketch.rectangle.center", json!({"center": {"ref": "l1.end"}, "corner": [5, 5]})),
+        ("sketch.rectangle.rounded", json!({"p0": [0, 0], "p1": [10, 10], "radius": 6})),
+        ("sketch.rectangle.rounded", json!({"p0": [0, 0], "p1": [10, 10], "radius": 0})),
+        ("sketch.rectangle.rounded", json!({"p0": [0, 0], "p1": [10, 10], "radius": true})),
+        ("sketch.rectangle.rounded", json!({"p0": [0, 0], "p1": [1], "radius": 1})),
+        ("sketch.rectangle.three_point", json!({"p0": [0, 0], "p1": [0, 0], "p2": [1, 1]})),
+        ("sketch.rectangle.three_point", json!({"p0": [0, 0], "p1": [5, 0], "p2": [9, 0]})),
+        ("sketch.rectangle.three_point", json!({"p0": "l1.end", "p1": [5, 0], "p2": [5, 5]})),
+        ("sketch.polygon.inscribed", json!({"center": [0, 0]})),
+        ("sketch.polygon.inscribed", json!({"center": [0, 0], "radius": 0})),
+        ("sketch.polygon.inscribed", json!({"center": [0, 0], "radius": "5"})),
+        ("sketch.polygon.inscribed", json!({"center": [0, 0], "radius": 5, "sides": 2})),
+        ("sketch.polygon.inscribed", json!({"center": "l1.end", "radius": 5})),
+        ("sketch.polygon.circumscribed", json!({"center": [0, 0], "diameter": "x"})),
+        ("sketch.polygon.circumscribed", json!({"center": [0, 0], "radius": 5, "sides": 201})),
+        ("sketch.polygon.edge", json!({"p0": [0, 0], "p1": [0, 0]})),
+        ("sketch.polygon.edge", json!({"p0": [0, 0], "p1": [5, 0], "sides": 2.5})),
+        ("sketch.polygon.edge", json!({"p0": [0, 0], "p1": ["5", 0]})),
     ];
     for (id, p) in &cases {
         let error = |level| session(level).execute(id, p).err().map(|e| e.to_string());
@@ -214,4 +247,86 @@ fn wrong_typed_keys_are_reported() {
 
 fn input_schema_has(id: &str, key: &str) -> bool {
     crate::cmd::find_command(id).and_then(|c| c.contract).is_some_and(|c| c.allowed_keys().contains(key))
+}
+
+/// The rectangles and polygons (#13196): every form each takes is accepted (run in warn, no
+/// warnings), and each reply matches its own output schema.
+#[test]
+fn rectangles_and_polygons_reply_with_their_types() {
+    let schemas = [
+        ("rect", output_schema_for::<RectResult>()),
+        ("draw", output_schema_for::<DrawResult>()),
+        ("rounded", output_schema_for::<RoundedRectResult>()),
+        ("polygon", output_schema_for::<PolygonResult>()),
+    ];
+    let calls = [
+        ("rect", "sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [110, 10]})),
+        ("rect", "sketch.rectangle.two_point", json!({"p0": {"x": 100, "y": 20}, "p1": ["110 mm", 30], "construction": true, "connect": false})),
+        ("rect", "sketch.rectangle.two_point", json!({"p0": [100, 40], "p1": [110, 50], "sketch": null})),
+        ("draw", "sketch.rectangle.three_point", json!({"p0": [120, 0], "p1": [130, 0], "p2": [125, 5]})),
+        ("draw", "sketch.rectangle.three_point", json!({"p0": {"x": 120, "y": 20}, "p1": [130, 25], "p2": [120, 30], "construction": true})),
+        ("rect", "sketch.rectangle.center", json!({"center": [150, 5], "corner": [155, 10]})),
+        ("rect", "sketch.rectangle.center", json!({"center": ["150 mm", 25], "corner": [145, 20], "connect": false})),
+        ("rounded", "sketch.rectangle.rounded", json!({"p0": [170, 0], "p1": [190, 10], "radius": 2})),
+        ("rounded", "sketch.rectangle.rounded", json!({"p0": [170, 20], "p1": [190, 30], "radius": "1 mm", "construction": true})),
+        ("polygon", "sketch.polygon.inscribed", json!({"center": [210, 5], "radius": 4})),
+        ("polygon", "sketch.polygon.inscribed", json!({"center": {"x": 210, "y": 25}, "diameter": 8, "sides": 5, "angle": 0})),
+        ("polygon", "sketch.polygon.circumscribed", json!({"center": [230, 5], "radius": 4, "sides": 8})),
+        ("polygon", "sketch.polygon.circumscribed", json!({"center": [230, 25], "diameter": 8, "angle": 45, "connect": false})),
+        ("polygon", "sketch.polygon.edge", json!({"p0": [250, 0], "p1": [255, 0]})),
+        ("polygon", "sketch.polygon.edge", json!({"p0": [250, 20], "p1": [255, 20], "sides": 4})),
+    ];
+    let mut s = session(ParamCheck::Warn);
+    for (kind, id, p) in &calls {
+        let schema = schemas.iter().find(|(k, _)| k == kind).map(|(_, s)| s.as_value()).unwrap();
+        let r = run(&mut s, id, p.clone());
+        assert!(conforms(schema, schema, &r), "{id} {p}: {r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{id} {p}: {r}");
+        assert!(r["created"]["curves"].is_array(), "{r}");
+    }
+    // The replies' keys, as the handlers wrote them before the types: a rounded rectangle names
+    // its arcs and radius parameter, and no corners.
+    let keys = |r: &Value| r.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default();
+    let mut off = session(ParamCheck::Off);
+    let r = run(&mut off, "sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [110, 10]}));
+    assert_eq!(keys(&r), ["constraints", "corners", "created", "curves", "sides", "sketch"]);
+    assert!(r["sides"]["bottom"].is_string() && r["corners"]["top_left"].is_string(), "{r}");
+    let r = run(&mut off, "sketch.rectangle.rounded", json!({"p0": [170, 0], "p1": [190, 10], "radius": 2}));
+    assert_eq!(keys(&r), ["arcs", "constraints", "created", "curves", "param", "sides", "sketch"]);
+    assert_eq!((r["curves"].as_array().map(Vec::len), r["arcs"].as_array().map(Vec::len)), (Some(8), Some(4)), "{r}");
+    assert!(r["param"].as_str().is_some_and(|name| !name.is_empty()), "{r}");
+    let r = run(&mut off, "sketch.polygon.inscribed", json!({"center": [210, 5], "radius": 4}));
+    assert_eq!(keys(&r), ["constraints", "created", "curves", "sketch", "support_circle"]);
+    assert_eq!(r["curves"].as_array().map(Vec::len), Some(6), "six sides by default: {r}");
+    // The same calls give the same JSON with the check off and in strict.
+    let (mut off, mut strict) = (session(ParamCheck::Off), session(ParamCheck::Strict));
+    for (_, id, p) in &calls {
+        assert_eq!(run(&mut off, id, p.clone()), run(&mut strict, id, p.clone()), "{id} {p}");
+    }
+}
+
+/// What the rectangles and polygons ignore or read as left out today is reported: a number typed
+/// as text, a key a polygon never reads.
+#[test]
+fn rectangles_and_polygons_report_wrong_typed_keys() {
+    let message = |id: &str, p: Value| issues(id, &p).first().map(|i| i.message.clone());
+    let polygon = json!({"center": [0, 0], "radius": 5});
+    for key in ["sides", "angle"] {
+        let mut bad = polygon.clone();
+        bad[key] = json!("6");
+        assert_eq!(message("sketch.polygon.inscribed", bad), Some(format!("`{key}` must be a number")));
+    }
+    let mut bad = polygon.clone();
+    bad["construction"] = json!(true);
+    assert_eq!(issues("sketch.polygon.inscribed", &bad).len(), 1, "a polygon draws no construction geometry");
+    assert_eq!(
+        message("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [5, 5], "construction": "yes"})).as_deref(),
+        Some("`construction` must be true or false")
+    );
+    assert_eq!(
+        message("sketch.rectangle.center", json!({"center": [0, 0], "corner": [5, 5], "sketch": true})).as_deref(),
+        Some("`sketch` must be an id or a name")
+    );
+    assert_eq!(message("sketch.rectangle.rounded", json!({"p0": ["w / 2", 0], "p1": [5, 5], "radius": "r"})), None);
+    assert_eq!(message("sketch.polygon.edge", json!({"p0": [0, 0], "p1": [5, 0], "sides": 4})), None);
 }
