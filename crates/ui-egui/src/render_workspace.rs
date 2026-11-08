@@ -3418,6 +3418,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // A mouse drag, the spin and an animated view own the pointer instead, and their
         // hover goes off as before.
         let view_moving = crate::navigation::view_moving(app, input.scroll, input.pinch, input.pan);
+        // The face under a still pointer keeps its highlight while the view moves under it
+        // (#2130); a mouse drag owns the pointer instead, and its hover goes off.
+        let hover_frozen = crate::navigation::hover_is_frozen(&input, app);
         let navigating = view_moving
             || input.middle
             || input.secondary_down
@@ -3434,7 +3437,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let candidate = assign::candidate(app, &hits, input.mods);
         // The view moved under a still pointer: the highlight under it stays on the face
         // it was on instead of going off (#2130). It is picked again when the gesture ends.
-        if !(view_moving && image_inside) {
+        if !(hover_frozen && image_inside) {
             app.viewport.hover = candidate.as_ref().map(|(hit, _)| hit.clone());
         }
         let assigning = assign::input(app, ui, &response, candidate.as_ref(), image_inside && !navigating && geometry_current);

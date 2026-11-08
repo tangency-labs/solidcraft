@@ -819,6 +819,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "history_sketches",
         "home_fit_size",
         "invert_navigator_arrows",
+        "keep_hover_while_navigating",
         "keep_work_on_tab_switch",
         "language",
         "layout",
