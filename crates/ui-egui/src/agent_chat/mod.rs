@@ -93,7 +93,7 @@ impl State {
             State::Failed => "failed",
         }
     }
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         tr(match self {
             State::Off => "ui.agent_chat_state_off",
             State::Starting => "ui.agent_chat_state_starting",

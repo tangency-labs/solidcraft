@@ -110,6 +110,17 @@ impl Product {
     }
     fn presentation(self, app: &crate::SolveApp, play_button: bool) -> PanelPresentation {
         let mut presentation = self.empty_presentation();
+        if self == Self::Assistant {
+            let waiting = app.agent_chat.waiting();
+            let state = app.agent_chat.state();
+            presentation.status = Some(if waiting > 0 {
+                solidcraft_ui_text::format("ui.assistant_waiting", &[("count", &waiting.to_string())])
+            } else {
+                state.label().into()
+            });
+            presentation.attention = waiting > 0
+                || matches!(state, crate::agent_chat::State::NeedsAuth | crate::agent_chat::State::Exited | crate::agent_chat::State::Failed);
+        }
         presentation.actions = match self {
             Self::History => crate::ui_kit::HistoryTransport::shown(play_button)
                 .iter()
@@ -854,7 +865,7 @@ impl FramePanelContent for ProductionFrame<'_> {
             Product::Browser | Product::RenderBrowser => crate::browser::panel_contents(self.app, ui),
             Product::History if context.flow == Flow::Wide => crate::timeline::panel_inline(self.app, ui),
             Product::History => crate::timeline_left::panel_contents(self.app, ui),
-            Product::Assistant => crate::agent_chat::shared_content(self.app, ui),
+            Product::Assistant => crate::agent_chat::shared_content(self.app, ui, context.flow),
         }
         let capture = ui.ctx().data_mut(|data| data.remove_temp::<Option<FocusCapture>>(focus_capture_id()).flatten());
         if context.document.as_ref().map(|document| document.0.as_str()) != Some(self.app.session.document_id.as_str()) {
