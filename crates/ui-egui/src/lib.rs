@@ -760,7 +760,7 @@ pub struct SolveApp {
     pub native_resize_border: bool,
     /// macOS: the traffic lights sit over the application bar's left end.
     pub integrated_titlebar: bool,
-    /// The desktop host installed native menus alongside the application bar controls.
+    /// The desktop host installed a native File menu, replacing the in-window menu by default.
     pub native_file_menu: bool,
     /// Where the application bar puts search, Report a bug and the version (set by the host).
     pub header: toolbar::HeaderLayout,
