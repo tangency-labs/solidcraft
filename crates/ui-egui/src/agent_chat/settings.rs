@@ -208,10 +208,10 @@ fn start_listing(app: &mut SolveApp, ctx: &egui::Context, key: ListingKey, secre
     };
     let (tx, rx) = std::sync::mpsc::channel();
     let (protocol, url, allow_insecure_http) = (key.0, key.1.clone(), key.3);
-    let language = crate::i18n::language();
+    let language = solidcraft_ui_text::language();
     let wake = ctx.clone();
     let spawned = std::thread::Builder::new().name("endpoint-models".into()).spawn(move || {
-        let _language = crate::i18n::scope(language);
+        let _language = solidcraft_ui_text::scope(language);
         let list = secret().and_then(|secret| match protocol {
             Protocol::OpenAi => super::api_client::model_list(&http, &url, secret.as_deref(), allow_insecure_http),
             Protocol::Anthropic => super::api_client::anthropic_model_list(&http, &url, secret.as_deref()),
@@ -699,7 +699,7 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui,
             |ui| {
                 let response = ui_kit::checkbox(ui, tr("ai.prefs.show_pointer"), &mut app.ui.agent_cursor.show)
-                    .backing_on_hover_text(crate::i18n::tr_label("Show the pointer an AI agent moves (#35)"));
+                    .backing_on_hover_text(solidcraft_ui_text::tr_label("Show the pointer an AI agent moves (#35)"));
                 crate::scenario::publish_target("prefs:agent_pointer_show", response.rect);
                 ui.add_enabled_ui(app.ui.agent_cursor.show, |ui| {
                     let speed_label_width = ui_kit::ContentWidth::label(ui, tr("ai.prefs.pointer_speed")) + crate::theme::Tokens::get().space_4;
@@ -734,7 +734,7 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 (app.ui.agent_cursor.show, app.ui.agent_cursor.speed.label(), app.ui.agent_cursor.follow_camera)
             },
-            |ui, (visible, speed, follow)| ui_kit::settings_pointer_preview(ui, visible, crate::i18n::tr_label(&speed), follow),
+            |ui, (visible, speed, follow)| ui_kit::settings_pointer_preview(ui, visible, solidcraft_ui_text::tr_label(&speed), follow),
         );
     });
 }

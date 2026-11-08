@@ -120,7 +120,7 @@ pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option
             crate::theme::TabAccent::current_icon_accent(ui.ctx()),
             1.0,
         );
-        let label = crate::i18n::tr_label(&item.label);
+        let label = solidcraft_ui_text::tr_label(&item.label);
         let mut job = egui::text::LayoutJob::simple_singleline(label.to_string(), FontId::proportional(t.font_small), ink);
         job.wrap.max_width = 74.0;
         job.wrap.max_rows = 1;
@@ -137,14 +137,14 @@ pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option
         p.text(
             center - vec2(0.0, t.space_6),
             Align2::CENTER_CENTER,
-            crate::i18n::tr_label(&item.label),
+            solidcraft_ui_text::tr_label(&item.label),
             FontId::proportional(t.font_label),
             t.form_ink,
         );
         p.text(
             center + vec2(0.0, t.space_14),
             Align2::CENTER_CENTER,
-            crate::i18n::tr_label(&item.shortcut),
+            solidcraft_ui_text::tr_label(&item.shortcut),
             FontId::monospace(t.font_small),
             t.form_dim,
         );

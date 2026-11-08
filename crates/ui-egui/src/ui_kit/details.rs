@@ -267,7 +267,7 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 if !description.settings.is_empty() {
-                    heading(ui, crate::i18n::tr("ui.details_settings"));
+                    heading(ui, solidcraft_ui_text::tr("ui.details_settings"));
                     super::settings_form(ui, t.form_label_width, |ui| {
                         for field in &description.settings {
                             ui.push_id(&field.id, |ui| {
@@ -279,7 +279,7 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                     });
                 }
                 if !description.key.is_empty() {
-                    heading(ui, crate::i18n::tr("ui.details_key"));
+                    heading(ui, solidcraft_ui_text::tr("ui.details_key"));
                     for row in &description.key {
                         ui.horizontal(|ui| {
                             patterned_swatch(ui, row.colour, row.pattern, row.pattern_colour);
@@ -315,7 +315,9 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                                     if row.target {
                                         let (rect, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
                                         let response = ui
-                                            .push_id(&row.id, |ui| super::icon_button_at(ui, rect, "fit", crate::i18n::tr("ui.details_target")))
+                                            .push_id(&row.id, |ui| {
+                                                super::icon_button_at(ui, rect, "fit", solidcraft_ui_text::tr("ui.details_target"))
+                                            })
                                             .inner;
                                         remember_control(ui, response.id);
                                         solidcraft_ui_registry::publish_target(&format!("details:target:{}", row.id), response.rect);
@@ -332,7 +334,7 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                         if expanded { description.findings.len() } else { description.findings.len().min(6) } as f64,
                     );
                     if !expanded && description.findings.len() > 6 {
-                        let text = crate::i18n::format("ui.details_show_all", &[("count", &description.findings.len().to_string())]);
+                        let text = solidcraft_ui_text::format("ui.details_show_all", &[("count", &description.findings.len().to_string())]);
                         let response = super::button(ui, text, super::Button::Ghost);
                         remember_control(ui, response.id);
                         solidcraft_ui_registry::publish_target("details:show_all", response.rect);
@@ -341,7 +343,7 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                         }
                     }
                 } else if !description.readout.is_empty() {
-                    heading(ui, crate::i18n::tr("ui.details_readout"));
+                    heading(ui, solidcraft_ui_text::tr("ui.details_readout"));
                     let expanded_id = ui.make_persistent_id((id, "all_readout"));
                     let expanded = ui.data(|data| data.get_temp::<bool>(expanded_id)).unwrap_or(false);
                     let columns = [super::Column::new("", 1.0).flex(), super::Column::new("", 1.0).flex()];
@@ -362,7 +364,7 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                         if expanded { description.readout.len() } else { description.readout.len().min(6) } as f64,
                     );
                     if !expanded && description.readout.len() > 6 {
-                        let text = crate::i18n::format("ui.details_show_all", &[("count", &description.readout.len().to_string())]);
+                        let text = solidcraft_ui_text::format("ui.details_show_all", &[("count", &description.readout.len().to_string())]);
                         let response = super::button(ui, text, super::Button::Ghost);
                         remember_control(ui, response.id);
                         solidcraft_ui_registry::publish_target("details:show_all", response.rect);

@@ -309,7 +309,7 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut card = |ui: &mut egui::Ui, index: usize, width: f32| {
         let Some(e) = visible.get(index) else { return };
         let source = app.tr(if e.imported { "prefs.imported_file" } else { "prefs.built_in" });
-        let note = if e.class.high { crate::i18n::format("prefs.picker.high_note", &[("source", source)]) } else { source.to_owned() };
+        let note = if e.class.high { solidcraft_ui_text::format("prefs.picker.high_note", &[("source", source)]) } else { source.to_owned() };
         let day = system && slot_id(&app.preferences, false) == e.id;
         let night = system && slot_id(&app.preferences, true) == e.id;
         let selected = !following && if system { day || night } else { app.preferences.theme == e.id };

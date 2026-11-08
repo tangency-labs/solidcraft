@@ -155,14 +155,14 @@ pub(crate) fn settings_pointer_preview(ui: &mut Ui, visible: bool, speed: &str, 
         crate::icons::pointer::paint(&ui.painter().with_clip_rect(rect.shrink(t.space_4)), path.get(1).copied().unwrap_or(rect.center()));
     }
     let caption = if visible {
-        crate::i18n::format("ai.prefs.pointer_preview_speed", &[("speed", speed)])
+        solidcraft_ui_text::format("ai.prefs.pointer_preview_speed", &[("speed", speed)])
     } else {
-        crate::i18n::tr("ai.prefs.pointer_preview_hidden").to_owned()
+        solidcraft_ui_text::tr("ai.prefs.pointer_preview_hidden").to_owned()
     };
     let caption_rect = Rect::from_min_max(rect.min + vec2(t.space_8, t.space_4), pos2(rect.right() - t.space_8, rect.top() + t.space_24));
     paint_text(ui, caption_rect, &caption, FontId::proportional(t.font_small), t.form_dim, false);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), &caption));
-    response.backing_on_hover_text(crate::i18n::tr(if follows_camera { "ai.prefs.follow_camera_on" } else { "ai.prefs.follow_camera_off" }));
+    response.backing_on_hover_text(solidcraft_ui_text::tr(if follows_camera { "ai.prefs.follow_camera_on" } else { "ai.prefs.follow_camera_off" }));
 }
 
 /// One muted metadata line; full commands, endpoints and tool lists remain available on hover.

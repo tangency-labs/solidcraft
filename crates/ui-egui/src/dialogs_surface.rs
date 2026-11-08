@@ -180,7 +180,7 @@ pub(crate) fn continuity_row_explained(
 
 /// The hover text of a continuity choice: each order's own line, which names its code.
 pub(crate) fn continuity_tip(allowed: &[Continuity]) -> String {
-    allowed.iter().map(|g| crate::i18n::tr(g.tip_id())).collect::<Vec<_>>().join("\n")
+    allowed.iter().map(|g| solidcraft_ui_text::tr(g.tip_id())).collect::<Vec<_>>().join("\n")
 }
 
 /// What each dialog's continuity rows offer: the orders its construction builds, from the
@@ -193,7 +193,7 @@ fn patch_orders() -> Vec<Continuity> {
 /// faces meet each other with different curvatures (tangent only: no surface smooth at the corner
 /// has both curvatures there).
 fn patch_continuity_tip() -> String {
-    format!("{}\n{}", continuity_tip(&patch_orders()), crate::i18n::tr("ui.patch_continuity_corner_tip"))
+    format!("{}\n{}", continuity_tip(&patch_orders()), solidcraft_ui_text::tr("ui.patch_continuity_corner_tip"))
 }
 
 fn blend_orders() -> Vec<Continuity> {
@@ -295,14 +295,14 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
             form_row(ui, "ui.fair_iterations", |ui| {
                 ui_kit::number_field(ui, iterations, 1..=1000, 1.0, "");
             });
-            enter |= hint_row(ui, "Tolerance", tolerance, crate::i18n::tr_label("ui.fair_tolerance_default"));
+            enter |= hint_row(ui, "Tolerance", tolerance, solidcraft_ui_text::tr_label("ui.fair_tolerance_default"));
             ui_kit::options(ui, "fair_options", &mut [("ui.fair_keep_edges", keep_edges)]);
         }
         Surf::Match { order } => {
             choice_row(ui, "Continuity", "match_order", order, &MATCH_CONTINUITY.map(|(label, _)| label));
         }
         Surf::Stitch { tolerance } => {
-            enter |= hint_row(ui, "Tolerance", tolerance, crate::i18n::tr("ui.stitch_tolerance_hint"));
+            enter |= hint_row(ui, "Tolerance", tolerance, solidcraft_ui_text::tr("ui.stitch_tolerance_hint"));
         }
         Surf::Thicken { thickness, symmetric, operation } => {
             enter |= expr_row(ui, "Thickness", thickness);
@@ -1215,7 +1215,7 @@ mod tests {
         }
         assert_eq!(blend_orders().last(), Some(&Continuity::G3), "a blend builds up to G3 today");
         for lang in ["en", "ar", "he", "ja", "zh", "de", "ko"] {
-            let locale = crate::i18n::Locale::for_language(lang);
+            let locale = solidcraft_ui_text::Locale::for_language(lang);
             for g in Continuity::ALL {
                 let (label, tip) = (locale.text(g.label_id()), locale.text(g.tip_id()));
                 assert!(label != g.label_id() && tip != g.tip_id(), "{lang}: {g:?} has no text");

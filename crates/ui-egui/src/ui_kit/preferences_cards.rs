@@ -415,7 +415,7 @@ pub(crate) fn settings_plugin_card(
         }
         let width = dimension(ui.available_width());
         let tile_side = t.space_24 + t.space_12;
-        let folder_label = crate::i18n::tr_label("Show in folder");
+        let folder_label = solidcraft_ui_text::tr_label("Show in folder");
         let folder_font = FontId::proportional(t.font_body);
         let folder_galley = ui.painter().layout_no_wrap(folder_label.into(), folder_font, t.form_dim);
         let folder_width = folder_galley.size().x + t.space_8 * 2.0 + t.space_14 + t.space_6;
@@ -465,7 +465,7 @@ pub(crate) fn settings_plugin_card(
         if folder.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        let check = super::checkbox_at(ui, check_rect, &format!("{name}: {}", crate::i18n::tr("prefs.plugins_enabled")), enabled);
+        let check = super::checkbox_at(ui, check_rect, &format!("{name}: {}", solidcraft_ui_text::tr("prefs.plugins_enabled")), enabled);
         (folder, check)
     })
 }

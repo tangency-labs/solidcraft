@@ -567,7 +567,7 @@ fn feature_editor_browser_rows_follow_the_marker_and_return_after_cancel() {
 fn the_edited_sketch_is_marked_in_the_users_language() {
     let mut h = crate::scenario::Harness::new();
     h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap();
-    let _japanese = crate::i18n::scope("ja");
+    let _japanese = solidcraft_ui_text::scope("ja");
     let rows = super::entries(&h.app, 0, "sketches");
     assert_eq!(rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>(), ["スケッチ1  (編集中)"]);
 }

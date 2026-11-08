@@ -384,7 +384,7 @@ fn universal_chrome_controls_have_real_accessible_widgets_and_stable_ids_at_both
                     };
                     assert_eq!(node.role(), expected_role, "the actual widget role follows its typed target: {control:?}");
                     if matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { .. })) {
-                        assert_eq!(control.accessible_name, crate::i18n::tr("ui.panel_host.menu"));
+                        assert_eq!(control.accessible_name, solidcraft_ui_text::tr("ui.panel_host.menu"));
                     }
                 }
             }
@@ -806,7 +806,7 @@ fn universal_drag_badge_keeps_display_order_on_one_line_and_clamps_without_alloc
     let t = Tokens::get();
     let domain = egui::Rect::from_min_max(egui::pos2(20.0, 30.0), egui::pos2(440.0, 330.0));
     let logical = "אחד שניים שלושה ארבעה חמישה שישה שבעה שמונה תשעה עשרה אחרון";
-    let hebrew = crate::bidi::visual(logical).into_owned();
+    let hebrew = solidcraft_ui_text::bidi::visual(logical).into_owned();
     assert_ne!(hebrew, logical, "exercise an already display-ordered eleven-word Hebrew title");
     let narrow = egui::Rect::from_min_size(domain.min, egui::vec2(180.0, 600.0));
     for (scale, rtl) in [(1.0, false), (2.0, true)] {
@@ -962,8 +962,8 @@ fn universal_inline_specimen_uses_one_total_row_with_real_content_and_shared_con
     assert!(runtime.layout().registry().get(&instance.kind).unwrap().header_actions.is_empty(), "the inline log declares no custom or debug actions");
     assert!(frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { .. }))));
     assert!(frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Collapse { .. }))));
-    assert!(h.widget(crate::i18n::tr("ui.panel_fixture.inline")).is_some());
-    assert!(h.widget(crate::i18n::tr("ui.panel_fixture.caption")).is_none());
+    assert!(h.widget(solidcraft_ui_text::tr("ui.panel_fixture.inline")).is_some());
+    assert!(h.widget(solidcraft_ui_text::tr("ui.panel_fixture.caption")).is_none());
 }
 
 #[test]

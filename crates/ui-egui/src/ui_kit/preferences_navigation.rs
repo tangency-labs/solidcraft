@@ -68,12 +68,12 @@ pub(crate) fn settings_axis_header(ui: &mut Ui) {
         let half = rect.width() * 0.5;
         for (index, label) in ["prefs.axis", "prefs.live_input"].into_iter().enumerate() {
             let cell = Rect::from_min_size(rect.min + vec2(half * index as f32, 0.0), vec2(half, rect.height()));
-            paint_text(ui, cell, &crate::i18n::tr(label).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim, false);
+            paint_text(ui, cell, &solidcraft_ui_text::tr(label).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim, false);
         }
         return;
     }
     for (column, label) in axis_columns(rect).into_iter().zip(["prefs.axis", "prefs.live_input", "", "prefs.speed", "prefs.source"]) {
-        paint_text(ui, column, &crate::i18n::tr(label).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim, false);
+        paint_text(ui, column, &solidcraft_ui_text::tr(label).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim, false);
     }
 }
 
@@ -107,13 +107,13 @@ pub(crate) fn settings_axis_row(
                 live_axis_bar_in(ui, live_rect, value, dead_zone);
                 let cell = |index: f32| Rect::from_min_size(pos2(rect.left(), rect.top() + (line + t.space_8) * index), vec2(rect.width(), line));
                 axis_control(ui, cell(1.0), "invert", name, invert);
-                let label_width = super::ContentWidth::label(ui, crate::i18n::tr("prefs.speed"))
-                    .max(super::ContentWidth::label(ui, crate::i18n::tr("prefs.source")));
+                let label_width = super::ContentWidth::label(ui, solidcraft_ui_text::tr("prefs.speed"))
+                    .max(super::ContentWidth::label(ui, solidcraft_ui_text::tr("prefs.source")));
                 axis_control(ui, cell(2.0), "speed", name, |ui| {
-                    super::settings_form(ui, label_width, |ui| super::row(ui, crate::i18n::tr("prefs.speed"), speed));
+                    super::settings_form(ui, label_width, |ui| super::row(ui, solidcraft_ui_text::tr("prefs.speed"), speed));
                 });
                 axis_control(ui, cell(3.0), "source", name, |ui| {
-                    super::settings_form(ui, label_width, |ui| super::row(ui, crate::i18n::tr("prefs.source"), source));
+                    super::settings_form(ui, label_width, |ui| super::row(ui, solidcraft_ui_text::tr("prefs.source"), source));
                 });
             } else {
                 let [label_rect, live_rect, invert_rect, speed_rect, source_rect] = axis_columns(rect);

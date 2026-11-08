@@ -1359,7 +1359,7 @@ fn bounded_dropdown_focus_announces_full_selected_source_with_a_nonempty_accessi
             let info = event.widget_info();
             assert_eq!(info.role, egui::Role::ComboBox);
             assert!(info.enabled);
-            let expected = if labelled { crate::i18n::tr_label("Retained source") } else { current };
+            let expected = if labelled { solidcraft_ui_text::tr_label("Retained source") } else { current };
             assert_eq!(info.label.as_deref(), Some(expected));
             assert!(!info.label.as_deref().unwrap().trim().is_empty());
             assert_eq!(

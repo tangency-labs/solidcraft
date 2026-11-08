@@ -530,7 +530,7 @@ pub(crate) fn theme_browser(ui: &mut Ui, id: &str, count: usize, grid: bool, rev
             if response.has_focus() {
                 ui.painter().circle_stroke(centre, size / 2.0 + t.space_2, Stroke::new(t.space_2, t.form_primary));
             }
-            let label = crate::i18n::tr(if left { "prefs.appearance.previous_themes" } else { "prefs.appearance.next_themes" });
+            let label = solidcraft_ui_text::tr(if left { "prefs.appearance.previous_themes" } else { "prefs.appearance.next_themes" });
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
             solidcraft_ui_registry::publish_target(if left { "prefs:theme_previous" } else { "prefs:theme_next" }, arrow);
             if response.clicked() {

@@ -251,15 +251,16 @@ pub fn link_copies(app: &mut SolveApp, accept: bool) -> bool {
 pub fn show_copies(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(c) = app.menu.link_copies.clone() else { return };
     let name = app.session.doc.components.iter().find(|x| x.id == c.linked).map(|x| x.name.clone()).unwrap_or_default();
-    let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique("sc_link_copies"), "help", crate::i18n::tr_label("Link Identical Copies"))
-        .actions("Link", "Keep", None)
-        .show(ctx, true, |ui| {
-            let text = crate::i18n::format("ui.link_copies_text", &[("name", &name)]);
-            crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Report("copies", false));
-            for (id, copy) in &c.copies {
-                crate::ui_kit::text(ui, &format!("  • {copy}"), crate::ui_kit::Text::Report(&format!("copy:{id}"), false));
-            }
-        });
+    let (closed, action) =
+        crate::ui_kit::Confirm::new(egui::Id::unique("sc_link_copies"), "help", solidcraft_ui_text::tr_label("Link Identical Copies"))
+            .actions("Link", "Keep", None)
+            .show(ctx, true, |ui| {
+                let text = solidcraft_ui_text::format("ui.link_copies_text", &[("name", &name)]);
+                crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Report("copies", false));
+                for (id, copy) in &c.copies {
+                    crate::ui_kit::text(ui, &format!("  • {copy}"), crate::ui_kit::Text::Report(&format!("copy:{id}"), false));
+                }
+            });
     match action {
         crate::ui_kit::Action::Ok => drop(link_copies(app, true)),
         crate::ui_kit::Action::Cancel => drop(link_copies(app, false)),

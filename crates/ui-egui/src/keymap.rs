@@ -684,7 +684,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                             ui,
                             egui::Id::unique("sc_keymap_filter"),
                             &mut app.keymap.filter,
-                            crate::i18n::tr_label("Filter commands or keys"),
+                            solidcraft_ui_text::tr_label("Filter commands or keys"),
                         )
                     })
                     .inner;
@@ -1050,7 +1050,7 @@ fn outcome(app: &SolveApp, ui: &mut egui::Ui) -> Option<&'static str> {
     }
     if let Some((_, key, _, _)) = app.keymap.conflict.clone() {
         ui.horizontal_wrapped(|ui| {
-            let replace = ui_kit::button(ui, crate::i18n::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
+            let replace = ui_kit::button(ui, solidcraft_ui_text::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
             crate::scenario::publish_target("keymap:replace", replace.rect);
             if replace.clicked() {
                 chosen = Some("replace");

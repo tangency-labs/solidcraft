@@ -65,7 +65,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
     let font_size = if small || catalog { t.font_small } else { t.font_label };
     // Callers pass English source labels or text they translated; either way a segment shows it
     // translated, as the dropdown it falls back to does. Handles keep the option as passed.
-    let shown: Vec<&str> = options.iter().map(|option| crate::i18n::tr_label(option)).collect();
+    let shown: Vec<&str> = options.iter().map(|option| solidcraft_ui_text::tr_label(option)).collect();
     let natural: Vec<_> = shown
         .iter()
         .enumerate()
@@ -311,7 +311,7 @@ pub(crate) fn checkbox_grid(ui: &mut Ui, items: &mut [(&str, &mut bool)], column
                 }
                 let square = super::checks::box_at(ui, egui::pos2(rect.left() + t.space_14 / 2.0, rect.center().y));
                 super::checks::paint_box(ui, square, &response, **value, false);
-                let translated = crate::i18n::tr_label(label);
+                let translated = solidcraft_ui_text::tr_label(label);
                 let text = if translated == "Tangent Chain" { "Tangent chain" } else { translated };
                 let text_rect = egui::Rect::from_min_max(egui::pos2((square.right() + t.space_6).min(rect.right()), rect.top()), rect.max);
                 paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_body), t.form_ink, false);
@@ -338,7 +338,7 @@ pub(crate) fn checkbox_row(ui: &mut egui::Ui, key: &str, label: &str, on: bool) 
         ui.painter().rect_filled(rect, t.control_radius, t.hover);
     }
     super::checks::paint_box(ui, square, &response, on, false);
-    let label = crate::i18n::tr_label(label);
+    let label = solidcraft_ui_text::tr_label(label);
     let painter = ui
         .painter()
         .with_clip_rect(ui.clip_rect().intersect(egui::Rect::from_min_max(rect.min, egui::pos2(square.left() - t.space_6, rect.bottom()))));
@@ -359,11 +359,11 @@ pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool, bol
         if !enabled {
             *value = false;
         }
-        let mut response = ui.add_enabled_ui(enabled, |ui| ui.toggle_value(value, text).backing_on_hover_text(crate::i18n::tr(id))).inner;
+        let mut response = ui.add_enabled_ui(enabled, |ui| ui.toggle_value(value, text).backing_on_hover_text(solidcraft_ui_text::tr(id))).inner;
         if !enabled {
-            response = response.backing_on_disabled_hover_text(crate::i18n::tr("sketch_text.no_bold"));
+            response = response.backing_on_disabled_hover_text(solidcraft_ui_text::tr("sketch_text.no_bold"));
         }
-        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled() && enabled, *value, crate::i18n::tr(id)));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled() && enabled, *value, solidcraft_ui_text::tr(id)));
         solidcraft_ui_registry::publish_target_as(&format!("dialog:{key}"), &format!("dialog:emphasis:{key}"), response.rect);
     }
 }
@@ -416,10 +416,10 @@ pub(crate) fn toggle_icon(ui: &mut Ui, row: &str, label: &str, selected: &mut bo
     let response =
         ui.add(egui::Button::new("").selected(*selected).min_size(vec2(t.space_24 + t.space_4, t.control_height)).sense(egui::Sense::CLICK));
     crate::icons::paint_icon(ui.painter(), response.rect.shrink(t.space_3), icon, f32::from(t.icon.a()) / 255.0);
-    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, *selected, crate::i18n::tr_label(label)));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, *selected, solidcraft_ui_text::tr_label(label)));
     t.button_bevel(ui, &response, *selected);
     solidcraft_ui_registry::publish_handle(&format!("dialog:{row}:{label}"), response.rect.center());
-    if response.clone().backing_on_hover_text(crate::i18n::tr_label(label)).clicked() {
+    if response.clone().backing_on_hover_text(solidcraft_ui_text::tr_label(label)).clicked() {
         *selected = !*selected;
     }
     solidcraft_ui_registry::publish_rect(&format!("dialog:{row}:{label}"), response.rect);
@@ -693,7 +693,7 @@ pub(crate) fn popup_list(
         .iter()
         .map(|option| {
             let text_w = ctx.fonts_mut(|fonts| fonts.layout_no_wrap(option.text.to_owned(), mono.clone(), option.color)).size().x;
-            let kind = crate::i18n::tr_label(option.kind);
+            let kind = solidcraft_ui_text::tr_label(option.kind);
             let kind_w = ctx.fonts_mut(|fonts| fonts.layout_no_wrap(kind.to_owned(), kind_font.clone(), t.form_dim)).size().x;
             text_w + kind_w + t.space_8 * 3.0
         })
@@ -733,7 +733,7 @@ pub(crate) fn popup_list(
                             ui.painter().rect_filled(rect, t.control_radius, if picked { t.selected_bg } else { t.hover });
                         }
                         let inner = rect.shrink2(vec2(t.space_8, 0.0));
-                        let kind = crate::i18n::tr_label(option.kind);
+                        let kind = solidcraft_ui_text::tr_label(option.kind);
                         let kind_width = super::metrics::label_width(ui, kind);
                         let text_rect = egui::Rect::from_min_max(
                             inner.min,

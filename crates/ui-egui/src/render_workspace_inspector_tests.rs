@@ -1540,15 +1540,15 @@ fn clearing_physical_stage_preserves_unsaved_camera_background_and_output_intent
 
 #[test]
 fn render_camera_labels_do_not_shadow_mechanical_pitch_and_axes_remain_explicit() {
-    let en = crate::i18n::Locale::for_language("en");
-    let de = crate::i18n::Locale::for_language("de");
+    let en = solidcraft_ui_text::Locale::for_language("en");
+    let de = solidcraft_ui_text::Locale::for_language("de");
     assert_eq!(de.label("Pitch"), "Steigung");
     assert_eq!(de.text("coupling.pitch"), "Steigung");
     assert_eq!(en.text("render.camera_pitch"), "Camera pitch");
     assert_ne!(en.text("render.camera_pitch"), en.text("coupling.pitch"));
     assert_eq!(de.text("render.camera_pitch"), "Kameraneigung");
     for locale in ["en", "de", "es", "ja", "zh"] {
-        let locale = crate::i18n::Locale::for_language(locale);
+        let locale = solidcraft_ui_text::Locale::for_language(locale);
         assert_eq!(locale.text("material.editor.axes_numeric"), "1 / 2 / 3");
         assert_eq!(locale.text("material.editor.axes_wood"), "L / R / T");
     }
@@ -1732,7 +1732,7 @@ fn cpu_raster_refusing_a_size_names_the_method_and_profile_that_render_it() {
     assert!(!size_limit_reason(&h.app, 16384, 16384).contains("CPU resource profile"), "past Workstation no profile is named");
     assert_eq!(size_mark(&h.app, "fits", Some((2048, 2048))), None);
     h.app.preferences.language = "de".into();
-    let _language = crate::i18n::scope("de");
+    let _language = solidcraft_ui_text::scope("de");
     assert!(super::super::image_request(&h.app).unwrap_err().contains("CPU-Ressourcenprofil Studio"));
 }
 
@@ -1791,7 +1791,7 @@ fn a_size_the_cpu_profile_refuses_names_the_profile_that_renders_it() {
     // Translated: the profile is named as the profile selector names it.
     h.app.preferences.language = "ja".into();
     {
-        let _language = crate::i18n::scope("ja");
+        let _language = solidcraft_ui_text::scope("ja");
         let reason = size_limit_reason(&h.app, 3840, 2160);
         assert!(reason.contains("CPUリソースプロファイル「スタジオ」"), "{reason}");
         assert_eq!(size_mark(&h.app, "4K UHD", Some((3840, 2160))).as_deref(), Some("4K UHD・「スタジオ」が必要"));
@@ -1927,7 +1927,7 @@ fn appearance_inspector_all_users_replaces_exact_look_once_without_changing_mass
     h.step(&json!({"click":{"handle":"render:stage:look"}})).unwrap();
     assert_eq!(selected_editor(&h.app), Editor::Appearance);
     let undo = h.app.session.undo.len();
-    h.step(&json!({"click":{"handle":format!("dialog:{}:{}", h.app.tr("render.inspector_applies_to"), crate::i18n::format("render.inspector_all_users", &[("count", "2")]))}}))
+    h.step(&json!({"click":{"handle":format!("dialog:{}:{}", h.app.tr("render.inspector_applies_to"), solidcraft_ui_text::format("render.inspector_all_users", &[("count", "2")]))}}))
         .unwrap();
     h.step(&json!({"click":{"handle":"render:appearance:preview:replace"}})).unwrap();
     h.step(&json!({"click":{"handle":"dialog: search"}})).unwrap();
@@ -2441,7 +2441,7 @@ fn appearance_inspector_approved_layout_is_305_wide_and_preserves_stage_bounds()
     assert!((inspector.width() - 305.0).abs() <= 1.0, "{inspector:?}");
     assert!((inspector.top() - browser.top()).abs() <= 1.0);
     assert!(inspector.bottom() < shots.top());
-    assert!(h.widget(&crate::i18n::format("render.inspector_all_users", &[("count", "2")])).is_some());
+    assert!(h.widget(&solidcraft_ui_text::format("render.inspector_all_users", &[("count", "2")])).is_some());
     assert!(h.widget(h.app.tr("render.inspector_save_library")).is_some());
     assert_eq!(h.app.session.doc.to_json(), before);
     assert_eq!(h.app.session.undo.len(), undo);

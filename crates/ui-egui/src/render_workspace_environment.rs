@@ -421,7 +421,7 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
             if method == ImageMethod::CpuRaytrace && app.render_workspace.view.raytrace.path.is_none() {
                 note(app, ui, "render.cpu_constant_direct_help");
                 let sampling = app.render_workspace.view.raytrace.progressive.unwrap_or_default();
-                let detail = crate::i18n::format(
+                let detail = solidcraft_ui_text::format(
                     "render.cpu_constant_enable_indirect_plan",
                     &[
                         ("depth", &solidcraft_engine::render::job::CpuPathOptions::default().max_depth.to_string()),
@@ -825,7 +825,7 @@ pub(super) fn stage_confirmation(app: &mut SolveApp, ctx: &egui::Context) {
     let title = app.tr("render.environment.remove_confirm").to_string();
     let remove = app.tr("render.environment.remove").to_string();
     let cancel = app.tr("render.environment.keep").to_string();
-    let detail = crate::i18n::Locale::for_language(&app.preferences.language)
+    let detail = solidcraft_ui_text::Locale::for_language(&app.preferences.language)
         .format("render.environment.remove_note", &[("count", &pending.set.stage.len().to_string())]);
     let (closed, action) =
         ui_kit::Confirm::new(id, "delete", &title).tone(ui_kit::Tone::Danger).actions(&remove, &cancel, None).show(ctx, true, |ui| {
@@ -898,7 +898,7 @@ fn ground(app: &mut SolveApp, ui: &mut egui::Ui) {
             let count = app.render_workspace.view.draft.stage.len();
             ui_kit::text(
                 ui,
-                &crate::i18n::Locale::for_language(&app.preferences.language)
+                &solidcraft_ui_text::Locale::for_language(&app.preferences.language)
                     .format("render.environment.saved_panels", &[("count", &count.to_string())]),
                 ui_kit::Text::Inline,
             );
@@ -1125,7 +1125,7 @@ pub(super) fn atmosphere(app: &mut SolveApp, ui: &mut egui::Ui) {
             note(app, ui, "render.cpu_volume_help");
             if !path {
                 let sampling = app.render_workspace.view.raytrace.progressive.unwrap_or_default();
-                let detail = crate::i18n::format(
+                let detail = solidcraft_ui_text::format(
                     "render.cpu_volume_enable_path_plan",
                     &[
                         ("depth", &solidcraft_engine::render::job::CpuPathOptions::default().max_depth.to_string()),

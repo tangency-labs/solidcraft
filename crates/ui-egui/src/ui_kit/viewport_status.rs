@@ -226,7 +226,7 @@ pub(crate) fn viewport_status_item(ui: &mut Ui, item: &StatusItem, state: &mut S
                 }
                 if item.has_key {
                     let open = state.open_key.as_deref() == Some(&item.id);
-                    let label = crate::i18n::format("ui.viewport_status_key", &[("name", &item.name)]);
+                    let label = solidcraft_ui_text::format("ui.viewport_status_key", &[("name", &item.name)]);
                     let response = icon_action(ui, item, "key", "chevron", &label, &label, open);
                     state.focus_ids.push(response.id);
                     if open || response.clicked() || matches!(&action, Some(StatusAction::Edit(id)) if id == &item.id) {
@@ -240,8 +240,8 @@ pub(crate) fn viewport_status_item(ui: &mut Ui, item: &StatusItem, state: &mut S
                         state.open_key = if open { None } else { Some(item.id.clone()) };
                     }
                 }
-                let label = crate::i18n::format("ui.viewport_status_clear", &[("name", &item.name)]);
-                let hint = crate::i18n::format("ui.viewport_status_clear_hint", &[("name", &item.name)]);
+                let label = solidcraft_ui_text::format("ui.viewport_status_clear", &[("name", &item.name)]);
+                let hint = solidcraft_ui_text::format("ui.viewport_status_clear_hint", &[("name", &item.name)]);
                 let response = icon_action(ui, item, "close", "close", &label, &hint, false);
                 state.focus_ids.push(response.id);
                 if response.clicked() {
@@ -354,7 +354,8 @@ pub(crate) fn viewport_status_summary(
                 let menu = super::Menu::button_with(
                     ui,
                     |ui, _| {
-                        let extra = crate::i18n::format("ui.viewport_status_summary_more", &[("count", &items.len().saturating_sub(1).to_string())]);
+                        let extra =
+                            solidcraft_ui_text::format("ui.viewport_status_summary_more", &[("count", &items.len().saturating_sub(1).to_string())]);
                         let name = ui.painter().layout_no_wrap(latest.name.clone(), crate::fonts::semibold(t.font_label), t.text);
                         let count = ui.painter().layout_no_wrap(extra, egui::FontId::monospace(t.font_small), t.text_dim);
                         let attention = items.iter().any(|item| item.kind == StatusKind::Attention);
@@ -395,7 +396,7 @@ pub(crate) fn viewport_status_summary(
                         } else {
                             crate::icons::paint_icon(ui.painter(), chevron, "chevron", 1.0);
                         }
-                        let label = crate::i18n::format(
+                        let label = solidcraft_ui_text::format(
                             "ui.viewport_status_summary_label",
                             &[("name", &latest.name), ("count", &items.len().saturating_sub(1).to_string())],
                         );
@@ -405,7 +406,7 @@ pub(crate) fn viewport_status_summary(
                         response
                     },
                     |ui| {
-                        super::Menu::heading(ui, crate::i18n::tr("ui.viewport_status_summary_heading"));
+                        super::Menu::heading(ui, solidcraft_ui_text::tr("ui.viewport_status_summary_heading"));
                         for item in items {
                             ui.push_id(&item.id, |ui| {
                                 ui.horizontal(|ui| {
@@ -434,7 +435,7 @@ pub(crate) fn viewport_status_summary(
                                         solidcraft_ui_registry::publish_target(&target(item, "setting"), response.rect);
                                     }
                                     if item.has_key {
-                                        let label = crate::i18n::format("ui.viewport_status_key", &[("name", &item.name)]);
+                                        let label = solidcraft_ui_text::format("ui.viewport_status_key", &[("name", &item.name)]);
                                         let response =
                                             icon_action(ui, item, "key", "chevron", &label, &label, state.open_key.as_deref() == Some(&item.id));
                                         state.focus_ids.push(response.id);
@@ -443,8 +444,8 @@ pub(crate) fn viewport_status_summary(
                                             ui.close();
                                         }
                                     }
-                                    let label = crate::i18n::format("ui.viewport_status_clear", &[("name", &item.name)]);
-                                    let hint = crate::i18n::format("ui.viewport_status_clear_hint", &[("name", &item.name)]);
+                                    let label = solidcraft_ui_text::format("ui.viewport_status_clear", &[("name", &item.name)]);
+                                    let hint = solidcraft_ui_text::format("ui.viewport_status_clear_hint", &[("name", &item.name)]);
                                     let response = icon_action(ui, item, "close", "close", &label, &hint, false);
                                     state.focus_ids.push(response.id);
                                     if response.clicked() {
@@ -455,7 +456,7 @@ pub(crate) fn viewport_status_summary(
                             });
                         }
                         super::Menu::separator(ui);
-                        let label = crate::i18n::tr("ui.viewport_status_summary_clear");
+                        let label = solidcraft_ui_text::tr("ui.viewport_status_summary_clear");
                         let mut footer = super::MenuItem::new("viewport_status_clear_all", label, "");
                         // Display hint only. Native popup Escape closes the list without dispatch.
                         footer.shortcut = "Esc";

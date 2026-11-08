@@ -649,7 +649,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ui.set_max_height(size.y);
             crate::ui_kit::Menu::show(ui, width, |ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(w, header), Sense::hover());
-                let title = crate::i18n::tr_label("Select Other").to_uppercase();
+                let title = solidcraft_ui_text::tr_label("Select Other").to_uppercase();
                 let title = if p.total > p.rows.len() { format!("{title} · {} / {}", p.rows.len(), p.total) } else { title };
                 ui.painter().text(
                     pos2(r.left() + 8.0, r.center().y),

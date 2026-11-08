@@ -33,7 +33,7 @@ fn blur_cost_meter(ui: &mut Ui, radius: f32) {
         }
     }
     solidcraft_ui_registry::publish_rect("prefs:blur_cost", rect);
-    response.backing_on_hover_text(crate::i18n::tr("prefs.blur_cost"));
+    response.backing_on_hover_text(solidcraft_ui_text::tr("prefs.blur_cost"));
 }
 
 /// Theme problems stay inline when space permits, with stacked text and wrapping actions otherwise.
@@ -42,13 +42,13 @@ pub(crate) fn theme_option_notice(ui: &mut Ui, id: &str, text: &str, can_undo: b
     let mut dismiss = false;
     let response = ui.push_id(("theme_notice", id, text), |ui| {
         let t = Tokens::get();
-        let dismiss_label = crate::i18n::tr("prefs.theme_notice_dismiss");
+        let dismiss_label = solidcraft_ui_text::tr("prefs.theme_notice_dismiss");
         let actions = super::ContentWidth::button(ui, dismiss_label)
             + t.space_8
-            + if can_undo { super::ContentWidth::button(ui, crate::i18n::tr("ui.undo")) + t.space_8 } else { 0.0 };
+            + if can_undo { super::ContentWidth::button(ui, solidcraft_ui_text::tr("ui.undo")) + t.space_8 } else { 0.0 };
         let mut draw_actions = |ui: &mut Ui| {
             if can_undo {
-                let response = super::text_button(ui, crate::i18n::tr("ui.undo"), true);
+                let response = super::text_button(ui, solidcraft_ui_text::tr("ui.undo"), true);
                 solidcraft_ui_registry::publish_target("prefs:theme_notice_undo:guard", response.rect);
                 undo = response.clicked();
             }
@@ -122,7 +122,7 @@ fn theme_option_metrics(ui: &Ui, option: &ThemeOptionRow<'_>, value: Option<&cra
                 .map(|n| super::ContentWidth::label(ui, &format!("{n}{}", unit.as_deref().unwrap_or(""))))
                 .fold(0.0, f32::max);
             if option.blur {
-                readout = readout.max(super::ContentWidth::label(ui, crate::i18n::tr("prefs.blur_off")));
+                readout = readout.max(super::ContentWidth::label(ui, solidcraft_ui_text::tr("prefs.blur_off")));
             }
             theme_option_slider_minimum(&t) + t.space_8 + readout + if option.blur { blur_meter_width(&t) + t.space_8 } else { 0.0 }
         }
@@ -157,7 +157,7 @@ pub(crate) fn theme_options_list(
     use super::preferences_layout::{Entry, Width, choice_width, layout};
     use crate::theme_files::OptionKind;
     // Label/help/choice text is already resolved, including the theme's English fallback.
-    let _labels = crate::i18n::resolved_labels();
+    let _labels = solidcraft_ui_text::resolved_labels();
     if options.is_empty() {
         return false;
     }
@@ -208,13 +208,13 @@ pub(crate) fn theme_options_list(
         super::text(ui, name, super::Text::Inline);
         super::settings_inline_note(
             ui,
-            &crate::i18n::format(
+            &solidcraft_ui_text::format(
                 if options.len() == 1 { "prefs.appearance.option_count_one" } else { "prefs.appearance.option_count" },
                 &[("count", &options.len().to_string())],
             ),
         );
         if options.iter().any(|option| values.get(&option.definition.id).is_some_and(|v| *v != option.definition.default_value())) {
-            let response = super::text_button(ui, crate::i18n::tr("prefs.theme_options_reset"), true);
+            let response = super::text_button(ui, solidcraft_ui_text::tr("prefs.theme_options_reset"), true);
             solidcraft_ui_registry::publish_target("prefs:theme_options_reset", response.rect);
             reset = response.clicked();
         }
@@ -276,7 +276,7 @@ pub(crate) fn theme_options_list(
     ui.push_id(("theme_options", theme_id), |ui| {
         draw_rows(ui, &plan.rows);
         if plan.more_count > 0 {
-            let title = crate::i18n::format("prefs.theme_options_more", &[("count", &plan.more_count.to_string())]);
+            let title = solidcraft_ui_text::format("prefs.theme_options_more", &[("count", &plan.more_count.to_string())]);
             super::section(ui, "more", &title, false, |ui| draw_rows(ui, &plan.more));
             if let Some(rect) = solidcraft_ui_registry::rect_of(&format!("dialog:section:{title}")) {
                 solidcraft_ui_registry::publish_target("prefs:theme_options_more", rect);
@@ -344,7 +344,7 @@ fn theme_option_control(
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
                                         let label = if option.blur && *n == 0.0 {
-                                            crate::i18n::tr("prefs.blur_off").to_owned()
+                                            solidcraft_ui_text::tr("prefs.blur_off").to_owned()
                                         } else {
                                             format!("{}{}", *n, unit.as_deref().unwrap_or(""))
                                         };
@@ -854,13 +854,13 @@ pub(crate) fn scale_specimen(ui: &mut Ui, scale: f32) {
     p.text(
         r.right_top() + vec2(-t.space_8, t.space_8),
         egui::Align2::RIGHT_TOP,
-        crate::i18n::tr("prefs.live_preview").to_uppercase(),
+        solidcraft_ui_text::tr("prefs.live_preview").to_uppercase(),
         FontId::proportional(t.font_micro),
         t.form_dim,
     );
     let origin = r.min + vec2(t.space_10, t.space_24);
     let line_h = t.control_height * scale;
-    let distance = crate::i18n::tr_label("Distance");
+    let distance = solidcraft_ui_text::tr_label("Distance");
     let label = p.layout_no_wrap(distance.to_owned(), font.clone(), t.form_dim);
     p.galley(origin + vec2(0.0, (line_h - label.size().y) / 2.0), label.clone(), t.form_dim);
     let field = Rect::from_min_size(origin + vec2(label.size().x + t.space_8 * scale, 0.0), vec2((t.form_label_width + t.space_6) * scale, line_h));
@@ -877,7 +877,7 @@ pub(crate) fn scale_specimen(ui: &mut Ui, scale: f32) {
     centred_text(
         &p,
         button,
-        crate::i18n::tr_label("OK"),
+        solidcraft_ui_text::tr_label("OK"),
         crate::fonts::semibold(t.font_label * scale),
         if t.borders.bevel.is_some() { t.form_ink } else { t.on_accent },
     );
@@ -985,7 +985,7 @@ pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
             ("prefs.status_done", "finish", colours.form_success),
         ] {
             let ink = if crate::theme::contrast_ratio(t.on_accent, fill) >= 4.5 { t.on_accent } else { t.tab_on_fill_dark };
-            let label = crate::i18n::tr(label);
+            let label = solidcraft_ui_text::tr(label);
             let galley = ui.painter().layout_no_wrap(label.to_owned(), crate::fonts::semibold(t.font_small), ink);
             let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + t.space_24 + t.space_16, t.space_24), Sense::hover());
             solidcraft_ui_registry::publish_rect(&format!("prefs:status_sample:{label}"), r);
@@ -1027,7 +1027,7 @@ pub(crate) fn colour_vision_sample(ui: &mut egui::Ui, t: &Tokens) {
         centred_text(
             &p,
             Rect::from_min_size(cell.left_bottom() + vec2(0.0, t.space_3), vec2(cell.width(), t.space_16)),
-            crate::i18n::tr(name),
+            solidcraft_ui_text::tr(name),
             FontId::proportional(t.font_small),
             t.text_dim,
         );

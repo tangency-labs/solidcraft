@@ -37,7 +37,7 @@ pub(crate) fn decoration(app: &SolveApp, names: &[String]) -> Decoration {
         count: if count == 0 {
             String::new()
         } else {
-            crate::i18n::format(if count == 1 { "render.tree_face_one" } else { "render.tree_face_count" }, &[("count", &count.to_string())])
+            solidcraft_ui_text::format(if count == 1 { "render.tree_face_one" } else { "render.tree_face_count" }, &[("count", &count.to_string())])
         },
     }
 }
@@ -172,7 +172,7 @@ pub(crate) fn environment(app: &SolveApp) -> (String, String) {
     };
     (
         name,
-        crate::i18n::format(
+        solidcraft_ui_text::format(
             "render.tree_environment_values",
             &[("rotation", &format!("{:.0}", rotation.to_degrees())), ("intensity", &format!("{intensity:.2}"))],
         ),
@@ -375,7 +375,7 @@ pub(crate) fn wear_subtitle(app: &SolveApp) -> String {
     if count == 0 {
         app.tr("render.wear_no_layers").into()
     } else {
-        crate::i18n::format(if count == 1 { "render.wear_layer_one" } else { "render.wear_layer_count" }, &[("count", &count.to_string())])
+        solidcraft_ui_text::format(if count == 1 { "render.wear_layer_one" } else { "render.wear_layer_count" }, &[("count", &count.to_string())])
     }
 }
 
@@ -421,7 +421,7 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
         }
         let open = browser::is_open(app, &key, true);
         let label = look_name(app, group.look.as_ref());
-        let count = crate::i18n::format(
+        let count = solidcraft_ui_text::format(
             if group.objects.len() == 1 { "render.tree_user_one" } else { "render.tree_users" },
             &[("count", &group.objects.len().to_string())],
         );

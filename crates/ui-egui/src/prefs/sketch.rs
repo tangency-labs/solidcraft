@@ -74,7 +74,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         }
                     })
-                    .backing_on_hover_text(crate::i18n::tr("prefs.snap_drawing_note"));
+                    .backing_on_hover_text(solidcraft_ui_text::tr("prefs.snap_drawing_note"));
                     crate::scenario::publish_target("prefs:suppress_sketch_snap", response.rect);
                 });
             });
@@ -328,7 +328,7 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let response = ui_kit::toggle_tile(
                     ui,
                     &ui_kit::Card {
-                        label: crate::i18n::tr(label),
+                        label: solidcraft_ui_text::tr(label),
                         sub: None,
                         selected: *value,
                         enabled: true,
@@ -339,7 +339,7 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                     width,
                 )
-                .backing_on_hover_text(crate::i18n::tr(help));
+                .backing_on_hover_text(solidcraft_ui_text::tr(help));
                 targets(key, &response);
                 if response.clicked() {
                     *value = !*value;
@@ -470,19 +470,19 @@ fn check_width(ui: &egui::Ui, label: &str, help: bool) -> f32 {
 
 /// Standard checkbox, its hover help, and its existing field target.
 fn check(ui: &mut egui::Ui, key: &str, label: &str, help: Option<&str>, value: &mut bool) -> egui::Response {
-    let help = help.map(crate::i18n::tr);
+    let help = help.map(solidcraft_ui_text::tr);
     ui.horizontal_top(|ui| {
         let t = Tokens::get();
         let show_help = help.is_some() && !crate::ui_kit::settings_search::suppress_chrome(ui);
         let width = (ui.available_width() - if show_help { t.space_8 + t.space_12 + 1.0 } else { 0.0 }).max(0.0).min(check_width(
             ui,
-            crate::i18n::tr(label),
+            solidcraft_ui_text::tr(label),
             false,
         ));
         ui.spacing_mut().item_spacing.x = t.space_8;
         let response = ui
             .allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui_kit::checkbox(ui, crate::i18n::tr(label), value)
+                ui_kit::checkbox(ui, solidcraft_ui_text::tr(label), value)
             })
             .inner;
         targets(key, &response);
@@ -542,11 +542,11 @@ fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     let p = &mut app.preferences;
                     ui_kit::bounded_length_field(ui, &mut p.dimension_step_mm, &units, decimals, DIMENSION_STEP_MM, 0.1)
-                        .on_hover_text(crate::i18n::tr("prefs.dimension_step_length"));
+                        .on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_length"));
                 });
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     ui_kit::number_field(ui, &mut app.preferences.dimension_step_deg, DIMENSION_STEP_DEG, 0.1, "°")
-                        .on_hover_text(crate::i18n::tr("prefs.dimension_step_angle"));
+                        .on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_angle"));
                 });
             });
         });

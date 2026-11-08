@@ -4038,7 +4038,7 @@ fn cpu_progressive_controls_resize_only_on_request_and_save_reload_without_a_hos
     assert_eq!(h.app.session.undo.len(), undo);
     h.app.run("view.render_select", json!({"kind":"output"})).unwrap();
     h.frames(3);
-    let resize = crate::i18n::format("render.output_largest", &[("width", "512"), ("height", "512")]);
+    let resize = solidcraft_ui_text::format("render.output_largest", &[("width", "512"), ("height", "512")]);
     assert!(h.widget(&resize).is_some(), "the proposed dimensions must be visible before accepting them");
     h.step(&json!({"widget":resize})).unwrap();
     assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (512, 512));
@@ -5268,7 +5268,7 @@ fn render_workspace_focus_messages_have_five_complete_locales() {
         ("ko", include_str!(concat!(env!("OUT_DIR"), "/locales/ko.json"))),
     ] {
         let translated: std::collections::BTreeMap<String, String> = serde_json::from_str(source).unwrap();
-        let locale = crate::i18n::Locale::for_language(language);
+        let locale = solidcraft_ui_text::Locale::for_language(language);
         for key in keys {
             let value = translated.get(key).unwrap_or_else(|| panic!("{language}: missing {key}"));
             assert!(!value.is_empty());
@@ -6329,8 +6329,10 @@ fn render_workspace_wear_tree_selects_the_scene_stack_and_counts_layers_in_both_
     for count in 1..=2 {
         h.app.render_workspace.view.studio.aging.push(AgingLayer::preset(AgingKind::Dust)).unwrap();
         h.app.render_workspace.view.dirty = true;
-        let label =
-            crate::i18n::format(if count == 1 { "render.wear_layer_one" } else { "render.wear_layer_count" }, &[("count", &count.to_string())]);
+        let label = solidcraft_ui_text::format(
+            if count == 1 { "render.wear_layer_one" } else { "render.wear_layer_count" },
+            &[("count", &count.to_string())],
+        );
         assert_eq!(scene::wear_subtitle(&h.app), label);
         for by_look in [false, true] {
             h.app.run("view.render_browser", json!({"by_look":by_look})).unwrap();
@@ -7642,7 +7644,7 @@ fn render_assign_gestures_grid_drag_modifiers_cancel_and_context_menu() {
 #[test]
 fn render_assign_gestures_labels_translate_in_all_five_catalogs() {
     for language in ["en", "ja", "zh", "de", "ko"] {
-        let locale = crate::i18n::Locale::for_language(language);
+        let locale = solidcraft_ui_text::Locale::for_language(language);
         for id in [
             "cmd.appearance_copy",
             "cmd.appearance_paste",
@@ -8550,7 +8552,7 @@ fn render_results_batch_output_footer_only_starts_on_click_and_cancel_drops_wait
     let queue = h.app.session.render_queue_state();
     assert_eq!((queue.running, queue.waiting), (1, 2));
     assert_eq!(h.app.render_workspace.view.job, queue.job);
-    let status = crate::i18n::format("render.batch_status", &[("running", "1"), ("waiting", "2")]);
+    let status = solidcraft_ui_text::format("render.batch_status", &[("running", "1"), ("waiting", "2")]);
     assert!(h.shapes.iter().any(|shape| matches!(&shape.shape,egui::Shape::Text(text) if text.galley.text()==status)));
     assert!(crate::scenario::rect_of("render:shots:queue").is_some());
     h.step(&json!({"click":{"handle":"render:stage:render.cancel"}})).unwrap();
@@ -10418,12 +10420,14 @@ fn live_source_labels_use_captured_executor_names_instead_of_the_selected_method
     h.app.render_workspace.view.method = ImageMethod::CpuRaytrace;
     for (executor, key) in [("cpu-raytrace", "render.method_cpu"), ("gpu-path", "render.method_gpu")] {
         for current in [true, false] {
-            let expected =
-                crate::i18n::format(if current { "render.live.source_current" } else { "render.live.source_outdated" }, &[("method", h.app.tr(key))]);
+            let expected = solidcraft_ui_text::format(
+                if current { "render.live.source_current" } else { "render.live.source_outdated" },
+                &[("method", h.app.tr(key))],
+            );
             assert_eq!(live::source_text(&h.app, executor, current), expected);
         }
     }
-    let expected = crate::i18n::format("render.live.source_outdated", &[("method", "test-image-executor")]);
+    let expected = solidcraft_ui_text::format("render.live.source_outdated", &[("method", "test-image-executor")]);
     assert_eq!(live::source_text(&h.app, "test-image-executor", false), expected, "unrecognised captures cannot claim CPU or GPU transport");
 }
 
@@ -10442,7 +10446,7 @@ fn live_source_badge_follows_real_pixels_and_its_settings_gear_opens_output_with
     let Some(mut h) = live_cpu_fixture() else { return };
     live::advance(&mut h.app, &h.ctx, 1.0);
     wait_live_complete(&mut h, 1.3);
-    let current = crate::i18n::format("render.live.source_current", &[("method", h.app.tr("render.method_cpu"))]);
+    let current = solidcraft_ui_text::format("render.live.source_current", &[("method", h.app.tr("render.method_cpu"))]);
     assert_eq!(live::source_note(&h.app), (current.clone(), "render.live.quality_help"));
     let document = h.app.session.doc.clone();
     let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
@@ -10510,7 +10514,7 @@ fn live_source_badge_follows_real_pixels_and_its_settings_gear_opens_output_with
 
     // A method change before the next lifecycle tick cannot rename an existing CPU image.
     h.app.render_workspace.view.method = ImageMethod::GpuRaytrace;
-    let previous = crate::i18n::format("render.live.source_outdated", &[("method", h.app.tr("render.method_cpu"))]);
+    let previous = solidcraft_ui_text::format("render.live.source_outdated", &[("method", h.app.tr("render.method_cpu"))]);
     assert_eq!(live::source_note(&h.app), (previous.clone(), "render.live.source_outdated_help"));
     live::advance(&mut h.app, &h.ctx, 2.0);
     assert_eq!(live::source_note(&h.app), (previous, "render.live.source_outdated_help"), "a refused update retains the captured source name");
@@ -14477,7 +14481,7 @@ fn stable_glass_pointer_draft_composes_saved_glass_maps_coat_and_lens_until_one_
         let saved = document.render.setups["Studio"].clone();
         assert_ne!(camera, saved.camera, "the optical save must preserve an independently saved camera");
         assert_eq!((saved.optics.len(), saved.surfaces.len(), saved.coats.len()), (1, 1, 1));
-        let mut scrolls = stable_glass_draft_click(&mut h, &format!("dialog:section:{}", crate::i18n::tr("render.appearance_editor.glass")));
+        let mut scrolls = stable_glass_draft_click(&mut h, &format!("dialog:section:{}", solidcraft_ui_text::tr("render.appearance_editor.glass")));
         scrolls += stable_glass_draft_click(&mut h, "render:glass:enable");
         let absorption = h.app.tr("render.appearance_editor.absorption").to_owned();
         for axis in 0..3 {
@@ -14510,7 +14514,7 @@ fn stable_glass_pointer_draft_composes_saved_glass_maps_coat_and_lens_until_one_
         assert_eq!(h.app.session.selection, selection);
         assert_eq!(h.app.cam, camera);
         assert!(h.app.render_workspace.view.job.is_none());
-        scrolls += stable_glass_draft_click(&mut h, &format!("dialog:section:{}", crate::i18n::tr("render.appearance_editor.saved")));
+        scrolls += stable_glass_draft_click(&mut h, &format!("dialog:section:{}", solidcraft_ui_text::tr("render.appearance_editor.saved")));
         scrolls += stable_glass_draft_reveal(&mut h, "render:optics-save");
         let save_label = h.app.tr("render.appearance_editor.save").to_owned();
         let save_enabled = {
@@ -15684,7 +15688,7 @@ fn advanced_glass_pointer_edit_keeps_saved_dispersion_film_and_independent_optic
         let original = saved.optics.iter().next().unwrap().clone();
         assert!(h.app.render_workspace.view.materials.bindings.is_empty(), "opening a saved row must not create an unsaved material override");
         assert_eq!(image_request(&h.app).unwrap()["settings"], json!(saved), "opening the advanced editor must preserve the complete saved setup");
-        stable_glass_draft_click(&mut h, &format!("dialog:section:{}", crate::i18n::tr("render.appearance_editor.glass")));
+        stable_glass_draft_click(&mut h, &format!("dialog:section:{}", solidcraft_ui_text::tr("render.appearance_editor.glass")));
         stable_glass_draft_reveal(&mut h, "render:glass:roughness");
         let field = crate::scenario::rect_of("render:glass:roughness").unwrap();
         assert!(stable_glass_draft_viewport(&h).contains_rect(field));
@@ -15707,7 +15711,7 @@ fn advanced_glass_pointer_edit_keeps_saved_dispersion_film_and_independent_optic
         assert!(h.app.render_workspace.view.dirty);
         assert!(Arc::ptr_eq(&document, &h.app.session.doc));
         assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
-        stable_glass_draft_click(&mut h, &format!("dialog:section:{}", crate::i18n::tr("render.appearance_editor.saved")));
+        stable_glass_draft_click(&mut h, &format!("dialog:section:{}", solidcraft_ui_text::tr("render.appearance_editor.saved")));
         h.step(&json!({"widget":h.app.tr("render.appearance_editor.replace")})).unwrap();
         stable_glass_draft_click(&mut h, "render:optics-save");
         assert_eq!(

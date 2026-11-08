@@ -540,7 +540,7 @@ fn text_matches(query: &str, text: &str) -> bool {
     // is typed in reading order: compare the query in display order too, so a multi-word Hebrew
     // or Arabic label is found as it is typed (#10471; #7532 fixed only the test's half).
     setting_score(query, text) > 0
-        || setting_score(&crate::bidi::visual(query), text) > 0
+        || setting_score(&solidcraft_ui_text::bidi::visual(query), text) > 0
         || english_hit(query, text)
         || keywords(text).iter().any(|word| setting_score(query, word) > 0)
 }
@@ -703,12 +703,12 @@ fn english_hit(query: &str, shown: &str) -> bool {
         static MAP: RefCell<(String, HashMap<String, Vec<String>>)> = RefCell::new((String::new(), HashMap::new()));
     }
     MAP.with(|slot| {
-        let lang = crate::i18n::language().to_string();
+        let lang = solidcraft_ui_text::language().to_string();
         let mut slot = slot.borrow_mut();
         if slot.0 != lang {
             let mut map: HashMap<String, Vec<String>> = HashMap::new();
-            let locale = crate::i18n::Locale::for_language(&lang);
-            crate::i18n::each_english_message(|id, english| {
+            let locale = solidcraft_ui_text::Locale::for_language(&lang);
+            solidcraft_ui_text::each_english_message(|id, english| {
                 if english.contains('{') {
                     return;
                 }
@@ -978,7 +978,7 @@ mod tests {
         assert!(!matches_text("rzd", &["Reverse zoom direction"]));
         assert!(!matches_text("q", &["Units of new designs"]));
         assert!(!matches_text("qqqq", &["Units of new designs"]));
-        let _language = crate::i18n::scope("fr");
+        let _language = solidcraft_ui_text::scope("fr");
         assert!(matches_text("units", &["Unités des nouvelles conceptions"]));
         assert!(matches_text("preferences", &["préférences"]));
         assert!(matches_text("dark", &["Theme"]));
@@ -1025,13 +1025,13 @@ mod tests {
 
     #[test]
     fn search_finds_right_to_left_labels_typed_in_reading_order() {
-        let _language = crate::i18n::scope("he");
-        let label = crate::i18n::tr("prefs.bodies_folders");
+        let _language = solidcraft_ui_text::scope("he");
+        let label = solidcraft_ui_text::tr("prefs.bodies_folders");
         assert!(matches_text("תיקיות גופים", &[label]), "the label as it is typed");
         assert!(matches_text("גופים תיקיות", &[label]), "the words swapped still match");
         assert!(matches_text("תיקיות", &[label]), "one word still matches");
-        let _language = crate::i18n::scope("ar");
-        let label = crate::i18n::tr("prefs.bodies_folders");
+        let _language = solidcraft_ui_text::scope("ar");
+        let label = solidcraft_ui_text::tr("prefs.bodies_folders");
         assert!(matches_text("مجلدات الأجسام", &[label]), "the label as it is typed");
         assert!(matches_text("الأجسام مجلدات", &[label]), "the words swapped still match");
         assert!(matches_text("مجلدات", &[label]), "one word still matches");
@@ -1134,9 +1134,9 @@ mod tests {
 
     #[test]
     fn the_search_field_names_the_window_it_searches() {
-        let name = crate::i18n::tr("ui.preferences").to_lowercase();
+        let name = solidcraft_ui_text::tr("ui.preferences").to_lowercase();
         for id in ["prefs.search", "prefs.search_empty"] {
-            let text = crate::i18n::tr(id).to_lowercase();
+            let text = solidcraft_ui_text::tr(id).to_lowercase();
             assert!(text.contains(&name), "`{text}` should name the window `{name}`");
         }
     }
@@ -1363,9 +1363,9 @@ mod tests {
             ("prefs.sketch.whole_bodies", "Click selects whole bodies"),
         ];
         for lang in ["en", "en-GB", "ar", "de", "he", "ja", "ko", "vi", "zh"] {
-            let _language = crate::i18n::scope(lang);
+            let _language = solidcraft_ui_text::scope(lang);
             for (id, legacy) in cases {
-                assert!(matches_text(legacy, &[crate::i18n::tr(id)]), "{lang}: {legacy} still finds {id}");
+                assert!(matches_text(legacy, &[solidcraft_ui_text::tr(id)]), "{lang}: {legacy} still finds {id}");
             }
         }
     }

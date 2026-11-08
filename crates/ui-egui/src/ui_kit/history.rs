@@ -225,7 +225,7 @@ impl HistoryTransport {
     }
 
     pub(crate) fn label(self, playing: bool) -> &'static str {
-        crate::i18n::tr(match self {
+        solidcraft_ui_text::tr(match self {
             Self::First => "ui.history_first",
             Self::Back => "ui.history_back",
             Self::Play if playing => "cmd.timeline_stop",
@@ -351,7 +351,7 @@ pub(crate) fn history_seam(ui: &mut egui::Ui, card: Rect, names: bool) -> Histor
     let id = ui.scope_id().with("history_seam");
     let edge = ui.interact(seam.edge, id.with("edge"), egui::Sense::CLICK | egui::Sense::DRAG);
     let button = ui.interact(seam.pill, id, egui::Sense::click_and_drag());
-    let label = crate::i18n::tr(if names { "ui.collapse" } else { "ui.expand" });
+    let label = solidcraft_ui_text::tr(if names { "ui.collapse" } else { "ui.expand" });
     button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     if button.clicked() {
         button.request_focus();
@@ -396,7 +396,7 @@ pub(crate) fn history_seam(ui: &mut egui::Ui, card: Rect, names: bool) -> Histor
         crate::ui_kit::Container::show_tooltip(response.id, tip, |ui| {
             let t = Tokens::get();
             ui.label(egui::RichText::new(label).font(crate::fonts::semibold(t.font_body)).color(t.text));
-            ui.label(egui::RichText::new(crate::i18n::tr("ui.history_edge_hint")).size(t.font_small).color(t.text_dim));
+            ui.label(egui::RichText::new(solidcraft_ui_text::tr("ui.history_edge_hint")).size(t.font_small).color(t.text_dim));
         });
     }
     solidcraft_ui_registry::publish_handle("history:names", seam.pill.center());

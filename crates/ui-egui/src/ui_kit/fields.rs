@@ -139,7 +139,7 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
             egui::Stroke::NONE,
         ));
         let sign = if delta > 0 { "+1" } else { "−1" };
-        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, format!("{} {sign}", crate::i18n::tr_label(&row))));
+        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, format!("{} {sign}", solidcraft_ui_text::tr_label(&row))));
         solidcraft_ui_registry::publish_handle(&format!("dialog:{row} {name}"), half.center());
         if let (true, true, Some(next)) = (enabled, arrow.clicked(), next) {
             *value = next;
@@ -406,7 +406,7 @@ fn searchable_dropdown_with(
         let search = ui.add(
             text_input(egui::TextEdit::singleline(filter))
                 .id_salt(format!("{id}_search"))
-                .hint_text(crate::i18n::tr_label("Search"))
+                .hint_text(solidcraft_ui_text::tr_label("Search"))
                 .desired_width(f32::INFINITY),
         );
         // Preferences types into its own search only while no field has the keyboard.
@@ -654,8 +654,8 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
     ui.allocate_ui(vec2(dimension(width), height), |ui| {
         ui.set_min_height(height);
         if let Some(model) = custom {
-            search_heading(ui, crate::i18n::tr("ui.agent_chat_custom_heading"), t.space_16);
-            let text = crate::i18n::format("ui.agent_chat_model_custom", &[("model", &compact(model, SEARCH_LABEL_CAP))]);
+            search_heading(ui, solidcraft_ui_text::tr("ui.agent_chat_custom_heading"), t.space_16);
+            let text = solidcraft_ui_text::format("ui.agent_chat_model_custom", &[("model", &compact(model, SEARCH_LABEL_CAP))]);
             let row = search_row(ui, &text, false);
             solidcraft_ui_registry::publish_target(&format!("{}:custom", p.handles), row.rect);
             if row.clicked() {
@@ -663,7 +663,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
             }
         }
         if !visible.is_empty() {
-            search_heading(ui, crate::i18n::tr("ui.agent_chat_models_heading"), t.space_16);
+            search_heading(ui, solidcraft_ui_text::tr("ui.agent_chat_models_heading"), t.space_16);
             // Rows of one height, group headings too: only those in view are laid out.
             let list = (ui.available_height() - note_height).max(row_height);
             egui::ScrollArea::vertical()
@@ -806,7 +806,7 @@ fn search_group_row(ui: &mut Ui, name: &str, count: usize, open: bool) -> Respon
     if rule_from < rule_to {
         painter.hline(rule_from..=rule_to, y, egui::Stroke::new(1.0, t.border));
     }
-    response.backing_on_hover_text(crate::i18n::format("ui.agent_chat_provider_models", &[("count", &count.to_string())]))
+    response.backing_on_hover_text(solidcraft_ui_text::format("ui.agent_chat_provider_models", &[("count", &count.to_string())]))
 }
 
 /// A `search_picker` row: as `list_picker`, but read from the left, as a list of ids is.
@@ -882,7 +882,7 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     }
     crate::theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
-    let label = crate::i18n::tr_label(label(ui));
+    let label = solidcraft_ui_text::tr_label(label(ui));
     response.widget_info(|| {
         let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), label);
         info.current_text_value = Some(value.clone());
@@ -901,11 +901,11 @@ fn dropdown_arrow(ui: &Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisua
 
 /// Native dropdown with kit arrow and scenario option handles. Tokens: `text_dim; scope control/font tokens`.
 pub(crate) fn dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> Response {
-    let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
+    let text = options.get(*selected).copied().map(solidcraft_ui_text::tr_label).unwrap_or("");
     let row = label(ui).to_string();
     dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
-            let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
+            let response = ui.selectable_value(selected, index, solidcraft_ui_text::tr_label(option));
             solidcraft_ui_registry::publish_target(&format!("dialog:{row}:{option}"), response.rect);
         }
     })
@@ -953,11 +953,11 @@ fn paint_dropdown_icon(ui: &Ui, rect: egui::Rect, icon: &str) {
 /// for that option's index, so a choice can be seen before it is picked. Tokens: dropdown tokens,
 /// the tooltip frame.
 pub(crate) fn dropdown_previews(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str], preview: impl Fn(&mut Ui, usize)) -> Response {
-    let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
+    let text = options.get(*selected).copied().map(solidcraft_ui_text::tr_label).unwrap_or("");
     let row = label(ui).to_string();
     dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
-            let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
+            let response = ui.selectable_value(selected, index, solidcraft_ui_text::tr_label(option));
             solidcraft_ui_registry::publish_target(&format!("dialog:{row}:{option}"), response.rect);
             Container::tooltip_ui(&response, |ui| {
                 preview(ui, index);
@@ -970,12 +970,12 @@ pub(crate) fn dropdown_previews(ui: &mut Ui, id: &str, selected: &mut usize, opt
 /// [`dropdown`] that also says whether an option was clicked, the one already shown included (a
 /// pick of the shown option changes nothing, yet it is a choice).
 pub(crate) fn dropdown_picked(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> bool {
-    let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
+    let text = options.get(*selected).copied().map(solidcraft_ui_text::tr_label).unwrap_or("");
     let row = label(ui).to_string();
     let mut picked = false;
     dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
-            let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
+            let response = ui.selectable_value(selected, index, solidcraft_ui_text::tr_label(option));
             picked |= response.clicked();
             solidcraft_ui_registry::publish_handle(&format!("dialog:{row}:{option}"), response.rect.center());
         }
@@ -1027,7 +1027,7 @@ pub(crate) fn bounded_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, curren
     // visual truncation must not truncate the accessible captured-source name.
     response.widget_info(|| {
         let row_label = label(ui);
-        let name = if row_label.trim().is_empty() { current } else { crate::i18n::tr_label(row_label) };
+        let name = if row_label.trim().is_empty() { current } else { solidcraft_ui_text::tr_label(row_label) };
         let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), name);
         info.current_text_value = Some(current.to_owned());
         info
@@ -1099,7 +1099,7 @@ fn dropdown_menu_width(
     // dropdown, without losing its full current value in the final announcement.
     response.widget_info(|| {
         let row_label = label(ui);
-        let name = if row_label.trim().is_empty() { current } else { crate::i18n::tr_label(row_label) };
+        let name = if row_label.trim().is_empty() { current } else { solidcraft_ui_text::tr_label(row_label) };
         let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), name);
         info.current_text_value = Some(current.to_owned());
         info
@@ -1239,7 +1239,7 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
     let editor = text_input(egui::TextEdit::singleline(value))
         .char_limit(limit)
         .id(id)
-        .hint_text(crate::i18n::tr_label(hint))
+        .hint_text(solidcraft_ui_text::tr_label(hint))
         .font(if frame { egui::FontId::monospace(t.font_label) } else { egui::FontId::proportional(t.font_label) })
         .background_color(if invalid { t.form_error_fill } else { t.input_fill() })
         .text_color(if invalid { t.form_error } else { t.form_ink })
@@ -1265,7 +1265,7 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
         super::layout::publish_geometry(ui, &response);
     }
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), crate::i18n::tr_label(label(ui)));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), solidcraft_ui_text::tr_label(label(ui)));
         info.current_text_value = Some(value.clone());
         info
     });
@@ -1314,7 +1314,7 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                     .return_key(None)
                     .desired_rows(1)
                     .desired_width(width)
-                    .hint_text(crate::i18n::tr_label(hint))
+                    .hint_text(solidcraft_ui_text::tr_label(hint))
                     .font(font)
                     .background_color(if invalid { t.form_error_fill } else { t.input_fill() })
                     .text_color(if invalid { t.form_error } else { t.form_ink });
@@ -1353,7 +1353,7 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
     });
     let response = shown.inner;
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, enabled, crate::i18n::tr_label(hint));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, enabled, solidcraft_ui_text::tr_label(hint));
         info.current_text_value = Some(value.clone());
         info
     });
@@ -1414,7 +1414,7 @@ pub(crate) fn menu_filter(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &
     let glyph = egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_8 + t.space_16 / 2.0, rect.center().y), vec2(t.space_16, t.space_16));
     crate::icons::paint_ink(ui.painter(), glyph, "zoom", t.form_dim);
     let field = egui::Rect::from_min_max(egui::pos2((glyph.right() + t.space_8).min(rect.right()), rect.top()), rect.max);
-    let hint_text = crate::i18n::tr_label(hint);
+    let hint_text = solidcraft_ui_text::tr_label(hint);
     let response = ui
         .scope_builder(egui::UiBuilder::new().max_rect(field).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(field));
@@ -1589,7 +1589,7 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
         };
         ui.painter().circle(center, t.space_8, fill, egui::Stroke::new(t.space_2, if off { t.form_dim } else { primary }));
         publish(ui, &response, egui::Role::Slider);
-        response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), value.to_f64(), crate::i18n::tr_label(label(ui))));
+        response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), value.to_f64(), solidcraft_ui_text::tr_label(label(ui))));
         solidcraft_ui_registry::publish_rect(&format!("dialog:slider_track:{}", label(ui)), slider);
         solidcraft_ui_registry::publish_target(&format!("dialog:slider:{}", label(ui)), response.rect);
         response
@@ -1789,7 +1789,7 @@ fn bounded_number_field<T: egui::emath::Numeric>(
     Tokens::get().input_bevel(ui, &response);
     response.widget_info(|| {
         let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), value.to_f64());
-        info.label = Some(crate::i18n::tr_label(label(ui)).to_string());
+        info.label = Some(solidcraft_ui_text::tr_label(label(ui)).to_string());
         info
     });
     super::layout::publish_geometry(ui, &response);
@@ -1961,13 +1961,13 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     publish(ui, &response, egui::Role::TextInput);
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), crate::i18n::tr_label(hint));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), solidcraft_ui_text::tr_label(hint));
         info.current_text_value = Some(value.clone());
         info
     });
     crate::theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
-    response.backing_on_hover_text(crate::i18n::tr_label(hint))
+    response.backing_on_hover_text(solidcraft_ui_text::tr_label(hint))
 }
 
 /// Attached Library dropdown and text editor inside one bordered control.
@@ -1995,7 +1995,7 @@ pub(crate) fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     if open {
         ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     }
-    if value.is_empty() { response.backing_on_hover_text(crate::i18n::tr_label(hint)) } else { response }
+    if value.is_empty() { response.backing_on_hover_text(solidcraft_ui_text::tr_label(hint)) } else { response }
 }
 
 /// Inline tree-name editor in caller-owned geometry; preserves its native focus and selection ID.

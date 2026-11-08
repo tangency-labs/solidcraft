@@ -1626,14 +1626,14 @@ const ELEMENTS: &[Element] = &[
         let t = Tokens::get();
         for open in [true, false] {
             let (rect, _) = ui.allocate_exact_size(vec2(t.form_close_size, t.form_close_size), egui::Sense::hover());
-            ui.push_id(open, |ui| disclosure_button_at(ui, rect, open, crate::i18n::tr_label(if open { "Collapse" } else { "Expand" })));
+            ui.push_id(open, |ui| disclosure_button_at(ui, rect, open, solidcraft_ui_text::tr_label(if open { "Collapse" } else { "Expand" })));
         }
     }),
     element!("panel_disclosure_button_at", |ui, _| {
         let t = Tokens::get();
         for open in [true, false] {
             let (rect, _) = ui.allocate_exact_size(vec2(t.form_close_size, t.form_close_size), egui::Sense::hover());
-            ui.push_id(open, |ui| panel_disclosure_button_at(ui, rect, open, crate::i18n::tr_label(if open { "Collapse" } else { "Expand" })));
+            ui.push_id(open, |ui| panel_disclosure_button_at(ui, rect, open, solidcraft_ui_text::tr_label(if open { "Collapse" } else { "Expand" })));
         }
     }),
     element!("dropdown_indicator", |ui, _| {

@@ -192,7 +192,7 @@ pub(crate) fn navigation_separator_source(ui: &mut Ui, id: &str, label: &str, dr
     icons::paint_ink(&painter, Rect::from_center_size(add_rect.center(), vec2(t.space_14, t.space_14)), "plus", t.form_primary);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     add.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), crate::i18n::format("navbar.custom.add_slot", &[("slot", label)]))
+        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::format("navbar.custom.add_slot", &[("slot", label)]))
     });
     (response, add)
 }
@@ -236,7 +236,7 @@ pub(crate) fn navigation_tile(ui: &mut Ui, id: &str, label: &str, icon: &str, dr
     icons::paint_ink(&painter, Rect::from_center_size(add_rect.center(), vec2(t.space_14, t.space_14)), "plus", t.form_primary);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     add.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), crate::i18n::format("navbar.custom.add_slot", &[("slot", label)]))
+        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::format("navbar.custom.add_slot", &[("slot", label)]))
     });
     (response, add)
 }

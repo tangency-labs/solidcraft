@@ -72,7 +72,7 @@ pub(crate) fn message(part: &RefusedPart, operation: Option<&str>) -> String {
         Some("intersect") => "refused.intersect",
         _ => "refused.change",
     };
-    format!("{} {}", crate::i18n::format(what, &[("body", &part.body)]), crate::i18n::tr(why_key(part)))
+    format!("{} {}", solidcraft_ui_text::format(what, &[("body", &part.body)]), solidcraft_ui_text::tr(why_key(part)))
 }
 
 /// What is wrong with the part, as a sentence id.
@@ -131,7 +131,7 @@ mod tests {
     /// status code.
     #[test]
     fn a_refused_part_is_named_with_what_is_wrong_with_it() {
-        let _english = crate::i18n::scope("en");
+        let _english = solidcraft_ui_text::scope("en");
         let rounded = RefusedPart { body: "VALVE_COVER_01".into(), face: Some(412), surface: Some(SurfaceKind::Torus) };
         assert_eq!(message(&rounded, Some("join")), "Couldn't join to VALVE_COVER_01. One of its rounded faces can't be used for modelling.");
         let apart = RefusedPart { body: "Bracket".into(), face: None, surface: None };

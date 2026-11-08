@@ -235,7 +235,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let moved = crate::frame::dock_offset(ctx, "PARAMETERS");
     let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
-    let title = crate::i18n::tr_label("Parameters");
+    let title = solidcraft_ui_text::tr_label("Parameters");
     let panel = ui_kit::Panel::new(
         title,
         egui::Id::unique("sc_params_dialog"),
@@ -286,7 +286,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 ui.horizontal_wrapped(|ui| {
                     if ui_kit::icon_label_button(ui, "Import…", "import_tray", true, false)
-                        .backing_on_hover_text(crate::i18n::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
+                        .backing_on_hover_text(solidcraft_ui_text::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
                         .clicked()
                     {
                         app.pick_open_command("parameters.import", json!({}), IMPORT_TYPES);
@@ -330,7 +330,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 style: ui.style().clone(),
                                 font: app.applied_ui_font.clone(),
                                 system_fonts: app.applied_system_fonts,
-                                language: crate::i18n::language(),
+                                language: solidcraft_ui_text::language(),
                             };
                             if d.group_layout.as_ref() != Some(&layout) {
                                 d.group_sizes.clear();
@@ -486,7 +486,7 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
     ];
     // An expression being edited may open over the cells to its right, up to the table's edge.
     let right = ui.max_rect().right().min(ui.clip_rect().right());
-    ui_kit::table_custom(ui, salt, &columns, crate::i18n::tr("manage.empty"), |ui, table| {
+    ui_kit::table_custom(ui, salt, &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
         // The Name heading sorts every section at once, each inside itself (#8563).
         table.headers(ui, |ui, index| {
             if index != 1 {
@@ -546,7 +546,7 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                         }
                     }
                     _ => {
-                        let rename = crate::i18n::tr_label("Double-click to rename");
+                        let rename = solidcraft_ui_text::tr_label("Double-click to rename");
                         // Keep long identifiers readable (#8533) without stacking the cell's own tooltip.
                         let response = ui_kit::name_cell_with_hint(ui, &r.name, false, rename);
                         crate::scenario::publish_handle(&format!("param:name:{}", r.name), response.rect.center());
@@ -652,7 +652,7 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
 }
 
 fn unit_label(u: &str) -> &str {
-    if u.is_empty() { crate::i18n::tr_label("none") } else { u }
+    if u.is_empty() { solidcraft_ui_text::tr_label("none") } else { u }
 }
 
 /// Only a fresh Enter in this field submits; held keys and unrelated focus do not.
@@ -677,15 +677,15 @@ fn held(d: &ParamsDialog, rows: &[Row]) -> serde_json::Map<String, Value> {
 
 /// The hint at the top of the dialog: when edits apply, as the check box under it says.
 fn hint(live: bool) -> &'static str {
-    crate::i18n::tr(if live { "manage.parameters_hint" } else { "parameters.held_hint" })
+    solidcraft_ui_text::tr(if live { "manage.parameters_hint" } else { "parameters.held_hint" })
 }
 
 /// The footer's note of the edits waiting for Apply, if any.
 fn held_status(count: usize) -> Option<String> {
     match count {
         0 => None,
-        1 => Some(crate::i18n::tr("parameters.held_one").to_string()),
-        n => Some(crate::i18n::format("parameters.held", &[("count", &n.to_string())])),
+        1 => Some(solidcraft_ui_text::tr("parameters.held_one").to_string()),
+        n => Some(solidcraft_ui_text::format("parameters.held", &[("count", &n.to_string())])),
     }
 }
 
@@ -712,8 +712,8 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
 /// "Apply each change as you leave its field", remembered across sessions (#9279). Turning it
 /// back on applies what was waiting.
 fn apply_live_checkbox(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[Row]) {
-    let response = ui_kit::checkbox(ui, crate::i18n::tr("parameters.apply_live"), &mut app.preferences.parameters_apply_live)
-        .backing_on_hover_text(crate::i18n::tr("parameters.apply_live_tip"));
+    let response = ui_kit::checkbox(ui, solidcraft_ui_text::tr("parameters.apply_live"), &mut app.preferences.parameters_apply_live)
+        .backing_on_hover_text(solidcraft_ui_text::tr("parameters.apply_live_tip"));
     crate::scenario::publish_handle("params:apply_live", response.rect.center());
     if response.changed() && app.preferences.parameters_apply_live {
         apply_held(app, d, rows);
@@ -1105,7 +1105,7 @@ mod tests {
                 for shape in &h.shapes {
                     text_in(&shape.shape, tooltips[0], &mut texts);
                 }
-                let hint = crate::i18n::tr_label("Double-click to rename");
+                let hint = solidcraft_ui_text::tr_label("Double-click to rename");
                 let expected = if name == "rip_length" { hint.to_owned() } else { format!("{name}\n{hint}") };
                 assert_eq!(texts, [expected], "only a clipped name needs repeating");
                 h.step(&json!({"click":{"handle":format!("param:name:{name}")},"double":true})).unwrap();
@@ -1390,7 +1390,7 @@ mod tests {
     fn the_apply_live_choice_is_remembered_and_turning_it_on_applies_what_waits() {
         assert!(crate::prefs::Prefs::default().parameters_apply_live, "live updates stay the default");
         // The hint above the check box says when edits apply, whichever way it is set.
-        assert_eq!(hint(true), crate::i18n::tr("manage.parameters_hint"));
+        assert_eq!(hint(true), solidcraft_ui_text::tr("manage.parameters_hint"));
         assert_ne!(hint(false), hint(true));
         assert!(hint(false).contains("Apply") && !hint(false).contains("leaving"), "{}", hint(false));
         let mut h = held_dialog();

@@ -48,7 +48,7 @@ fn slot_catalogue_uses_registered_commands_and_existing_icons() {
 fn catalogue_slot_descriptions_explain_slots_without_settings_jargon() {
     for slot in CATALOGUE {
         for language in ["en", "ja", "zh"] {
-            let description = crate::i18n::Locale::for_language(language).text(slot.description);
+            let description = solidcraft_ui_text::Locale::for_language(language).text(slot.description);
             assert!(!description.trim().is_empty() && description != slot.description, "{language}: {} needs a description", slot.id);
             assert!(description.ends_with(['.', '。']), "{language}: {} must be a sentence", slot.id);
             let lower = description.to_lowercase();

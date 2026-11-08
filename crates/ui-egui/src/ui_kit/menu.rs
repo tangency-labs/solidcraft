@@ -304,8 +304,11 @@ impl Menu {
     pub(crate) fn heading(ui: &mut Ui, label: &str) {
         let t = Tokens::get();
         let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_24), Sense::hover());
-        let mut job =
-            egui::text::LayoutJob::simple_singleline(crate::i18n::tr_label(label).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim);
+        let mut job = egui::text::LayoutJob::simple_singleline(
+            solidcraft_ui_text::tr_label(label).to_uppercase(),
+            crate::fonts::semibold(t.font_small),
+            t.form_dim,
+        );
         for section in &mut job.sections {
             section.format.extra_letter_spacing = t.font_small * t.font_section_tracking;
         }
@@ -381,7 +384,8 @@ impl<'a> MenuItem<'a> {
         // Areas first measure intrinsic content. Filling their provisional available
         // width would make a flipped submenu cover its parent and consume the opening click.
         let width = if ui.is_sizing_pass() {
-            let label = ui.painter().layout_no_wrap(crate::i18n::tr_label(self.label).to_string(), FontId::proportional(t.font_label), t.form_ink);
+            let label =
+                ui.painter().layout_no_wrap(solidcraft_ui_text::tr_label(self.label).to_string(), FontId::proportional(t.font_label), t.form_ink);
             let shortcut = ui.painter().layout_no_wrap(self.shortcut.to_string(), FontId::monospace(t.font_small), t.form_dim);
             let trailing = if self.submenu { t.space_16 } else { 0.0 };
             (t.control_height + t.space_2 + label.size().x + shortcut.size().x + t.space_24 + trailing).min(ui.available_width())
@@ -437,7 +441,7 @@ impl<'a> MenuItem<'a> {
                 icons::paint_icon(&painter, icon, self.icon, 1.0);
             }
         }
-        let label = crate::i18n::tr_label(self.label);
+        let label = solidcraft_ui_text::tr_label(self.label);
         let mut right = r.right() - t.space_8 - trailing;
         if self.submenu {
             let c = pos2(right - t.space_4, r.center().y);
@@ -448,7 +452,7 @@ impl<'a> MenuItem<'a> {
             right -= t.space_16;
         }
         if !self.shortcut.is_empty() {
-            let key = painter.layout_no_wrap(crate::i18n::tr_label(self.shortcut).to_string(), FontId::monospace(t.font_small), dim);
+            let key = painter.layout_no_wrap(solidcraft_ui_text::tr_label(self.shortcut).to_string(), FontId::monospace(t.font_small), dim);
             painter.galley(pos2(right - key.size().x, r.center().y - key.size().y / 2.0), key.clone(), dim);
             right -= key.size().x + t.space_8;
         }
@@ -475,7 +479,7 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
         ui.spacing_mut().item_spacing.y = 0.0;
         ui.add_space(t.space_4);
         ui.label(
-            egui::RichText::new(crate::i18n::tr("ui.ribbon_workspace").to_uppercase())
+            egui::RichText::new(solidcraft_ui_text::tr("ui.ribbon_workspace").to_uppercase())
                 .size(crate::theme::Tokens::get().font_small)
                 .semibold()
                 .color(t.text_dim),
@@ -524,7 +528,7 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
                     icons::paint_icon(ui.painter(), tile.shrink(t.space_6 + 1.0), &item.icon, if item.enabled { 1.0 } else { 0.35 });
                 }
                 let text = if item.enabled { t.text } else { t.text_dim };
-                let name = crate::i18n::tr_label(&item.label);
+                let name = solidcraft_ui_text::tr_label(&item.label);
                 let x = r.left() + 74.0;
                 let y = r.top() + 17.0;
                 let galley = egui::WidgetText::from(egui::RichText::new(name).semibold().size(crate::theme::Tokens::get().font_heading).color(text))
@@ -534,7 +538,7 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
                 let ppp = ui.ctx().pixels_per_point().max(0.5);
                 let origin = pos2((origin.x * ppp).round() / ppp, (origin.y * ppp).round() / ppp);
                 ui.painter().galley(origin, galley, text);
-                let badge = crate::i18n::tr(if planned {
+                let badge = solidcraft_ui_text::tr(if planned {
                     "ui.workspace_planned"
                 } else if current {
                     "ui.workspace_current"
@@ -558,10 +562,14 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
                     let galley = ui.painter().layout_job(job);
                     ui.painter().galley(pos2(x, y), galley, text);
                 };
-                line(crate::i18n::tr(description).to_string(), r.top() + 29.0);
+                line(solidcraft_ui_text::tr(description).to_string(), r.top() + 29.0);
                 if let Some(tabs) = tabs {
                     // Translate each tab even when this composed message falls back to English.
-                    let labels = crate::i18n::tr(tabs).split('·').map(|label| crate::i18n::tr_label(label.trim())).collect::<Vec<_>>().join(" · ");
+                    let labels = solidcraft_ui_text::tr(tabs)
+                        .split('·')
+                        .map(|label| solidcraft_ui_text::tr_label(label.trim()))
+                        .collect::<Vec<_>>()
+                        .join(" · ");
                     line(labels, r.top() + 47.0);
                 }
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, item.enabled, name));
@@ -575,7 +583,7 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
         ui.add_space(t.space_6);
         ui.add(
             egui::Label::new(
-                egui::RichText::new(crate::i18n::tr("ui.workspace_footer")).size(crate::theme::Tokens::get().font_small).color(t.text_dim),
+                egui::RichText::new(solidcraft_ui_text::tr("ui.workspace_footer")).size(crate::theme::Tokens::get().font_small).color(t.text_dim),
             )
             .wrap(),
         );

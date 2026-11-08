@@ -4097,6 +4097,7 @@ dependencies = [
  "solidcraft-gpu",
  "solidcraft-space-mouse",
  "solidcraft-ui-egui",
+ "solidcraft-ui-text",
  "ureq",
  "windows-sys 0.61.2",
  "winit",
@@ -4377,12 +4378,11 @@ dependencies = [
  "solidcraft-gpu",
  "solidcraft-space-mouse",
  "solidcraft-ui-registry",
+ "solidcraft-ui-text",
  "syn 2.0.119",
- "sys-locale",
  "tiny-skia",
  "toml",
  "ttf-parser",
- "unicode-bidi",
  "web-time",
  "winreg",
  "zip",
@@ -4393,6 +4393,16 @@ name = "solidcraft-ui-registry"
 version = "0.40.0-rc.3"
 dependencies = [
  "egui",
+]
+
+[[package]]
+name = "solidcraft-ui-text"
+version = "0.40.0-rc.3"
+dependencies = [
+ "log",
+ "serde_json",
+ "sys-locale",
+ "unicode-bidi",
 ]
 
 [[package]]
@@ -4407,6 +4417,7 @@ dependencies = [
  "serde_json",
  "solidcraft-engine",
  "solidcraft-ui-egui",
+ "solidcraft-ui-text",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",

@@ -854,9 +854,9 @@ impl crate::SolveApp {
             .as_ref()
             .ok_or_else(|| error(Rule::Availability, "shared panel host unavailable"))
             .and_then(|integration| integration.contextual_availability(&self.session, action));
-        eligibility
-            .err()
-            .map(|reason| crate::i18n::Locale::for_language(&self.preferences.language).text(super::workspace::rule_key(reason.rule)).to_owned())
+        eligibility.err().map(|reason| {
+            solidcraft_ui_text::Locale::for_language(&self.preferences.language).text(super::workspace::rule_key(reason.rule)).to_owned()
+        })
     }
 
     pub fn run_panel_command(&mut self, id: &str, params: &serde_json::Value) -> PanelResult<serde_json::Value> {
@@ -966,7 +966,7 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     if !app.prefs_window.open
         && let Err(reason) = sync_production_setting(app)
     {
-        app.set_status(crate::i18n::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
+        app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
         if let Some(integration) = &mut app.panel_runtime {
             integration.last_error = Some(reason);
         }

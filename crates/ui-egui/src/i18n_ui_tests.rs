@@ -13,7 +13,7 @@ fn japanese_dialog_keeps_english_scenario_handles() {
     assert!(h.widget("平面").is_some(), "the input label must be translated");
     assert!(h.widget("キャンセル").is_some(), "the close button must be translated");
     assert!(!scenario::handles("dialog:Plane").is_empty(), "scenario handles must retain source labels");
-    assert_eq!(crate::i18n::tr("ui.preferences"), "Preferences", "the render scope must restore English");
+    assert_eq!(solidcraft_ui_text::tr("ui.preferences"), "Preferences", "the render scope must restore English");
 
     h.app.preferences.language = "en".into();
     h.frames(3);
@@ -31,7 +31,7 @@ fn italian_dialog_keeps_english_scenario_handles() {
     assert!(h.widget("Piano").is_some());
     assert!(h.widget("Annulla").is_some());
     assert!(!scenario::handles("dialog:Plane").is_empty());
-    assert_eq!(crate::i18n::tr("ui.preferences"), "Preferences");
+    assert_eq!(solidcraft_ui_text::tr("ui.preferences"), "Preferences");
 
     h.app.preferences.language = "en".into();
     h.frames(3);
@@ -138,7 +138,7 @@ fn home_page_buttons_fit_their_translated_labels() {
         let out = crate::test_support::frame(&h.ctx, egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| h.app.ui(ui));
         let (mut rects, mut texts) = (Vec::new(), Vec::new());
         out.shapes.iter().for_each(|shape| collect(&shape.shape, &mut rects, &mut texts));
-        let locale = crate::i18n::Locale::for_language(catalog.id);
+        let locale = solidcraft_ui_text::Locale::for_language(catalog.id);
         for id in ["home.new_mm", "home.new_inches", "home.open", "home.import"] {
             let label = locale.text(id);
             let (_, text) = texts.iter().find(|(t, _)| t == label).unwrap_or_else(|| panic!("{}: {label:?} is not painted", catalog.id));
@@ -291,7 +291,7 @@ fn interference_dialog_renders_in_the_active_language() {
     for english in ["INTERFERENCE", "Bodies (all if none)", "Compute"] {
         assert!(h.widget(english).is_none(), "{english:?} is still shown in English");
     }
-    let fr = crate::i18n::Locale::for_language("fr");
+    let fr = solidcraft_ui_text::Locale::for_language("fr");
     assert_eq!(fr.format("dialog.bodies_count", &[("count", "3")]), "3 corps");
     assert_eq!(fr.text("dialog.compute_again"), "Recalculer");
 }
@@ -301,7 +301,7 @@ fn interference_dialog_renders_in_the_active_language() {
 #[test]
 fn continuity_gap_and_sheet_metal_gap_are_separate_messages() {
     for (lang, legend, sheet) in [("fr", "Écart", "Jeu"), ("de", "Lücke", "Spalt")] {
-        let locale = crate::i18n::Locale::for_language(lang);
+        let locale = solidcraft_ui_text::Locale::for_language(lang);
         assert_eq!(locale.text("ui.continuity_gap"), legend, "{lang}");
         assert_eq!(locale.text("ui.sheet_gap"), sheet, "{lang}");
     }

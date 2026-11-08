@@ -264,7 +264,7 @@ fn tooltip(app: &SolveApp, response: egui::Response, slot: &Slot, hidden: Option
     let label = if let Some(hidden) = hidden {
         app.tr(hidden).to_owned()
     } else if slot.id == "visual_style" {
-        crate::i18n::format("navbar.value_tip", &[("name", app.tr(slot.label)), ("value", current_style(app))])
+        solidcraft_ui_text::format("navbar.value_tip", &[("name", app.tr(slot.label)), ("value", current_style(app))])
     } else if slot.id == "projection" && projection_locked(app) {
         app.tr("nav.perspective.sketch").to_owned()
     } else if slot.id == "zoom" && key.is_some() {
@@ -617,7 +617,7 @@ fn display_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
         ("auto_ortho_faces", "Perspective while orbiting, ortho on faces", app.ui.auto_ortho_faces),
         ("tool_cursor", "Show tool at cursor", app.ui.tool_cursor),
     ] {
-        let mut row = NavigationMenuRow::new(id, crate::i18n::tr_label(label), "select");
+        let mut row = NavigationMenuRow::new(id, solidcraft_ui_text::tr_label(label), "select");
         row.selected = on;
         let response = row.show(ui);
         crate::scenario::publish_target(&format!("view:{id}"), response.rect);

@@ -42,7 +42,7 @@ fn fields(h: &Harness) -> Vec<(&'static str, String)> {
 /// ("Section size"), not the command's parameter name.
 fn assert_shown(h: &Harness, fields: &[(&str, String)]) {
     for (key, text) in fields {
-        let label = crate::i18n::tr(crate::dialogs::primitive_label(key));
+        let label = solidcraft_ui_text::tr(crate::dialogs::primitive_label(key));
         assert!(label.starts_with(char::is_uppercase) && !label.contains('_'), "the {key} row is labelled {label:?}");
         let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
         assert!(

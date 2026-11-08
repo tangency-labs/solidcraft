@@ -56,7 +56,10 @@ impl CommandSearch {
         let spacing = FieldSpacing::at(0.0);
         let (hint, key) = ctx.fonts_mut(|fonts| {
             (
-                fonts.layout_no_wrap(crate::i18n::tr_label("Search commands").to_owned(), FontId::proportional(t.font_button), t.form_dim).size().x,
+                fonts
+                    .layout_no_wrap(solidcraft_ui_text::tr_label("Search commands").to_owned(), FontId::proportional(t.font_button), t.form_dim)
+                    .size()
+                    .x,
                 fonts.layout_no_wrap("S".to_owned(), FontId::monospace(t.font_small), t.form_dim).size().x,
             )
         });
@@ -127,7 +130,7 @@ impl CommandSearch {
             solidcraft_ui_registry::publish_target("palette:search", r);
             return ui
                 .interact(r, egui::Id::unique("sc_sbox_compact"), Sense::click())
-                .backing_on_hover_text(crate::i18n::tr_label("Search commands"));
+                .backing_on_hover_text(solidcraft_ui_text::tr_label("Search commands"));
         }
         icons::paint_icon(
             ui.painter(),
@@ -158,7 +161,7 @@ impl CommandSearch {
                         .char_limit(limit)
                         .interactive(open)
                         .frame(egui::Frame::NONE)
-                        .hint_text(crate::i18n::tr_label("Search commands"))
+                        .hint_text(solidcraft_ui_text::tr_label("Search commands"))
                         .font(if mono { FontId::monospace(t.font_label) } else { FontId::proportional(t.font_button) }),
                 )
             })
@@ -190,7 +193,7 @@ impl CommandSearch {
     }
 
     pub(crate) fn heading(ui: &mut Ui, label: &str, count: usize) {
-        super::Menu::heading(ui, &format!("{}  {count}", crate::i18n::tr(label)));
+        super::Menu::heading(ui, &format!("{}  {count}", solidcraft_ui_text::tr(label)));
     }
 
     pub(crate) fn detail(ui: &mut Ui, text: &str) {
@@ -251,7 +254,7 @@ impl CommandSearch {
         let background = ui.painter().add(egui::Shape::Noop);
         egui::Frame::NONE.inner_margin(egui::Margin::symmetric(t.space_14 as i8, t.space_3 as i8)).show(ui, |ui| {
             ui.set_width((width - t.space_14 * 2.0).max(0.0));
-            super::text(ui, crate::i18n::tr(if command { "search.command_keys" } else { "search.keys" }), super::Text::Note("search_keys"));
+            super::text(ui, solidcraft_ui_text::tr(if command { "search.command_keys" } else { "search.keys" }), super::Text::Note("search_keys"));
         });
         let r = Rect::from_min_max(start, pos2(start.x + width, ui.min_rect().bottom()));
         let frame = egui::Frame::NONE.fill(t.dialog_footer).corner_radius(egui::CornerRadius { nw: 0, ne: 0, sw: t.radius_xl, se: t.radius_xl });

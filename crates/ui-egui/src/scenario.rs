@@ -122,7 +122,7 @@ impl Drop for Harness {
 
 impl Harness {
     pub fn new() -> Harness {
-        crate::i18n::pin_system_language();
+        solidcraft_ui_text::pin_system_language();
         let mut h = Harness {
             app: SolveApp::new(Session::default(), Services::default()),
             ctx: {

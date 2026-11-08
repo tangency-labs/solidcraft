@@ -141,7 +141,7 @@ fn command_done_echo_follows_the_language_preference_without_a_render_scope() {
     app.preferences.language = "zh".into();
     app.run("solid.box", json!({ "length": 5, "width": 5, "height": 5 })).expect("box");
     let echo = app.session.log.last().expect("the echo is logged");
-    let zh = crate::i18n::Locale::for_language("zh");
+    let zh = solidcraft_ui_text::Locale::for_language("zh");
     let expected = zh.format("ui.command_done", &[("command", zh.label(crate::command_label("solid.box")))]);
     assert_eq!(echo, &expected);
     assert!(echo.contains("完成"), "{echo}");

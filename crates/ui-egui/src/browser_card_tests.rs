@@ -595,7 +595,7 @@ fn browser_title_uses_a_single_semibold_run() {
         ui.set_width(250.0);
         browser_header(&mut app, ui, true);
     });
-    let title = crate::i18n::tr("ui.browser_title");
+    let title = solidcraft_ui_text::tr("ui.browser_title");
     let titles: Vec<_> = output
         .shapes
         .iter()
@@ -751,8 +751,8 @@ fn mesh_and_solid_body_rows_have_different_icons_and_tooltips() {
     let row = |name: &str| rows.iter().find(|e| e.key == name).unwrap_or_else(|| panic!("no {name} row in {:?}", body_rows(&h.app)));
     assert_eq!((row("Mesh").icon, row("Mesh").tip), ("mesh_body", Some("ui.body_kind_mesh")));
     assert_eq!((row("Solid").icon, row("Solid").tip), ("body", Some("ui.body_kind_solid")));
-    assert_eq!(crate::i18n::tr("ui.body_kind_mesh"), "Mesh body");
-    assert_eq!(crate::i18n::tr("ui.body_kind_solid"), "Solid body");
+    assert_eq!(solidcraft_ui_text::tr("ui.body_kind_mesh"), "Mesh body");
+    assert_eq!(solidcraft_ui_text::tr("ui.body_kind_solid"), "Solid body");
     // Its own drawing in the mesh colours, not the solid body's grey cube.
     let icon = crate::icon_svg::resolve("mesh_body");
     assert!(!icon.placeholder);

@@ -93,7 +93,8 @@ fn header_actions(
         action_rect.left() - t.space_8
     } else if let Some(collapsed) = collapsed {
         let fold = egui::Rect::from_min_size(egui::pos2(close_rect.left() - t.form_close_size - t.space_4, close_rect.top()), close_rect.size());
-        let response = super::disclosure_button_at(ui, fold, !*collapsed, crate::i18n::tr_label(if *collapsed { "Expand" } else { "Collapse" }));
+        let response =
+            super::disclosure_button_at(ui, fold, !*collapsed, solidcraft_ui_text::tr_label(if *collapsed { "Expand" } else { "Collapse" }));
         solidcraft_ui_registry::publish_handle("dialog:collapse", response.rect.center());
         if response.clicked() {
             *collapsed = !*collapsed;
@@ -184,7 +185,8 @@ impl<'a> TopHeader<'a> {
         }
         if let Some(collapsed) = collapsed {
             let fold = target(right);
-            let response = super::disclosure_button_at(ui, fold, !*collapsed, crate::i18n::tr_label(if *collapsed { "Expand" } else { "Collapse" }));
+            let response =
+                super::disclosure_button_at(ui, fold, !*collapsed, solidcraft_ui_text::tr_label(if *collapsed { "Expand" } else { "Collapse" }));
             solidcraft_ui_registry::publish_handle("dialog:collapse", response.rect.center());
             if response.clicked() {
                 *collapsed = !*collapsed;
@@ -210,7 +212,7 @@ impl<'a> TopHeader<'a> {
         let t = Tokens::get();
         if state.busy {
             egui::Spinner::new().size(t.space_14).paint_at(ui, self.icon);
-            let status = state.text.as_deref().unwrap_or_else(|| crate::i18n::tr_label("Updating the preview"));
+            let status = state.text.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr_label("Updating the preview"));
             ui.interact(self.icon, ui.scope_id().with("compute_status"), egui::Sense::hover()).backing_on_hover_text(status);
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         } else {
@@ -248,7 +250,7 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
         egui::pos2(rect.right() - (t.space_16 + t.space_4), rect.center().y),
         vec2(t.form_close_size, t.form_close_size),
     );
-    let close = super::icon_button_at(ui, close_rect, "close", crate::i18n::tr_label("Close"));
+    let close = super::icon_button_at(ui, close_rect, "close", solidcraft_ui_text::tr_label("Close"));
     solidcraft_ui_registry::publish_target("render:appearance:close", close.rect);
     if close.clicked() {
         action = Some(InspectorAction::Close);
@@ -258,7 +260,7 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
         let mut more_ui = ui.new_child(egui::UiBuilder::new().id_salt("inspector_more").max_rect(more_rect));
         let ui = &mut more_ui;
         super::Menu::text(ui, "…", |ui| {
-            if super::MenuItem::new("render:appearance:remove", crate::i18n::tr("render.inspector_remove"), "").show(ui).clicked() {
+            if super::MenuItem::new("render:appearance:remove", solidcraft_ui_text::tr("render.inspector_remove"), "").show(ui).clicked() {
                 action = Some(InspectorAction::Remove);
                 ui.close();
             }
@@ -871,7 +873,7 @@ impl<'a> Panel<'a> {
                         let (rect, _) = ui.allocate_exact_size(vec2(t.space_16, ui.available_height()), egui::Sense::hover());
                         egui::Spinner::new().size(t.space_14).paint_at(ui, rect);
                         solidcraft_ui_registry::publish_rect("dialog:footer:spinner", rect);
-                        let status = state.text.as_deref().unwrap_or_else(|| crate::i18n::tr_label("Updating the preview"));
+                        let status = state.text.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr_label("Updating the preview"));
                         ui.interact(rect, ui.scope_id().with("compute_status"), egui::Sense::hover()).backing_on_hover_text(status);
                         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
                     }
@@ -1360,9 +1362,9 @@ fn page_list_sized<S>(
                     ui.add_space(t.space_8);
                     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_24), egui::Sense::hover());
                     let rect = rect.shrink2(vec2(t.space_10, 0.0));
-                    paint_text(ui, rect, &crate::i18n::tr(group).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim, true);
+                    paint_text(ui, rect, &solidcraft_ui_text::tr(group).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim, true);
                 }
-                let label = crate::i18n::tr(page.label);
+                let label = solidcraft_ui_text::tr(page.label);
                 let (rect, response) =
                     ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height + t.space_4), egui::Sense::click());
                 if response.clicked() {

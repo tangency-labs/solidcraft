@@ -4,7 +4,6 @@
 //! tooltip. Text only for now; pictures and animations are a later step. A new toolbar command
 //! ships with its help: `every_toolbar_command_has_help` fails otherwise.
 
-use crate::i18n;
 use crate::ui_kit::BackingTooltipExt as _;
 
 /// The commands that have help text. Each one needs a `help.<id>` message in the catalogs.
@@ -330,7 +329,7 @@ pub fn help(command: &str) -> Option<String> {
         return None;
     }
     let key = format!("help.{command}");
-    let text = i18n::tr(&key);
+    let text = solidcraft_ui_text::tr(&key);
     (text != key).then(|| text.to_owned())
 }
 

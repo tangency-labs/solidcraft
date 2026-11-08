@@ -918,7 +918,7 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     let items = context_menu::items(&app, &t);
     for label in ["Edit Canvas", "Calibrate", "Delete"] {
         let item = find(&items, label);
-        assert!(!item.enabled && item.tip.as_deref() == Some(crate::i18n::tr("browser.canvas_locked")), "{label}: {item:?}");
+        assert!(!item.enabled && item.tip.as_deref() == Some(solidcraft_ui_text::tr("browser.canvas_locked")), "{label}: {item:?}");
     }
     assert!(find(&items, "Show/Hide").enabled && find(&items, "Rename").enabled);
     app.tree.picked_canvases = vec![id];

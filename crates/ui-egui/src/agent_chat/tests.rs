@@ -2906,7 +2906,7 @@ fn pictures_are_read_off_the_window_thread() {
     send(&mut app, &ctx, words);
     assert_eq!(script.prompts().len(), 1);
     {
-        let _ja = crate::i18n::scope("ja");
+        let _ja = solidcraft_ui_text::scope("ja");
         control(&mut app, &ctx, &json!({"attach": at(&d, "fake.png")})).unwrap();
     }
     settle_files(&mut app, &ctx);
@@ -4614,9 +4614,9 @@ fn the_composer_hint_stays_on_one_row_at_the_narrowest_width() {
             continue;
         }
         let language = path.file_stem().unwrap().to_string_lossy().into_owned();
-        let _scope = crate::i18n::scope(&language);
+        let _scope = solidcraft_ui_text::scope(&language);
         for key in ["ui.agent_chat_placeholder", "ui.agent_chat_placeholder_busy"] {
-            let hint = crate::i18n::tr(key).to_owned();
+            let hint = solidcraft_ui_text::tr(key).to_owned();
             let mut rows = 0;
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 rows = crate::ui_kit::assistant_hint_galley(ui, &hint, width - 2.0 * crate::theme::Tokens::get().form_inset).rows.len();

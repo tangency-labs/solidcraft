@@ -220,7 +220,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
             p.with_clip_rect(rect.intersect(p.clip_rect())).text(
                 centre,
                 egui::Align2::CENTER_CENTER,
-                crate::i18n::tr_label(label),
+                solidcraft_ui_text::tr_label(label),
                 egui::FontId::proportional(t.font_small),
                 t.form_dim,
             );
@@ -282,7 +282,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     solidcraft_ui_registry::publish_rect("prefs:layout_preview:dialog", dialog);
     solidcraft_ui_registry::publish_rect("prefs:layout_preview", outer);
     ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover())
-        .backing_on_hover_text(crate::i18n::tr("prefs.layout_note"));
+        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.layout_note"));
 }
 
 #[allow(unused_imports, reason = "painted by the Preferences pages of #9875 to #9883")]

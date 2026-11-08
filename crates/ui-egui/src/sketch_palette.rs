@@ -347,7 +347,7 @@ fn constrained_fraction(remaining: usize, total: usize, solved: bool) -> f32 {
 /// Draw the sketch options card, retaining the command paths used by the original palette.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     app.viewport.palette_rect = None;
-    let _language = crate::i18n::scope(&app.preferences.language);
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
     if !visible(app, ctx) {
         return;
     }
@@ -437,7 +437,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 let status = if !solved || !geometry || remaining == 0 {
                     crate::i18n::tr_dyn(&dof_text(remaining, solved, geometry))
                 } else {
-                    crate::i18n::format(if remaining == 1 { "sketch.dof_left_one" } else { "sketch.dof_left" }, &[("count", &remaining.to_string())])
+                    solidcraft_ui_text::format(
+                        if remaining == 1 { "sketch.dof_left_one" } else { "sketch.dof_left" },
+                        &[("count", &remaining.to_string())],
+                    )
                 };
                 // Selectable text would take the drag from the band beneath it.
                 let header = ui
@@ -461,12 +464,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             crate::ui_kit::Part::Body => {
                 let t = crate::theme::Tokens::get();
                 if open_ends > 0 {
-                    let text = crate::i18n::format("sketch.open_ends", &[("count", &open_ends.to_string())]);
+                    let text = solidcraft_ui_text::format("sketch.open_ends", &[("count", &open_ends.to_string())]);
                     ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.open_ends_tip"));
                 }
                 if untied_ends > 0 {
                     ui.horizontal(|ui| {
-                        let text = crate::i18n::format("sketch.untied_ends", &[("count", &untied_ends.to_string())]);
+                        let text = solidcraft_ui_text::format("sketch.untied_ends", &[("count", &untied_ends.to_string())]);
                         ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.untied_ends_tip"));
                         let button = crate::ui_kit::button(ui, app.tr("ui.tie_ends"), crate::ui_kit::Button::Normal)
                             .backing_on_hover_text(app.tr("ui.tie_ends_tip"));
@@ -501,9 +504,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     let segments = LINE_TYPES.map(|(key, icon, name)| {
                         let name = app.tr_label(name);
                         let tip = if has_curves {
-                            crate::i18n::format("sketch.make_selection", &[("linetype", name)])
+                            solidcraft_ui_text::format("sketch.make_selection", &[("linetype", name)])
                         } else {
-                            crate::i18n::format("sketch.draw_curves", &[("linetype", name)])
+                            solidcraft_ui_text::format("sketch.draw_curves", &[("linetype", name)])
                         };
                         crate::ui_kit::IconSegment { key, icon, tip }
                     });

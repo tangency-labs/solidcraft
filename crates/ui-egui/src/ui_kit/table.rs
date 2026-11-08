@@ -211,15 +211,15 @@ impl Table<'_> {
         super::text::paint_text(
             ui,
             egui::Rect::from_min_max(egui::pos2(icon.right() + t.space_6, rect.top()), rect.max),
-            crate::i18n::tr_label(label),
+            solidcraft_ui_text::tr_label(label),
             egui::FontId::proportional(t.font_label),
             t.form_dim,
             false,
         );
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr_label(label)));
         solidcraft_ui_registry::publish_handle(&format!("dialog:table:{}:add", self.id), rect.center());
         solidcraft_ui_registry::publish_rect(&format!("dialog:table:{}:add", self.id), rect);
-        response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(crate::i18n::tr_label(tooltip))
+        response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(solidcraft_ui_text::tr_label(tooltip))
     }
 
     fn row_content(&self, ui: &mut Ui, key: &str, selected: bool, force: bool, add: impl FnOnce(&mut TableRow<'_>)) -> Response {
@@ -299,8 +299,8 @@ pub(crate) fn label_actions(ui: &mut Ui, text: &str, add: impl FnOnce(&mut Ui)) 
 /// Table heading text. Tokens: font_small, form_dim.
 fn header_label(ui: &mut Ui, label: &str) {
     let t = Tokens::get();
-    ui.add(egui::Label::new(egui::RichText::new(crate::i18n::tr_label(label)).size(t.font_small).strong().color(t.form_dim)).truncate())
-        .backing_on_hover_text(crate::i18n::tr_label(label));
+    ui.add(egui::Label::new(egui::RichText::new(solidcraft_ui_text::tr_label(label)).size(t.font_small).strong().color(t.form_dim)).truncate())
+        .backing_on_hover_text(solidcraft_ui_text::tr_label(label));
 }
 
 /// How a table orders its rows by one column. `Listed` keeps the order the owner gave them.
@@ -373,7 +373,7 @@ pub(crate) fn sort_header(ui: &mut Ui, label: &str, sort: &mut Sort) -> Response
     if response.hovered() {
         ui.painter().rect_filled(rect, t.control_radius, t.hover);
     }
-    let text = crate::i18n::tr_label(label);
+    let text = solidcraft_ui_text::tr_label(label);
     let font = crate::fonts::semibold(t.font_small);
     let width = ui.painter().layout_no_wrap(text.to_owned(), font.clone(), t.form_dim).size().x.ceil();
     let text_rect = egui::Rect::from_min_max(rect.min, egui::pos2((rect.left() + width).min(rect.right() - t.space_14 - t.space_4), rect.bottom()));
@@ -395,7 +395,7 @@ pub(crate) fn sort_header(ui: &mut Ui, label: &str, sort: &mut Sort) -> Response
         Sort::Descending => "Back to the original order",
     };
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), text));
-    response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(crate::i18n::tr_label(tip))
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(solidcraft_ui_text::tr_label(tip))
 }
 
 /// Column removal appears inside the hovered header only. Keeps the former × button handle.
@@ -424,7 +424,7 @@ pub(crate) fn bin_button(ui: &mut Ui, tooltip: &str) -> Response {
     let (rect, _) = ui.allocate_exact_size(vec2(t.control_height, t.control_height), egui::Sense::hover());
     let response = super::actions::icon_button_colored(ui, rect, "delete", tooltip, Some(t.form_error));
     for (row, label) in
-        [("Actions", "Delete"), ("Actions", "×"), (super::layout::label(ui), crate::i18n::tr_label("Delete")), (super::layout::label(ui), "×")]
+        [("Actions", "Delete"), ("Actions", "×"), (super::layout::label(ui), solidcraft_ui_text::tr_label("Delete")), (super::layout::label(ui), "×")]
     {
         let key = format!("dialog:button:{row}:{label}");
         solidcraft_ui_registry::publish_handle(&key, rect.center());
@@ -461,7 +461,7 @@ pub(crate) fn plus_header<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> Opt
 /// Active configuration status, on the same line as the name and optional Apply action.
 pub(crate) fn active_pill(ui: &mut Ui) {
     let t = Tokens::get();
-    let label = crate::i18n::tr_label("Active");
+    let label = solidcraft_ui_text::tr_label("Active");
     let width = label_width(ui, label) + t.space_16;
     let (rect, response) = ui.allocate_exact_size(vec2(width, t.font_small + t.space_6), egui::Sense::hover());
     ui.painter().rect(rect, t.radius_xl, t.control_fill, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);

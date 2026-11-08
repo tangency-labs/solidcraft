@@ -170,9 +170,9 @@ fn icon_button_presentation(
             t.form_dim
         }),
     );
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr_label(label)));
     pointer_on_hover(ui, &response);
-    response.backing_on_hover_text(crate::i18n::tr_label(label))
+    response.backing_on_hover_text(solidcraft_ui_text::tr_label(label))
 }
 
 /// Plain secondary text action, sharing the kit's normal hit height and typography.
@@ -288,7 +288,7 @@ pub(super) fn footer_with_left(
             };
             // A confirmation's third choice (Don't Save, Keep) never waited for OK's inputs.
             let response = ui.add_enabled(!nothing_to_apply, |ui: &mut Ui| {
-                let mut button = styled_button(ui, crate::i18n::tr_label(label).into(), tone)
+                let mut button = styled_button(ui, solidcraft_ui_text::tr_label(label).into(), tone)
                     .frame(secondary_left)
                     .selected(marked)
                     .min_size(vec2(0.0, t.form_button_height));
@@ -354,7 +354,7 @@ fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padd
     let primary = look.primary(kind);
     let live = look.live(kind);
     ui.spacing_mut().button_padding = vec2(padding, 0.0);
-    let text = RichText::new(crate::i18n::tr_label(label)).size(t.font_label);
+    let text = RichText::new(solidcraft_ui_text::tr_label(label)).size(t.font_label);
     let tone = if primary && ok_enabled {
         if look.danger { ButtonTone::Danger } else { ButtonTone::Primary }
     } else if marked {
@@ -403,7 +403,7 @@ impl<'a> HeaderActions<'a> {
             if label.is_empty() {
                 continue;
             }
-            let text = ui.painter().layout_no_wrap(crate::i18n::tr_label(label).to_owned(), crate::fonts::bold(t.font_label), t.form_ink);
+            let text = ui.painter().layout_no_wrap(solidcraft_ui_text::tr_label(label).to_owned(), crate::fonts::bold(t.font_label), t.form_ink);
             let width = (text.size().x.ceil() + t.space_8 * 2.0).min((x - band.left()).max(0.0));
             let rect = egui::Rect::from_min_max(
                 egui::pos2(x - width, band.center().y - t.form_button_height / 2.0),
@@ -480,7 +480,7 @@ pub(crate) fn button_pair(ui: &mut egui::Ui, key: &str, states: [bool; 2], butto
                     t.control_border_stroke(t.control_border),
                     egui::StrokeKind::Inside,
                 );
-                let label = crate::i18n::tr_label(button.label);
+                let label = solidcraft_ui_text::tr_label(button.label);
                 let galley = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(t.font_label), t.form_ink);
                 let icon_width = if button.icon.is_some() { t.sketch_footer_icon_size + t.space_4 } else { 0.0 };
                 let left = rect.center().x - (galley.size().x + icon_width) / 2.0;
@@ -577,16 +577,16 @@ pub fn button(ui: &mut Ui, label: impl Into<egui::WidgetText>, options: Button) 
     }
     let response = match options {
         Button::Enabled(enabled) if super::settings_page_active(ui) => {
-            ui.add_enabled(enabled, button_widget(crate::i18n::tr_label(&key).into(), options))
+            ui.add_enabled(enabled, button_widget(solidcraft_ui_text::tr_label(&key).into(), options))
         }
-        Button::Enabled(enabled) => ui.add_enabled_ui(enabled, |ui| ui.add(button_widget(crate::i18n::tr_label(&key).into(), options))).inner,
+        Button::Enabled(enabled) => ui.add_enabled_ui(enabled, |ui| ui.add(button_widget(solidcraft_ui_text::tr_label(&key).into(), options))).inner,
         _ => ui.add(button_widget(label, options)),
     };
     if !matches!(options, Button::Ghost) {
         Tokens::get().button_bevel(ui, &response, matches!(options, Button::SmallSelected));
     }
     pointer_on_hover(ui, &response);
-    let key = if matches!(options, Button::Enabled(_)) { crate::i18n::tr_label(&key) } else { &key };
+    let key = if matches!(options, Button::Enabled(_)) { solidcraft_ui_text::tr_label(&key) } else { &key };
     publish_button(ui, &response, key);
     response
 }
@@ -603,7 +603,7 @@ pub(crate) fn button_at(ui: &mut Ui, id: &str, rect: egui::Rect, label: impl Int
                 super::scope(ui, |ui| {
                     let draw = |ui: &mut Ui, label| ui.add_sized(rect.size(), button_widget(label, options));
                     match options {
-                        Button::Enabled(enabled) => ui.add_enabled_ui(enabled, |ui| draw(ui, crate::i18n::tr_label(&key).into())).inner,
+                        Button::Enabled(enabled) => ui.add_enabled_ui(enabled, |ui| draw(ui, solidcraft_ui_text::tr_label(&key).into())).inner,
                         _ => draw(ui, label),
                     }
                 })
@@ -620,7 +620,7 @@ pub(crate) fn button_at(ui: &mut Ui, id: &str, rect: egui::Rect, label: impl Int
 
 /// Accent action outside the footer, using the same shared button component.
 pub(crate) fn primary_button(ui: &mut Ui, label: &str) -> Response {
-    let response = button(ui, crate::i18n::tr_label(label), Button::Primary);
+    let response = button(ui, solidcraft_ui_text::tr_label(label), Button::Primary);
     solidcraft_ui_registry::publish_target(&format!("dialog:button:{label}"), response.rect);
     response
 }
@@ -629,7 +629,7 @@ pub(crate) fn primary_button(ui: &mut Ui, label: &str) -> Response {
 /// `form_primary, on_accent, form_button_height, font_label, control_radius, space_6/10`.
 pub(crate) fn wide_primary_button(ui: &mut Ui, label: &str) -> Response {
     let t = Tokens::get();
-    let text = RichText::new(crate::i18n::tr_label(label)).size(t.font_label);
+    let text = RichText::new(solidcraft_ui_text::tr_label(label)).size(t.font_label);
     let response = egui::Frame::NONE
         .inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_6 as i8))
         .show(ui, |ui| {
@@ -654,7 +654,7 @@ fn publish_button(ui: &Ui, response: &Response, label: &str) {
 
 /// Nested action menu in a dense table. Tokens: scope control/font tokens.
 pub(crate) fn action_menu<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
-    let response = super::Menu::button(ui, crate::i18n::tr_label(label), |ui| super::scope(ui, add));
+    let response = super::Menu::button(ui, solidcraft_ui_text::tr_label(label), |ui| super::scope(ui, add));
     solidcraft_ui_registry::publish_target(&format!("dialog:menu:{label}"), response.response.rect);
     response
 }
@@ -695,12 +695,12 @@ pub(crate) fn compact_button(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: b
         .inner;
     publish_button(ui, &response, glyph);
     pointer_on_hover(ui, &response);
-    response.backing_on_hover_text(crate::i18n::tr_label(tooltip))
+    response.backing_on_hover_text(solidcraft_ui_text::tr_label(tooltip))
 }
 
 /// Secondary action with an existing icon, optionally using the danger ink. Keeps button handles.
 pub(crate) fn icon_label_button(ui: &mut Ui, label: &str, icon: &str, enabled: bool, danger: bool) -> Response {
-    icon_label_presentation(ui, crate::i18n::tr_label(label), Some(icon), enabled, false, danger, false)
+    icon_label_presentation(ui, solidcraft_ui_text::tr_label(label), Some(icon), enabled, false, danger, false)
 }
 
 /// Icon-only action with an accessible name and tooltip, using the shared action

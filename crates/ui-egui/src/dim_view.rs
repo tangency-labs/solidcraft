@@ -163,7 +163,7 @@ impl DimensionDraft {
 /// of its id, and without the `value:` field tag, since the box is the value
 /// ("Sketch Dimension: `mm` is a unit name, so it cannot be a parameter name").
 fn shown_error(id: &str, e: &str) -> String {
-    let label = crate::i18n::tr_label(crate::command_label(id));
+    let label = solidcraft_ui_text::tr_label(crate::command_label(id));
     crate::friendly_error(id, e).replacen(&format!("{label}: value: "), &format!("{label}: "), 1)
 }
 
@@ -226,7 +226,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
         ellipse_as_before(draft.half_axes, &mut params);
         AXIS.with(|axis| *axis.borrow_mut() = None);
         app.run("sketch.dimension", params)?;
-        app.set_status(crate::i18n::tr("sketch.dimension_added_driven"), false);
+        app.set_status(solidcraft_ui_text::tr("sketch.dimension_added_driven"), false);
         return Ok(());
     }
     EDIT.with(|edit| {
@@ -1166,8 +1166,8 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
             Container::show_backing(ui, frame, |ui| {
                 crate::ui_kit::scope(ui, |ui| {
                     ui.set_max_width(popup_width);
-                    crate::ui_kit::text(ui, &crate::i18n::format("dialog.dimension_name", &[("name", &e.param)]), crate::ui_kit::Text::Inline)
-                        .backing_on_hover_text(crate::i18n::tr("dialog.dimension_insert_hint"));
+                    crate::ui_kit::text(ui, &solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]), crate::ui_kit::Text::Inline)
+                        .backing_on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"));
                     if !e.owned {
                         // The whole value is selected before the field reads its state, every frame
                         // until the person takes it over, so typing replaces it (#11204). Only on the
@@ -1266,9 +1266,9 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
                     // The sentence comes from the catalog, so it reads in the interface language (#8863).
                     let named = reply.get("renamed").and_then(|r| r.get("to")).and_then(serde_json::Value::as_str);
                     let status = match (reply.get("defined").and_then(serde_json::Value::as_str), named) {
-                        (Some(name), _) => crate::i18n::format("sketch.dimension_applied_defined", &[("name", name)]),
-                        (None, Some(name)) => crate::i18n::format("sketch.dimension_applied_renamed", &[("name", name)]),
-                        (None, None) => crate::i18n::tr("sketch.dimension_applied").to_string(),
+                        (Some(name), _) => solidcraft_ui_text::format("sketch.dimension_applied_defined", &[("name", name)]),
+                        (None, Some(name)) => solidcraft_ui_text::format("sketch.dimension_applied_renamed", &[("name", name)]),
+                        (None, None) => solidcraft_ui_text::tr("sketch.dimension_applied").to_string(),
                     };
                     app.set_status(status, false);
                 }

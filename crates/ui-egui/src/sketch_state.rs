@@ -59,13 +59,13 @@ impl SketchState {
     /// The state in words, for the row's tooltip.
     pub(crate) fn text(self) -> String {
         match self {
-            SketchState::Empty => crate::i18n::tr("ui.no_geometry_yet").to_string(),
-            SketchState::Under(dof) => crate::i18n::format(
+            SketchState::Empty => solidcraft_ui_text::tr("ui.no_geometry_yet").to_string(),
+            SketchState::Under(dof) => solidcraft_ui_text::format(
                 if dof == 1 { "history.sketch_under_constrained_one" } else { "history.sketch_under_constrained" },
                 &[("count", &dof.to_string())],
             ),
-            SketchState::Full => crate::i18n::tr("ui.fully_constrained").to_string(),
-            SketchState::Conflict => crate::i18n::tr("ui.constraints_conflict").to_string(),
+            SketchState::Full => solidcraft_ui_text::tr("ui.fully_constrained").to_string(),
+            SketchState::Conflict => solidcraft_ui_text::tr("ui.constraints_conflict").to_string(),
         }
     }
 }

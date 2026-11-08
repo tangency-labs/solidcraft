@@ -180,7 +180,7 @@ pub(super) fn publish(ui: &Ui, response: &Response, kind: egui::Role) {
         _ => {}
     }
     let label = label(ui);
-    response.widget_info(|| egui::WidgetInfo::labeled(kind, ui.is_enabled(), crate::i18n::tr_label(label)));
+    response.widget_info(|| egui::WidgetInfo::labeled(kind, ui.is_enabled(), solidcraft_ui_text::tr_label(label)));
     publish_geometry(ui, response);
 }
 
@@ -206,7 +206,7 @@ pub(crate) fn status_line(ui: &mut Ui, text: &str, tone: StatusTone) -> Response
         StatusTone::Warning => t.warning,
         StatusTone::Error => t.error,
     };
-    let response = ui.add(egui::Label::new(RichText::new(crate::i18n::tr_label(text)).size(t.font_label).color(ink)).wrap());
+    let response = ui.add(egui::Label::new(RichText::new(solidcraft_ui_text::tr_label(text)).size(t.font_label).color(ink)).wrap());
     solidcraft_ui_registry::publish_rect(&format!("dialog:status:{text}"), response.rect);
     response
 }
@@ -439,7 +439,7 @@ pub(crate) fn figure_rows(
     let mut slots = Vec::with_capacity(fields.len());
     for (label, value) in fields.iter_mut() {
         let caption = egui::Rect::from_min_max(egui::pos2(left, top), egui::pos2(rect.right(), top + t.font_small));
-        paint_text(ui, caption, crate::i18n::tr_label(label), egui::FontId::proportional(t.font_small), t.form_dim, false);
+        paint_text(ui, caption, solidcraft_ui_text::tr_label(label), egui::FontId::proportional(t.font_small), t.form_dim, false);
         let field = egui::Rect::from_min_max(egui::pos2(left, caption.bottom() + t.space_2), egui::pos2(rect.right(), top + slot));
         enter |= ui
             .scope_builder(
@@ -471,7 +471,7 @@ pub(crate) fn figure_rows(
 pub(crate) fn section_heading(ui: &mut Ui, title: &str) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_16), egui::Sense::hover());
-    paint_text(ui, rect, &crate::i18n::tr_label(title).to_uppercase(), crate::fonts::semibold(t.font_caption), t.form_dim, true);
+    paint_text(ui, rect, &solidcraft_ui_text::tr_label(title).to_uppercase(), crate::fonts::semibold(t.font_caption), t.form_dim, true);
     solidcraft_ui_registry::publish_rect(&format!("dialog:heading:{title}"), rect);
 }
 
@@ -575,7 +575,7 @@ fn section_with_badge<R>(
     );
     super::disclosure(ui.painter(), icon_rect.center(), open, t.form_dim);
     let text_rect = egui::Rect::from_min_max(egui::pos2((icon_rect.right() + t.form_gap_y).min(rect.right()), rect.top()), rect.max);
-    let caption = crate::i18n::tr_label(title).to_uppercase();
+    let caption = solidcraft_ui_text::tr_label(title).to_uppercase();
     let badge_value = count;
     let badge_width = badge_value.as_ref().map_or(0.0, |value| label_width(ui, value) + t.space_12);
     let reserved = if badge_value.is_some() { badge_width + t.space_12 } else { 0.0 };
@@ -613,7 +613,7 @@ fn section_with_badge<R>(
     if rule_left < rule_right {
         t.secondary_hline(ui.painter(), rule_left..=rule_right, rect.center().y, t.dialog_rule);
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, ui.is_enabled(), open, crate::i18n::tr_label(title)));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, ui.is_enabled(), open, solidcraft_ui_text::tr_label(title)));
     // A disclosure says whether it is open as expanded, as egui's own collapsing header does.
     ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(open));
     solidcraft_ui_registry::publish_handle(&format!("dialog:section:{title}"), response.rect.center());
@@ -916,7 +916,7 @@ pub(crate) fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut 
     let check = egui::Rect::from_min_size(rect.min + vec2(t.space_6, 0.0), vec2(t.space_24, rect.height()));
     let changed = ui
         .scope_builder(egui::UiBuilder::new().max_rect(check).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-            super::checkbox(ui, "", enabled).backing_on_hover_text(crate::i18n::tr_label("Enable rule")).changed()
+            super::checkbox(ui, "", enabled).backing_on_hover_text(solidcraft_ui_text::tr_label("Enable rule")).changed()
         })
         .inner;
     let right = (rect.right() - dimension(actions_width) - t.space_6).max(check.right());

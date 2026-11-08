@@ -304,7 +304,7 @@ pub(crate) fn settings_autosave_timeline(ui: &mut Ui, minutes: f64) {
             } else {
                 egui::Align2::CENTER_TOP
             },
-            crate::i18n::tr(key),
+            solidcraft_ui_text::tr(key),
             FontId::proportional(t.font_small),
             t.form_dim,
         );

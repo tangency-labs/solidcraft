@@ -112,8 +112,8 @@ fn device(app: &mut SolveApp, ui: &mut egui::Ui) {
             );
         });
         crate::scenario::publish_rect("prefs:space_mouse_device_card", card.response.rect);
-        setting::space_mouse_enabled(app, ui).backing_on_hover_text(crate::i18n::tr("ui.3d_mouse_hint"));
-        setting::space_mouse_in_view(app, ui).backing_on_hover_text(crate::i18n::tr("ui.3d_mouse_show_in_view_tip"));
+        setting::space_mouse_enabled(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_hint"));
+        setting::space_mouse_in_view(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_show_in_view_tip"));
         let names = [
             (SpaceMouseGhost::LeftViewport, app.tr("ui.3d_mouse_ghost_left_viewport").to_owned()),
             (SpaceMouseGhost::RightViewport, app.tr("ui.3d_mouse_ghost_right_viewport").to_owned()),
@@ -191,7 +191,7 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
-            setting::space_mouse_sketch_orbit(app, ui).backing_on_hover_text(crate::i18n::tr("ui.3d_mouse_sketch_orbit_tip"));
+            setting::space_mouse_sketch_orbit(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_sketch_orbit_tip"));
         });
     });
 }
@@ -204,7 +204,7 @@ fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
         let rows: Vec<(String, bool)> = (0..6)
             .map(|row| {
                 let label = crate::space_mouse::row_label(mapping, row);
-                let text = crate::i18n::Locale::for_language(&app.preferences.language).format(label, &[("n", &(row + 1).to_string())]);
+                let text = solidcraft_ui_text::Locale::for_language(&app.preferences.language).format(label, &[("n", &(row + 1).to_string())]);
                 (text, label == "ui.3d_mouse_view_off")
             })
             .collect();
@@ -241,7 +241,7 @@ fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
                     |ui| {
                         ui.add_enabled_ui(enabled && !off, |ui| {
                             if let Some(reverse) = reverse {
-                                ui_kit::checkbox(ui, crate::i18n::tr_label("Invert"), reverse);
+                                ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Invert"), reverse);
                             }
                         });
                     },
@@ -380,7 +380,7 @@ fn advanced(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::divider(ui, "space_mouse_picture");
             // Under each circle's axes, what the view does with them: the rows' own labels.
             let stories = crate::space_mouse::stories(&app.preferences.language, app.space_mouse.mapping, app.preferences.space_mouse_axis_source);
-            let help = crate::i18n::tr("ui.3d_mouse_circles_help").to_string();
+            let help = solidcraft_ui_text::tr("ui.3d_mouse_circles_help").to_string();
             let pads = |ui: &mut egui::Ui| {
                 crate::space_mouse_calibration::dead_zone_pads(ui, calibration, raw, false, &stories);
                 ui_kit::text(ui, &help, ui_kit::Text::Hint("space_mouse_circles_help"));

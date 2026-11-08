@@ -13081,7 +13081,7 @@ fn production_browser_and_history_mount_existing_content_once_and_preserve_combi
             assert_eq!(crate::scenario::handle_at(&format!("timeline:{name}")).is_some(), !combined);
         }
         if combined {
-            assert!(rows.iter().any(|row| row.0 == crate::i18n::tr("ui.history_title")), "combined History keeps its real Browser folder");
+            assert!(rows.iter().any(|row| row.0 == solidcraft_ui_text::tr("ui.history_title")), "combined History keeps its real Browser folder");
         } else {
             let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
             assert!(history.inline, "Bottom History uses the generic one-row composition");

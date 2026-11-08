@@ -33,7 +33,7 @@ const LABEL_COLUMN_MAX: f32 = 1.6;
 /// once and the label column and the captions line up on the same text.
 pub(super) fn indented_label(text: &str) -> String {
     let indent = text.len() - text.trim_start().len();
-    format!("{}{}", &text[..indent], crate::i18n::tr_label(text.trim_start()))
+    format!("{}{}", &text[..indent], solidcraft_ui_text::tr_label(text.trim_start()))
 }
 
 /// Measured width of a label in the form label font. Tokens: `font_label, dialog_label`.
@@ -154,7 +154,7 @@ mod label_tests {
     /// `Profil`; the row must show `Profile`, not the second translation.
     #[test]
     fn a_label_is_translated_once() {
-        let _de = crate::i18n::scope("de");
+        let _de = solidcraft_ui_text::scope("de");
         assert_eq!(indented_label("Profiles"), "Profile");
         assert_eq!(indented_label("  Profiles"), "  Profile");
         assert_eq!(indented_label("Profile"), "Profil");

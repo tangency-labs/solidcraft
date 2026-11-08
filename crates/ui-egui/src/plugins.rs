@@ -150,9 +150,9 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
     crate::ui_kit::settings_page(ui, |ui| {
-        crate::ui_kit::settings_heading(ui, crate::i18n::tr("ui.plugins"), crate::i18n::tr("prefs.plugins_intro"));
+        crate::ui_kit::settings_heading(ui, solidcraft_ui_text::tr("ui.plugins"), solidcraft_ui_text::tr("prefs.plugins_intro"));
         let Some(dir) = dir else {
-            ui.label(crate::i18n::tr("ui.plugins_desktop"));
+            ui.label(solidcraft_ui_text::tr("ui.plugins_desktop"));
             return;
         };
         let t = crate::theme::Tokens::get();
@@ -164,7 +164,7 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
                 ui,
                 ui.scope_id().with("plugins_search"),
                 &mut app.prefs_window.plugin_query,
-                crate::i18n::tr("ui.plugins_search"),
+                solidcraft_ui_text::tr("ui.plugins_search"),
             );
             ui.add_space(8.0);
         }
@@ -173,11 +173,11 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         crate::ui_kit::settings_list_section(
             ui,
             "plugins_installed",
-            crate::i18n::tr("prefs.plugins_installed"),
+            solidcraft_ui_text::tr("prefs.plugins_installed"),
             Some(&plugins.len().to_string()),
             |ui| {
                 if plugins.is_empty() && (!searching || crate::ui_kit::settings_search::shows_all(ui)) {
-                    crate::ui_kit::text(ui, crate::i18n::tr("ui.plugins_empty"), crate::ui_kit::Text::Hint("plugins_empty"));
+                    crate::ui_kit::text(ui, solidcraft_ui_text::tr("ui.plugins_empty"), crate::ui_kit::Text::Hint("plugins_empty"));
                 }
                 ui.spacing_mut().item_spacing.y = t.space_8;
                 let mut shown = 0usize;
@@ -199,14 +199,14 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
                     }
                 }
                 if !searching && !plugins.is_empty() && shown == 0 {
-                    ui.label(crate::i18n::tr("ui.plugins_none"));
+                    ui.label(solidcraft_ui_text::tr("ui.plugins_none"));
                 }
             },
         );
         if !searching && query.trim().is_empty() && !skipped.is_empty() {
             ui.add_space(6.0);
             ui.label(
-                RichText::new(crate::i18n::format("ui.plugins_skipped", &[("count", &skipped.len().to_string())]))
+                RichText::new(solidcraft_ui_text::format("ui.plugins_skipped", &[("count", &skipped.len().to_string())]))
                     .size(t.font_small)
                     .color(t.text_dim),
             );
@@ -217,8 +217,8 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         }
         if !searching {
             ui.horizontal(|ui| {
-                let button = crate::ui_kit::icon_label_button(ui, crate::i18n::tr("prefs.plugins_show_folder"), "folder", true, false)
-                    .backing_on_hover_text(crate::i18n::format("ui.plugins_note", &[("path", &path)]));
+                let button = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("prefs.plugins_show_folder"), "folder", true, false)
+                    .backing_on_hover_text(solidcraft_ui_text::format("ui.plugins_note", &[("path", &path)]));
                 crate::scenario::publish_target("prefs:plugins:folder", button.rect);
                 if button.clicked() {
                     if let Err(e) = std::fs::create_dir_all(dir) {
@@ -322,7 +322,7 @@ mod tests {
         for dark in [false, true] {
             crate::theme::set_dark(dark);
             for language in ["en", "de"] {
-                let _language = crate::i18n::scope(language);
+                let _language = solidcraft_ui_text::scope(language);
                 for width in [646.0, 200.0] {
                     let mut h = crate::scenario::Harness::new();
                     let dir = h.dir.join("plugin-action-layout");

@@ -592,9 +592,9 @@ fn the_ribbon_button_reads_finish_edit_not_a_surface_finish() {
     // A bare "Finish" is a surface finish in other catalogs (German "Oberfläche")
     let label = crate::workspace::ribbon_button_label(solidcraft_engine::find_command("component.finish_edit").unwrap());
     assert_eq!(label, "Finish Edit");
-    assert_eq!(crate::i18n::Locale::for_language("de").label(label), "Bearbeitung beenden");
+    assert_eq!(solidcraft_ui_text::Locale::for_language("de").label(label), "Bearbeitung beenden");
     for language in ["ar", "he", "ja", "vi", "zh"] {
-        assert_ne!(crate::i18n::Locale::for_language(language).label(label), label, "{language}");
+        assert_ne!(solidcraft_ui_text::Locale::for_language(language).label(label), label, "{language}");
     }
 }
 

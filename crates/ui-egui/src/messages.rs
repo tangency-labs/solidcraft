@@ -8,8 +8,8 @@ use egui::{RichText, vec2};
 use serde_json::{Value, json};
 
 use crate::SolveApp;
-use crate::i18n::{format, tr};
 use crate::theme::Tokens;
+use solidcraft_ui_text::{format, tr};
 
 /// Messages kept (the oldest go first).
 pub const KEEP: usize = 200;

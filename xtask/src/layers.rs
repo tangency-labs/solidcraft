@@ -70,6 +70,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("color", Class::Shared),
     // the widget handle and rect registry UI components publish into and scenarios/the control channel read (#12936)
     ("ui-registry", Class::Shared),
+    // message catalogs' machinery and bidirectional text: lookup, formatting, language choice (#13290)
+    ("ui-text", Class::Shared),
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),

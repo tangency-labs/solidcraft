@@ -18,7 +18,7 @@ fn chord_parts(chord: &str) -> Vec<&str> {
 pub(crate) fn shortcut_binding_width(ui: &Ui, chord: &str) -> f32 {
     let t = Tokens::get();
     if chord.is_empty() {
-        return super::ContentWidth::label(ui, crate::i18n::tr("prefs.shortcuts_not_assigned")) + t.space_8;
+        return super::ContentWidth::label(ui, solidcraft_ui_text::tr("prefs.shortcuts_not_assigned")) + t.space_8;
     }
     let parts = chord_parts(chord);
     parts
@@ -39,7 +39,7 @@ pub(crate) fn shortcut_binding(ui: &mut Ui, chord: &str, editable: bool) -> Resp
     }
     let mut x = rect.left();
     if chord.is_empty() {
-        let text = crate::i18n::tr("prefs.shortcuts_not_assigned");
+        let text = solidcraft_ui_text::tr("prefs.shortcuts_not_assigned");
         let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_label), t.form_dim);
         ui.painter().galley(pos2(x + t.space_4, rect.center().y - galley.size().y / 2.0), galley, t.form_dim);
     } else {
@@ -56,7 +56,7 @@ pub(crate) fn shortcut_binding(ui: &mut Ui, chord: &str, editable: bool) -> Resp
         egui::WidgetInfo::labeled(
             if editable { egui::Role::Button } else { egui::Role::Label },
             ui.is_enabled(),
-            if chord.is_empty() { crate::i18n::tr("prefs.shortcuts_not_assigned") } else { chord },
+            if chord.is_empty() { solidcraft_ui_text::tr("prefs.shortcuts_not_assigned") } else { chord },
         )
     });
     response
@@ -94,7 +94,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
                 editor.size(),
                 super::fields::text_input(egui::TextEdit::singleline(value))
                     .id(id)
-                    .hint_text(crate::i18n::tr_label(hint))
+                    .hint_text(solidcraft_ui_text::tr_label(hint))
                     .font(FontId::proportional(t.font_label))
                     .text_color(t.form_ink)
                     .margin(vec2(t.space_4, 0.0))
@@ -122,7 +122,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
     }
     super::layout::publish(ui, &response, egui::Role::TextInput);
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), crate::i18n::tr_label(hint));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), solidcraft_ui_text::tr_label(hint));
         info.current_text_value = Some(value.clone());
         info
     });

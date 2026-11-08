@@ -99,10 +99,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         d.refused = None;
     }
     let metadata = app.session.doc.metadata.clone();
-    let title = crate::i18n::tr_label("Design Properties");
+    let title = solidcraft_ui_text::tr_label("Design Properties");
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_design_properties"), "settings", title).fields().show(ctx, true, |ui| {
         for (i, k) in keys(Owner::Design).enumerate() {
-            let (key, label) = (k.name, crate::i18n::tr(k.label));
+            let (key, label) = (k.name, solidcraft_ui_text::tr(k.label));
             let Some(field) = d.fields.get_mut(i) else { continue };
             if key == DESCRIPTION {
                 ui_kit::multiline_text_field(ui, label, egui::Id::unique(("sc_design_properties", key)), field);
@@ -111,15 +111,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             // Saved by another tool as something other than text: kept unless typed over.
             if metadata.get(key).is_some() && metadata.text(key).is_none() && d.opened.get(i).is_some_and(String::is_empty) {
-                ui_kit::caption(ui, label, crate::i18n::tr("ui.design_properties.not_text"));
+                ui_kit::caption(ui, label, solidcraft_ui_text::tr("ui.design_properties.not_text"));
             }
         }
-        ui_kit::text(ui, crate::i18n::tr("ui.design_properties.exports"), ui_kit::Text::Note("exports"));
+        ui_kit::text(ui, solidcraft_ui_text::tr("ui.design_properties.exports"), ui_kit::Text::Note("exports"));
         let others: Vec<(&String, &Value)> = metadata.others().collect();
         if !others.is_empty() {
-            let heading = format!("{} ({})", crate::i18n::tr("ui.design_properties.others"), others.len());
+            let heading = format!("{} ({})", solidcraft_ui_text::tr("ui.design_properties.others"), others.len());
             ui_kit::section(ui, "sc_design_properties_others", &heading, false, |ui| {
-                ui_kit::text(ui, crate::i18n::tr("ui.design_properties.others_note"), ui_kit::Text::Note("others"));
+                ui_kit::text(ui, solidcraft_ui_text::tr("ui.design_properties.others_note"), ui_kit::Text::Note("others"));
                 egui::ScrollArea::vertical().max_height(ui_kit::row_height() * OTHERS_ROWS).show(ui, |ui| {
                     for (key, value) in others {
                         ui_kit::row(ui, key, |ui| ui_kit::text(ui, &preview(value), ui_kit::Text::Cell));
@@ -263,7 +263,9 @@ fn show_measuring(app: &mut SolveApp, ctx: &egui::Context) {
     let bodies = m.bodies();
     let heading = app.tr("ui.properties").to_string();
     let text = match bodies {
-        Some((done, total)) => crate::i18n::format("ui.properties.measuring_bodies", &[("done", &done.to_string()), ("total", &total.to_string())]),
+        Some((done, total)) => {
+            solidcraft_ui_text::format("ui.properties.measuring_bodies", &[("done", &done.to_string()), ("total", &total.to_string())])
+        }
         None => app.tr("ui.properties.measuring").to_string(),
     };
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
@@ -344,7 +346,7 @@ fn inertia_rows(app: &SolveApp, total: &Value) -> Vec<(String, Vec<String>)> {
     }
     for (n, axis) in total["principal_axes"].as_array().into_iter().flatten().enumerate() {
         let Some(e) = point(axis) else { continue };
-        let label = crate::i18n::format("ui.properties.principal_axis", &[("number", &(n + 1).to_string())]);
+        let label = solidcraft_ui_text::format("ui.properties.principal_axis", &[("number", &(n + 1).to_string())]);
         rows.push((label, [e.x, e.y, e.z].map(|x| format!("{:.4}", if x.abs() < 5e-5 { 0.0 } else { x })).to_vec()));
     }
     rows
@@ -354,9 +356,9 @@ fn inertia_rows(app: &SolveApp, total: &Value) -> Vec<(String, Vec<String>)> {
 /// file's), else with the name of the component, placement or bodies it measured.
 fn window_title(title: &str, v: &Value) -> String {
     if v["component"].as_u64() == Some(0) {
-        crate::i18n::tr("ui.properties").to_string()
+        solidcraft_ui_text::tr("ui.properties").to_string()
     } else {
-        crate::i18n::format("properties.title", &[("name", title)])
+        solidcraft_ui_text::format("properties.title", &[("name", title)])
     }
 }
 
@@ -406,7 +408,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
         rows.push(("Density", format!("{:.3} g/cm³", number(b, "density_g_cm3"))));
     }
     if !bodies.is_empty() && skipped == bodies.len() as u64 {
-        rows.push(("", crate::i18n::tr_label("Open surface — no volume").to_string()));
+        rows.push(("", solidcraft_ui_text::tr_label("Open surface — no volume").to_string()));
     } else {
         rows.push(("Mass", format!("{:.3} g", number(total, "mass_g"))));
         rows.push(("Volume", crate::prefs::show_mm(app, number(total, "volume_mm3"), 3)));
@@ -436,7 +438,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
         format!("({}) g·{unit}", m.join(", "))
     });
     let inertia = inertia_rows(app, total);
-    let note = crate::i18n::format("ui.properties.inertia_note", &[("unit", unit)]);
+    let note = solidcraft_ui_text::format("ui.properties.inertia_note", &[("unit", unit)]);
     // A component's closed bodies have mass, but a mesh that would not close gave no tensor.
     let unavailable =
         inertia.is_empty() && total["inertia_g_mm2"].is_null() && number(total, "mass_g") > 0.0 && total.get("first_moment_g_mm").is_some();
@@ -450,7 +452,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     let heading = window_title(&title, &v);
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
         for (label, value) in &rows {
-            ui_kit::row(ui, crate::i18n::tr_label(label), |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
+            ui_kit::row(ui, solidcraft_ui_text::tr_label(label), |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
         }
         if let Some(first) = &first {
             ui_kit::row(ui, &first_label, |ui| ui_kit::text(ui, first, ui_kit::Text::Cell));
@@ -591,7 +593,7 @@ mod tests {
     #[test]
     fn each_field_is_labelled_from_the_table_of_keys() {
         use solidcraft_engine::doc::metadata::{KEYS, Owner, keys};
-        let english = crate::i18n::Locale::for_language("en");
+        let english = solidcraft_ui_text::Locale::for_language("en");
         for k in KEYS {
             assert_ne!(english.text(k.label), k.label, "`{}`'s label is in the English catalog", k.name);
         }
