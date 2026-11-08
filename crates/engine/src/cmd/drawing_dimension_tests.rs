@@ -480,7 +480,7 @@ fn a_baseline_set_reads_each_hole_from_its_origin() {
         (json!({"targets": {"remove": [3]}}), "`targets.remove` numbers this set's targets, 0 to 2"),
         (json!({"targets": {"remove": [0, 1]}}), "a baseline set has 2 to 64 targets"),
         (json!({"targets": {"add": [nowhere]}}), "no corner at"),
-        (json!({"targets": {"add": Value::Array(vec![nowhere.clone(); 65])}}), "a set has at most 64 targets"),
+        (json!({"targets": {"add": Value::Array(vec![nowhere.clone(); 65])}}), "a baseline set has 2 to 64 targets"),
         // The box's top corner over the origin: no distance from it, horizontally.
         (json!({"targets": {"add": [[0, 0, 30]]}}), "a target in line with its origin has no distance to dimension"),
     ] {
@@ -517,6 +517,36 @@ fn a_baseline_set_reads_each_hole_from_its_origin() {
     // 64 targets are kept: the 65 above are refused by their count alone.
     let most = add(&mut s, view, based(&corner, Value::Array(vec![h10.clone(); 64])));
     assert_eq!(members(&most).len(), 64, "{most}");
+}
+
+/// An edit of a set's targets is checked by its numbers and its count before any target is looked
+/// up: one more target on a set at its limit, a number past its end or given twice, or targets on a
+/// dimension that isn't a set are refused for that, even when what it adds names nothing.
+#[test]
+fn a_set_edit_is_counted_before_any_target_is_looked_up() {
+    let (mut s, view) = front_view();
+    let full = json!({"baseline": {"origin": [0, 0, 0], "targets": vec![json!([80, 0, 0]); 64], "direction": "horizontal"}});
+    let full = add(&mut s, view, full)["dimension"].clone();
+    let length = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}))["dimension"].clone();
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let nowhere = json!([1e6, 1e6, 1e6]);
+    let cases = [
+        (&full, json!({"add": [nowhere]}), "a baseline set has 2 to 64 targets"),
+        (&full, json!({"remove": [64], "add": [nowhere]}), "`targets.remove` numbers this set's targets, 0 to 63"),
+        (&full, json!({"remove": [0, 0], "add": [nowhere]}), "`targets.remove` names each target once"),
+        (&length, json!({"add": [nowhere]}), "`targets` is a set's"),
+    ];
+    // Every case is tried, so a failure lists each wrong answer.
+    let wrong: Vec<String> = cases
+        .into_iter()
+        .filter_map(|(dimension, targets, why)| {
+            let p = json!({"dimension": dimension, "set": {"targets": targets}});
+            let e = s.execute(EDIT, &p).err().map_or_else(|| "accepted".to_string(), |e| e.to_string());
+            (!e.contains(why) || e.contains("no corner")).then(|| format!("{why}: {e}"))
+        })
+        .collect();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
 }
 
 /// An ordinate set from the box's bottom front corner to the box's top corner over it and holes at

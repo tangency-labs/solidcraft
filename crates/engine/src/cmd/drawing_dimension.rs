@@ -12,7 +12,7 @@ use serde_json::Value;
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::dimension::{
-    Candidate, Dimension, DimensionKind, MAX_SET_TARGETS, ModelEdge, ModelFace, ModelPoint, Reference, Resolved, Silhouette, Status, TextPlace,
+    Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Resolved, Silhouette, Status, TextPlace,
     check_baseline_targets, check_chain_length, check_ordinate_targets, check_set_targets,
 };
 use solidcraft_doc::ids;
@@ -418,11 +418,18 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let changed = match &request.set.targets {
         None => s.edit_drawing(EDIT, |d| change(d, id, &request.set, Vec::new()))?,
         Some(targets) => {
-            // A set's targets change what it measures: named as add names them, on a copy that is
-            // read before it is kept, as add reads a new dimension. Counted before any is named.
-            if targets.add.len() > MAX_SET_TARGETS || targets.remove.len() > MAX_SET_TARGETS {
-                return Err(bad(EDIT, format!("a set has at most {MAX_SET_TARGETS} targets")));
+            // A set's targets change what it measures. Their numbers and their count are checked
+            // first, so a refused edit looks nothing up; then the added ones are named as add names
+            // them, on a copy that is read before it is kept, as add reads a new dimension.
+            let record = s.drawing(EDIT)?;
+            let kind = &record.dimension(id).ok_or_else(|| bad(EDIT, format!("the drawing has no dimension {}", ids::encode(id))))?.kind;
+            if !matches!(kind, DimensionKind::Baseline { .. } | DimensionKind::Ordinate { .. }) {
+                return Err(bad(EDIT, "`targets` is a set's"));
             }
+            let now = targets_of(kind).len();
+            check_removed(now, &targets.remove)?;
+            let count = now.saturating_sub(targets.remove.len()).saturating_add(targets.add.len());
+            check_set_targets(kind, count).map_err(|why| bad(EDIT, why.to_string()))?;
             let name = |c: &CornerParam| s.doc.corner_reference(&s.model, &c.pick, &c.path).map_err(|why| bad(EDIT, why.to_string()));
             let added = targets.add.iter().map(name).collect::<Result<Vec<_>>>()?;
             let mut copy = Drawing::clone(s.drawing(EDIT)?);
@@ -581,16 +588,24 @@ fn change(d: &mut Drawing, id: u64, set: &DimensionSet, added: Vec<ModelPoint>) 
 /// `targets` without the ones numbered in `remove` (each once, as the list is now), then `added`
 /// after the rest.
 fn retarget(targets: &mut Vec<ModelPoint>, remove: &[usize], added: Vec<ModelPoint>) -> Result<()> {
+    check_removed(targets.len(), remove)?;
+    let mut gone = remove.to_vec();
+    gone.sort_unstable();
+    let kept = std::mem::take(targets).into_iter().enumerate().filter(|(at, _)| gone.binary_search(at).is_err());
+    targets.extend(kept.map(|(_, target)| target).chain(added));
+    Ok(())
+}
+
+/// `remove`, numbers of a set's `targets` targets: each once, as the list is now.
+fn check_removed(targets: usize, remove: &[usize]) -> Result<()> {
     let mut gone = remove.to_vec();
     gone.sort_unstable();
     if gone.windows(2).any(|pair| pair.first() == pair.get(1)) {
         return Err(bad(EDIT, "`targets.remove` names each target once"));
     }
-    if gone.last().is_some_and(|last| *last >= targets.len()) {
-        return Err(bad(EDIT, format!("`targets.remove` numbers this set's targets, 0 to {}", targets.len().saturating_sub(1))));
+    if gone.last().is_some_and(|last| *last >= targets) {
+        return Err(bad(EDIT, format!("`targets.remove` numbers this set's targets, 0 to {}", targets.saturating_sub(1))));
     }
-    let kept = std::mem::take(targets).into_iter().enumerate().filter(|(at, _)| gone.binary_search(at).is_err());
-    targets.extend(kept.map(|(_, target)| target).chain(added));
     Ok(())
 }
 
