@@ -2622,9 +2622,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// most once, [`crate::surface::surface::p2::LsiGlobalSolver`]). A B-spline's own
     /// boxes are its whole net's whatever the domain, so the box is the net's of the
     /// sub-patch over `domain` (`CopySubPatch`), its normals the surface's own; a plane's
-    /// is its domain's. A surface carried by no B-spline net (a procedural blend, a
-    /// curve-bounded or STEP surface) gets the whole surface's bounds, which hold for
-    /// any part. `None` for a box the surface cannot bound.
+    /// is its domain's. `None` for a surface carried by no B-spline net and not a plane
+    /// (an offset, procedural blend, curve-bounded or STEP surface): its bounds are the
+    /// whole surface's whatever the domain, so they tell nothing of one part. A box or
+    /// normal map the surface cannot bound is `None` in the pair.
     ///
     /// # Errors
     ///
@@ -2633,7 +2634,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         &self,
         k: &Kernel,
         domain: &Extent2d,
-    ) -> Result<(Option<crate::geom::extent3d::Extent3d>, Option<PolarBox>)> {
+    ) -> Result<Option<(Option<crate::geom::extent3d::Extent3d>, Option<PolarBox>)>> {
         let req = BoundingBoxRequest {
             normal: true,
             pseudo: false,
@@ -2654,7 +2655,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             SurfaceKind::Torus(s) => Some(s.base().base()),
             SurfaceKind::SurfOfRevolution(s) => Some(s.base()),
             SurfaceKind::SurfOfExtrusion(s) => Some(s.base()),
-            _ => None,
+            SurfaceKind::Plane(_) => None,
+            _ => return Ok(None),
         };
         let boxes = match net {
             Some(net) => match ignored(net.copy_sub_patch(domain))? {
@@ -2665,10 +2667,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             },
             None => ignored(calculate_bounding_box(k, surface, domain, &req))?,
         };
-        Ok(match boxes {
+        Ok(Some(match boxes {
             Some(b) => (b.normal, b.polar),
             None => (None, None),
-        })
+        }))
     }
 
     /// `mBA_pSurface->CalculateBoundingBox(m_sUVDomain, NULL, NULL, &m_sPolarBox,

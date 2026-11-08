@@ -54,8 +54,9 @@
 //!   normals lie within the angular tolerance. A leaf without one is solved as upstream
 //!   solves it.
 //! - **Bounds.** Each leaf, or part of one, takes at most six guesses (upstream's fixed
-//!   arrays). A leaf is halved into parts at most [`MAX_PART_DEPTH`] deep, with an
-//!   explicit stack. No recursion.
+//!   arrays). A leaf is halved into at most [`MAX_PARTS`] parts, [`MAX_PART_DEPTH`]
+//!   deep, with an explicit stack; a leaf whose surface cannot bound a part on its own
+//!   (an offset surface) is not halved. No recursion.
 
 use super::p1::{is_node_valid, is_surface_cache_owner, surface_to_evaluate};
 use super::p2::{original_surface, LsiGlobalSolver, Surface, TsectCurveType};
@@ -317,6 +318,11 @@ fn pseudo_hit(hit: &Result<PseudoHit>) -> Option<(u32, f64, f64)> {
 /// side is then at least 2^-20 of the leaf's (about a millionth), below which two
 /// crossings of a line are one near-tangent crossing for the part's guesses.
 const MAX_PART_DEPTH: u32 = 20;
+
+/// The most parts [`LsiGlobalSolver::parts_crossed_once`] makes of a leaf: a part left to
+/// halve when the parts made and waiting reach it is kept as it is, crossed perhaps more
+/// than once, so a leaf's solve is bounded whatever its normal map does.
+const MAX_PARTS: usize = 256;
 
 /// A part of a leaf's domain the line may cross ([`LsiGlobalSolver::parts_crossed_once`]).
 struct LeafPart {
@@ -669,7 +675,9 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
     /// spot, kept with `once` false, as is one whose normals cannot be bounded and one
     /// whose normals lie within the angular tolerance ([`ANG_TOL_RAD`]): halving a flat
     /// part does not narrow its normals, and a line lying in it is a coincidence, which
-    /// the leaf's own solve takes. An explicit stack, at most [`MAX_PART_DEPTH`] deep.
+    /// the leaf's own solve takes. A leaf whose surface cannot bound a part on its own
+    /// ([`SurfaceCache::boxes_over`] is `None`) is one part, solved as upstream solves it.
+    /// An explicit stack, at most [`MAX_PART_DEPTH`] deep and [`MAX_PARTS`] parts.
     fn parts_crossed_once(
         &self,
         k: &Kernel,
@@ -681,7 +689,17 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         let mut parts = Vec::new();
         let mut stack = vec![(leaf.domain, 0_u32)];
         while let Some((domain, depth)) = stack.pop() {
-            let (bbox, polar) = leaf.cache.boxes_over(k, &domain)?;
+            // a surface with no bounds of a part's own (an offset surface, say) bounds
+            // every part as the whole leaf: halving drops nothing and narrows nothing, so
+            // the leaf is solved whole, as upstream solves it
+            let Some((bbox, polar)) = leaf.cache.boxes_over(k, &domain)? else {
+                parts.push(LeafPart {
+                    domain,
+                    interval: leaf.interval,
+                    once: false,
+                });
+                continue;
+            };
             // the line interval within the part's box (the leaf's where it has no box)
             let mut interval = leaf.interval;
             if let Some(mut bbox) = bbox {
@@ -708,7 +726,12 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             // coincidence, which the leaf's own solve takes.
             let once = polar.is_some_and(|b| !b.has_perpendicular_to_vector(line_vec));
             let flat = polar.is_some_and(|b| normal_spread(&b) <= ANG_TOL_RAD);
-            if once || flat || polar.is_none() || depth >= MAX_PART_DEPTH {
+            if once
+                || flat
+                || polar.is_none()
+                || depth >= MAX_PART_DEPTH
+                || parts.len() + stack.len() + 2 > MAX_PARTS
+            {
                 parts.push(LeafPart {
                     domain,
                     interval,
