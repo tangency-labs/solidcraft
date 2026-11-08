@@ -102,8 +102,9 @@ const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.config
 
 /// Commands that stay for agents, MCP and scripts but are not offered to people: the sketch solves
 /// itself after every edit, so a Solve button (and the search hit for it) only confuses; drawn 3D
-/// points are moved with the triad that appears when one is clicked, not a Move button.
-pub const AGENT_ONLY: &[&str] = &["sketch.solve", "sketch.move3d"];
+/// points are moved with the triad that appears when one is clicked, not a Move button. People
+/// reset every toolbar tab from Customize Toolbar, which asks first; the command never asks.
+pub const AGENT_ONLY: &[&str] = &["sketch.solve", "sketch.move3d", "view.toolbar_reset_all"];
 
 pub const SECTIONS: &[Section] = &[
     Section {

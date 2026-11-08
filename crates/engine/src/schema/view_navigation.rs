@@ -161,6 +161,21 @@ pub struct RibbonTabsOnlyParams {
     pub on: Option<bool>,
 }
 
+/// `view.toolbar_reset_all`: put every toolbar tab's buttons back to their defaults (#11471).
+/// It takes no parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ToolbarResetAllParams {}
+
+/// What `view.toolbar_reset_all` returns: nothing to report. The window resets its toolbar
+/// customisation; the design is not changed and nothing is added to undo.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ToolbarResetAll {
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `view.ribbon_tabs_only` returns: the request echoed. The window applies it to its
 /// preference; the design is not changed and nothing is added to undo.
 #[derive(Debug, Serialize, JsonSchema)]
