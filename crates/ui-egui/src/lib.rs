@@ -1723,16 +1723,23 @@ impl SolveApp {
         self.pick_open(|app, path| {
             let Some(path) = path else { return };
             if solidcraft_engine::io::is_design_path(&path) {
-                // Picked in the file dialog: its server is the user's choice.
-                let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
-                let inserted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", json!({ "path": path })));
-                if inserted.is_ok() {
-                    app.fit_view();
-                }
+                app.insert_design_async(&path, None);
             } else {
                 app.insert_path_async(&path);
             }
         });
+    }
+
+    /// Insert the saved design at `path` as a linked component, read beside the window as Insert
+    /// STEP is: a large design rebuilds for a while, the window keeps drawing and Cancel changes
+    /// nothing (#11593). The user chose the file, so its network server is allowed. `note`: the
+    /// status line once it is in.
+    pub(crate) fn insert_design_async(&mut self, path: &str, note: Option<String>) {
+        let mut request = file_load::Request::new(path, file_load::Kind::InsertDesign);
+        request.allow_hosts = solidcraft_engine::io::vfs::network_host(path).into_iter().collect();
+        request.note = note;
+        // A request that could not be queued has said why in the status line.
+        let _ = file_load::begin_request(self, request);
     }
 
     /// A command that needs one choice from a short list: its menu under the button that started it
