@@ -100,7 +100,9 @@ fn piled_up_glyphs_fade_but_a_picked_one_does_not() {
     let far = plan_at(&mut h, 20_000.0);
     assert!(glyph(&far, hinge).centre.distance(glyph(&far, glue).centre) < 3.5, "{far:?}");
     assert!(!glyph(&far, hinge).faded && glyph(&far, glue).faded, "{far:?}");
-    // A picked joint comes first and never fades; the other one on it fades instead.
+    // A picked joint comes first and never fades; the other one on it fades instead. (With its
+    // parts lit, #10878, the picked joint draws alone, so this looks with the light off.)
+    h.app.preferences.highlight_joint_parts = false;
     h.app.tree.picked_joints.push(glue);
     let picked = plan_at(&mut h, 20_000.0);
     assert_eq!(picked[0].id, glue);
