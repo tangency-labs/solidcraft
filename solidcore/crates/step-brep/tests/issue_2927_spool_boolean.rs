@@ -978,15 +978,14 @@ fn spool_boolean_x_cuts_closed_forms_and_invariants() {
 
 #[test]
 fn spool_boolean_z_cuts_closed_forms_and_invariants() {
-    // 4 non-bore-step `z` cuts from #2927 (`10, 40, 70, 100`; `z = 130` added with WR-759)
-    // + 2 exterior boundary cuts (`-5, 145`).
+    // 5 `z` cuts from #2927 (`10, 40, 70, 100, 130`) + 2 exterior boundary cuts (`-5, 145`).
     let mut k = Kernel::default();
     let verified = import_verified_spool(&mut k);
     verify_axis_sweep(
         &mut k,
         &verified,
         2,
-        &[-5, 10, 40, 70, 100, 145],
+        &[-5, 10, 40, 70, 100, 130, 145],
         &[],
         10_300.0,
     );
@@ -994,7 +993,7 @@ fn spool_boolean_z_cuts_closed_forms_and_invariants() {
     // Fine continuity and collar sweep across the `z = 130` inner-bore step plane and `z = 135`.
     let chamfer = verified.chamfer;
     let mut prev_fine: Option<(f64, f64)> = None;
-    for z_cut in [129.5, 129.99, 130.01, 130.5, 135.0] {
+    for z_cut in [129.5, 129.99, 130.0, 130.01, 130.5, 135.0] {
         let tool = halfspace_box(&mut k, 2, z_cut);
         let mut diff = boolean_difference(
             &mut k,

@@ -42,7 +42,10 @@
 //! - **Surface swap.** `DeleteEdge` swaps the two faces' surfaces through
 //!   `SmFace::SetSurface` (ported in `topology.face_p1`, which moves an owned
 //!   `Surface`): the swap takes the surface out of the deleted face and hands the
-//!   replaced one back.
+//!   replaced one back. When `flip_face` then flips the surviving face's orientation
+//!   (`SmBrep.cpp:6196`), `same_orientation_faces` is toggled too (`WR-759`) so loops
+//!   moved from `del_f` onto `surv_f` (`SmBrep.cpp:6526`) land on the matching faceuse
+//!   instead of the inverted one.
 //! - **`SmLockBrepBox`** is RAII upstream; `StitchFaces` holds `topology.brep_p1`'s
 //!   [`LockBrepBox`] guard (unlocked on drop, on every path). Its lock
 //!   (`SmBrep::LockBoundingBox`, unit `query.brep`) is not ported yet.
@@ -885,7 +888,7 @@ fn delete_manifold_edge(
     let split_loop = lu == lu_rad;
 
     // mark when face and radial face have same orientation
-    let same_orientation_faces =
+    let mut same_orientation_faces =
         eu1::faceuse_orientation(b, faceuse)? == eu1::faceuse_orientation(b, fu_rad)?;
 
     // Determine if either end of edge is a strut end
@@ -985,10 +988,19 @@ fn delete_manifold_edge(
                     // swap the surfaces between the faces
                     swap_face_surfaces(k, b, env.key_of, sf, df)?;
                     if flip_face {
-                        ignore_status(crate::error::passed_on(
-                            face1::flip_face_orientation(b, sf),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        // WR-759: `SmFace::FlipFaceOrientation` (`SmFace.cpp:10171-10198`)
+                        // returns `Err` (`NER`) only before flipping `m_pFU` and the
+                        // faceuses' orientations (`:10191-10193`), and `Ok(())`
+                        // (`SM_SUCCESS`) whenever the flip happened; an ignored pass-on
+                        // `Err` therefore did not flip `sf` and must leave
+                        // `same_orientation_faces` unchanged.
+                        match face1::flip_face_orientation(b, sf) {
+                            Ok(()) => same_orientation_faces = !same_orientation_faces,
+                            Err(e) => ignore_status(crate::error::passed_on::<()>(
+                                Err(e),
+                                k.fixes.brep_edit_statuses_pass_on,
+                            )?)?,
+                        }
                     }
                 }
                 // else: WARN (asked to keep a surface not used by the faces)
@@ -2308,5 +2320,254 @@ mod tests {
         let r = face_remove_loop(&mut b, f, None);
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })));
         assert_eq!(b.face(f).unwrap().rectangular_trim, face2::UNSURE);
+    }
+
+    #[test]
+    fn wr759_delete_edge_flipping_surviving_face_preserves_moved_inner_loop_orientation() {
+        use crate::curve::curve::Curve;
+        use crate::curve::ellipse::Ellipse;
+        use crate::curve::line::Line;
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::geom::tol::USE_DEFAULT;
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        use crate::math::{Point3, Vec3};
+        use crate::surface::cone::Cone;
+        use crate::surface::plane::Plane;
+        use crate::surface::surface::Surface;
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
+        use crate::topology::brep_constructor::{BrepConstructor, VertexNode};
+        use crate::topology::trimming_tools::create_uv_trim_curves;
+
+        let mut k = Kernel::default();
+        let frame_top_up = Axis2Placement::new(Point3::ZERO, Vec3::X, Vec3::Y); // z = 0, +Z
+        let frame_top_dn = Axis2Placement::new(Point3::ZERO, Vec3::X, -Vec3::Y); // z = 0, -Z
+        let frame_bot_up = Axis2Placement::new(Point3::new(0.0, 0.0, -5.0), Vec3::X, Vec3::Y); // z = -5, +Z
+        let frame_bot_dn = Axis2Placement::new(Point3::new(0.0, 0.0, -5.0), Vec3::X, -Vec3::Y); // z = -5, -Z
+        let plane_dom = Extent2d::from_bounds(-15.0, -15.0, 15.0, 15.0);
+
+        let c_top_10 = Curve::from(
+            Ellipse::create_canonical_circle(&k, &frame_top_up, 10.0, None, None).unwrap(),
+        );
+        let c_top_5 = Curve::from(
+            Ellipse::create_canonical_circle(&k, &frame_top_up, 5.0, None, None).unwrap(),
+        );
+        let c_top_2 = Curve::from(
+            Ellipse::create_canonical_circle(&k, &frame_top_up, 2.0, None, None).unwrap(),
+        );
+        let c_bot_10 = Curve::from(
+            Ellipse::create_canonical_circle(&k, &frame_bot_up, 10.0, None, None).unwrap(),
+        );
+        let c_bot_2 = Curve::from(
+            Ellipse::create_canonical_circle(&k, &frame_bot_up, 2.0, None, None).unwrap(),
+        );
+        let seam_10 = Curve::from(Line::from_points(
+            Point3::new(10.0, 0.0, -5.0),
+            Point3::new(10.0, 0.0, 0.0),
+            3,
+        ));
+        let seam_2 = Curve::from(Line::from_points(
+            Point3::new(2.0, 0.0, -5.0),
+            Point3::new(2.0, 0.0, 0.0),
+            3,
+        ));
+        let mut cyl_10 =
+            Surface::from(Cone::create_canonical_cylinder(&k, &frame_bot_up, 10.0).unwrap());
+        cyl_10
+            .adjust_step_uv_domain(&k, &Extent2d::from_bounds(0.0, -1.0, 360.0, 6.0))
+            .unwrap();
+        let cyl_10_dom = cyl_10.natural_uv_domain_with_nurb(&k).unwrap();
+        let mut cyl_2 =
+            Surface::from(Cone::create_canonical_cylinder(&k, &frame_bot_up, 2.0).unwrap());
+        cyl_2
+            .adjust_step_uv_domain(&k, &Extent2d::from_bounds(0.0, -1.0, 360.0, 6.0))
+            .unwrap();
+        let cyl_2_dom = cyl_2.natural_uv_domain_with_nurb(&k).unwrap();
+
+        let mut c = BrepConstructor::new();
+        c.start_brep(&mut k, USE_DEFAULT).unwrap();
+        c.start_region(true, None).unwrap();
+        c.start_shell().unwrap();
+
+        let v_t10 = c.start_vertex_of_loop(Point3::new(10.0, 0.0, 0.0)).unwrap();
+        let v_t5 = c.start_vertex_of_loop(Point3::new(5.0, 0.0, 0.0)).unwrap();
+        let v_t2 = c.start_vertex_of_loop(Point3::new(2.0, 0.0, 0.0)).unwrap();
+        let v_b10 = c
+            .start_vertex_of_loop(Point3::new(10.0, 0.0, -5.0))
+            .unwrap();
+        let v_b2 = c.start_vertex_of_loop(Point3::new(2.0, 0.0, -5.0)).unwrap();
+
+        // Face 1 (`surv_f`): z = 0 annulus r in [5, 10] on +Z plane, outward normal +Z (Same).
+        let surv_f = c.start_face(OrientType::Same).unwrap();
+        c.set_face_surface(
+            Surface::from(Plane::create_canonical(&frame_top_up).unwrap()),
+            &plane_dom,
+        )
+        .unwrap();
+        c.start_loop(OrientType::Same).unwrap();
+        let e_t10 = c
+            .start_edge(&mut k, OrientType::Same, None, Some(v_t10), Some(v_t10))
+            .unwrap();
+        c.set_edge_curve(&k, Some(c_top_10), false).unwrap();
+        let n_t10 = VertexNode::from_point(Point3::new(10.0, 0.0, 0.0));
+        c.set_limits(&k, &n_t10, &n_t10).unwrap();
+        c.end_edge().unwrap();
+        c.end_loop(&k).unwrap();
+
+        c.start_loop(OrientType::Same).unwrap();
+        let e_mid = c
+            .start_edge(&mut k, OrientType::Opposite, None, Some(v_t5), Some(v_t5))
+            .unwrap();
+        c.set_edge_curve(&k, Some(c_top_5), false).unwrap();
+        let n_t5 = VertexNode::from_point(Point3::new(5.0, 0.0, 0.0));
+        c.set_limits(&k, &n_t5, &n_t5).unwrap();
+        c.end_edge().unwrap();
+        c.end_loop(&k).unwrap();
+        c.end_face().unwrap();
+
+        // Face 2 (`del_f`): z = 0 annulus r in [2, 5] on -Z plane, outward normal +Z (Opposite).
+        let del_f = c.start_face(OrientType::Opposite).unwrap();
+        c.set_face_surface(
+            Surface::from(Plane::create_canonical(&frame_top_dn).unwrap()),
+            &plane_dom,
+        )
+        .unwrap();
+        c.start_loop(OrientType::Opposite).unwrap();
+        c.start_edge(&mut k, OrientType::Same, Some(e_mid), None, None)
+            .unwrap();
+        c.end_edge().unwrap();
+        c.end_loop(&k).unwrap();
+
+        c.start_loop(OrientType::Opposite).unwrap();
+        let e_t2 = c
+            .start_edge(&mut k, OrientType::Opposite, None, Some(v_t2), Some(v_t2))
+            .unwrap();
+        c.set_edge_curve(&k, Some(c_top_2), false).unwrap();
+        let n_t2 = VertexNode::from_point(Point3::new(2.0, 0.0, 0.0));
+        c.set_limits(&k, &n_t2, &n_t2).unwrap();
+        c.end_edge().unwrap();
+        c.end_loop(&k).unwrap();
+        c.end_face().unwrap();
+
+        // Face 3: z = -5 bottom annulus r in [2, 10] on -Z plane, outward normal -Z (Same).
+        c.start_face(OrientType::Same).unwrap();
+        c.set_face_surface(
+            Surface::from(Plane::create_canonical(&frame_bot_dn).unwrap()),
+            &plane_dom,
+        )
+        .unwrap();
+        c.start_loop(OrientType::Same).unwrap();
+        let e_b10 = c
+            .start_edge(&mut k, OrientType::Opposite, None, Some(v_b10), Some(v_b10))
+            .unwrap();
+        c.set_edge_curve(&k, Some(c_bot_10), false).unwrap();
+        let n_b10 = VertexNode::from_point(Point3::new(10.0, 0.0, -5.0));
+        c.set_limits(&k, &n_b10, &n_b10).unwrap();
+        c.end_edge().unwrap();
+        c.end_loop(&k).unwrap();
+
+        c.start_loop(OrientType::Same).unwrap();
+        let e_b2 = c
+            .start_edge(&mut k, OrientType::Same, None, Some(v_b2), Some(v_b2))
+            .unwrap();
+        c.set_edge_curve(&k, Some(c_bot_2), false).unwrap();
+        let n_b2 = VertexNode::from_point(Point3::new(2.0, 0.0, -5.0));
+        c.set_limits(&k, &n_b2, &n_b2).unwrap();
+        c.end_edge().unwrap();
+        c.end_loop(&k).unwrap();
+        c.end_face().unwrap();
+
+        // Face 4: outer cylinder r = 10, z in [-5, 0], outward normal +R (Same).
+        c.start_face(OrientType::Same).unwrap();
+        c.set_face_surface(cyl_10, &cyl_10_dom).unwrap();
+        c.start_loop(OrientType::Same).unwrap();
+        c.start_edge(&mut k, OrientType::Same, Some(e_b10), None, None)
+            .unwrap();
+        c.end_edge().unwrap();
+        let e_s10 = c
+            .start_edge(&mut k, OrientType::Same, None, Some(v_b10), Some(v_t10))
+            .unwrap();
+        c.set_edge_curve(&k, Some(seam_10), false).unwrap();
+        c.set_limits(&k, &n_b10, &n_t10).unwrap();
+        c.end_edge().unwrap();
+        c.start_edge(&mut k, OrientType::Opposite, Some(e_t10), None, None)
+            .unwrap();
+        c.end_edge().unwrap();
+        c.start_edge(&mut k, OrientType::Opposite, Some(e_s10), None, None)
+            .unwrap();
+        c.end_edge().unwrap();
+        c.end_loop(&k).unwrap();
+        c.end_face().unwrap();
+
+        // Face 5: inner bore cylinder r = 2, z in [-5, 0], outward normal -R (Opposite).
+        c.start_face(OrientType::Opposite).unwrap();
+        c.set_face_surface(cyl_2, &cyl_2_dom).unwrap();
+        c.start_loop(OrientType::Opposite).unwrap();
+        c.start_edge(&mut k, OrientType::Opposite, Some(e_b2), None, None)
+            .unwrap();
+        c.end_edge().unwrap();
+        let e_s2 = c
+            .start_edge(&mut k, OrientType::Same, None, Some(v_b2), Some(v_t2))
+            .unwrap();
+        c.set_edge_curve(&k, Some(seam_2), false).unwrap();
+        c.set_limits(&k, &n_b2, &n_t2).unwrap();
+        c.end_edge().unwrap();
+        c.start_edge(&mut k, OrientType::Same, Some(e_t2), None, None)
+            .unwrap();
+        c.end_edge().unwrap();
+        c.start_edge(&mut k, OrientType::Opposite, Some(e_s2), None, None)
+            .unwrap();
+        c.end_edge().unwrap();
+        c.end_loop(&k).unwrap();
+        c.end_face().unwrap();
+
+        c.end_shell(&mut k, false).unwrap();
+        c.end_region().unwrap();
+        let mut b = c.end_brep().unwrap();
+        for f in brep1::faces(&b, None).unwrap() {
+            create_uv_trim_curves(&k, &mut b, f).unwrap();
+        }
+        let pre = check_brep(&mut k, &mut b, CheckLevel::Level0).unwrap();
+        assert!(
+            pre.pointer_reports.is_empty(),
+            "pre-merge pointer reports: {:?}",
+            pre.pointer_reports
+        );
+
+        b.set_editing_enabled(true);
+        let serial = b.notify_serial().unwrap_or(1);
+        let key_of = |entity| super::super::p3::topology_ref(serial, entity);
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        super::super::p3::seed_records(&mut records, &b, &key_of);
+        let mut attributes = AttributeStore::default();
+        let mut env = DeleteEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            key_of: &key_of,
+            context: None,
+        };
+
+        delete_edge(&mut k, &mut b, &mut env, e_mid, Some(del_f)).unwrap();
+        b.refresh_cached_topology();
+        assert_eq!(brep1::faces(&b, None).unwrap().len(), 4);
+        create_uv_trim_curves(&k, &mut b, surv_f).unwrap();
+
+        let chk = check_brep(&mut k, &mut b, CheckLevel::Level0).unwrap();
+        assert!(
+            chk.pointer_reports.is_empty(),
+            "expected clean topology after merging opposite-normal faces, got: {:?}",
+            chk.pointer_reports
+        );
+
+        let store = AttributeStore::default();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| crate::geom::attribute::ObjectKey(0),
+        };
+        let vol = brep_volume(&k, &mut b, 1e-7, &attrs).unwrap();
+        let expected_vol = core::f64::consts::PI * (100.0 - 4.0) * 5.0; // 480 * pi
+        assert!(
+            (vol - expected_vol).abs() < 5e-2,
+            "merged hollow cylinder volume {vol} != {expected_vol}"
+        );
     }
 }
