@@ -90,8 +90,8 @@ fn cup() -> Body {
 /// The tool: the profile Y in [-34.75, wall], Z in [5, 20], its lower corner a quarter arc of
 /// radius 10 about (-34.75, 15) ending tangent to the vertical line at (`wall`, 15), revolved
 /// `angle` about Z, placed symmetrically about the YZ plane (the profile turned by -angle/2,
-/// whose sine and cosine `half` gives).
-fn tool(wall: f64, half: (f64, f64)) -> Body {
+/// whose sine and cosine `half` gives; `angle` is in radians).
+fn tool(wall: f64, angle: f64, half: (f64, f64)) -> Body {
     let (s, c) = (-half.0, half.1);
     let turn = |p: [f64; 3]| [c * p[0] - s * p[1], s * p[0] + c * p[1], p[2]];
     let turn_dir = |d: [f64; 3]| [c * d[0] - s * d[1], s * d[0] + c * d[1], d[2]];
@@ -111,19 +111,24 @@ fn tool(wall: f64, half: (f64, f64)) -> Body {
     revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], angle, true).unwrap()
 }
 
-/// The two revolve angles, 28 and 36 degrees: their names, and the sine and cosine of half
-/// of each (the ops tests compute no geometry, so the values are written out).
-const ANGLES: [(&str, (f64, f64)); 2] = [
+/// The two revolve angles, 28 and 36 degrees: their names, their radians, and the sine and
+/// cosine of half of each (the ops tests compute no geometry, so the values are written out).
+const ANGLES: [(&str, f64, (f64, f64)); 2] = [
     (
         "28 deg",
+        0.488_692_190_558_412_3,
         (0.241_921_895_599_667_73, 0.970_295_726_275_996_5),
     ),
-    ("36 deg", (0.309_016_994_374_947_4, 0.951_056_516_295_153_5)),
+    (
+        "36 deg",
+        0.628_318_530_717_958_6,
+        (0.309_016_994_374_947_4, 0.951_056_516_295_153_5),
+    ),
 ];
 
 /// The cut, or why it failed: the boolean's error, or no body.
-fn cut(wall: f64, angle: (&str, (f64, f64))) -> Result<Body, String> {
-    match boolean(cup(), tool(wall, angle.1), BooleanOp::Subtract) {
+fn cut(wall: f64, angle: (&str, f64, (f64, f64))) -> Result<Body, String> {
+    match boolean(cup(), tool(wall, angle.1, angle.2), BooleanOp::Subtract) {
         Ok(Some(b)) => Ok(b),
         Ok(None) => Err("no body".to_string()),
         Err(e) => Err(format!("{e}")),
