@@ -692,6 +692,13 @@ impl<'a> Panel<'a> {
         ctx.data(|d| d.get_temp(self.id.with("body_height")))
     }
 
+    /// The body's viewport on the last frame when its content overflowed it, i.e. when a
+    /// vertical scrollbar is drawn along the viewport's right edge; `None` while nothing scrolls.
+    /// A resize grip on that edge must stay out of this rectangle (#13422 review).
+    pub(crate) fn last_body_scrollbar(&self, ctx: &egui::Context) -> Option<egui::Rect> {
+        ctx.data(|d| d.get_temp(self.id.with("body_scrollbar")))
+    }
+
     /// The painted anchor also drives dragging, including the shell's edge clearance.
     pub(crate) fn bounded_anchor(&self, ctx: &egui::Context) -> egui::Pos2 {
         let viewport = self.viewport;
@@ -871,7 +878,11 @@ impl<'a> Panel<'a> {
                                 .show(ui, body)
                                 .inner
                         });
-                    ui.ctx().data_mut(|d| d.insert_temp(self.id.with("body_height"), scroll.inner_rect.height()));
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(self.id.with("body_height"), scroll.inner_rect.height());
+                        let scrolls = scroll.content_size.y > scroll.inner_rect.height() + 0.5;
+                        d.insert_temp(self.id.with("body_scrollbar"), scrolls.then_some(scroll.inner_rect));
+                    });
                     solidcraft_ui_registry::publish_count("dialog:body:content_height", f64::from(scroll.content_size.y));
                     solidcraft_ui_registry::publish_count("dialog:body:scroll_y", f64::from(scroll.state.clamped_offset().y));
                     solidcraft_ui_registry::publish_rect("dialog:body:viewport", scroll.inner_rect);

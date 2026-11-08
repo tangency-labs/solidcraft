@@ -356,7 +356,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::ComputeStatus { text: held_status, busy: false, applying: false }
             },
         );
-        resize = resize_edges(ui, side);
+        resize = resize_edges(ui, side, panel.last_body_scrollbar(ui.ctx()));
         d.reset_scroll = false;
     });
     match resize {
@@ -449,8 +449,10 @@ enum Resize {
 }
 
 /// Drag areas on the card's free side edge (the one away from its dock side), its bottom edge
-/// and the corner between them. The header stays the title drag area.
-fn resize_edges(ui: &mut egui::Ui, side: crate::frame::Side) -> Resize {
+/// and the corner between them. The header stays the title drag area. When the free edge is the
+/// right one and the body scrolls, `scrollbar` is the body viewport whose right edge carries the
+/// scrollbar: the side grip skips that span so scrollbar drags still scroll (#13422 review).
+fn resize_edges(ui: &mut egui::Ui, side: crate::frame::Side, scrollbar: Option<egui::Rect>) -> Resize {
     let t = solidcraft_theme::Tokens::get();
     let card = ui.min_rect();
     let grip = t.space_6;
@@ -461,26 +463,31 @@ fn resize_edges(ui: &mut egui::Ui, side: crate::frame::Side) -> Resize {
     let free_left = side == crate::frame::Side::Right;
     let x_edge = if free_left { card.left()..=card.left() + grip } else { card.right() - grip..=card.right() };
     let corner_x = if free_left { card.left()..=card.left() + grip * 2.0 } else { card.right() - grip * 2.0..=card.right() };
-    let edges = [
-        (
+    // The scrollbar sits on the body's right edge, so only a right-hand grip can cover it.
+    let side_top = match scrollbar {
+        Some(body) if !free_left && body.is_finite() => body.bottom().max(card.top() + t.form_header_height),
+        _ => card.top() + t.form_header_height,
+    };
+    let mut edges = vec![(
+        "bottom",
+        egui::Rect::from_x_y_ranges(card.left() + grip * 2.0..=card.right() - grip * 2.0, card.bottom() - grip..=card.bottom()),
+        egui::CursorIcon::ResizeVertical,
+        Axes { width: false, height: true },
+    )];
+    if side_top < card.bottom() - grip * 2.0 {
+        edges.push((
             "side",
-            egui::Rect::from_x_y_ranges(x_edge, card.top() + t.form_header_height..=card.bottom() - grip * 2.0),
+            egui::Rect::from_x_y_ranges(x_edge, side_top..=card.bottom() - grip * 2.0),
             egui::CursorIcon::ResizeHorizontal,
             Axes { width: true, height: false },
-        ),
-        (
-            "bottom",
-            egui::Rect::from_x_y_ranges(card.left() + grip * 2.0..=card.right() - grip * 2.0, card.bottom() - grip..=card.bottom()),
-            egui::CursorIcon::ResizeVertical,
-            Axes { width: false, height: true },
-        ),
-        (
-            "corner",
-            egui::Rect::from_x_y_ranges(corner_x, card.bottom() - grip * 2.0..=card.bottom()),
-            if free_left { egui::CursorIcon::ResizeNeSw } else { egui::CursorIcon::ResizeNwSe },
-            Axes { width: true, height: true },
-        ),
-    ];
+        ));
+    }
+    edges.push((
+        "corner",
+        egui::Rect::from_x_y_ranges(corner_x, card.bottom() - grip * 2.0..=card.bottom()),
+        if free_left { egui::CursorIcon::ResizeNeSw } else { egui::CursorIcon::ResizeNwSe },
+        Axes { width: true, height: true },
+    ));
     let mut out = Resize::None;
     for (name, rect, cursor, axes) in edges {
         let response = ui.interact(rect, ui.make_persistent_id(("params_resize", name)), egui::Sense::click_and_drag()).on_hover_cursor(cursor);
