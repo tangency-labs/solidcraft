@@ -6932,6 +6932,22 @@ fn replay(
                 instances.push(start..copies.len());
             }
         }
+        // A cut or intersect copy with no named targets, made where the pattern's own component
+        // has no body for it, works on the bodies of its source's component, as the source did
+        // (#12996). A pattern whose component has bodies cuts them, as before. The same scope
+        // counts misses, takes sheet cuts and applies the copies.
+        let scoped;
+        let f = if matches!(op, Operation::Cut | Operation::Intersect)
+            && targets.is_empty()
+            && f.participants.is_empty()
+            && src.component != f.component
+            && !st.bodies.iter().any(|b| b.component == f.component || b.feature == f.id)
+        {
+            scoped = Feature { component: src.component, ..f.clone() };
+            &scoped
+        } else {
+            f
+        };
         if op == Operation::Cut {
             let (m, t) = count_copy_misses(st, f, &targets, &copies, &instances, &axes);
             missed += m;
@@ -6962,16 +6978,6 @@ fn replay(
                 continue;
             }
         }
-        // A cut or intersect copy with no named targets works on the bodies of its source's
-        // component, as the source did, not those of the component active when the pattern
-        // was made (#12996).
-        let scoped;
-        let f = if matches!(op, Operation::Cut | Operation::Intersect) && targets.is_empty() && src.component != f.component {
-            scoped = Feature { component: src.component, ..f.clone() };
-            &scoped
-        } else {
-            f
-        };
         // New bodies from a pattern join their source when they touch it (as one feature would).
         if f.body_names.is_empty() {
             apply_traced(doc, st, f, copies, op, &targets)?;

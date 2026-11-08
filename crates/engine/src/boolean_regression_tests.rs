@@ -1576,3 +1576,33 @@ fn pattern_of_an_untargeted_cut_in_a_component_works_with_root_active() {
     let got = volume(&s, "Body1");
     assert!((one_hole - got - 9.0 * hole).abs() < 0.02 * hole, "{one_hole} -> {got}");
 }
+
+/// #12996: when the component active for the pattern has a body of its own, the copies of an
+/// untargeted cut keep cutting it, as they did before: saved designs rebuild the same.
+#[test]
+fn pattern_of_an_untargeted_cut_still_cuts_its_own_components_body() {
+    let mut s = Session::default();
+    let run = |s: &mut Session, command: &str, params: Value| s.execute(command, &params).unwrap();
+    run(&mut s, "component.create", json!({"name": "Main Body"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-50, -50], "p1": [50, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "20 mm", "operation": "new", "body_name": "Body1"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "10 mm", "direction": "negative", "operation": "cut", "name": "Extrude62"}));
+    let one_hole = volume(&s, "Body1");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Other"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-50, -50], "p1": [50, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "20 mm", "operation": "new", "body_name": "Plate2"}));
+    let plate = volume(&s, "Plate2");
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Extrude62"], "axis": "Z", "count": 10}));
+    let hole = 10.0 * 16.0 * std::f64::consts::PI;
+    let (body1, plate2) = (volume(&s, "Body1"), volume(&s, "Plate2"));
+    assert!((one_hole - body1).abs() < 0.02 * hole, "Body1 untouched: {one_hole} -> {body1}");
+    assert!((plate - plate2 - 9.0 * hole).abs() < 0.02 * hole, "Plate2 cut: {plate} -> {plate2}");
+}
