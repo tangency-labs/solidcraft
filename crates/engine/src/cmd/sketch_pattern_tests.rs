@@ -465,6 +465,51 @@ fn pattern_edits_retain_surviving_ids_and_work_after_undo_and_reopen() {
 }
 
 #[test]
+fn pattern_edits_can_add_and_remove_seed_entities_but_not_copy_their_own_copies() {
+    for circular in [false, true] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0]],"ids":["a"]}));
+        run(&mut s, "sketch.line", json!({"points":[[10,5],[20,5]],"ids":["b"]}));
+        let cmd = if circular { "sketch.pattern.circular" } else { "sketch.pattern.rectangular" };
+        let params = if circular { json!({"entities":["a"],"center":"origin","count":4}) } else { json!({"entities":["a"],"count":4,"spacing":10}) };
+        let original = run(&mut s, cmd, params);
+        let pattern = original["pattern"].as_str().unwrap();
+        let first_copies = ids(&original["curves"]);
+        assert_eq!(first_copies.len(), 3);
+        // Where the first copy of a seed line starting at `start` begins.
+        let moved = |start: Vec2| if circular { Vec2::new(-start.y, start.x) } else { start + Vec2::new(10.0, 0.0) };
+        let starts = |s: &Session, copies: &[String]| -> Vec<Vec2> { copies.iter().map(|id| point(&sketch(s), &format!("{id}.start"))).collect() };
+
+        let before = s.doc.to_json();
+        let added = run(&mut s, cmd, json!({"pattern":pattern,"entities":["a","b"]}));
+        let copies = ids(&added["curves"]);
+        assert_eq!(copies.len(), 6, "{cmd}: three copies of each seed");
+        assert_eq!(sketch(&s).curves.len(), 8, "{cmd}: the old copies are gone, not kept beside the new ones");
+        for seed in [Vec2::new(10.0, 0.0), Vec2::new(10.0, 5.0)] {
+            assert!(starts(&s, &copies).iter().any(|p| p.dist(moved(seed)) < 1e-6), "{cmd}: a copy of the seed at {seed:?}");
+        }
+        check_relations(&s);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.to_json(), before);
+        run(&mut s, "edit.redo", json!({}));
+
+        let removed = run(&mut s, cmd, json!({"pattern":pattern,"entities":["b"]}));
+        let copies = ids(&removed["curves"]);
+        assert_eq!(copies.len(), 3);
+        assert_eq!(sketch(&s).curves.len(), 5, "{cmd}: both seeds stay, only b is copied");
+        assert!(starts(&s, &copies).iter().any(|p| p.dist(moved(Vec2::new(10.0, 5.0))) < 1e-6));
+        assert!(!starts(&s, &copies).iter().any(|p| p.dist(moved(Vec2::new(10.0, 0.0))) < 1e-6), "{cmd}: a is no longer copied");
+        assert!(point(&sketch(&s), "a.start").dist(Vec2::new(10.0, 0.0)) < 1e-6);
+        check_relations(&s);
+
+        let before = s.doc.to_json();
+        let own_copy = copies[0].clone();
+        assert!(s.execute(cmd, &json!({"pattern":pattern,"entities":["b", own_copy]})).is_err(), "{cmd}: a copy cannot seed its own pattern");
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+#[test]
 fn malformed_pattern_edits_roll_back_and_deleted_seed_does_not_panic() {
     let mut s = new_sketch();
     run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0]],"ids":["l1"]}));

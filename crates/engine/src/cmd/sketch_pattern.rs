@@ -1,4 +1,5 @@
-//! Associative sketch patterns. Editing retains ids at surviving instance indices.
+//! Associative sketch patterns. Editing retains ids at surviving instance indices; a changed
+//! seed list rebuilds every copy.
 
 use solidcraft_sketch::{SketchPattern, SketchPatternKind};
 
@@ -13,7 +14,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             return Err(bad(cmd, "too many sketch patterns"));
         }
         let old_index = str_(p, "pattern").and_then(|id| sk.patterns.iter().position(|x| x.id == id));
-        let old = if let Some(id) = str_(p, "pattern") {
+        let mut old = if let Some(id) = str_(p, "pattern") {
             let i = sk.patterns.iter().position(|x| x.id == id).ok_or_else(|| bad(cmd, "unknown sketch pattern"))?;
             Some(sk.patterns.remove(i))
         } else {
@@ -85,9 +86,24 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             .filter_map(|i| sk.curves.get(*i).map(|c| c.id.clone()))
             .chain(ps.iter().filter_map(|i| sk.points.get(*i).map(|p| p.id.clone())))
             .collect();
-        if let Some(old) = &old {
+        if let Some(old) = &mut old {
             if entity_ids != old.entities {
-                return Err(bad(cmd, "the seed entities of an existing pattern cannot be changed"));
+                // A changed seed list (#10649) rebuilds every copy: the old copies go, and the
+                // new ones get fresh ids. A copy cannot seed the pattern that makes it.
+                if old
+                    .instances
+                    .iter()
+                    .any(|instance| entity_ids.iter().any(|id| instance.curves.contains(id) || instance.points.iter().any(|(_, copy)| copy == id)))
+                {
+                    return Err(bad(cmd, "a pattern cannot copy its own copies"));
+                }
+                for instance in std::mem::take(&mut old.instances) {
+                    sk.constraints.retain(|c| !instance.constraints.contains(&c.id));
+                    let curves: Vec<_> = instance.curves.iter().filter_map(|id| sk.curve_index(id)).collect();
+                    sk.remove_curves(&curves);
+                    let points: Vec<_> = instance.points.iter().filter_map(|(_, id)| sk.resolve_point(id)).collect();
+                    sk.remove_points(&points);
+                }
             }
             if old.instances.len() >= MAX_COPIES {
                 return Err(bad(cmd, "too many stored pattern instances"));
