@@ -4527,7 +4527,7 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
 /// The shader's analysis colours (`ana_c`: draft positive, between, negative; reachable,
 /// blocked; curvature flat, middle, tight; alpha 1) and flags (`ana_f.x`: 1 to stripe the bad
 /// faces).
-pub fn analysis_colors(c: &solidcraft_render::AnalysisColors) -> [f32; 36] {
+pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
     let mut v = [0.0; 36];
     let colors = c.draft.iter().chain(&c.access).chain(&c.curvature).flat_map(|rgb| [rgb[0], rgb[1], rgb[2], 1.0]);
     for (slot, x) in v.iter_mut().zip(colors) {

@@ -13,7 +13,7 @@ pub(super) struct Classification {
 /// near-maximal text/background contrast: four shipped palettes measure 21:1, while
 /// every other shipped palette is at most 16.006:1. No theme ids are special-cased.
 pub(super) fn theme_traits(t: &Tokens) -> Classification {
-    let linear = solidcraft_engine::geom::srgb::decode8;
+    let linear = solidcraft_color::srgb::decode8;
     let luminance = 0.2126 * linear(t.dialog_footer.r()) + 0.7152 * linear(t.dialog_footer.g()) + 0.0722 * linear(t.dialog_footer.b());
     Classification { dark: luminance < 0.5, high: crate::theme::contrast_ratio(t.form_ink, t.dialog_footer) >= 20.0 }
 }

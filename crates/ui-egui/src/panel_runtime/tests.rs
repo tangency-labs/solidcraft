@@ -27,7 +27,7 @@ fn panel_surface_policy_keeps_disabled_host_storage_small() {
 #[test]
 fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
     use egui::Color32;
-    use solidcraft_engine::geom::srgb::{decode8, encode8};
+    use solidcraft_color::srgb::{decode8, encode8};
     let high_contrast = crate::theme_files::resolve(crate::theme_files::find("high-contrast", &[]).unwrap());
     // Independent stored-premultiplied source-over for both real renderer target
     // formats. This does not call the production contrast/bounds predicate.
@@ -133,7 +133,7 @@ fn panel_contrast_checks_interior_luminance_and_translucent_muted_inks() {
 #[test]
 fn panel_contrast_encloses_actual_premultiplied_gpu_blends() {
     use egui::Color32;
-    use solidcraft_engine::geom::srgb::{decode8, encode8};
+    use solidcraft_color::srgb::{decode8, encode8};
     // Independent physical source-over oracle: read stored premultiplied bytes,
     // never the production readability predicate or unpremultiplication helper.
     let physical = |source: Color32, background: Color32, linear: bool, dither: f64| {

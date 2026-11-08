@@ -10,6 +10,7 @@ mod palettes;
 
 use egui::{Color32, Stroke};
 use serde::{Deserialize, Serialize};
+use solidcraft_color::AnalysisColors;
 
 /// Expanded Wide hosts compose controls and content in one total row below
 /// this logical height. Independent of pixel density and user UI scaling.
@@ -154,7 +155,7 @@ impl Surfaces {
 fn oklab_blend(from: Color32, to: Color32, fraction: f32) -> Color32 {
     let lab = |color: Color32| {
         let [r, g, b, a] = color.to_srgba_unmultiplied();
-        let decode = solidcraft_engine::geom::srgb::decode8;
+        let decode = solidcraft_color::srgb::decode8;
         let (r, g, b) = (decode(r), decode(g), decode(b));
         let l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b).cbrt();
         let m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b).cbrt();
@@ -621,7 +622,7 @@ pub(crate) fn icon_accent_for_tab(tab: &str) -> Option<&'static str> {
 /// WCAG contrast of two opaque sRGB colours.
 pub(crate) fn contrast_ratio(a: Color32, b: Color32) -> f64 {
     let luminance = |c: Color32| {
-        let linear = solidcraft_engine::geom::srgb::decode8;
+        let linear = solidcraft_color::srgb::decode8;
         0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
     };
     let (a, b) = (luminance(a), luminance(b));
@@ -669,7 +670,7 @@ pub(crate) fn panel_surface_fill(fill: Color32, tokens: &Tokens, requested: f32)
 }
 
 fn panel_luminance(color: Color32) -> f64 {
-    let decode = solidcraft_engine::geom::srgb::decode8;
+    let decode = solidcraft_color::srgb::decode8;
     0.2126 * decode(color.r()) + 0.7152 * decode(color.g()) + 0.0722 * decode(color.b())
 }
 
@@ -699,7 +700,7 @@ pub(crate) fn panel_surface_readable(fill: Color32, tokens: &Tokens) -> bool {
 /// then round outward to cover framebuffer quantization. This intentionally
 /// overestimates uncertainty instead of promising threshold contrast falsely.
 pub(crate) fn panel_composite_bounds(source: Color32, background: Color32) -> (Color32, Color32) {
-    use solidcraft_engine::geom::srgb::{decode, encode};
+    use solidcraft_color::srgb::{decode, encode};
     if source.a() == 255 {
         // Flat opaque integer colours survive the shader's <0.5-byte dither and
         // final nearest-byte conversion unchanged on either framebuffer format.
@@ -1004,10 +1005,6 @@ pub fn srgb(c: [f32; 3]) -> Color32 {
     let byte = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
     Color32::from_rgb(byte(c[0]), byte(c[1]), byte(c[2]))
 }
-
-/// Surface analysis colours, straight sRGB 0..1 as the shader takes them (exact, so they read
-/// the same as when they were literals in the WGSL). The light theme's are the headless default.
-pub use solidcraft_engine::render::AnalysisColors;
 
 /// Colours for native viewport markers and the agent pointer. Command artwork uses the SVG palette.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1707,11 +1704,6 @@ impl Tokens {
         t.axis_z = t.axis_z.lerp_to_gamma(t.viewport_top, 0.55);
         t
     }
-}
-
-/// How a physical material looks (the default appearance follows the material).
-pub fn material_color(name: &str) -> Option<Color32> {
-    solidcraft_engine::doc::material_color(name).map(|[r, g, b]| Color32::from_rgb(r, g, b))
 }
 
 /// Switch themes (the visuals follow on the next [`apply`]).
