@@ -316,11 +316,11 @@ crates/solidcore/src/blend/hcr.rs	-	int-div	1	proven	usize::MAX / 2	constant non
 crates/solidcore/src/blend/law_corners.rs	LawCornerPieces::classify	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/law_corners.rs	sphere_zone	with_capacity	1	proven	Vec::with_capacity(9)	constant capacity
 crates/solidcore/src/blend/law_corners.rs	sphere_zone	with_capacity	2	proven	Vec::with_capacity(9)	constant capacity
-crates/solidcore/src/boolean/merge/p2.rs	MergeState::merge_added_body	Vec::remove	1	open	remove(i)	
+crates/solidcore/src/boolean/merge/p2.rs	MergeState::merge_added_body	Vec::remove	1	proven	remove(i)	i is position() in the same Vec
 crates/solidcore/src/boolean/merge/p4.rs	classify_edge_faces	step_by	1	proven	step_by(2)	constant non-zero step
 crates/solidcore/src/boolean/topology_intersector/p1.rs	TopologyIntersector::face_face_intersect	Vec::insert	1	open	insert((jj + 1).min(faces2.len()), new_face)	
-crates/solidcore/src/boolean/topology_intersector/p2.rs	TopologyIntersector::intersect_topology	with_capacity	1	open	Vec::with_capacity(faces.len())	
-crates/solidcore/src/boolean/topology_intersector/p2.rs	teardown_reads_freed	Vec::remove	1	open	remove(i)	
+crates/solidcore/src/boolean/topology_intersector/p2.rs	TopologyIntersector::intersect_topology	with_capacity	1	proven	Vec::with_capacity(faces.len())	faces.len(), an in-memory slice
+crates/solidcore/src/boolean/topology_intersector/p2.rs	teardown_reads_freed	Vec::remove	1	proven	remove(i)	i is position() in the same Vec
 crates/solidcore/src/curve/composite_curve/p1.rs	CompositeCurve::approximate_curve	Vec::drain	1	proven	drain(..)	full-range drain(..)
 crates/solidcore/src/curve/composite_curve/p1.rs	CompositeCurve::approximate_curve	with_capacity	1	proven	Vec::with_capacity(n)	n = self.segments.len(), an existing Vec of elements larger than &Curve
 crates/solidcore/src/curve/composite_curve/p1.rs	CompositeCurve::approximate_curve	with_capacity	2	proven	Vec::with_capacity(approx_segments.len())	an existing Vec<Curve>; a Curve holds its BSplineCurve inline
