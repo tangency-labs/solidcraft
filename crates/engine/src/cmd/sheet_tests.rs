@@ -3524,10 +3524,20 @@ fn flanges_and_folds_go_on_a_sheet_folded_across_slanted_edges() {
 }
 
 /// Walls leaning at 70° close the trapezoid's corner on a slanted line, so a fold across the wide
-/// end's wall crosses a slanted edge of a flange: the wall widens evenly up to its top, and the
-/// bend with it (#10621).
+/// end's wall crosses a slanted edge of a flange, and the rip that mitres the wall to the slanted
+/// side's: the wall widens evenly up to its top, and the bend with it (#10621). Folded low, the
+/// wall's top turns into the slanted wall, and the fold is refused.
 #[test]
 fn a_fold_across_a_flanges_slanted_end_folds() {
+    // By hand (T 2, R 1, K 0.4, gap T): the 70° walls stand H 40 from their outer sharps, and
+    // their inner faces meet on a line that runs 0.3996 mm out along the wide wall's base for each
+    // mm up the wall. The mitre keeps each wall gap / 2 off the plane halving the corner: a cut of
+    // 1 / 0.7002 = 1.428 mm square to that line. The 30° fold turns the wall's top inward, toward
+    // its surface and the slanted wall. Folded at z = 14, the cut edge from s = 36.6 to 39.2 mm up
+    // the wall (of the 40 from its outer sharp) lies 0 to 0.15 mm inside the slanted wall's 2 mm
+    // slab, 11 to 12 mm in from the corner and below that wall's top: refused. Folded at z = 22
+    // and 30, the nearest point, the top of the cut edge, stays 0.30 and 0.81 mm off the slanted
+    // wall's inner face: the fold goes ahead.
     let lean = 70f64.to_radians();
     let walls = json!({"edges": [[160, 0, 2], t2_slant(120.0)], "height": 40, "angle": "70 deg"});
     // The wall's outer face, from where the wall alone reaches: its top's outer corner is the
@@ -3538,20 +3548,39 @@ fn a_fold_across_a_flanges_slanted_end_folds() {
     let b = bbox(&mut one);
     let (x_out, z_in) = (b["max"][0].as_f64().unwrap_or(f64::NAN), b["max"][2].as_f64().unwrap_or(f64::NAN));
     let z_out = z_in - 2.0 * lean.cos();
-    let mut lengths = Vec::new();
-    for z in [14.0, 22.0, 30.0] {
+    let walled = || {
         let mut s = Session::default();
         t2_trapezoid(&mut s);
         run(&mut s, "sheet.flange", walls.clone());
+        s
+    };
+    let fold_at = |z: f64| {
         let x = x_out - (z_out - z) / lean.tan();
-        run(&mut s, "sheet.fold", json!({"points": [[x, -90.0, z], [x, 90.0, z]], "angle": "30 deg"}));
+        json!({"points": [[x, -90.0, z], [x, 90.0, z]], "angle": "30 deg"})
+    };
+    let mut s = walled();
+    match s.execute("sheet.fold", &fold_at(14.0)) {
+        Ok(v) => panic!("z 14: the wall's top turns into the slanted wall: {v}"),
+        Err(e) => assert!(e.to_string().contains("mitred corner") && e.to_string().contains("rip"), "z 14: {e}"),
+    }
+    let mut lengths = Vec::new();
+    for z in [22.0, 30.0] {
+        let mut s = walled();
+        run(&mut s, "sheet.fold", fold_at(z));
         let (v, f) = (volume(&mut s), flat(&mut s));
         assert_eq!(f["bends"].as_array().map(Vec::len), Some(3), "z {z}: {f}");
         assert!(rel(v, t2_volume_from_flat(&f)) < 2e-5, "z {z}: volume {v} vs the flat's {}: {f}", t2_volume_from_flat(&f));
         lengths.push(f["bends"][2]["length"].as_f64().unwrap_or(f64::NAN));
     }
-    let (rise, more) = (lengths[1] - lengths[0], lengths[2] - lengths[1]);
-    assert!(rise > 1e-3 && (rise - more).abs() < 1e-6, "{lengths:?}");
+    // Each side of the wall runs straight in the flat: the free one on along the plate's slanted
+    // side, 25 / 160 mm wider for each mm up the wall, the mitred one along the walls' meeting
+    // line (its cut is the same all along), cos 70°·(√(25² + 160²) + 25) / 160 = 0.3996 mm. The
+    // folds lie 8 / sin 70° = 8.513 mm apart up the wall, so the bend grows 8.513 × 0.5559 =
+    // 4.732 mm between them.
+    let apart = (30.0 - 22.0) / lean.sin();
+    let widening = 25.0 / 160.0 + lean.cos() * ((25.0f64 * 25.0 + 160.0 * 160.0).sqrt() + 25.0) / 160.0;
+    let rise = lengths[1] - lengths[0];
+    assert!((rise - apart * widening).abs() < 1e-6, "{lengths:?}: the bend grows {rise} vs {}", apart * widening);
 }
 
 /// A blank whose outer outline is curved: `draw` makes it in a sketch, on the T2 sheet.

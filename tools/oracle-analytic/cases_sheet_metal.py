@@ -15,11 +15,10 @@ face.  The conventions that place them are SolidCraft's documented sheet-metal s
     trimmed back by the setback (R + t) tan(theta/2); the flange's outer face measures
     `height` from the virtual sharp (along the flange for a non-90 deg angle); the flat leg
     past the bend is height - (R + t) tan(theta/2).
-  * Several flanges in one command meeting at a 90 deg corner: each bend stops at the trimmed
-    base corner; each panel runs on past its bend by (R + t) - (t + gap/sqrt 2) so the gap
-    between the panels' inner corners is the rule gap (corner open, no corner fill).
-  * A later flange on an adjacent edge trims the base under the earlier bend; that bend stops
-    at the trimmed base corner and the earlier panel runs on alone (an open corner relief).
+  * Flanges meeting at a 90 deg corner, made in one command or one after another: the corner
+    belongs to the two bends, whichever came first. Each bend stops at the trimmed base corner;
+    each panel runs on past its bend by (R + t) - (t + gap/sqrt 2) so the gap between the
+    panels' inner corners is the rule gap (corner open, no corner fill).
   * Flat hem: 180 deg bend toward the face it starts from (inside), its leg hem_gap = 0.01 mm off
     that face (inner radius gap/2), length measured from the outer face of the hem bend,
     leg = L - (gap/2 + t).
@@ -206,7 +205,7 @@ def edge_flange_section(width_y, height, theta, rv, base_far=None):
 
 # Cases SolidCraft fails today, with the issue that tracks each (cargo xtask oracle reports them
 # as known failures and fails once they pass, so the mark is removed with the fix).
-KNOWN_FAILURES = {"75-sm-bracket-holes": "#296"}
+KNOWN_FAILURES = {}
 
 
 def write(case, d):
@@ -372,28 +371,34 @@ def c74():
 
 def c75():
     rv = STEEL
-    t, R = rv["t"], rv["R"]
+    t, R, gap = rv["t"], rv["R"], rv["gap"]
     sb = R + t
     zc = t + R
     leg1, leg2 = 30 - sb, 15 - sb
+    # The corner belongs to both bends (69's corner): each panel runs on past its bend's end by ext.
+    ext = sb - (t + gap / math.sqrt(2))
     P = []
     P.append(prism(Rect(sb, 40, 0, t), 0, 80 - sb, yz))                  # base x 0..75, y 5..40
     P.append(prism(Sector((sb, zc), R, R + t, -PI, -PI / 2), 0, 80 - sb, yz))  # bend 1, x 0..75
-    P.append(prism(Rect(0, t, zc, zc + leg1), 0, 80, yz))                # flange 1, x 0..80
+    P.append(prism(Rect(0, t, zc, zc + leg1), 0, 80 - sb + ext, yz))     # flange 1, x 0..75.73
     P.append(prism(Sector((80 - sb, zc), R, R + t, -PI / 2, 0), sb, 40, xz))  # bend 2, y 5..40
-    P.append(prism(Rect(80 - t, 80, zc, zc + leg2), sb, 40, xz))         # flange 2, y 5..40
+    P.append(prism(Rect(80 - t, 80, zc, zc + leg2), sb - ext, 40, xz))   # flange 2, y 4.27..40
     contacts = [(80 - sb) * t, (80 - sb) * t, (40 - sb) * t, (40 - sb) * t]
     r, n = 3.0, 2
     dV = -n * PI * r * r * t
     dA = n * (2 * PI * r * t - 2 * PI * r * r)
     dS = (-PI * r * r * t * (25 + 55), -n * PI * r * r * t * 20, -n * PI * r * r * t * t / 2)
     V, A, com, bb = assemble(P, contacts, dV, dA, dS)
-    m = ("base x 0..75, y 5..40, z 0..2.5 (trimmed 5 by each flange's setback); bend 1 (R 2.5..5 about y 5, z 5) x 0..75; "
-         "flange 1 y 0..2.5, z 5..30, x 0..80; bend 2 (R 2.5..5 about x 75, z 5) y 5..40; flange 2 x 77.5..80, z 5..15, "
-         "y 5..40; minus two d6 through holes at (25,20), (55,20) in the base. A = sum of prism areas - 2 x 4 joint "
-         "areas (75t, 75t, 35t, 35t) + hole walls - hole discs")
+    m = ("base x 0..75, y 5..40, z 0..2.5 (trimmed 5 by each flange's setback); bend 1 (R 2.5..5 about y 5, z 5) x 0..75 and "
+         "bend 2 (R 2.5..5 about x 75, z 5) y 5..40, both ending at the trimmed base corner (75, 5); the panels mitred by the "
+         "rule's gap: each runs on past its bend by ext = (R+t) - (t + gap/sqrt2) = %.9f, so flange 1 y 0..2.5, z 5..30, "
+         "x 0..%.9f and flange 2 x 77.5..80, z 5..15, y %.9f..40 (each t + gap/sqrt2 short of the other's outer face); "
+         "minus two d6 through holes at (25,20), (55,20) in the base. A = sum of prism areas - 2 x 4 joint areas "
+         "(75t, 75t, 35t, 35t) + hole walls - hole discs" % (ext, 80 - sb + ext, sb - ext))
     return record(V, A, com, bb, m, faces=None,
-                  note="SolidCraft convention: the second flange trims the base under the first bend, so bend 1 stops at x 75 while flange 1's panel runs to x 80 (open corner relief, no fill).")
+                  note="the corner belongs to the two bends that meet there, whichever flange was made first: the panels are "
+                       "mitred by the rule's gap as in one command (69). The open corner the flat model left, where the earlier "
+                       "flange's panel ran on to x 80 alone, depended on the order the flanges were made.")
 
 
 def c69():

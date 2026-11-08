@@ -39,8 +39,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use solidcore_record::brep::Loop as Bounds;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::{
-    Anchor, Bend, Corner, CornerRelief, Datum, Development, Fold, Joint, JointKind, Lap, Panel, Relief, Rigid2, Rigid3, Rip, Sheet, Surface, Tail,
-    ZoneEnds, curve_through, develop, fold,
+    Anchor, Bend, Corner, CornerRelief, Cut, Datum, Development, Fold, Joint, JointKind, Lap, Panel, Relief, Rigid2, Rigid3, Rip, Sheet, Surface,
+    Tail, ZoneEnds, curve_through, develop, fold,
 };
 use solidcraft_geom::brep::query::Query;
 use solidcraft_kernel::{Body, FaceSurface, face_surface};
@@ -882,14 +882,36 @@ const ROLL_FROM: f64 = 5.011_872_336_272_722;
 /// planes run on to where they cross, the bend's virtual sharp, and bend there with the rule's
 /// radius, the tooling's, whatever the model's.
 struct Modelled {
-    roll: usize,
-    /// Each plane, the edge it meets the cylinder along, and how far it runs on past that edge,
-    /// square across it, to the sharp.
-    sides: [(usize, usize, f64); 2],
+    /// The cylinder's faces: one, or the pieces cut-outs across the bend parted it into (a bend
+    /// split by cut-outs across it is one bend).
+    rolls: Vec<usize>,
+    /// Each plane, the edges it meets the cylinder along (one for each piece, in the order of
+    /// `rolls`), and how far it runs on past them, square across, to the sharp.
+    sides: [(usize, Vec<usize>, f64); 2],
     /// The sharp's ends, square across from the cylinder's ends.
     sharp: (Vec3, Vec3),
     /// The cylinder's inside radius, as modelled.
     inside: f64,
+}
+
+impl Modelled {
+    /// Takes in `piece`, another face of the same cylinder between the same two planes: its
+    /// faces and edges, and the sharp run on as far as either reaches.
+    fn join(&mut self, piece: Modelled) {
+        let Some(d) = (self.sharp.1 - self.sharp.0).normalized() else { return };
+        let o = self.sharp.0;
+        let ends = [self.sharp.0, self.sharp.1, piece.sharp.0, piece.sharp.1];
+        let along = |p: &&Vec3| (**p - o).dot(d);
+        let lo = ends.iter().min_by(|x, y| along(x).total_cmp(&along(y)));
+        let hi = ends.iter().max_by(|x, y| along(x).total_cmp(&along(y)));
+        if let (Some(lo), Some(hi)) = (lo, hi) {
+            self.sharp = (*lo, *hi);
+        }
+        self.rolls.extend(piece.rolls);
+        for (mine, theirs) in self.sides.iter_mut().zip(piece.sides) {
+            mine.1.extend(theirs.1);
+        }
+    }
 }
 
 /// The faces of a body that become the sheet.
@@ -1212,6 +1234,37 @@ pub fn convert_surfaces(
             _ => bent.extend(on_side_edge(e)),
         }
     }
+    // The planes a cylinder meets smoothly along its edges.
+    let planes_beside = |g: usize| -> BTreeSet<usize> {
+        let Ok(sg) = shape(g) else { return BTreeSet::new() };
+        (0..edge_count)
+            .filter_map(|e| {
+                let (x, y) = pair(e)?;
+                let h = if x == g && y != g {
+                    y
+                } else if y == g && x != g {
+                    x
+                } else {
+                    return None;
+                };
+                let sh = shape(h).ok()?;
+                (matches!(sh, Shape::Plane { .. }) && smooth(e, &sg, &sh)).then_some(h)
+            })
+            .collect()
+    };
+    // Faces `g` and `h` of one cylinder between the same two planes: pieces of one bend that
+    // cut-outs across it parted.
+    let one_bend = |g: usize, h: usize| -> bool {
+        let Ok(Shape::Cylinder { origin: o1, axis: a1, radius: r1, inward: i1, .. }) = shape(g) else { return false };
+        let Ok(Shape::Cylinder { origin: o2, axis: a2, radius: r2, inward: i2, .. }) = shape(h) else { return false };
+        let off = (o2 - o1) - a1 * (o2 - o1).dot(a1);
+        let planes = planes_beside(g);
+        let coaxial = a1.cross(a2).len() <= 1e-9 && off.len() <= tol * 10.0;
+        coaxial && (r1 - r2).abs() <= tol * 10.0 && i1 == i2 && planes.len() == 2 && planes == planes_beside(h)
+    };
+    // A pick on one piece of a bend that cut-outs across it split bends every piece.
+    let more: Vec<usize> = side.iter().copied().filter(|h| is_roll(*h) && !rolled.contains(h) && rolled.iter().any(|g| one_bend(*g, *h))).collect();
+    rolled.extend(more);
     let (bent, rolled) = (bent, rolled);
 
     // Converting, the sheet is that whole side. Thickening, it is the faces picked, the rolls of
@@ -1323,11 +1376,23 @@ pub fn convert_surfaces(
         }
         let at = |x: f64| on + axis * (x - (on - origin).dot(axis));
         let (s0, s1) = (at(lo), at(hi));
-        modelled.push(Modelled { roll: f, sides: [(a, ea, sa), (bb, eb, sb)], sharp: (s0, s1), inside });
+        // The planes in order, so that the pieces of one bend line up.
+        let sides = if a <= bb { [(a, vec![ea], sa), (bb, vec![eb], sb)] } else { [(bb, vec![eb], sb), (a, vec![ea], sa)] };
+        let piece = Modelled { rolls: vec![f], sides, sharp: (s0, s1), inside };
+        // Another piece of a bend already found (cut-outs across it parted them) joins it.
+        let same = |m: &&mut Modelled| {
+            m.rolls.first().is_some_and(|g| one_bend(*g, f)) && m.sides[0].0 == piece.sides[0].0 && m.sides[1].0 == piece.sides[1].0
+        };
+        match modelled.iter_mut().find(same) {
+            Some(m) => m.join(piece),
+            None => modelled.push(piece),
+        }
     }
     for m in &modelled {
-        shaped.remove(&m.roll);
-        sheet_faces.remove(&m.roll);
+        for g in &m.rolls {
+            shaped.remove(g);
+            sheet_faces.remove(g);
+        }
     }
 
     // Each edge between two faces of the sheet: a seam where it runs on smoothly, a bend where
@@ -1356,7 +1421,7 @@ pub fn convert_surfaces(
             .filter(|e| on_edge(*p, *e))
             .filter_map(on_side_edge)
             .filter_map(pair)
-            .any(|(x, y)| modelled.iter().any(|m| m.roll == x || m.roll == y));
+            .any(|(x, y)| modelled.iter().any(|m| m.rolls.contains(&x) || m.rolls.contains(&y)));
         edge || modelled_at || q.faces_at(*p, near).first().and_then(|(_, g)| on_side(*g)).is_some_and(|g| rolled.contains(&g))
     };
     if let Some(p) = bends.iter().find(|p| !between(p)) {
@@ -1402,7 +1467,7 @@ pub fn convert_surfaces(
                 }
             }
             for m in &modelled {
-                let [(x, ..), (y, ..)] = m.sides;
+                let (x, y) = (m.sides[0].0, m.sides[1].0);
                 let g = if x == f {
                     y
                 } else if y == f {
@@ -1452,7 +1517,7 @@ pub fn convert_surfaces(
             }
         }
         // Along a modelled bend, the panel runs on to the bend's sharp.
-        for (g, e, by) in modelled.iter().flat_map(|m| m.sides) {
+        for (g, e, by) in modelled.iter().flat_map(|m| m.sides.iter().flat_map(|(g, es, by)| es.iter().map(move |e| (*g, *e, *by)))) {
             let Some(u) = uses.iter().find(|u| u.edge == e).filter(|_| g == f) else { continue };
             let (Some(&a), Some(&z)) = (u.chart.first(), u.chart.last()) else { continue };
             region = to_sharp(&region, (a, z), by, tol).map_err(|e| DocError::Invalid(format!("the face at {} {e}", at(point))))?;
@@ -1606,8 +1671,10 @@ pub fn convert_surfaces(
     // Each modelled bend, at its sharp, with the rule's radius; the joint and the radius it was
     // modelled with are kept, to read the body as it is (see `SurfaceConversion::as_modelled`).
     let mut modelled_radii: Vec<(usize, f64)> = Vec::new();
-    for m in &modelled {
-        let [(x, ..), (y, ..)] = m.sides;
+    // Each modelled bend's joint.
+    let mut bend_of: Vec<(usize, usize)> = Vec::new();
+    for (mi, m) in modelled.iter().enumerate() {
+        let (x, y) = (m.sides[0].0, m.sides[1].0);
         let (a, b) = if parent.get(&x) != Some(&y) { (x, y) } else { (y, x) };
         let (Some(&ia), Some(&ib), Some(Shape::Plane { plane: pa, out: na }), Some(Shape::Plane { plane: pb, out: nb })) =
             (index.get(&a), index.get(&b), shaped.get(&a), shaped.get(&b))
@@ -1615,11 +1682,19 @@ pub fn convert_surfaces(
             continue;
         };
         let Some(ra) = panels.get(ia).map(|p| p.region.clone()) else { continue };
-        // Run so that `a`'s material lies to the left.
+        // Run so that `a`'s material lies to the left: looked for beside the sharp where a piece
+        // of the cylinder runs along it (a cut-out across the bend may leave none at its middle).
         let (mut s0, mut s1) = m.sharp;
         let (c0, c1) = (pa.to_local(s0), pa.to_local(s1));
         let extent = ra.outer.polyline(1e-3).bounds().size().len().max(1e-9);
-        if !(c1 - c0).normalized().is_some_and(|d| ra.contains(c0.lerp(c1, 0.5) + d.perp() * (extent * 1e-4))) {
+        let on_sharp = |p: Vec3| {
+            let d = s1 - s0;
+            s0 + d * ((p - s0).dot(d) / d.dot(d).max(1e-300))
+        };
+        let first = m.sides.iter().find(|(g, ..)| *g == a).and_then(|(_, es, _)| es.first());
+        let beside = first.and_then(|e| middle_of(*e)).map_or(s0.lerp(s1, 0.5), on_sharp);
+        let mid = pa.to_local(beside);
+        if !(c1 - c0).normalized().is_some_and(|d| ra.contains(mid + d.perp() * (extent * 1e-4))) {
             (s0, s1) = (s1, s0);
         }
         let (a0, a1, b0, b1) = (pa.to_local(s0), pa.to_local(s1), pb.to_local(s0), pb.to_local(s1));
@@ -1641,6 +1716,7 @@ pub fn convert_surfaces(
             relief: (Relief::None, Relief::None),
         };
         modelled_radii.push((joints.len(), m.inside));
+        bend_of.push((mi, joints.len()));
         joints.push(Joint {
             a: Anchor { panel: ia, origin: a0, dir: da },
             b: Anchor { panel: ib, origin: b0, dir: db },
@@ -1649,7 +1725,103 @@ pub fn convert_surfaces(
         edges.push(s0.lerp(s1, 0.5));
     }
 
+    // What of each modelled bend's zone no face of its cylinder covers: the cut-outs across it,
+    // and at its ends whatever the body's corner left (a relief's bite, a torn end). Of the strip
+    // the zone takes along its sharp, each face of the cylinder is read in the cylinder's own
+    // parameters (along its axis, the angle round it) and laid into the flat chart of the bend's
+    // `a` panel exactly as the development lays the zone beside it: along the sharp as the bend
+    // runs, and across from that panel's tangent line by the angle turned at the rule's neutral
+    // radius. Each piece left is kept with the ends of the strip it reaches.
+    let mut uncovered: Vec<(usize, Region2, bool, bool)> = Vec::new();
+    for &(mi, j) in &bend_of {
+        let (Some(m), Some(Joint { a: an, kind: JointKind::Bend(bend), .. })) = (modelled.get(mi), joints.get(j)) else { continue };
+        let (Some(place), Some(&face_a)) = (places.get(an.panel), order.get(an.panel)) else { continue };
+        let (Some((_, on_a, _)), Some((_, on_b, _))) = (m.sides.iter().find(|(g, ..)| *g == face_a), m.sides.iter().find(|(g, ..)| *g != face_a))
+        else {
+            continue;
+        };
+        let (o3, d3) = (place.point(an.origin.extend(0.0)), place.vector(an.dir.extend(0.0)));
+        let toward_b = Vec2::new(an.dir.y, -an.dir.x);
+        let (setback, width, neutral) = (bend.setback(t), bend.allowance(t, rule.k_factor), bend.radius + rule.k_factor * t);
+        let (origin2, dir2, len) = (an.origin, an.dir, bend.length);
+        let lay = |along: f64, across: f64| origin2 + dir2 * along + toward_b * across;
+        let strip = Region2 {
+            outer: Loop2::polygon(&[lay(0.0, -setback), lay(len, -setback), lay(len, width - setback), lay(0.0, width - setback)]).ccw(),
+            holes: Vec::new(),
+        };
+        let mut left = vec![strip];
+        for (k, &f) in m.rolls.iter().enumerate() {
+            let Ok(sf @ Shape::Cylinder { origin, axis, .. }) = shape(f) else { continue };
+            let (Some(&ea), Some(&eb)) = (on_a.get(k), on_b.get(k)) else { continue };
+            let (region, uses) =
+                face_chart(b, &q, &sf, f, sag, tol).map_err(|e| DocError::Invalid(format!("a modelled bend's face can't be read: {e}")))?;
+            // The angle of the face's edge along each plane.
+            let angle = |e: usize| {
+                let pts = &uses.iter().find(|u| u.edge == e)?.chart;
+                (!pts.is_empty()).then(|| pts.iter().map(|c| c.y).sum::<f64>() / pts.len() as f64)
+            };
+            let (Some(va), Some(vb)) = (angle(ea), angle(eb)) else { continue };
+            let turn = if vb >= va { 1.0 } else { -1.0 };
+            let (base, rate) = ((origin - o3).dot(d3), axis.dot(d3));
+            let map = |c: Vec2| lay(base + rate * c.x, -setback + turn * (c.y - va) * neutral);
+            let laid = |l: &Loop2| -> Option<Loop2> {
+                let segs = l.segs.iter().map(|s| (!matches!(s, Seg2::Arc { .. })).then(|| s.map_controls(map))).collect::<Option<Vec<_>>>()?;
+                Some(Loop2 { segs })
+            };
+            let (Some(outer), Some(holes)) = (laid(&region.outer), region.holes.iter().map(laid).collect::<Option<Vec<_>>>()) else {
+                return err(format!("not supported yet: a round edge in the face of the bend at {}", at(o3)));
+            };
+            let piece = Region2 { outer: outer.ccw(), holes: holes.into_iter().map(|h| h.ccw().reversed()).collect() };
+            left = solidcraft_kernel::planar_regions_boolean(&left, std::slice::from_ref(&piece), solidcraft_kernel::BoolOp::Cut, tol)?;
+        }
+        for r in left.into_iter().filter(|r| r.area() > tol * tol) {
+            let x = |p: Vec2| (p - origin2).dot(dir2);
+            let reaches = |end: f64| r.outer.segs.iter().any(|s| (x(s.start()) - end).abs() <= tol * 10.0);
+            let (at_start, at_end) = (reaches(0.0), reaches(len));
+            uncovered.push((j, r, at_start, at_end));
+        }
+    }
+
     let mut model = Sheet { thickness: t, k_factor: rule.k_factor, panels, joints, corners: Vec::new(), cuts: Vec::new() };
+    // Each corner where two bends standing on one panel meet, closed as a flanged sheet's is (see
+    // `close_corners_on`): both bends run to the corner, the panels beyond them meet on the line
+    // their surfaces share there, and a rip of the rule's gap parts them; settled, the corner
+    // then takes the rule's relief. Only a corner the body left open closes: panels that meet
+    // already (a shell's walls), or are joined to others there (five faces round a corner), stay
+    // as they are, and so does a corner whose panels' sides at it are no straight edges from
+    // their bends.
+    let framed: Vec<Option<Rigid3>> = places.iter().copied().map(Some).collect();
+    let made = model.joints.len();
+    let ends_of = |joint: &Joint| match &joint.kind {
+        JointKind::Bend(bend) => Some((joint.a.origin, joint.a.origin + joint.a.dir * bend.length)),
+        _ => None,
+    };
+    let before: Vec<Option<(Vec2, Vec2)>> = model.joints.iter().map(ends_of).collect();
+    for j in 0..made {
+        if before.get(j).copied().flatten().is_some() {
+            crate::sheet_surface_features::close_corners_on(&mut model, &framed, rule.gap, j, true)?;
+        }
+    }
+    // A point on each new rip's edge, as each joint has.
+    for joint in model.joints.iter().skip(made) {
+        let mid = match &joint.kind {
+            JointKind::Rip(rip) => rip.edges.0.first().zip(rip.edges.0.last()).map(|(p, q)| p.lerp(*q, 0.5)),
+            _ => None,
+        };
+        let place = places.get(joint.a.panel);
+        edges.push(mid.zip(place).map_or(Vec3::default(), |(p, place)| place.point(p.extend(0.0))));
+    }
+    // What the body's corner left at a bend's end is the sheet's where the corner stays as
+    // modelled, and the rule's relief's where it was closed.
+    for (j, region, at_start, at_end) in uncovered {
+        let (Some(Some((s0, s1))), Some(now)) = (before.get(j), model.joints.get(j).and_then(ends_of)) else { continue };
+        let closed = |was: Vec2, is: Vec2| was.dist(is) > tol;
+        if (at_start && closed(*s0, now.0)) || (at_end && closed(*s1, now.1)) {
+            continue;
+        }
+        let Some(panel) = model.joints.get(j).map(|x| x.a.panel) else { continue };
+        model.cuts.push(Cut { panel, region });
+    }
     let reliefs = Reliefs::of(rule);
     let mut notes = settle(&mut model, &places, &reliefs, &|_| None, tol, &at)?;
     // Where the rule's tooling changes the body, say so.

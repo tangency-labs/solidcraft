@@ -219,7 +219,7 @@ fn bends_picked_inside_and_a_fixed_face_inside_give_the_same_sheet() {
     tray(&mut a, t);
     run(&mut a, "sheet.convert", json!({"mode": "thicken", "body": "Tray", "face": [50, 30, 0], "bends": inner}));
     assert!((volume(&mut a) - v).abs() < 1e-6 * v && same_size(flat_size(&mut a), f, 1e-9));
-    // From the floor inside, the sheet's other skin is the fixed one: the bends turn down from it
+    // From the floor inside, the sheet's other face is the fixed one: the bends turn down from it
     // and the flat is the inside lengths less the inside setbacks, L' + 2H' - 4R + 2BA, which is
     // the same blank.
     let mut b = Session::default();
@@ -297,13 +297,14 @@ fn a_z_section_bends_up_at_one_edge_and_down_at_the_other() {
     let (t, k, r) = (2.0, 0.5, 1.0);
     let mut s = Session::default();
     rule(&mut s, "Test", t, k, r, 0.5);
-    // Flange 60, web 40, flange 30 on one skin: its first corner is the outside of its bend,
+    // Flange 60, web 40, flange 30 on one surface: its first corner is the outside of its bend,
     // its second the inside.
     let bends = section(&mut s, &[(0.0, 0.0), (60.0, 0.0), (60.0, 40.0), (90.0, 40.0)], t, 100.0);
     run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": [30, 0, 50], "bends": bends}));
     let mut directions: Vec<String> = bend_rows(&mut s).into_iter().map(|row| row.1).collect();
+    // Sorted, one bend each way reads ["down", "up"] (as on main), whichever bend turns which way.
     directions.sort();
-    assert_eq!(directions, ["up", "down"]);
+    assert_eq!(directions, ["down", "up"]);
     // Outside setbacks R + T at the first bend, inside setbacks R at the second, and a 90°
     // allowance for each: 60 + 40 + 30 - 2 (R + T) - 2 R + π (R + K T) = 128.2832.
     let across = 130.0 - 2.0 * (r + t) - 2.0 * r + PI * (r + k * t);
@@ -481,14 +482,14 @@ fn bent_section(s: &mut Session, outer: &[(f64, f64)], t: f64, ri: f64, len: f64
     };
     let left = |d: (f64, f64)| (-d.1, d.0);
     let at = |p: (f64, f64), d: (f64, f64), k: f64| (p.0 + d.0 * k, p.1 + d.1 * k);
-    // Per corner: where its arc starts and ends on the line's skin and on the other skin, the
+    // Per corner: where its arc starts and ends on the line's surface and on the other face, the
     // middles of those two arcs, and the middles of its outer and its inner arc.
     let mut corners = Vec::new();
     for (i, &c) in outer.iter().enumerate().take(n - 1).skip(1) {
         let (d0, d1) = (dir(i - 1), dir(i));
         let (cross, dot) = (d0.0 * d1.1 - d0.1 * d1.0, d0.0 * d1.0 + d0.1 * d1.1);
         let theta = cross.abs().atan2(dot);
-        // Turning toward the material, this skin is the bend's outside.
+        // Turning toward the material, this surface is the bend's outside.
         let (rp, ro) = if cross > 0.0 { (ri + t, ri) } else { (ri, ri + t) };
         let a = at(c, d0, -rp * (theta / 2.0).tan());
         let b = at(c, d1, rp * (theta / 2.0).tan());
@@ -1548,7 +1549,7 @@ fn outline_corners(s: &mut Session) -> Vec<[f64; 2]> {
 /// Whether the flat outline has a corner at each of `want` (from the low corner of its box), the
 /// flat as it lies or turned in its box: half round, or seen from its other face. (The flat frame
 /// runs along a longest edge of the fixed face, which may be either of two, and from a shell's
-/// inner skin it is seen from the other side.)
+/// inner surface it is seen from the other side.)
 fn outline_has(s: &mut Session, want: &[[f64; 2]]) -> bool {
     let pts = outline_corners(s);
     let hi = [pts.iter().map(|q| q[0]).fold(0.0, f64::max), pts.iter().map(|q| q[1]).fold(0.0, f64::max)];
@@ -1906,6 +1907,27 @@ fn flat_area_and_bends(s: &mut Session) -> (f64, Vec<f64>) {
 /// or round (a torn butt corner is torn differently from one feature's corner).
 #[test]
 fn trays_of_its_own_sheet_metal_convert_back() {
+    // A round relief's edge on a bend is a circle of the flat folded round the bend: its angle
+    // round the bend runs as the circle's sine does along it, which no spline holds exactly. The
+    // kernel folds it as degree-7 pieces within FOLD_TOL times the edge's size of the fold
+    // (FOLD_TOL = 1e-7, crates/kernel/src/sew.rs, as close as a folded edge's own chain keeps to
+    // the fold), and the converted tray reads its reliefs back from those pieces. So the round
+    // trip keeps a round relief to that tolerance, not to a rounding: each of its arcs on a bend
+    // may lie up to off = 1e-7 x 120 mm from the circle (120 mm, the tray's largest coordinate,
+    // bounds every edge's size). The relief, r = 1.5, is centred where the zones' centre lines
+    // cross, BA/2 = (π/4)(R + K T) = 0.375π short of each bend's notched end, so its arc on each
+    // bend is 2 r acos(BA/2 / r) = 2.002371 long, and there are eight (two bends at each of four
+    // corners): 16.018973 in all. The flat's area may move by off times that (0.000192 mm²), the
+    // solid by T times that (0.000192 mm³), and each bend's length by off at each of its two ends,
+    // 2 off = 0.000024 (its centre line meets each arc square to it, through the arc's centre).
+    // The outline `sheet.flat_pattern` lists is chords 1e-3 off its curves, which the two trays
+    // draw differently (an arc, and the curve read back from the body), so a round relief's flat
+    // is measured exactly instead: unfolded, the sheet is its flat drawn T deep, and its volume
+    // over T is the flat's area.
+    // T 1, the relief 3 across, BA = (π/2)(R + K T) with R 1, K 0.5.
+    let (t, r, ba) = (1.0, 1.5, FRAC_PI_2 * 1.5);
+    let (off, arcs) = (1e-7 * 120.0, 8.0 * 2.0 * r * (ba / 2.0 / r).acos());
+    let (round_volume, round_area, round_bend) = (off * arcs * t, off * arcs, 2.0 * off);
     for shape in ["notch", "tear", "round"] {
         for two in [false, true].into_iter().filter(|two| !(*two && shape == "tear")) {
             let what = format!("{shape}, {}", if two { "two features" } else { "one feature" });
@@ -1913,16 +1935,26 @@ fn trays_of_its_own_sheet_metal_convert_back() {
             let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
             let out = s.execute("sheet.convert", &json!({"mode": "thicken", "body": body, "face": [60, 45, 0], "bends": picks, "rule": "T"}));
             assert!(out.is_ok(), "{what}: {}", out.err().map(|e| e.to_string()).unwrap_or_default());
-            // The same tray: its solid, and its flat with the same bends.
+            // The same tray: its solid, and its flat with the same bends (a round relief to the
+            // fold's tolerance, above).
+            let round = shape == "round";
             let (v, size, (area, bends)) = (volume(&mut source), flat_size(&mut source), flat_area_and_bends(&mut source));
-            assert!((volume(&mut s) - v).abs() < 1e-9 * v, "{what}: {} vs {v}", volume(&mut s));
+            let (dv, db) = if round { (round_volume, round_bend) } else { (1e-9 * v, 1e-6) };
+            assert!((volume(&mut s) - v).abs() < dv, "{what}: {} vs {v}", volume(&mut s));
             assert!(same_size(flat_size(&mut s), size, 1e-6), "{what}: {:?} vs {size:?}", flat_size(&mut s));
             let (got_area, got_bends) = flat_area_and_bends(&mut s);
-            assert!((got_area - area).abs() < 1e-9 * area, "{what}: {got_area} vs {area}");
+            assert!(round || (got_area - area).abs() < 1e-9 * area, "{what}: {got_area} vs {area}");
             assert!(
-                got_bends.len() == bends.len() && got_bends.iter().zip(&bends).all(|(x, y)| (x - y).abs() < 1e-6),
+                got_bends.len() == bends.len() && got_bends.iter().zip(&bends).all(|(x, y)| (x - y).abs() < db),
                 "{what}: {got_bends:?} vs {bends:?}"
             );
+            // A round relief's flat, exactly (last: it unfolds both trays).
+            if round {
+                run(&mut s, "sheet.unfold", json!({}));
+                run(&mut source, "sheet.unfold", json!({}));
+                let (got, want) = (volume(&mut s) / t, volume(&mut source) / t);
+                assert!((got - want).abs() < round_area, "{what}: flat {got} vs {want}");
+            }
         }
     }
 }
