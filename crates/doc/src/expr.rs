@@ -1133,8 +1133,9 @@ pub fn eval_params(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value
     out
 }
 
-/// [`eval_params`], worked out.
-fn eval_params_uncached(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
+/// [`eval_params`], worked out, and kept nowhere: for definitions evaluated once each, such as a
+/// configuration's, which would only push the design's own out of the cache.
+pub(crate) fn eval_params_uncached(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
     let mut done: BTreeMap<String, Value> = BTreeMap::new();
     let mut errors: BTreeMap<String, String> = BTreeMap::new();
     let index: BTreeMap<&str, &ParamDef> = params.iter().map(|p| (p.name.as_str(), p)).collect();

@@ -669,7 +669,7 @@ pub(crate) enum Target {
 }
 
 /// Length unit of the document in mm (bare numbers of unit-less parameters next to lengths).
-fn doc_len(units: &str) -> f64 {
+pub(crate) fn doc_len(units: &str) -> f64 {
     match expr::unit_info(units) {
         Some((Kind::Length, s)) => s,
         _ => 1.0,
@@ -698,6 +698,18 @@ impl Document {
             Target::Text(_) => crate::text_params::unquote(expression),
             Target::User(_) => expression.trim().to_string(),
             Target::Input { kind, .. } => self.with_design_unit(expression, kind),
+        }
+    }
+
+    /// `name`'s definition for evaluation were its expression `expression`, as a change would
+    /// store it; a text parameter, or a name the design lacks, has none.
+    pub(crate) fn param_def_for(&self, name: &str, expression: &str) -> Option<ParamDef> {
+        let at = self.param_target(name)?;
+        let stored = self.stored_expression(at, expression);
+        match at {
+            Target::Text(_) => None,
+            Target::User(i) => self.params.get(i).map(|p| ParamDef { name: p.name.clone(), expr: stored, unit: p.unit.clone() }),
+            Target::Input { kind, .. } => Some(self.input_def(name, stored, kind)),
         }
     }
 

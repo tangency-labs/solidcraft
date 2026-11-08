@@ -381,14 +381,14 @@ fn configured() -> Document {
 #[test]
 fn a_family_table_lists_each_configuration_in_order() {
     let doc = configured();
-    let rows = Family::rows(&doc);
+    let rows = Family::rows(&doc, "mm");
     assert_eq!(rows.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(), ["Default", "Small", "Large", "Medium"]);
     let read = |row: usize, key: &str| rows[row].fields.get(key).map(String::as_str);
     assert_eq!((read(0, "name"), read(0, "param:width"), read(0, "param:hole_d")), (Some("Default"), Some("20 mm"), Some("5 mm")));
     assert_eq!((read(3, "param:width"), read(3, "material:Body 1"), read(3, "suppress:99")), (Some("w * 2"), Some("Steel"), Some("false")));
     assert_eq!(rows.iter().map(|r| r.fields.get(ACTIVE).map(String::as_str)).collect::<Vec<_>>(), [None, None, Some("yes"), None]);
     assert!(rows.iter().all(|r| r.level == 0 && r.numbers.is_empty() && r.kind == table::RowKind::Part && !r.purchased));
-    assert!(Family::rows(&Document::new("None")).is_empty(), "no configurations, no rows");
+    assert!(Family::rows(&Document::new("None"), "mm").is_empty(), "no configurations, no rows");
 
     let family = Family { of: SheetComponent { source: 1, component: 0 } };
     let (mut definition, left_out) = family.table(&doc);
@@ -407,9 +407,78 @@ fn a_family_table_lists_each_configuration_in_order() {
     for row in &mut fewer.configs.rows {
         row.cells.remove(1);
     }
-    let laid = definition.layout(&Family::rows(&fewer), solidcore_record::Vec2::new(0.0, 280.0), &measure).unwrap();
+    let laid = definition.layout(&Family::rows(&fewer, "mm"), solidcore_record::Vec2::new(0.0, 280.0), &measure).unwrap();
     assert!(laid.rows.iter().all(|row| row.cells[2].lines.is_empty()), "HOLE_D is gone from the design");
     assert_eq!(laid.rows[0].cells[1].lines[0].text, "9 mm");
+}
+
+/// A parameter's cell carries the value it gives its configuration, so it sorts by value: one
+/// worked out from other parameters prints that value, one typed as a value prints as typed, and
+/// one that doesn't evaluate keeps its text and goes after the numbers. A parameter a rule drives,
+/// and one worked out from it, get no value.
+#[test]
+fn a_family_tables_parameter_cells_read_their_values() {
+    use crate::config::{Column as ConfigColumn, ConfigRow};
+    let mut doc = Document::new("Values");
+    doc.set_param("w", "15 mm", None, None).unwrap();
+    doc.set_param("width", "20 mm", None, None).unwrap();
+    doc.configs.columns = vec![ConfigColumn::Param("width".into()), ConfigColumn::Material("Body".into())];
+    let row = |name: &str, width: &str| ConfigRow { name: name.into(), cells: vec![width.into(), "Steel".into()] };
+    doc.configs.rows = vec![
+        row("Twice", "w * 2"),
+        row("Inch", "1 in"),
+        row("Ten", "10 mm"),
+        row("Nine", "9 mm"),
+        row("Loop", "width + 1"),
+        row("Unknown", "nope * 2"),
+    ];
+    let rows = Family::rows(&doc, "mm");
+    let width = |at: usize| (rows[at].fields["param:width"].clone(), rows[at].numbers.get("param:width").copied());
+    assert_eq!(width(0), ("30.00 mm".to_string(), Some(30.0)), "worked out from w: its value");
+    assert_eq!(width(1), ("1 in".to_string(), Some(25.4)), "typed as a value: as typed");
+    assert_eq!(width(4), ("width + 1".to_string(), None), "circular");
+    assert_eq!(width(5), ("nope * 2".to_string(), None), "unknown name");
+    assert!(rows.iter().all(|r| r.fields["material:Body"] == "Steel" && !r.numbers.contains_key("material:Body")));
+    assert_eq!(Family::rows(&doc, "in")[0].fields["param:width"], "1.1811 in", "in the drawing's units");
+
+    let family = Family { of: SheetComponent { source: 1, component: 0 } };
+    let (mut definition, _) = family.table(&doc);
+    definition.sort = vec![table::SortKey { column: "param_width".into(), descending: false }];
+    let measure = |text: &str, cap: f64| text.chars().count() as f64 * cap / 2.0;
+    let laid = definition.layout(&rows, solidcore_record::Vec2::new(0.0, 280.0), &measure).unwrap();
+    let names: Vec<String> = laid.rows.iter().map(|row| row.cells[0].lines[0].text.clone()).collect();
+    assert_eq!(names, ["Nine", "Ten", "Inch", "Twice", "Unknown", "Loop"]);
+
+    // A rule that drives w: w * 2 has no value now, and 1 in still has its own.
+    let rule = json!({"id": "r", "name": "Drive w", "condition": {"type": "always"}, "effect": {"type": "drive_parameter", "parameter": "w", "expression": "5 mm"}});
+    doc.configs.rules = vec![serde_json::from_value(rule).unwrap()];
+    let rows = Family::rows(&doc, "mm");
+    assert_eq!((rows[0].fields["param:width"].as_str(), rows[0].numbers.get("param:width")), ("w * 2", None));
+    assert_eq!(rows[1].numbers.get("param:width"), Some(&25.4));
+    doc.configs.rules[0].enabled = false;
+    assert_eq!(Family::rows(&doc, "mm")[0].numbers.get("param:width"), Some(&30.0), "a rule turned off drives nothing");
+
+    // An angle worked out from another prints in degrees and sorts by its value: 30° before 1 rad
+    // (57.3°), which reads first as text. An area (`w * w`) is neither a length nor an angle, so it
+    // keeps its text and has no number.
+    let mut doc = Document::new("Angles");
+    doc.set_param("a", "15 deg", None, None).unwrap();
+    doc.set_param("tilt", "10 deg", None, None).unwrap();
+    doc.set_param("w", "3 mm", None, None).unwrap();
+    doc.set_param("width", "20 mm", None, None).unwrap();
+    doc.configs.columns = vec![ConfigColumn::Param("tilt".into()), ConfigColumn::Param("width".into())];
+    let row = |name: &str, tilt: &str, width: &str| ConfigRow { name: name.into(), cells: vec![tilt.into(), width.into()] };
+    doc.configs.rows = vec![row("Rad", "1 rad", "w * w"), row("Twice", "a * 2", "20 mm")];
+    let rows = Family::rows(&doc, "mm");
+    assert_eq!(rows[1].fields["param:tilt"], "30.00°");
+    assert!((rows[1].numbers["param:tilt"] - 30f64.to_radians()).abs() < 1e-12, "{:?}", rows[1].numbers);
+    assert_eq!(rows[0].fields["param:tilt"], "1 rad");
+    assert_eq!((rows[0].fields["param:width"].as_str(), rows[0].numbers.get("param:width")), ("w * w", None), "an area");
+    let (mut definition, _) = family.table(&doc);
+    definition.sort = vec![table::SortKey { column: "param_tilt".into(), descending: false }];
+    let laid = definition.layout(&rows, solidcore_record::Vec2::new(0.0, 280.0), &measure).unwrap();
+    let names: Vec<String> = laid.rows.iter().map(|row| row.cells[0].lines[0].text.clone()).collect();
+    assert_eq!(names, ["Twice", "Rad"], "by value, not by text");
 }
 
 /// A family table's columns: NAME, then one per configuration column, headed by the parameter's

@@ -213,7 +213,7 @@ fn rows_of(s: &Session, d: &Drawing, record: &SheetTable) -> std::result::Result
         Kind::Family(family) if family.of.component != 0 => {
             return Err(format!("component {} has no configurations: a design's configurations are its own", family.of.component));
         }
-        Kind::Family(_) => return Ok(Family::rows(&s.doc)),
+        Kind::Family(_) => return Ok(Family::rows(&s.doc, s.doc.drawing_units(d))),
         Kind::PartsList(list) => list,
     };
     let state = s.model.state();

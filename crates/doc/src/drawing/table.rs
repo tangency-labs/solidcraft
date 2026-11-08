@@ -30,7 +30,7 @@ use crate::assembly::BomType;
 use crate::bom::{self, Bom, Group, Mass, Quantity, Request, View};
 use crate::config::Column as ConfigColumn;
 use crate::display_units::{NumberFormat, format_length, format_number};
-use crate::{DocError, Document, Result, ids};
+use crate::{DocError, Document, Result, expr, ids};
 
 /// The most tables a drawing may have.
 pub const MAX_TABLES: usize = 1_000;
@@ -237,22 +237,53 @@ impl Family {
     }
 
     /// Each of `doc`'s configurations as a table reads it, in its table's order: its name, the cell
-    /// of each configuration column as the design saves it, and [`ACTIVE`] `yes` on the active one.
-    /// A cell is an expression with its units, so it is text and sorts as text.
-    pub fn rows(doc: &Document) -> Vec<table::Row> {
+    /// of each configuration column, and [`ACTIVE`] `yes` on the active one. A parameter's cell
+    /// carries the value it gives the configuration ([`Document::configuration_values`]) as its
+    /// number, so it sorts by value; one worked out from other parameters prints that value, a
+    /// length in `units`, and one typed as a value prints as typed. Any other cell is text.
+    pub fn rows(doc: &Document, units: &str) -> Vec<table::Row> {
         let configs = &doc.configs;
         let keys: Vec<String> = configs.columns.iter().map(|c| doc.config_key(c)).collect();
+        let reads_values = configs.columns.iter().any(|c| matches!(c, ConfigColumn::Param(_)));
         let row = |config: &crate::config::ConfigRow| {
-            // A key longer than a row's field key can be names no column, so it is left out.
-            let cells = keys.iter().zip(&config.cells).filter(|(key, _)| key.len() <= table::MAX_KEY_BYTES);
-            let mut fields: BTreeMap<String, String> = cells.map(|(key, cell)| (key.clone(), cell.clone())).collect();
+            let values = if reads_values { doc.configuration_values(config) } else { BTreeMap::new() };
+            let (mut fields, mut numbers) = (BTreeMap::new(), BTreeMap::new());
+            for ((key, column), cell) in keys.iter().zip(&configs.columns).zip(&config.cells) {
+                // A key longer than a row's field key can be names no column, so it is left out.
+                if key.len() > table::MAX_KEY_BYTES {
+                    continue;
+                }
+                let value = match column {
+                    ConfigColumn::Param(name) => values.get(name).copied().filter(|v| v.v.is_finite() && v.kind().is_some()),
+                    _ => None,
+                };
+                let text = match value {
+                    Some(v) if !expr::references(cell).is_empty() => shown(v, units).unwrap_or_else(|| cell.clone()),
+                    _ => cell.clone(),
+                };
+                if let Some(v) = value {
+                    numbers.insert(key.clone(), v.v);
+                }
+                fields.insert(key.clone(), text);
+            }
             fields.insert("name".into(), config.name.clone());
             if configs.active.as_deref() == Some(config.name.as_str()) {
                 fields.insert(ACTIVE.into(), "yes".into());
             }
-            table::Row { key: config.name.clone(), kind: table::RowKind::Part, purchased: false, fields, level: 0, numbers: BTreeMap::new() }
+            table::Row { key: config.name.clone(), kind: table::RowKind::Part, purchased: false, fields, level: 0, numbers }
         };
         configs.rows.iter().map(row).collect()
+    }
+}
+
+/// A parameter's value as a table prints it, with two decimals: a length in `units`, as a parts
+/// list's lengths are, an angle in degrees, a number as it is.
+fn shown(value: expr::Value, units: &str) -> Option<String> {
+    let number = |x: f64| format_number(x, 2, &NumberFormat::default()).ok().map(|shown| shown.text);
+    match value.kind()? {
+        expr::Kind::Length => Some(format_length(value.v, units, 2)),
+        expr::Kind::Angle => number(value.v.to_degrees()).map(|n| format!("{n}°")),
+        expr::Kind::Unitless => number(value.v),
     }
 }
 

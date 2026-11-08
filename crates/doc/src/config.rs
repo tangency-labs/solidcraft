@@ -2,9 +2,11 @@
 //! expression, feature suppression, body material or body appearance. Activating a row sets
 //! those values in the design atomically, which then rebuilds as usual.
 
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
 use serde::{Deserialize, Serialize};
 
-use crate::{DEFAULT_MATERIAL, DocError, Document, Result};
+use crate::{DEFAULT_MATERIAL, DocError, Document, Result, expr};
 
 #[path = "config_rules.rs"]
 mod rules;
@@ -164,6 +166,36 @@ impl Document {
         }
     }
 
+    /// Each parameter's value in configuration `row`, read without activating it: the design's
+    /// definitions with the row's cells in their place, evaluated once. A parameter an enabled rule
+    /// drives gets none, and so does one worked out from it, as activation may change it. A value
+    /// that doesn't evaluate is left out. It copies no Document and evaluates no model.
+    pub fn configuration_values(&self, row: &ConfigRow) -> BTreeMap<String, expr::Value> {
+        let driven: BTreeSet<&str> = self
+            .configs
+            .rules
+            .iter()
+            .filter(|rule| rule.enabled)
+            .filter_map(|rule| match &rule.effect {
+                RuleEffect::DriveParameter { parameter, .. } => Some(parameter.as_str()),
+                _ => None,
+            })
+            .collect();
+        let mut defs = self.param_defs();
+        let at: HashMap<String, usize> = defs.iter().enumerate().map(|(i, def)| (def.name.clone(), i)).collect();
+        for (column, cell) in self.configs.columns.iter().zip(&row.cells) {
+            if let Column::Param(name) = column
+                && let (Some(&i), Some(def)) = (at.get(name), self.param_def_for(name, cell))
+                && let Some(slot) = defs.get_mut(i)
+            {
+                *slot = def;
+            }
+        }
+        // Left out, a driven parameter makes those worked out from it fail too.
+        defs.retain(|def| !driven.contains(def.name.as_str()));
+        expr::eval_params_uncached(&defs, crate::params::doc_len(&self.units)).0
+    }
+
     /// Set the design to a row's values (all or nothing).
     pub fn apply_configuration(&mut self, row: &str) -> Result<()> {
         self.apply_configuration_with_trace(row).map(|_| ())
@@ -315,6 +347,21 @@ mod tests {
         assert_eq!(d, before);
         assert!(d.change_params_atomic(&[("length".into(), "3 mm".into()), ("length".into(), "4 mm".into())]).is_err());
         assert_eq!(d, before);
+    }
+
+    /// A cell's definition is the one a change would store: a user parameter's expression trimmed,
+    /// with its unit; a text parameter, or a name the design lacks, has none.
+    #[test]
+    fn a_cells_definition_is_what_a_change_stores() {
+        let mut d = Document::new("A");
+        d.units = "in".into();
+        d.set_param("width", "2 in", None, None).unwrap();
+        d.set_text_param("label", "A", None).unwrap();
+        let def = d.param_def_for("width", "  3 in ").unwrap();
+        d.change_params_atomic(&[("width".into(), "  3 in ".into())]).unwrap();
+        assert_eq!(d.param_defs().into_iter().find(|p| p.name == "width"), Some(def));
+        assert!(d.param_def_for("label", "\"B\"").is_none());
+        assert!(d.param_def_for("missing", "1 mm").is_none());
     }
 
     #[test]

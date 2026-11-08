@@ -1063,4 +1063,28 @@ mod tests {
         assert!((volume(&mut reopened) - 6000.0).abs() < 1e-6);
         assert!(reopened.doc.configuration_matches());
     }
+
+    /// A configuration's values read without activating it are those activating it gives: a user
+    /// parameter worked out from another, and a feature's input typed as a bare number in a design
+    /// in inches.
+    #[test]
+    fn a_configurations_values_are_those_its_activation_gives() {
+        let mut s = Session::default();
+        s.doc_mut().units = "in".into();
+        run(&mut s, "parameters.change", json!({"name": "w", "expression": "1 in"}));
+        run(&mut s, "parameters.change", json!({"name": "depth", "expression": "w * 2"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        let length = s.doc.features[0].param_names[0].clone();
+        run(&mut s, "config.configure", json!({"params": ["w", "depth", length]}));
+        let key = format!("param:{length}");
+        run(&mut s, "config.row", json!({"name": "Big", "values": {"param:w": "2 in", "param:depth": "w * 3", key: "3"}}));
+        let row = s.doc.configs.rows.iter().find(|r| r.name == "Big").cloned().unwrap();
+        let read = s.doc.configuration_values(&row);
+        run(&mut s, "config.activate", json!({"row": "Big"}));
+        let (active, _) = s.doc.param_values();
+        for name in ["w", "depth", length.as_str()] {
+            assert!((read[name].v - active[name].v).abs() < 1e-9, "{name}: {:?} vs {:?}", read[name], active[name]);
+        }
+        assert!((read["depth"].v - 6.0 * 25.4).abs() < 1e-9 && (read[length.as_str()].v - 3.0 * 25.4).abs() < 1e-9, "{read:?}");
+    }
 }

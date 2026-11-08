@@ -641,10 +641,13 @@ fn a_family_table_lists_the_designs_configurations() {
         s.execute("config.row", &json!({"name": "Huge", "values": {"param:width": "90 mm"}})).unwrap();
     });
     assert_eq!(keys(&mut s), ["Default", "Small", "Large", "Tiny", "Huge"], "a new configuration shows on the next read");
+    with_the_drawing_closed(&mut s, |s| {
+        s.execute("config.row", &json!({"name": "Inch", "values": {"param:width": "1 in"}})).unwrap();
+    });
     run(&mut s, EDIT, json!({"table": ids::encode(id), "set": {"sort": [{"column": "param_width"}]}}));
-    assert_eq!(keys(&mut s), ["Tiny", "Small", "Default", "Large", "Huge"], "9 mm before 10 mm");
+    assert_eq!(keys(&mut s), ["Tiny", "Small", "Default", "Inch", "Large", "Huge"], "by value: 1 in is 25.4 mm");
     run(&mut s, EDIT, json!({"table": ids::encode(id), "set": {"sort": [{"column": "name", "descending": true}]}}));
-    assert_eq!(keys(&mut s), ["Tiny", "Small", "Large", "Huge", "Default"]);
+    assert_eq!(keys(&mut s), ["Tiny", "Small", "Large", "Inch", "Huge", "Default"]);
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(keys(&mut s)[0], "Tiny", "undo puts the width sort back");
 
