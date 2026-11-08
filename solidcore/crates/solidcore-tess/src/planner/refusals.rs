@@ -379,7 +379,14 @@ fn the_flips_name_a_middle_the_surface_does_not_evaluate_at() {
     let uv = vec![[0.0, 0.0], [0.75, -0.5], [0.75, 0.5], [0.0, 1.0]];
     let fixed: Vec<Vec3> = uv.iter().map(|q| point(&s, *q)).collect();
     let mut tris = vec![[0, 1, 2], [0, 2, 3]];
-    match super::sag::flip(&s, 0.01, 1e-9, &fixed, &uv, &mut tris) {
+    match super::sag::flip(
+        &s,
+        0.01,
+        &mut super::sag::Poles::new(&s, 1e-9),
+        &fixed,
+        &uv,
+        &mut tris,
+    ) {
         Err(super::sag::Stop::NoValue(NoValue(q))) => assert_eq!(q[0], 0.5, "{q:?}"),
         other => panic!("{other:?}, flipped to {tris:?}"),
     }
@@ -544,7 +551,13 @@ fn a_step_inwards_the_surface_has_no_point_at_refuses_the_face() {
 fn the_worst_sag_is_measured_where_the_surface_evaluates() {
     let s = cylinder_without(0.5);
     let uv = [[0.0, 0.0], [0.75, -0.5], [0.75, 0.5]];
-    let got = super::sag::worst(&s, 1e-9, &[], &uv, &[[0, 1, 2]]);
+    let got = super::sag::worst(
+        &s,
+        &mut super::sag::Poles::new(&s, 1e-9),
+        &[],
+        &uv,
+        &[[0, 1, 2]],
+    );
     // Measured at its three sides' middles; its middle, unmeasured, is counted, so the face is
     // never taken as within its tolerance over it.
     assert!(

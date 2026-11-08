@@ -1345,7 +1345,16 @@ fn sag_refinement_across_an_inflection_ends_without_slivers() {
     let fixed: Vec<Vec3> = Vec::new();
     let tol = 0.5;
     let start = uv.len();
-    sag::refine(&s, tol, 1e-9, &fixed, &mut uv, &mut tris, 20_000).unwrap();
+    sag::refine(
+        &s,
+        tol,
+        &mut sag::Poles::new(&s, 1e-9),
+        &fixed,
+        &mut uv,
+        &mut tris,
+        20_000,
+    )
+    .unwrap();
     assert!(
         uv.len() - start < 1_000,
         "{} points added: refinement ran to its budget",
@@ -1400,7 +1409,7 @@ fn triangles_standing_across_a_curved_sheet_are_flipped_along_it() {
             .sum()
     };
     let before = area(&tris);
-    sag::flip(&s, 0.1, 1e-9, &[], &uv, &mut tris).unwrap();
+    sag::flip(&s, 0.1, &mut sag::Poles::new(&s, 1e-9), &[], &uv, &mut tris).unwrap();
     let after = area(&tris);
     let sides: Vec<(u32, u32)> = tris
         .iter()
@@ -2137,4 +2146,32 @@ fn an_edge_stopped_at_its_depth_bound_is_named_within_its_tolerance() {
     assert_eq!((capped.edge, capped.cap), (2, EdgeCap::Depth), "{capped:?}");
     assert!(capped.within && capped.sag <= capped.tol, "{capped:?}");
     assert!(capped.excess > 1.0, "{capped:?}");
+}
+
+thread_local! {
+    /// Calls of the kernel's pole classifier ([`pole_at`]) on this thread, for the counts below.
+    pub(super) static POLE_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// A node's collapsed directions are a property of its parameters, so the pole classifier is
+/// asked about each node of a face once (two directions), not again for every triangle, side and
+/// round that looks at it. On the spline coil, which the classifier dominated, the count is the
+/// nodes' own, and the mesh is the one the per-look classifier made.
+#[test]
+fn the_pole_classifier_is_asked_once_per_node_of_a_spline_face() {
+    // (body, display triangles, display classifier calls, export triangles, export calls);
+    // before the memo the calls were 1_089_434 (display) and 1_091_452 (export).
+    let name = "smlib_coil_lower_half";
+    let (b, size) = (fixture(name), size_of(name));
+    for (t, want_tris, want_calls) in [
+        (MeshTolerance::display_of(size), 30_776, 42_846),
+        (MeshTolerance::export_of(size), 30_808, 42_654),
+    ] {
+        POLE_CALLS.with(|c| c.set(0));
+        let (p, _) = plan(&b, &t, size).unwrap();
+        let calls = POLE_CALLS.with(std::cell::Cell::get);
+        let (m, _) = p.evaluate();
+        assert_eq!(m.triangles.len(), want_tris, "triangles");
+        assert_eq!(calls, want_calls, "classifier calls");
+    }
 }

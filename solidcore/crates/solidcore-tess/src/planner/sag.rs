@@ -18,8 +18,9 @@ use super::{NoValue, Unclassified};
 
 /// Split the triangles `tris` of a face (indices into `uv`; the first `fixed.len()` points sit
 /// at `fixed`, the rest on the surface at their parameters) until none of them lies farther
-/// than `tol` from the surface `s`, adding at most `max_points` points to `uv`. `reach`: how near
-/// a pole a point is taken as one (see [`solidcore::eval::uv::degenerate_within`]).
+/// than `tol` from the surface `s`, adding at most `max_points` points to `uv`. `poles`: the
+/// classifier of the face's nodes, shared by [`refine`], [`flip`] and [`worst`] (how near a pole a
+/// point is taken as one: see [`solidcore::eval::uv::degenerate_within`]).
 ///
 /// A point the surface does not evaluate at (a node, or a middle the check needs) is the
 /// evaluator refusing the face: the error names it, and the caller leaves the face out whole.
@@ -50,7 +51,7 @@ impl From<Unclassified> for Stop {
 pub(crate) fn refine(
     s: &EvalSurface,
     tol: f64,
-    reach: f64,
+    poles: &mut Poles,
     fixed: &[Vec3],
     uv: &mut Vec<[f64; 2]>,
     tris: &mut Vec<[u32; 3]>,
@@ -64,7 +65,6 @@ pub(crate) fn refine(
             .map(|d| kernel::record_vec3(d.0))
             .ok_or(NoValue(q))
     };
-    let mean = |qs: &[[f64; 2]]| mean(s, reach, qs);
     // How far the flat point `c` lies from the surface, measured along the normal at the surface
     // point of the same parameters: those parameters need not be the nearest (a straight line in
     // the parameters is no geodesic near a pole), and only the departure across the surface
@@ -103,10 +103,7 @@ pub(crate) fn refine(
             continue;
         };
         let p = |i: u32| pos.get(i as usize).copied();
-        let q = |i: u32| uv.get(i as usize).copied();
-        let (Some(pa), Some(pb), Some(pc), Some(qa), Some(qb), Some(qc)) =
-            (p(t[0]), p(t[1]), p(t[2]), q(t[0]), q(t[1]), q(t[2]))
-        else {
+        let (Some(pa), Some(pb), Some(pc)) = (p(t[0]), p(t[1]), p(t[2])) else {
             continue;
         };
         // Sides inside the face (two triangles on them), long enough to split, with their sag.
@@ -117,7 +114,7 @@ pub(crate) fn refine(
             if sides.get(&e).is_none_or(|ts| ts.len() != 2) {
                 continue;
             }
-            let (Some(xa), Some(xb), Some(ua), Some(ub)) = (p(a), p(b), q(a), q(b)) else {
+            let (Some(xa), Some(xb)) = (p(a), p(b)) else {
                 continue;
             };
             let len = xa.dist(xb);
@@ -127,7 +124,7 @@ pub(crate) fn refine(
             let sag = if let Some(&sag) = sag_of.get(&e) {
                 sag
             } else {
-                let sag = off(mean(&[ua, ub])?, (xa + xb) * 0.5)?;
+                let sag = off(poles.mean(uv, &[a, b])?, (xa + xb) * 0.5)?;
                 sag_of.insert(e, sag);
                 sag
             };
@@ -138,7 +135,7 @@ pub(crate) fn refine(
         // inside the face divides by four. A triangle whose middle is off splits its side inside
         // the face that sags most, while that side still contributes; what is left comes from
         // its boundary sides, which the edges' own sampling keeps within the tolerance.
-        let centroid = mean(&[qa, qb, qc])?;
+        let centroid = poles.mean(uv, &t)?;
         let worst = inner.iter().max_by(|x, y| x.0.total_cmp(&y.0)).copied();
         let split = match worst {
             Some((sag, _, e)) if sag > tol => e,
@@ -174,14 +171,11 @@ pub(crate) fn refine(
         if from != ti {
             queue.push(ti);
         }
-        let (Some(ua), Some(ub)) = (q(split.0), q(split.1)) else {
-            continue;
-        };
         // A split is wanted and there is no room for its point.
         if uv.len() >= limit {
             return Ok(true);
         }
-        let m = mean(&[ua, ub])?;
+        let m = poles.mean(uv, &[split.0, split.1])?;
         let pm = at(m)?;
         // Proven: `plan_face` checks its nodes and the MAX_REFINE more it lets this add are at most
         // MAX_FACE_NODES, so the index fits a u32.
@@ -194,29 +188,73 @@ pub(crate) fn refine(
     Ok(false)
 }
 
-/// The mean of parameter points, as the surface point between them: at a pole the parameter
-/// along the degenerate direction is free (the pole copy carries a neighbour's), so there the
-/// mean takes it from the other points alone.
-/// A point whose poles the kernel's classifier cannot tell is the error.
-fn mean(s: &EvalSurface, reach: f64, qs: &[[f64; 2]]) -> Result<[f64; 2], Unclassified> {
-    let mut out = [0.0; 2];
-    // Proven: `d` < 2 enumerates `out` and indexes the `[f64; 2]` parameters `qs`.
-    #[allow(clippy::indexing_slicing)]
-    for (d, slot) in out.iter_mut().enumerate() {
-        let mut free: Vec<f64> = Vec::new();
-        for q in qs {
-            if !super::pole_at(s, *q, d, reach)? {
-                free.push(q[d]);
+/// Which parameter directions the surface is collapsed along at each node of a face's
+/// triangulation, as the kernel's classifier says (within `reach`): a property of the node's
+/// parameters, so it is asked once per node however many triangles and rounds look at it.
+pub(crate) struct Poles<'a> {
+    s: &'a EvalSurface,
+    reach: f64,
+    /// Per node index; `None` until asked.
+    flags: Vec<Option<[bool; 2]>>,
+}
+
+impl<'a> Poles<'a> {
+    pub(crate) fn new(s: &'a EvalSurface, reach: f64) -> Self {
+        Poles {
+            s,
+            reach,
+            flags: Vec::new(),
+        }
+    }
+
+    /// Whether each direction is collapsed at node `i`, whose parameters are `q`.
+    fn at(&mut self, i: u32, q: [f64; 2]) -> Result<[bool; 2], Unclassified> {
+        let i = i as usize;
+        if let Some(Some(f)) = self.flags.get(i) {
+            return Ok(*f);
+        }
+        let f = [
+            super::pole_at(self.s, q, 0, self.reach)?,
+            super::pole_at(self.s, q, 1, self.reach)?,
+        ];
+        if self.flags.len() <= i {
+            self.flags.resize(i + 1, None);
+        }
+        if let Some(slot) = self.flags.get_mut(i) {
+            *slot = Some(f);
+        }
+        Ok(f)
+    }
+
+    /// The mean of nodes' parameters, as the surface point between them: at a pole the
+    /// parameter along the degenerate direction is free (the pole copy carries a neighbour's),
+    /// so there the mean takes it from the other nodes alone. A node whose poles the kernel's
+    /// classifier cannot tell is the error.
+    fn mean(&mut self, uv: &[[f64; 2]], nodes: &[u32]) -> Result<[f64; 2], Unclassified> {
+        let mut qs: Vec<([f64; 2], [bool; 2])> = Vec::new();
+        for &i in nodes {
+            if let Some(&q) = uv.get(i as usize) {
+                qs.push((q, self.at(i, q)?));
             }
         }
-        let pick: Vec<f64> = if free.is_empty() {
-            qs.iter().map(|q| q[d]).collect()
-        } else {
-            free
-        };
-        *slot = pick.iter().sum::<f64>() / pick.len().max(1) as f64;
+        let mut out = [0.0; 2];
+        // Proven: `d` < 2 enumerates `out` and indexes the `[f64; 2]` parameters and flags.
+        #[allow(clippy::indexing_slicing)]
+        for (d, slot) in out.iter_mut().enumerate() {
+            let free: Vec<f64> = qs
+                .iter()
+                .filter(|(_, f)| !f[d])
+                .map(|(q, _)| q[d])
+                .collect();
+            let pick: Vec<f64> = if free.is_empty() {
+                qs.iter().map(|(q, _)| q[d]).collect()
+            } else {
+                free
+            };
+            *slot = pick.iter().sum::<f64>() / pick.len().max(1) as f64;
+        }
+        Ok(out)
     }
-    Ok(out)
 }
 
 /// The farthest the triangles `tris` (as for [`refine`]) lie from the surface, measured as
@@ -229,7 +267,7 @@ fn mean(s: &EvalSurface, reach: f64, qs: &[[f64; 2]]) -> Result<[f64; 2], Unclas
 /// classifier cannot tell.
 pub(crate) fn worst(
     s: &EvalSurface,
-    reach: f64,
+    poles: &mut Poles,
     fixed: &[Vec3],
     uv: &[[f64; 2]],
     tris: &[[u32; 3]],
@@ -245,8 +283,8 @@ pub(crate) fn worst(
         })
         .collect();
     // How far the flat point `c` lies from the surface at the mean of `qs`, as `refine`'s `off`.
-    let off = |qs: &[[f64; 2]], c: Vec3| -> Result<Option<f64>, Unclassified> {
-        let m = mean(s, reach, qs)?;
+    let mut off = |nodes: &[u32], c: Vec3| -> Result<Option<f64>, Unclassified> {
+        let m = poles.mean(uv, nodes)?;
         let Some((x, su, sv)) = s.derivs(m[0], m[1]).map(kernel::record_triple) else {
             return Ok(None);
         };
@@ -259,7 +297,7 @@ pub(crate) fn worst(
     let (mut worst, mut unmeasured) = (0.0f64, 0usize);
     for (k, t) in tris.iter().enumerate() {
         let corner = |i: u32| Some((*uv.get(i as usize)?, *pos.get(i as usize)?));
-        let (Some((qa, pa)), Some((qb, pb)), Some((qc, pc))) =
+        let (Some((_, pa)), Some((_, pb)), Some((_, pc))) =
             (corner(t[0]), corner(t[1]), corner(t[2]))
         else {
             return Err(Stop::Corner(k));
@@ -268,16 +306,16 @@ pub(crate) fn worst(
         // corner they need).
         let mut measured: Vec<Option<f64>> = Vec::new();
         measured.push(match (pa, pb, pc) {
-            (Some(a), Some(b), Some(c)) => off(&[qa, qb, qc], (a + b + c) * (1.0 / 3.0))?,
+            (Some(a), Some(b), Some(c)) => off(t, (a + b + c) * (1.0 / 3.0))?,
             _ => None,
         });
-        for ((qx, px), (qy, py)) in [
-            ((qa, pa), (qb, pb)),
-            ((qb, pb), (qc, pc)),
-            ((qc, pc), (qa, pa)),
+        for ((nx, px), (ny, py)) in [
+            ((t[0], pa), (t[1], pb)),
+            ((t[1], pb), (t[2], pc)),
+            ((t[2], pc), (t[0], pa)),
         ] {
             measured.push(match (px, py) {
-                (Some(x), Some(y)) => off(&[qx, qy], (x + y) * 0.5)?,
+                (Some(x), Some(y)) => off(&[nx, ny], (x + y) * 0.5)?,
                 _ => None,
             });
         }
@@ -388,7 +426,7 @@ const MIN_FLIP_ANGLE: f64 = 1e-3;
 pub(crate) fn flip(
     s: &EvalSurface,
     tol: f64,
-    reach: f64,
+    poles: &mut Poles,
     fixed: &[Vec3],
     uv: &[[f64; 2]],
     tris: &mut [[u32; 3]],
@@ -396,7 +434,6 @@ pub(crate) fn flip(
     if !(tol.is_finite() && tol > 0.0) || tris.len() < 2 {
         return Ok(());
     }
-    let mean = |qs: &[[f64; 2]]| mean(s, reach, qs);
     let derivs = |q: [f64; 2]| {
         s.derivs(q[0], q[1])
             .map(kernel::record_triple)
@@ -441,13 +478,11 @@ pub(crate) fn flip(
         angle(a, b, c).min(angle(b, c, a)).min(angle(c, a, b))
     };
     // How far a facet's normal turns from the surface normal at its middle (radians, 0 to pi/2).
-    let deviation = |t: [u32; 3]| -> Result<f64, Stop> {
-        let (Some(a), Some(b), Some(c), Some(qa), Some(qb), Some(qc)) =
-            (p(t[0]), p(t[1]), p(t[2]), q(t[0]), q(t[1]), q(t[2]))
-        else {
+    let deviation = |poles: &mut Poles, t: [u32; 3]| -> Result<f64, Stop> {
+        let (Some(a), Some(b), Some(c)) = (p(t[0]), p(t[1]), p(t[2])) else {
             return Ok(0.0);
         };
-        let m = mean(&[qa, qb, qc])?;
+        let m = poles.mean(uv, &t)?;
         let facet = (b - a).cross(c - a).normalized();
         let (_, su, sv) = derivs(m)?;
         Ok(match (facet, su.cross(sv).normalized()) {
@@ -458,20 +493,16 @@ pub(crate) fn flip(
     };
     // Whether the facet's normal lies on the side of the surface normal that its (u, v)
     // orientation `sign` says.
-    let upright = |t: [u32; 3], sign: f64| -> Result<bool, Stop> {
-        let (Some(a), Some(b), Some(c), Some(qa), Some(qb), Some(qc)) =
-            (p(t[0]), p(t[1]), p(t[2]), q(t[0]), q(t[1]), q(t[2]))
-        else {
+    let upright = |poles: &mut Poles, t: [u32; 3], sign: f64| -> Result<bool, Stop> {
+        let (Some(a), Some(b), Some(c)) = (p(t[0]), p(t[1]), p(t[2])) else {
             return Ok(false);
         };
-        let (_, su, sv) = derivs(mean(&[qa, qb, qc])?)?;
+        let (_, su, sv) = derivs(poles.mean(uv, &t)?)?;
         Ok((b - a).cross(c - a).dot(su.cross(sv)) * sign > 0.0)
     };
-    let centroid_off = |t: [u32; 3]| -> Result<f64, Stop> {
-        match (p(t[0]), p(t[1]), p(t[2]), q(t[0]), q(t[1]), q(t[2])) {
-            (Some(a), Some(b), Some(c), Some(qa), Some(qb), Some(qc)) => {
-                Ok(off(mean(&[qa, qb, qc])?, (a + b + c) * (1.0 / 3.0))?)
-            }
+    let centroid_off = |poles: &mut Poles, t: [u32; 3]| -> Result<f64, Stop> {
+        match (p(t[0]), p(t[1]), p(t[2])) {
+            (Some(a), Some(b), Some(c)) => Ok(off(poles.mean(uv, &t)?, (a + b + c) * (1.0 / 3.0))?),
             _ => Ok(f64::INFINITY),
         }
     };
@@ -523,20 +554,20 @@ pub(crate) fn flip(
         // The pair the other way must lie closer along the surface (its facets turn less from
         // the surface normal), by more than a degree: a pair within a degree of the surface is
         // left as the layout made it.
-        let mut cached = |ti: u32, t: [u32; 3]| -> Result<f64, Stop> {
+        let mut cached = |poles: &mut Poles, ti: u32, t: [u32; 3]| -> Result<f64, Stop> {
             if let Some(d) = dev_of.get(ti as usize).copied().flatten() {
                 Ok(d)
             } else {
-                let d = deviation(t)?;
+                let d = deviation(poles, t)?;
                 if let Some(slot) = dev_of.get_mut(ti as usize) {
                     *slot = Some(d);
                 }
                 Ok(d)
             }
         };
-        let worse = cached(t1, ta)?.max(cached(t2, tb)?);
+        let worse = cached(poles, t1, ta)?.max(cached(poles, t2, tb)?);
         let degree = 1f64.to_radians();
-        if worse < degree || deviation(n1)?.max(deviation(n2)?) >= worse - degree {
+        if worse < degree || deviation(poles, n1)?.max(deviation(poles, n2)?) >= worse - degree {
             continue;
         }
         // ... and have area in 3D (three corners on one line of a cone have none, however they
@@ -544,21 +575,19 @@ pub(crate) fn flip(
         if min_angle(n1).min(min_angle(n2)) < MIN_FLIP_ANGLE {
             continue;
         }
-        if !(upright(n1, sign)? && upright(n2, sign)?) {
+        if !(upright(poles, n1, sign)? && upright(poles, n2, sign)?) {
             continue;
         }
-        let (Some(pa), Some(pb), Some(pc), Some(pd), Some(qa), Some(qb), Some(qc), Some(qd)) =
-            (p(a), p(b), p(c), p(d), q(a), q(b), q(c), q(d))
-        else {
+        let (Some(pa), Some(pb), Some(pc), Some(pd)) = (p(a), p(b), p(c), p(d)) else {
             continue;
         };
         let allowed = tol
-            .max(off(mean(&[qa, qb])?, (pa + pb) * 0.5)?)
-            .max(centroid_off(ta)?)
-            .max(centroid_off(tb)?);
-        if off(mean(&[qc, qd])?, (pc + pd) * 0.5)? > allowed
-            || centroid_off(n1)? > allowed
-            || centroid_off(n2)? > allowed
+            .max(off(poles.mean(uv, &[a, b])?, (pa + pb) * 0.5)?)
+            .max(centroid_off(poles, ta)?)
+            .max(centroid_off(poles, tb)?);
+        if off(poles.mean(uv, &[c, d])?, (pc + pd) * 0.5)? > allowed
+            || centroid_off(poles, n1)? > allowed
+            || centroid_off(poles, n2)? > allowed
         {
             continue;
         }
@@ -607,7 +636,15 @@ mod tests {
         assert_eq!(fixed.len(), 4);
         let mut tris = vec![[0, 1, 2], [0, 2, 3]];
         assert_eq!(
-            refine(&s, 0.01, 1e-9, &fixed, &mut uv, &mut tris, 1000),
+            refine(
+                &s,
+                0.01,
+                &mut Poles::new(&s, 1e-9),
+                &fixed,
+                &mut uv,
+                &mut tris,
+                1000
+            ),
             Err(Stop::NoValue(NoValue([0.5, 0.5])))
         );
         assert_eq!(tris, vec![[0, 1, 2], [0, 2, 3]]);
@@ -628,11 +665,19 @@ mod tests {
         assert_eq!(fixed.len(), 4);
         let mut tris = vec![[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]];
         assert_eq!(
-            refine(&s, 0.01, 1e-9, &fixed, &mut uv, &mut tris, 1000),
+            refine(
+                &s,
+                0.01,
+                &mut Poles::new(&s, 1e-9),
+                &fixed,
+                &mut uv,
+                &mut tris,
+                1000
+            ),
             Err(Stop::NoValue(NoValue([0.5, 0.5])))
         );
         assert_eq!(
-            flip(&s, 0.01, 1e-9, &fixed, &uv, &mut tris),
+            flip(&s, 0.01, &mut Poles::new(&s, 1e-9), &fixed, &uv, &mut tris),
             Err(Stop::NoValue(NoValue([0.5, 0.5])))
         );
     }
@@ -661,7 +706,7 @@ mod tests {
         };
         let uv = [[0.5, -0.1], [0.5, 0.1], [0.6, 0.0]];
         let side = 3.0 * (1.0 - 0.1f64.cos());
-        let got = worst(&s, 0.0, &[], &uv, &[[0, 1, 2]]);
+        let got = worst(&s, &mut Poles::new(&s, 0.0), &[], &uv, &[[0, 1, 2]]);
         assert!(
             got.as_ref()
                 .is_ok_and(|(w, unmeasured)| (w - side).abs() < 1e-9 * side && *unmeasured == 0),
@@ -669,7 +714,13 @@ mod tests {
         );
         // A corner past the nodes is the triangle's index.
         assert_eq!(
-            worst(&s, 0.0, &[], &uv, &[[0, 1, 2], [0, 1, 3]]),
+            worst(
+                &s,
+                &mut Poles::new(&s, 0.0),
+                &[],
+                &uv,
+                &[[0, 1, 2], [0, 1, 3]]
+            ),
             Err(Stop::Corner(1))
         );
     }

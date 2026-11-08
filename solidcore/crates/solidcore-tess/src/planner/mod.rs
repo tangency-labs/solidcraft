@@ -230,6 +230,8 @@ pub(crate) fn pole_at(
     d: usize,
     reach: f64,
 ) -> std::result::Result<bool, Unclassified> {
+    #[cfg(test)]
+    tests::POLE_CALLS.with(|c| c.set(c.get() + 1));
     solidcore::eval::uv::degenerate_within(s, q, d, reach).map_err(|e| Unclassified {
         at: q,
         why: crate::eval_message(e),
@@ -2298,16 +2300,26 @@ fn plan_face(
     }
     // Whatever the layout, no triangle leaves the surface by more than the tolerance.
     if !planar {
-        if sag::refine(s, tol, reach, &fixed, &mut all, &mut triangles, MAX_REFINE)
-            .map_err(|e| sag_stop(e, all.len()))?
+        // The kernel's classifier is asked once per node over the three passes.
+        let mut poles = sag::Poles::new(s, reach);
+        if sag::refine(
+            s,
+            tol,
+            &mut poles,
+            &fixed,
+            &mut all,
+            &mut triangles,
+            MAX_REFINE,
+        )
+        .map_err(|e| sag_stop(e, all.len()))?
         {
             caps.push(Cap::Refine);
         }
-        sag::flip(s, tol, reach, &fixed, &all, &mut triangles)
+        sag::flip(s, tol, &mut poles, &fixed, &all, &mut triangles)
             .map_err(|e| sag_stop(e, all.len()))?;
         // A face a bound limited is named with the sag its triangles reach.
         if !caps.is_empty() {
-            let (sag, unmeasured) = sag::worst(s, reach, &fixed, &all, &triangles)
+            let (sag, unmeasured) = sag::worst(s, &mut poles, &fixed, &all, &triangles)
                 .map_err(|e| sag_stop(e, all.len()))?;
             stats.over_tolerance.push(OverTolerance {
                 face: fi as usize,
