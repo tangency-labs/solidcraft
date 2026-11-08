@@ -1389,13 +1389,26 @@ fn top_spring_least_rho(s: f64) -> f64 {
 /// at V. By the closed form above its top face's spring curve dips into the bore from asked
 /// 7.8068; main built asked 7.8 (the spring curve 6e-4 clear of the bore) and refused 8 to
 /// 9.5 late, "a round kept round a feature does not close on the body", naming nothing. The
-/// corner checks what it takes out of the top: refused as `SetbackTooLong` at V, naming the
-/// largest setback on 8.5's grid of thousandths whose spring curve stays on the face, 0.918 x
-/// 8.5 = 7.803 (3.3e-4 clear of the bore; the next, 7.8115, 4.1e-4 into it). Asked that, the
-/// corner builds, graded as the corners above.
+/// corner checks what it takes out of the top: refused as `SetbackTooLong` at V, naming a
+/// setback whose spring curve stays on the face and that lies within 1e-3 of that limit: the
+/// root, not the last point of a grid of thousandths below it (0.918 x 8.5 = 7.803, 3.8e-3
+/// short). The spring curve clears the bore there by the check's gap, the tolerances, which
+/// costs about 6e-4 of setback. Asked that, the corner builds, graded as the corners above.
 #[test]
 fn bored_d_prism_spring_curve_leaving_the_top_names_the_setback_that_keeps_it() {
-    let (bore, asked, step) = (6.9, 8.5, 8.5 / 1000.0);
+    let (bore, asked) = (6.9, 8.5);
+    // the limit by the closed form: where the spring curve's least rho reaches the bore
+    let (mut clear, mut into) = (7.0, 8.0);
+    for _ in 0..50 {
+        let mid = 0.5 * (clear + into);
+        if top_spring_least_rho(mid) > bore {
+            clear = mid;
+        } else {
+            into = mid;
+        }
+    }
+    let limit = clear;
+    assert!((limit - 7.8068).abs() < 1e-4, "{limit}");
     let (mut k, mut b, edges, case) = d_prism_eight_case(Some(bore), 14);
     let v = vertex_at(&b, case.v);
     let r = round_asked(
@@ -1415,19 +1428,15 @@ fn bored_d_prism_spring_curve_leaving_the_top_names_the_setback_that_keeps_it() 
         }
         other => panic!("{other:?}, {}", r.reason),
     };
-    // on the grid, its spring curve clear of the bore, the next one's not
-    let grid = (named / step).round();
-    assert!((grid * step - named).abs() <= 1e-12, "{named} off the grid");
+    // its spring curve clear of the bore, and within 1e-3 of the limit
     assert!(
         top_spring_least_rho(named) > bore,
         "{named}: {}",
         top_spring_least_rho(named)
     );
     assert!(
-        top_spring_least_rho(named + step) < bore,
-        "{}: {}",
-        named + step,
-        top_spring_least_rho(named + step)
+        named < limit && named > limit - 1e-3,
+        "{named} against the limit {limit}"
     );
     let (mut k, mut b, edges, case) = d_prism_eight_case(Some(bore), 14);
     let r = round_asked(
