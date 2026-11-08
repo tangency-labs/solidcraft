@@ -917,13 +917,18 @@ impl Task {
         // A job with an indirect clamp (JobOptions::clamp_indirect) uses the program for its scene
         // with the clamp compiled in, built once per device; every other job keeps the ordinary ones.
         let clamp = options.clamp_indirect.is_some();
-        let photons =
-            options.caustics.map(|options| photons::Resources::new(&context, options, &upload.nodes, source_count, clamp)).transpose()?;
+        let photons = options.caustics.map(|options| photons::Resources::new(&context, options, &upload.nodes, source_count, clamp)).transpose()?;
         cancel.check()?;
         let glass_lighting = needs_glass_lighting(&scene);
         let optical_tile_bytes = glass_tile_bytes(&scene, &request);
         let optical_pipelines = if glass_lighting {
-            Some(glass_pipeline(&context, photons.as_ref().map_or(&context.layout, |resources| &resources.layout), photons.is_some(), clamp, &cancel)?)
+            Some(glass_pipeline(
+                &context,
+                photons.as_ref().map_or(&context.layout, |resources| &resources.layout),
+                photons.is_some(),
+                clamp,
+                &cancel,
+            )?)
         } else {
             None
         };
