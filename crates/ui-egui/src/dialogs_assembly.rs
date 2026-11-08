@@ -405,25 +405,14 @@ fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
     let (pick, face, edge) = match &o.snap {
         Snap::FaceCenter { pick, face, .. } | Snap::CircleCenter { pick, face, .. } => (*pick, face.as_deref(), None),
         Snap::Edge { pick, edge, .. } => (*pick, None, edge.as_deref()),
-        Snap::Point { .. } | Snap::Frame { .. } => {
-            let path = if o.occurrence == 0 {
-                Vec::new()
-            } else {
-                let occurrence = s.doc.occurrences.iter().find(|p| p.id == o.occurrence)?;
-                let mut path = s.doc.first_path(occurrence.parent);
-                path.push(occurrence.id);
-                s.doc.path_placement(&path)?;
-                path
-            };
-            return Some(Sel::Occurrence { path });
-        }
+        Snap::Point { .. } | Snap::Frame { .. } => return Some(Sel::Occurrence { path: origin_placement(s, o)? }),
     };
-    // The pick is in the component's coordinates; the placed bodies are in the world.
-    let at =
-        if o.occurrence == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, o.occurrence) };
+    // The pick is in its part's coordinates; the placed bodies are in the world.
+    let path = origin_placement(s, o)?;
+    let (_, at) = s.doc.path_placement(&path)?;
     let p = solidcraft_engine::doc::apply_point(&at, pick);
     let st = crate::open_meshing::session_world(s);
-    let own: Vec<&solidcraft_engine::doc::ModelBody> = st.bodies.iter().filter(|b| occurrence_of_body(s, &b.name) == Some(o.occurrence)).collect();
+    let own: Vec<&solidcraft_engine::doc::ModelBody> = st.bodies.iter().filter(|b| placement_of_body(s, &b.name).as_ref() == Some(&path)).collect();
     let named = match (face, edge) {
         (Some(name), _) => own.iter().filter_map(|b| named_face(b, name, p)).min_by(|a, b| a.0.total_cmp(&b.0)),
         (None, Some(name)) => own.iter().filter_map(|b| named_edge(b, name, p)).min_by(|a, b| a.0.total_cmp(&b.0)),
@@ -611,15 +600,34 @@ pub struct SnapPt {
 
 /// The occurrence placing a world body (0: the root design), the instance its name says.
 pub(crate) fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
-    // The world name tells the instance: a further occurrence of a component is not its first.
+    placement_of_body(s, body).map(|path| path.last().copied().unwrap_or(0))
+}
+
+/// The placement of a world body: the occurrence ids from the root (empty: the root design).
+/// The world name tells the instance, a copy of a sub-assembly placed more than once included.
+pub(crate) fn placement_of_body(s: &Session, body: &str) -> Option<Vec<u64>> {
     let st = crate::open_meshing::session_world(s);
     let b = st.body(body)?;
     if s.doc.model_body_component(b) == 0 {
-        return Some(0);
+        return Some(Vec::new());
     }
     let model = s.model.state();
     let (_, _, _, path, _) = s.doc.body_frames_with_source(&model).into_iter().find(|(world, ..)| world == body)?;
-    path.last().copied()
+    (!path.is_empty()).then_some(path)
+}
+
+/// The placement a joint origin's part is at: its occurrence's first placement, then the
+/// occurrences it is inside.
+fn origin_placement(s: &Session, o: &JointOrigin) -> Option<Vec<u64>> {
+    if o.occurrence == 0 {
+        return Some(Vec::new());
+    }
+    let occurrence = s.doc.occurrences.iter().find(|p| p.id == o.occurrence)?;
+    let mut path = s.doc.first_path(occurrence.parent);
+    path.push(occurrence.id);
+    path.extend(&o.inside);
+    s.doc.path_placement(&path)?;
+    Some(path)
 }
 
 /// Centre and unit normal of the circle through a polyline's points, if it lies on one.
@@ -744,8 +752,13 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
         }
         _ => return None,
     };
-    if let (Some(occ), Value::Object(m)) = (occurrence_of_body(s, body), &mut snap.param) {
-        m.insert("occurrence".into(), json!(occ));
+    // The placement picked on, so a part in a sub-assembly placed more than once is found on the
+    // copy it was picked on (#11426).
+    if let (Some(path), Value::Object(m)) = (placement_of_body(s, body), &mut snap.param) {
+        m.insert("occurrence".into(), json!(path.last().copied().unwrap_or(0)));
+        if !path.is_empty() {
+            m.insert("path".into(), json!(path));
+        }
     }
     Some(snap)
 }
@@ -794,6 +807,9 @@ fn shifted(s: &SnapPt, x: f64, y: f64) -> Value {
     let ax = s.z.any_perp();
     let ay = s.z.cross(ax);
     let mut p = json!({"frame": {"origin": pt(s.at + ax * x + ay * y), "z": pt(s.z), "x": pt(ax)}});
+    if let Some(path) = s.param.get("path") {
+        p["path"] = path.clone();
+    }
     if let Some(o) = s.param.get("occurrence") {
         p["occurrence"] = o.clone();
     }
@@ -1576,7 +1592,8 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 return Ok(cmd("joint.as_built", p));
             }
             let (a, b) = (snap(0, "component 1's joint origin")?, snap(1, "component 2's joint origin")?);
-            if a.param.get("occurrence").is_some() && a.param.get("occurrence") == b.param.get("occurrence") {
+            let placed = |x: &SnapPt| (x.param.get("occurrence").cloned(), x.param.get("path").cloned());
+            if a.param.get("occurrence").is_some() && placed(&a) == placed(&b) {
                 return Err("the two origins are on the same component".into());
             }
             let (x, y) = (eval(&f.offset[0], ValueKind::Length)?, eval(&f.offset[1], ValueKind::Length)?);

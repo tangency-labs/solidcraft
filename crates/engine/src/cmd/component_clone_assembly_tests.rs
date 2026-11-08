@@ -6,7 +6,7 @@ use solidcraft_doc::motion::{ContactSet, ExplodedView, MotionStudy, StudyKey};
 use solidcraft_doc::{IDENTITY, Occurrence};
 
 fn at(occurrence: u64) -> JointOrigin {
-    JointOrigin { occurrence, snap: Snap::Point { point: Vec3::ZERO, z: None, x: None } }
+    JointOrigin::new(occurrence, Snap::Point { point: Vec3::ZERO, z: None, x: None })
 }
 
 fn joint(id: u64, a: u64, b: u64) -> Joint {
@@ -36,18 +36,18 @@ fn documents() -> (Document, Document) {
     source.assembly.origins = vec![
         NamedOrigin {
             name: "Typed origin".into(),
-            origin: JointOrigin {
-                occurrence: 1,
-                snap: Snap::FaceCenter {
+            origin: JointOrigin::new(
+                1,
+                Snap::FaceCenter {
                     pick: Vec3::new(1.0, 2.0, 3.0),
                     face: Some("F1:start@F10.2".into()),
                     x: Some(XRef::Face { face: "F10:side".into(), pick: None }),
                 },
-            },
+            ),
         },
         NamedOrigin {
             name: "Foreign geometry".into(),
-            origin: JointOrigin { occurrence: 1, snap: Snap::CircleCenter { pick: Vec3::ZERO, face: Some("F99:end".into()), end: None, x: None } },
+            origin: JointOrigin::new(1, Snap::CircleCenter { pick: Vec3::ZERO, face: Some("F99:end".into()), end: None, x: None }),
         },
         NamedOrigin { name: "Outside".into(), origin: at(9) },
     ];
@@ -116,10 +116,7 @@ fn internal_relationships_receive_independent_ids_and_remapped_typed_references(
 fn copied_gears_take_their_picked_faces_along() {
     let (mut source, _) = documents();
     let circle = |face: &str| {
-        Size::Circle(JointOrigin {
-            occurrence: 1,
-            snap: Snap::CircleCenter { pick: Vec3::X, face: Some(face.into()), end: Some("F1:top".into()), x: None },
-        })
+        Size::Circle(JointOrigin::new(1, Snap::CircleCenter { pick: Vec3::X, face: Some(face.into()), end: Some("F1:top".into()), x: None }))
     };
     let gear = |ra| Coupling::Gear { ra, rb: Size::Length(5.0), internal: false, reverse: false };
     source.assembly.links = vec![
@@ -248,16 +245,16 @@ fn an_edge_origin_is_copied_onto_the_copys_edges() {
     let mut source = source;
     source.assembly.origins = vec![NamedOrigin {
         name: "Corner".into(),
-        origin: JointOrigin {
-            occurrence: 1,
-            snap: Snap::Edge {
+        origin: JointOrigin::new(
+            1,
+            Snap::Edge {
                 pick: Vec3::new(1.0, 2.0, 3.0),
                 edge: edge("F1:top|F1:side"),
                 face: edge("F1:top"),
                 corner: edge("F1:top|F10:end"),
                 axis: None,
             },
-        },
+        ),
     }];
     destination.assembly.origins.clear();
     clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())

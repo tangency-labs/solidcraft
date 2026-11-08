@@ -774,7 +774,7 @@ fn read_linked(s: &Session, comp: u64, link: &DesignLink) -> std::result::Result
 fn numbered_references(s: &Session, comp: u64, feature: u64) -> Vec<String> {
     let numbered = format!("F{feature}:face:");
     let on = |o: &solidcraft_doc::joints::JointOrigin| {
-        s.doc.occurrences.iter().any(|x| x.id == o.occurrence && x.component == comp)
+        s.doc.occurrences.iter().any(|x| x.id == o.part() && x.component == comp)
             && o.snap.face_names().iter().any(|n| n.trim_start_matches(solidcraft_doc::naming::LEGACY_MARK).starts_with(&numbered))
     };
     let joints = s.doc.assembly.joints.iter().filter(|j| on(&j.a) || on(&j.b)).map(|j| format!("joint {}", j.name));

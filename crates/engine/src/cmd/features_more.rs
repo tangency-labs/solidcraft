@@ -647,7 +647,10 @@ fn align_frame(s: &Session, p: &Value, key: &str, bodies: &[String]) -> Result<O
             (frame, s.doc.feature(sketch).map_or(0, |f| f.component))
         }
         None => {
-            let origin = super::joints::origin_param(s, Some(v), cmd)?;
+            // On its part, in the part's own coordinates: the same in every copy of a
+            // sub-assembly the part is in, wherever it was picked.
+            let picked = super::joints::origin_param(s, Some(v), cmd)?;
+            let origin = solidcraft_doc::joints::JointOrigin::new(picked.part(), picked.snap);
             let on = super::joints::component_of(s, origin.occurrence);
             (AlignFrame::Origin { origin: Box::new(origin) }, on)
         }

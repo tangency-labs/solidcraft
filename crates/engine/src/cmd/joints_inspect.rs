@@ -82,6 +82,7 @@ fn side_json(s: &Session, st: &ModelState, o: &JointOrigin) -> JointSide {
         component,
         component_name,
         path: occurrence_path(&s.doc, o.occurrence),
+        inside: o.inside.clone(),
         snap: o.snap.clone(),
         references: references(&s.doc, &o.snap),
         resolves: false,

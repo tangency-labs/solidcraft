@@ -38,7 +38,7 @@ impl JsonSchema for JointOriginParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "A joint origin, as joint.create takes a side: a joint origin's name, or an object with occurrence and face, circle, edge or point (world coordinates, or a face's name), with z?, x?, end?, on?, corner?, or with a frame {origin, z, x?}.",
+            "description": "A joint origin, as joint.create takes a side: a joint origin's name, or an object with occurrence and face, circle, edge or point (world coordinates, or a face's name), with path?, z?, x?, end?, on?, corner?, or with a frame {origin, z, x?}.",
             "anyOf": [
                 {"type": "string", "minLength": 1},
                 {"type": "object"}
@@ -376,6 +376,7 @@ impl JsonSchema for JointOriginArg {
                     "type": "object",
                     "properties": {
                         "occurrence": {"description": "The occurrence the origin is on, by id or name. Default: found from the point, or the named face's component.", "type": ["number", "string"]},
+                        "path": {"description": "The placement picked, as occurrence ids from the top of the assembly down to occurrence: says which copy of a sub-assembly placed more than once.", "type": "array", "items": {"type": "integer", "minimum": 0}},
                         "face": {"description": "The centre of a planar face: a point on it [x, y, z], or its name.", "anyOf": [point, {"type": "string"}]},
                         "circle": {"description": "The centre of a round end: a point [x, y, z] on its wall, rim or centre, or the round face's name.", "anyOf": [point, {"type": "string"}]},
                         "edge": at("A point [x, y, z] on an edge of a planar face."),
@@ -1230,6 +1231,10 @@ pub struct JointSide {
     pub component_name: String,
     /// The occurrence names from the top of the assembly down, with `/` between.
     pub path: String,
+    /// The occurrences inside it down to the part the snap is on, by id: set for an origin on a
+    /// part in a later copy of a sub-assembly. Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inside: Vec<u64>,
     /// The snap as saved, in the component's coordinates.
     #[schemars(with = "SnapShape")]
     pub snap: Snap,
@@ -1793,6 +1798,12 @@ pub struct MakeJointOriginParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "OccurrenceKey")]
     pub occurrence: Option<OccurrenceKey>,
+    /// The placement picked on: occurrence ids from the top of the assembly down, ending at
+    /// `occurrence`, so a part in a sub-assembly placed more than once is on that copy. Default:
+    /// the occurrence's first placement, or with no occurrence the placement nearest the pick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<Vec<u64>>")]
+    pub path: Option<Value>,
     /// The centre of a planar face: a point on it, or its name. The first of `face` and `circle`
     /// given by name wins; then the first given as a point of `face`, `circle`, `edge` and `point`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1984,6 +1995,8 @@ impl<'de> Deserialize<'de> for MakeJointOriginParams {
         Ok(MakeJointOriginParams {
             name: text(&m, "name")?,
             occurrence: m.get("occurrence").and_then(|v| OccurrenceKey::read(v).ok()),
+            // Read by the handler's path parser, which `occurrence.move` shares.
+            path: raw("path"),
             face: raw("face"),
             circle: raw("circle"),
             edge: raw("edge"),
