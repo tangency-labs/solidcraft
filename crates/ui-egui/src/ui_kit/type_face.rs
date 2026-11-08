@@ -326,6 +326,10 @@ mod tests {
         let Some(font) = name else { panic!("the name is painted") };
         assert_eq!(font.family, semibold(1.0).family, "the name is set in semibold");
         assert!(ctx.fonts_mut(|f| f.has_glyphs(&font, "Bracket")), "a face draws the semibold name");
+        let bare = egui::Context::default();
+        bare.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+        assert!(!bare.fonts(|f| f.definitions().families.contains_key(&font.family)), "a bare context has no semibold family");
+        assert!(!bare.fonts_mut(|f| f.has_glyphs(&font, "Bracket")), "without the binding no face draws the name");
     }
 
     fn painted_text(ctx: &egui::Context) -> Vec<(String, FontId)> {
