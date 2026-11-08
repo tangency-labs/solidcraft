@@ -754,7 +754,27 @@ mod imp {
         let c = curves(plane, pieces)?;
         let route = path.iter().map(path_curve).collect::<Result<Vec<_>>>()?;
         let frame = if translate { SweepFrame::Translate } else { SweepFrame::Follow };
-        Brep::sweep_placed(&c, &route, frame, true).map_err(|e| failed("sweep", e))
+        Brep::sweep_placed(&c, &route, frame, true).map_err(|e| sweep_failed(path, e))
+    }
+
+    /// SMLib's refusal of a sweep along `path`, in words where its status says why: an arc of the
+    /// path is swept as a turn about the arc's axis, and `SM_ERR_AXIS_INSIDE_FACE` (1025) is the
+    /// profile reaching across that axis, past the centre of the bend (#12126).
+    fn sweep_failed(path: &[crate::PathSeg], e: solidcraft_smlib::Error) -> KernelError {
+        let tightest = path
+            .iter()
+            .filter_map(|s| match *s {
+                crate::PathSeg::Arc { a, center, .. } => Some(a.dist(center)),
+                _ => None,
+            })
+            .min_by(f64::total_cmp);
+        match (&e, tightest) {
+            (solidcraft_smlib::Error::Status(1025), Some(radius)) => KernelError::Invalid(format!(
+                "the profile reaches past the centre of a bend in the path: it must stay within the radius of the tightest bend ({} mm)",
+                crate::blend::trimmed_mm(radius)
+            )),
+            _ => failed("sweep", e),
+        }
     }
 
     /// `q` moved by the motion `a`.
