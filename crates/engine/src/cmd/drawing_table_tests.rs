@@ -699,6 +699,71 @@ fn a_family_table_says_what_it_cannot_list() {
     assert_eq!(inspected(&mut s, id_of(&wide))["status"], json!("ok"));
 }
 
+/// The words `table`'s rows show, each cell's lines joined, as the sheet sets them.
+fn shown(s: &Session, table: u64) -> Vec<Vec<String>> {
+    let d = s.drawing("test").unwrap().clone();
+    let record = d.tables.by_id(table).unwrap();
+    let placed = place(s, &d, record, space(s), &PaperFonts::new(&d.font, &d.language, true)).ok().unwrap();
+    let words = |cell: &solidcraft_geom::table::CellLayout| cell.lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>().join(" ");
+    placed.layout.rows.iter().map(|row| row.cells.iter().map(words).collect()).collect()
+}
+
+/// A general table holds the cells typed in, at the top left on its own layer: its rows numbered
+/// from 1, a cell set or cleared one at a time, each edit one undo step, and a column of numbers
+/// sorted by value.
+#[test]
+fn a_general_table_holds_the_cells_typed_in() {
+    let mut s = assembly();
+    let sheet = sheet_of(&s);
+    let steps = s.undo.len();
+    let rows = json!([{"a": "Paint", "b": "1.10"}, {"a": "Grease", "b": "9"}, {"a": "Label", "b": "1.2"}]);
+    let added = run(&mut s, ADD, json!({"sheet": sheet, "kind": "general", "set": {"general": {"rows": rows}}}));
+    assert_eq!(s.undo.len(), steps + 1);
+    assert_eq!(added["record"]["place"]["anchor"]["corner"], json!("top_left"), "{added}");
+    assert_eq!(added["record"]["kind"]["general"]["rows"], rows);
+    let id = id_of(&added);
+    let table = ids::encode(id);
+    let row = |a: &str, b: &str, c: &str| vec![a.to_string(), b.to_string(), c.to_string()];
+    assert_eq!(shown(&s, id), [row("Paint", "1.10", ""), row("Grease", "9", ""), row("Label", "1.2", "")], "an empty cell is blank");
+    let keys: Vec<Value> = inspected(&mut s, id)["rows"].as_array().unwrap().iter().map(|r| r["key"].clone()).collect();
+    assert_eq!(keys, [json!("1"), json!("2"), json!("3")]);
+
+    run(
+        &mut s,
+        EDIT,
+        json!({"table": table, "set": {"general": {"cells": [{"row": 2, "column": "c", "text": "NLGI 2"}, {"row": 1, "column": "b", "text": ""}]}}}),
+    );
+    assert_eq!(shown(&s, id), [row("Paint", "", ""), row("Grease", "9", "NLGI 2"), row("Label", "1.2", "")]);
+    let saved = &s.drawing("test").unwrap().tables.by_id(id).unwrap().kind;
+    assert_eq!(serde_json::to_value(saved).unwrap()["general"]["rows"][0], json!({"a": "Paint"}), "a cleared cell isn't saved");
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(shown(&s, id)[0], row("Paint", "1.10", ""), "one undo step puts both cells back");
+
+    run(&mut s, EDIT, json!({"table": table, "set": {"sort": [{"column": "b"}]}}));
+    assert_eq!(shown(&s, id).iter().map(|r| r[1].clone()).collect::<Vec<_>>(), ["1.10", "1.2", "9"], "by value: 1.10 is 1.1");
+    let d = s.drawing("test").unwrap().clone();
+    let built = crate::drawing_scene::build(&s, &d, d.sheets[0].id).unwrap();
+    assert_eq!(built.objects.iter().find(|o| o.object == id).unwrap().kind, solidcraft_geom::paper::ObjectKind::GeneralTable);
+    run(&mut s, EDIT, json!({"table": table, "set": {"general": {"rows": []}}}));
+    assert!(shown(&s, id).is_empty(), "[] clears the table");
+}
+
+/// A row typed by hand in a parts list is a virtual component: one with a typed quantity is a row
+/// of the sheet's list, and the list takes no typed rows of its own.
+#[test]
+fn a_parts_list_row_by_hand_is_a_virtual_component() {
+    let mut s = assembly();
+    with_the_drawing_closed(&mut s, |s| {
+        s.execute("component.create", &json!({"name": "Grease", "virtual": true, "bom_quantity": "3"})).unwrap();
+    });
+    let sheet = sheet_of(&s);
+    let id = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"})));
+    let grease = shown(&s, id).into_iter().find(|r| r.get(2).is_some_and(|name| name == "Grease"));
+    assert_eq!(grease.map(|r| r[1].clone()), Some("3".to_string()), "QTY is the typed quantity");
+    let why = refused(&mut s, EDIT, json!({"table": ids::encode(id), "set": {"general": {"rows": [{"name": "Grease"}]}}}));
+    assert!(why.contains("virtual component"), "{why}");
+}
+
 /// A table's id is drawn from the ids the drawing shares, and a damaged file's table is refused.
 #[test]
 fn hostile_tables_are_refused_with_nothing_changed() {
@@ -761,6 +826,33 @@ fn hostile_tables_are_refused_with_nothing_changed() {
         refused(&mut s, EDIT, json!({"table": table, "set": bad}));
     }
     assert!(refused(&mut s, EDIT, json!({"table": revisions, "set": {"list": {}}})).contains("parts list"));
+    assert!(refused(&mut s, EDIT, json!({"table": revisions, "set": {"general": {}}})).contains("general table"));
+    let general = ids::encode(id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "general", "set": {"general": {"rows": [{"a": "x"}]}}}))));
+    let long_key: Value = Value::Object([("k".repeat(257), json!("x"))].into_iter().collect());
+    let many: Vec<Value> = (0..=solidcraft_geom::table::MAX_ROWS).map(|_| json!({})).collect();
+    for bad in [
+        json!({"rows": [{"a": ""}]}),
+        json!({"rows": [{"a": "x".repeat(4097)}]}),
+        json!({"rows": [long_key]}),
+        json!({"rows": [{"a": 1}]}),
+        json!({"rows": {"a": "x"}}),
+        json!({"rows": null}),
+        json!({"rows": many}),
+        json!({"cells": [{"row": 0, "column": "a", "text": "y"}]}),
+        json!({"cells": [{"row": 2, "column": "a", "text": "y"}]}),
+        json!({"cells": [{"row": 1.5, "column": "a", "text": "y"}]}),
+        json!({"cells": [{"row": -1, "column": "a", "text": "y"}]}),
+        json!({"cells": [{"row": 1, "column": "a", "text": "bell\u{7}"}]}),
+        json!({"cells": [{"row": 1, "column": "a"}]}),
+        json!({"cells": [{"row": 1, "column": "", "text": "y"}]}),
+        json!({"colour": "red"}),
+    ] {
+        refused(&mut s, EDIT, json!({"table": general, "set": {"general": bad}}));
+    }
+    assert!(
+        refused(&mut s, EDIT, json!({"table": general, "set": {"overrides": [{"row": "1", "column": "a", "text": "y"}]}}))
+            .contains("type into the cell")
+    );
     refused(&mut s, EDIT, json!({"table": "0000000000000", "set": {}}));
     refused(&mut s, DELETE, json!({"table": "0000000000000"}));
     s.drawing("test").unwrap().validate().unwrap();

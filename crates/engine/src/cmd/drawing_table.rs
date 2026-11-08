@@ -1,5 +1,5 @@
-//! `drawing.table.add`, `.edit` and `.delete` (#3874): a parts list or a revision table saved on a
-//! sheet of the open drawing. Its definition is the record's ([`solidcraft_doc::drawing::table`]).
+//! `drawing.table.add`, `.edit` and `.delete` (#3874): a parts list, a revision table, a family
+//! table or a general table saved on a sheet of the open drawing. Its definition is the record's ([`solidcraft_doc::drawing::table`]).
 //! Each is one undo step of the drawing, and none evaluates the model. `drawing.table.inspect` says
 //! where a table sits and what it shows, laid out as the sheet draws it
 //! ([`crate::drawing_table_paper`]), or why it can't be.
@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcraft_doc::drawing::table::{Family, Kind, LeftOut, MassFormat, PartsList, SheetTable};
+use solidcraft_doc::drawing::table::{Family, General, Kind, LeftOut, MassFormat, PartsList, SheetTable};
 use solidcraft_doc::drawing::{Drawing, OnSheet, SheetComponent};
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
@@ -25,8 +25,8 @@ use crate::drawing_scene::sheet_id;
 use crate::drawing_table_paper::{Unplaced, drawing_space, place};
 use crate::params::bad;
 use crate::schema::drawing_table::{
-    AddParams, DeleteParams, DeleteResult, EditParams, InspectOverride, InspectParams, InspectResult, InspectRow, InspectWarning, KindParam, ListSet,
-    TableResult, TableSet,
+    AddParams, DeleteParams, DeleteResult, EditParams, GeneralSet, InspectOverride, InspectParams, InspectResult, InspectRow, InspectWarning,
+    KindParam, ListSet, TableResult, TableSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -50,7 +50,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "sheet: id or name; kind: parts_list (at the top right; lists the component its sheet documents, else the design) or \
              revision (at the bottom left) or family (at the top left; the design's configurations, a row each, with NAME and a \
-             column per configuration column, as many as a table has room for); set?: as drawing.table.edit → {table, sheet, record: as saved, warnings?}. A parts \
+             column per configuration column, as many as a table has room for) or general (at the top left; cells typed in, as plain \
+             text, under columns A, B and C); set?: as drawing.table.edit → {table, sheet, record: as saved, warnings?}. A parts \
              list saves the numbers its view shows, if it has none saved, so what is printed doesn't move. One undo step; no \
              model is evaluated.",
         ),
@@ -63,7 +64,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<TableResult>)
         .params(
             "table: its id; set: {sheet?, list?: {component?, levels?, group_by?, group_children?, show_purchased_contents?, mass?: \
-             {unit: g|kg|lb, decimals}}, columns?, heading?: top|bottom, row_height_mm?, cap_mm?, filter?, overrides?, split?: {rows, gap_mm?, side?: left|right} or null, sort?: [{column, descending?}] (at most 4, the first first, each level of a parts list on its own; [] for the list's order), place?: \
+             {unit: g|kg|lb, decimals}}, general?: {rows?: [{key: text}] (every row, each its cells by column key), cells?: \
+             [{row (from 1 to the last), column (its key), text (\"\" clears it)}] (after rows)}, columns?, heading?: top|bottom, row_height_mm?, cap_mm?, filter?, overrides?, split?: {rows, gap_mm?, side?: left|right} or null, sort?: [{column, descending?}] (at most 4, the first first, each level of a parts list on its own; [] for the list's order), place?: \
              {anchor: {corner, offset_mm?}} or {at: [x, y]}}, columns, filter and overrides as a drawing saves them → as \
              drawing.table.add. One undo step, none when nothing changes.",
         ),
@@ -97,6 +99,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         KindParam::Revision => Kind::Revision,
         KindParam::PartsList => Kind::PartsList(new_list(&record, sheet)?),
         KindParam::Family => Kind::Family(Family { of: sheet_component(&record, sheet)? }),
+        KindParam::General => Kind::General(General::default()),
     };
     let (start, left_out) = match &kind {
         Kind::Family(family) => family.table(&s.doc),
@@ -227,7 +230,7 @@ fn new_list(d: &Drawing, sheet: u64) -> Result<PartsList> {
 fn listed(table: &SheetTable) -> Option<PartsList> {
     match table.kind {
         Kind::PartsList(list) => Some(list),
-        Kind::Revision | Kind::Family(_) => None,
+        Kind::Revision | Kind::Family(_) | Kind::General(_) => None,
     }
 }
 
@@ -239,6 +242,12 @@ fn apply(s: &Session, d: &Drawing, table: &mut SheetTable, set: TableSet, cmd: &
     if let Some(list) = set.list {
         let Kind::PartsList(old) = &mut table.kind else { return Err(bad(cmd, "`list` is for a parts list")) };
         apply_list(s, old, list, cmd)?;
+    }
+    if let Some(general) = set.general {
+        match &mut table.kind {
+            Kind::General(old) => apply_general(old, general, cmd)?,
+            other => return Err(bad(cmd, general_on_another(other))),
+        }
     }
     if let Some(place) = set.place {
         table.place = serde_json::from_value(place).map_err(|e| bad(cmd, format!("`place`: {e}")))?;
@@ -282,6 +291,35 @@ fn apply_list(s: &Session, list: &mut PartsList, set: ListSet, cmd: &str) -> Res
         cmd,
     )?;
     Ok(())
+}
+
+/// `set` on a general table: every row, then each cell, as typed. A cell edit names a row the
+/// table has; `""` clears its cell, so an empty cell is never saved.
+fn apply_general(general: &mut General, set: GeneralSet, cmd: &str) -> Result<()> {
+    *general = merged(general, [("rows", set.rows)], cmd)?;
+    for cell in set.cells.unwrap_or_default() {
+        let count = general.rows.len();
+        let row = cell.row.checked_sub(1).and_then(|at| general.rows.get_mut(at));
+        let row =
+            row.ok_or_else(|| bad(cmd, format!("row {} is not one of its {count} rows: rows are numbered from 1, and added with `rows`", cell.row)))?;
+        if cell.text.is_empty() {
+            row.remove(&cell.column);
+        } else {
+            row.insert(cell.column, cell.text);
+        }
+    }
+    Ok(())
+}
+
+/// Why `general` is refused on a table of `kind`. A parts list lists components, so a row by hand
+/// in one is a virtual component, listed in every list of its assembly.
+fn general_on_another(kind: &Kind) -> &'static str {
+    match kind {
+        Kind::PartsList(_) => {
+            "a parts list lists its components: a row by hand is a virtual component (component.create {virtual: true, bom_quantity})"
+        }
+        _ => "`general` is for a general table",
+    }
 }
 
 /// `record` with `fields`, those given, in place of its own: the record's own reader judges them.

@@ -83,6 +83,7 @@ pub(crate) fn kind_of(record: &SheetTable) -> ObjectKind {
         Kind::PartsList(_) => ObjectKind::PartsList,
         Kind::Revision => ObjectKind::RevisionTable,
         Kind::Family(_) => ObjectKind::FamilyTable,
+        Kind::General(_) => ObjectKind::GeneralTable,
     }
 }
 
@@ -205,7 +206,8 @@ fn corner_of(place: Place, sized: Aabb2, space: Aabb2) -> Vec2 {
 }
 
 /// `record`'s rows: a revision table's from the drawing's revisions; a family table's from the
-/// design's configurations; a parts list's from the design open; or why it can't be listed.
+/// design's configurations; a general table's from its own cells; a parts list's from the design
+/// open; or why it can't be listed.
 fn rows_of(s: &Session, d: &Drawing, record: &SheetTable) -> std::result::Result<Vec<Row>, String> {
     let list = match &record.kind {
         Kind::Revision => return Ok(d.revisions.table_rows(d.revisions.per_sheet.then_some(record.sheet))),
@@ -214,6 +216,7 @@ fn rows_of(s: &Session, d: &Drawing, record: &SheetTable) -> std::result::Result
             return Err(format!("component {} has no configurations: a design's configurations are its own", family.of.component));
         }
         Kind::Family(_) => return Ok(Family::rows(&s.doc, s.doc.drawing_units(d))),
+        Kind::General(general) => return Ok(general.rows(&record.table)),
         Kind::PartsList(list) => list,
     };
     let state = s.model.state();

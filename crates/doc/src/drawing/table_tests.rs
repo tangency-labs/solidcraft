@@ -566,3 +566,73 @@ fn a_family_table_saves_and_its_source_is_checked() {
     });
     assert!(unknown.contains("columns"), "{unknown}");
 }
+
+/// `tabled` with a general table of `rows` at the top left, and its id.
+fn with_general(rows: Vec<BTreeMap<String, String>>) -> (Drawing, u64) {
+    let (mut d, _) = tabled();
+    let mut id_source = IdSource::seeded(13057);
+    let id = d.allocate_id(&mut id_source).unwrap();
+    let kind = Kind::General(General { rows });
+    let sheet = d.sheets[0].id;
+    d.tables.add([Arc::new(SheetTable { id, sheet, table: kind.default_table(), place: kind.default_place(), kind })]);
+    (d, id)
+}
+
+fn cells(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+    pairs.iter().map(|(key, text)| (key.to_string(), text.to_string())).collect()
+}
+
+/// A general table saves its cells by column key and reads back; it starts at the top left under
+/// columns A, B and C, lists nothing of the design, and its rows are numbered from 1, each cell typed
+/// as a number also that number and each cell left empty blank.
+#[test]
+fn a_general_table_saves_its_cells_and_numbers_its_rows() {
+    let rows = vec![cells(&[("a", "Paint"), ("b", "RAL 7035")]), cells(&[("a", "Thread"), ("c", "1.10")])];
+    let (d, id) = with_general(rows.clone());
+    d.validate().unwrap();
+    let saved = d.to_json().unwrap();
+    assert_eq!(Drawing::from_json(&saved).unwrap(), d);
+    let v: Value = serde_json::from_str(&saved).unwrap();
+    let general = v["tables"].as_array().unwrap().iter().find(|t| t["kind"].get("general").is_some()).cloned().unwrap();
+    assert_eq!(general["kind"]["general"]["rows"], json!([{"a": "Paint", "b": "RAL 7035"}, {"a": "Thread", "c": "1.10"}]));
+    let table = d.tables.by_id(id).unwrap();
+    assert_eq!(table.place, Place::Anchor { corner: Corner::TopLeft, offset_mm: [0.0, 0.0] });
+    assert_eq!(table.table.columns.iter().map(|c| (c.name.as_str(), c.heading.as_str())).collect::<Vec<_>>(), [("a", "A"), ("b", "B"), ("c", "C")]);
+    assert_eq!(table.kind.of(), None);
+    let read = General { rows }.rows(&table.table);
+    assert_eq!(read.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(), ["1", "2"]);
+    assert_eq!(read[1].fields, cells(&[("a", "Thread"), ("b", ""), ("c", "1.10")]), "a cell left empty is blank");
+    assert_eq!(read[1].numbers, BTreeMap::from([("c".to_string(), 1.1)]), "a typed number sorts by value");
+    assert!(read[0].numbers.is_empty(), "words aren't numbers");
+}
+
+/// A general table's cells keep a table's caps, each refused in a file as from a command.
+#[test]
+fn a_general_tables_cells_keep_the_caps() {
+    let too_many: BTreeMap<String, String> = (0..=table::MAX_COLUMNS).map(|n| (format!("k{n}"), "x".to_string())).collect();
+    let big = "x".repeat(4000);
+    let full: Vec<_> = (0..300).map(|n| cells(&[("a", &big), ("b", &format!("{n}"))])).collect();
+    for (rows, words) in [
+        (vec![BTreeMap::new(); table::MAX_ROWS + 1], "rows"),
+        (vec![too_many], "cells"),
+        (vec![cells(&[("", "x")])], "key"),
+        (vec![cells(&[(&"k".repeat(table::MAX_KEY_BYTES + 1), "x")])], "key"),
+        (vec![cells(&[("two\nlines", "x")])], "key"),
+        (vec![cells(&[("a", "")])], "empty"),
+        (vec![cells(&[("a", "bell\u{7}")])], "control"),
+        (vec![cells(&[("a", &"x".repeat(4097))])], "4096"),
+        (full, "1 MiB"),
+    ] {
+        let (d, _) = with_general(rows);
+        let why = d.validate().unwrap_err().to_string();
+        assert!(why.contains(words), "{words}: {why}");
+    }
+    let (mut d, id) = with_general(vec![cells(&[("a", "x"), ("b", "two\nlines")])]);
+    d.validate().unwrap();
+    let mut over = d.tables.by_id(id).unwrap().clone();
+    over.table.overrides.push(table::Override { row: "1".into(), column: "a".into(), text: "y".into() });
+    let at = d.tables.index_of(id).unwrap();
+    *d.tables.get_mut(at).unwrap() = Arc::new(over);
+    let why = d.validate().unwrap_err().to_string();
+    assert!(why.contains("type into the cell"), "{why}");
+}

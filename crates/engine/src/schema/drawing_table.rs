@@ -31,13 +31,42 @@ impl JsonSchema for TableIdParam {
     }
 }
 
-/// What a table lists: `revision`, `parts_list` or `family`.
+/// What a table lists: `revision`, `parts_list`, `family` or `general`.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum KindParam {
     Revision,
     PartsList,
     Family,
+    General,
+}
+
+/// A general table's cells: each left out stays as it is.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct GeneralSet {
+    /// `[{key: text}]`: every row, each its cells by column key, in place of all of them; `[]` clears
+    /// the table.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Vec<std::collections::BTreeMap<String, String>>")]
+    pub rows: Option<Value>,
+    /// One cell each, in order, after `rows`.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    pub cells: Option<Vec<CellSet>>,
+}
+
+/// One cell of a general table, typed in.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct CellSet {
+    /// The row's number, from 1 to the last row: rows are added with `rows`.
+    pub row: usize,
+    /// The column's key, as its cells read it.
+    pub column: String,
+    /// Its text; `""` clears the cell.
+    pub text: String,
 }
 
 /// The view a parts list lists, as `assembly.bom` takes it: each left out stays as it is, or is the
@@ -82,6 +111,10 @@ pub struct TableSet {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ListSet")]
     pub list: Option<ListSet>,
+    /// A general table's cells: refused on any other kind.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "GeneralSet")]
+    pub general: Option<GeneralSet>,
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     pub columns: Option<Value>,
     /// `top` or `bottom`.

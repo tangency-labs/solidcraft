@@ -677,7 +677,7 @@ fn sort_value(row: &Row, column: &Column, overrides: &Overrides, budget: &mut Bu
 
 /// Text typed as a number: a sign (`-`, `−` or `+`), digits and at most one decimal point or comma,
 /// and nothing else, so `12 mm` or `1,234.5` stays text. Tables show numbers without groups.
-fn typed_number(text: &str) -> Option<f64> {
+pub fn typed_number(text: &str) -> Option<f64> {
     let text = text.trim();
     let (negative, digits) = match text.strip_prefix(['-', '\u{2212}']) {
         Some(rest) => (true, rest),

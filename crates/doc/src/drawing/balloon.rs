@@ -76,7 +76,7 @@ impl Drawing {
     pub fn parts_list_for(&self, b: &Balloon) -> std::result::Result<(u64, PartsList), Vec<u64>> {
         let list = |t: &SheetTable| match t.kind {
             Kind::PartsList(list) => Some((t.id, list)),
-            Kind::Revision | Kind::Family(_) => None,
+            Kind::Revision | Kind::Family(_) | Kind::General(_) => None,
         };
         let lists: Vec<(u64, u64, PartsList)> = self.tables.iter().filter_map(|t| list(t).map(|(id, l)| (id, t.sheet, l))).collect();
         if let Some(named) = lists.iter().find(|(id, ..)| Some(*id) == b.parts_list) {

@@ -150,6 +150,8 @@ pub enum ObjectKind {
     RevisionTable,
     /// The sheet table that lists a design's configurations, a row each.
     FamilyTable,
+    /// The sheet table whose cells are typed in.
+    GeneralTable,
     /// An image placed on the sheet, such as a logo or a photo.
     SheetImage,
     /// A drawing view's lines.
@@ -171,6 +173,7 @@ impl ObjectKind {
             ObjectKind::PartsList => "PARTS_LIST",
             ObjectKind::RevisionTable => "REVISION_TABLE",
             ObjectKind::FamilyTable => "FAMILY_TABLE",
+            ObjectKind::GeneralTable => "GENERAL_TABLE",
             ObjectKind::SheetImage => "SHEET_IMAGE",
             ObjectKind::View => "VIEW",
             ObjectKind::Dimension => "DIMENSION",

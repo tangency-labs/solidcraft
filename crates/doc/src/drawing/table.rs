@@ -1,6 +1,7 @@
 //! A drawing's saved tables (#3874): a parts list or a revision table on one of its sheets. The
-//! record says what the table lists, how it reads ([`Table`]) and where it sits; its rows are never
-//! saved, so it reads the design and the revision record as they are when it is drawn.
+//! record says what the table lists, how it reads ([`Table`]) and where it sits. Only a general
+//! table's rows are saved: every other kind reads the design and the revision record as they are
+//! when it is drawn.
 //!
 //! - **A parts list** lists one bill of materials view of a component of the drawing's design,
 //!   with the options [`crate::bom::ItemNumbers`] saves. Its source is checked against the
@@ -9,12 +10,14 @@
 //! - **A family table** lists the design's configurations, a row each, with a column per
 //!   configuration column ([`Family::table`]). Only the design has configurations: one of another
 //!   component is for what draws it to report.
+//! - **A general table** holds cells typed in ([`General`]), as plain text. Its cells are the
+//!   table's, so an override over one is refused: the cell itself is typed.
 //! - **Where it sits** is a corner of the sheet's drawing space with an offset, so a change of
 //!   paper takes it along and moves nothing else, or a free place on paper.
 //!
 //! The rules, beside the record's: a table is on one of the drawing's sheets; its definition keeps
 //! [`Table::validate`]; its place is on paper ([`is_paper_coordinate`]); at most [`MAX_TABLES`],
-//! listed by id.
+//! listed by id. A general table's cells keep a table's caps (`General::check`).
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -61,6 +64,16 @@ pub enum Kind {
     /// The drawing's revision rows ([`Drawing::revisions`]).
     Revision,
     Family(Family),
+    General(General),
+}
+
+/// The cells a general table holds, typed in: each row its cells by column key, so a column moved
+/// keeps its cells. An empty cell isn't saved, so a cell has one form; one no column reads is kept
+/// and not drawn, as a parts list's field no column reads isn't.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct General {
+    pub rows: Vec<BTreeMap<String, String>>,
 }
 
 /// How many configuration columns a new family table leaves out, by why.
@@ -325,6 +338,47 @@ fn unique(base: String, taken: &mut HashSet<String>) -> String {
     name
 }
 
+impl General {
+    /// Each row as `table` reads it: its key its number from 1, its fields its cells, and each cell
+    /// typed as a number also as that number ([`table::typed_number`]), so `1.2` sorts before `1.10`.
+    /// A cell left empty is blank, not missing: every field a column reads is there.
+    pub fn rows(&self, table: &Table) -> Vec<table::Row> {
+        let read = table.columns.iter().flat_map(|c| &c.content.0).filter_map(|part| match part {
+            Part::Field { key, .. } => Some((key.clone(), String::new())),
+            Part::Text(_) => None,
+        });
+        let blank: BTreeMap<String, String> = read.collect();
+        let row = |(at, cells): (usize, &BTreeMap<String, String>)| {
+            let numbers = cells.iter().filter_map(|(key, text)| Some((key.clone(), table::typed_number(text)?))).collect();
+            let mut fields = blank.clone();
+            fields.extend(cells.clone());
+            let key = at.saturating_add(1).to_string();
+            table::Row { key, kind: table::RowKind::Part, purchased: false, fields, level: 0, numbers }
+        };
+        self.rows.iter().enumerate().map(row).collect()
+    }
+
+    /// The rules: a table's caps on its rows, its columns and its text, each cell's text by the
+    /// cell text rule and not empty, each key one line, and no overrides on `table`.
+    fn check(&self, table: &Table) -> Result<()> {
+        require(self.rows.len() <= table::MAX_ROWS, || format!("a general table has at most {} rows", table::MAX_ROWS))?;
+        require(table.overrides.is_empty(), || "a general table's cells are typed in: type into the cell instead (`general.cells`)".into())?;
+        let mut bytes = 0usize;
+        for cells in &self.rows {
+            require(cells.len() <= table::MAX_COLUMNS, || format!("a general table's row has at most {} cells", table::MAX_COLUMNS))?;
+            for (key, text) in cells {
+                let one_line = !key.is_empty() && key.len() <= table::MAX_KEY_BYTES && cell::check_label(key).is_ok();
+                require(one_line, || format!("a cell's column key is one line of 1 to {} bytes", table::MAX_KEY_BYTES))?;
+                require(!text.is_empty(), || format!("the cell `{key}` is empty: an empty cell isn't saved"))?;
+                cell::check_text([text.as_str()]).map_err(|e| DocError::Invalid(e.to_string()))?;
+                bytes = bytes.saturating_add(key.len()).saturating_add(text.len());
+                require(bytes <= table::MAX_TEXT_BYTES, || "a general table's cells hold at most 1 MiB of text".into())?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl MassFormat {
     /// A mass as this format shows it, without its unit: the column's heading says that.
     fn text(self, mass: Mass) -> Option<String> {
@@ -354,6 +408,7 @@ impl Kind {
                 Column { printed: false, ..column(BALLOONED, "BALLOONED", HAlign::Centre) },
             ],
             Kind::Family(_) => vec![column("name", "NAME", HAlign::Left)],
+            Kind::General(_) => vec![column("a", "A", HAlign::Left), column("b", "B", HAlign::Left), column("c", "C", HAlign::Left)],
             Kind::Revision => vec![
                 column("revision", "REV", HAlign::Centre),
                 column("description", "DESCRIPTION", HAlign::Left),
@@ -377,12 +432,12 @@ impl Kind {
     }
 
     /// Where a new table of this kind goes: a parts list at the top right, a revision table at the
-    /// bottom left, a family table at the top left.
+    /// bottom left, a family table and a general table at the top left.
     pub fn default_place(&self) -> Place {
         let corner = match self {
             Kind::PartsList(_) => Corner::TopRight,
             Kind::Revision => Corner::BottomLeft,
-            Kind::Family(_) => Corner::TopLeft,
+            Kind::Family(_) | Kind::General(_) => Corner::TopLeft,
         };
         Place::Anchor { corner, offset_mm: [0.0, 0.0] }
     }
@@ -392,7 +447,7 @@ impl Kind {
         match self {
             Kind::PartsList(list) => Some(list.of),
             Kind::Family(family) => Some(family.of),
-            Kind::Revision => None,
+            Kind::Revision | Kind::General(_) => None,
         }
     }
 }
@@ -421,8 +476,12 @@ impl Drawing {
             let named = || format!("it lists source {}, which the drawing doesn't have", ids::encode(of.source));
             require(self.sources.iter().any(|s| s.id == of.source), named)?;
         }
-        if let Kind::PartsList(list) = &t.kind {
-            require(list.mass.decimals <= MAX_MASS_DECIMALS, || format!("a mass shows at most {MAX_MASS_DECIMALS} decimals"))?;
+        match &t.kind {
+            Kind::PartsList(list) => {
+                require(list.mass.decimals <= MAX_MASS_DECIMALS, || format!("a mass shows at most {MAX_MASS_DECIMALS} decimals"))?;
+            }
+            Kind::General(general) => general.check(&t.table)?,
+            Kind::Revision | Kind::Family(_) => {}
         }
         let [x, y] = match t.place {
             Place::Anchor { offset_mm, .. } => offset_mm,
