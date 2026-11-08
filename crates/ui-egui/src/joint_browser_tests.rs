@@ -57,6 +57,7 @@ fn joint_styles_draw_badges_or_the_old_ring_and_axis() {
     assert_eq!(circles(&joint_shapes(&h), 5.0, 1.5), 2, "dots in place of badges");
 }
 
+/// Every joint type draws something, and no two types share a pictogram.
 #[test]
 fn every_joint_type_has_its_own_symbol() {
     use solidcraft_engine::doc::joints::JointKind;
@@ -171,6 +172,28 @@ fn a_new_limit_changes_the_bright_joints_without_a_new_construction() {
     assert_eq!(bright(&h), [rail, rod], "cleared, both are bright again");
 }
 
+/// A motion link holds its driven value inside that joint's limits. Pushed against one, the
+/// driven joint can't move its parts, so it goes quiet; clearing the limit frees it again. That
+/// limit changes how free the parts are, so a new solve finds it.
+#[test]
+fn a_limit_that_holds_a_linked_joint_changes_how_free_its_parts_are() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30), ("C", 60)], |id, p| h.app.run(id, p).unwrap());
+    h.app.run("joint.as_built", json!({"type": "slider", "name": "Drive", "a": "A:1", "b": "B:1", "at": {"point": [30, 10, 5]}})).unwrap();
+    h.app.run("joint.as_built", json!({"type": "slider", "name": "Follow", "a": "B:1", "b": "C:1", "at": {"point": [60, 10, 5]}})).unwrap();
+    h.app.run("joint.motion_link", json!({"a": "Drive", "b": "Follow", "ratio": 1, "offset": 50})).unwrap();
+    h.frames(2);
+    let [drive, follow] = ["Drive", "Follow"].map(|name| id(&h, name));
+    let bright = |h: &Harness| crate::joint_symbols::bright(&h.app.session).iter().copied().collect::<Vec<_>>();
+    assert_eq!(bright(&h), [drive, follow], "the drive moves B, and through the link C against B");
+
+    h.app.run("joint.limits", json!({"joint": "Follow", "min": -10, "max": 10})).unwrap();
+    assert_eq!(bright(&h), [drive], "the link pushes Follow to its stop, so C no longer moves against B");
+    h.app.run("joint.limits", json!({"joint": "Follow"})).unwrap();
+    assert_eq!(bright(&h), [drive, follow], "cleared, the link moves C again");
+}
+
 /// Components A (grounded) and B joined by a revolute "Hinge", and C held by a rigid "Glue".
 fn harness() -> Harness {
     let mut h = Harness::new();
@@ -193,6 +216,7 @@ fn id(h: &Harness, name: &str) -> u64 {
     h.app.session.doc.assembly.joints.iter().find(|j| j.name == name).unwrap().id
 }
 
+/// The id of the occurrence named `name`, such as "C:1".
 fn occurrence(h: &Harness, name: &str) -> u64 {
     h.app.session.doc.occurrences.iter().find(|o| o.name == name).unwrap().id
 }

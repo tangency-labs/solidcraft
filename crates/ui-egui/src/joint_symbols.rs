@@ -48,8 +48,9 @@ struct Bright {
 }
 
 /// A hash of what decides how free the parts are: everything about the joints but their values
-/// and limits, so dragging a part doesn't solve again for every frame. Limits don't change the
-/// freedom; [`bright_joints`] reads them from the design each time.
+/// and limits, so dragging a part doesn't solve again for every frame. A limit only changes the
+/// freedom where a motion link drives the value it stops, since the link is held to it there, so
+/// only those limits count; [`bright_joints`] reads the others from the design each time.
 fn construction(s: &Session) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -57,6 +58,10 @@ fn construction(s: &Session) -> u64 {
         format!("{} {:?} {:?} {:?} {} {} {} {}", j.id, j.kind, j.a, j.b, j.flip, j.offset, j.angle, j.suppressed).hash(&mut h);
     }
     format!("{:?}", s.doc.assembly.links).hash(&mut h);
+    for l in &s.doc.assembly.links {
+        let held = s.doc.assembly.joints.iter().find(|j| j.id == l.b).and_then(|j| j.limits.get(l.ib).copied().flatten());
+        format!("{held:?}").hash(&mut h);
+    }
     for o in &s.doc.occurrences {
         (o.id, o.parent, o.grounded).hash(&mut h);
     }
@@ -150,6 +155,7 @@ pub(crate) fn along(kind: JointKind) -> Option<[f64; 3]> {
     }
 }
 
+/// The pictogram of a joint type: what the joint lets move, or the relation it holds.
 pub(crate) fn symbol(kind: JointKind) -> Symbol {
     let centre = [0.0, 0.0];
     let (lines, dots) = match kind {
@@ -260,6 +266,7 @@ pub(crate) enum Family {
     Contact,
 }
 
+/// The family a joint type belongs to, which the [`BY_TYPE`] style colours and outlines.
 pub(crate) fn family(kind: JointKind) -> Family {
     match kind {
         JointKind::Rigid => Family::Fixed,

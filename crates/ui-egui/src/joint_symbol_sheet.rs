@@ -34,6 +34,7 @@ enum Row {
 }
 
 impl Row {
+    /// The row's name and the dim note under it.
     fn label(self) -> (&'static str, &'static str) {
         match self {
             Row::Type(kind) => (
@@ -53,6 +54,7 @@ impl Row {
         }
     }
 
+    /// The joint type the row draws; the state rows draw a revolute joint.
     fn kind(self) -> JointKind {
         match self {
             Row::Type(kind) => kind,
@@ -61,6 +63,7 @@ impl Row {
     }
 }
 
+/// Every joint type in the Type box's order, then the states.
 fn rows() -> Vec<Row> {
     let types = TYPES.iter().filter_map(|t| JointKind::parse(t)).map(Row::Type);
     types.chain([Row::Quiet, Row::Suppressed, Row::Limit, Row::Picked, Row::Faint]).collect()
@@ -101,11 +104,13 @@ fn cell(style: u8, row: Row, c: Pos2, t: &Tokens) -> Vec<Shape> {
     shapes
 }
 
+/// A colour as SVG writes it, with its alpha.
 fn colour(c: Color32) -> String {
     let [r, g, b, a] = c.to_srgba_unmultiplied();
     format!("rgba({r},{g},{b},{:.3})", f32::from(a) / 255.0)
 }
 
+/// Writes `shape` as SVG: the circles, lines, paths and rectangles the joint glyphs are made of.
 fn svg_shape(shape: &Shape, out: &mut String) {
     match shape {
         Shape::Vec(shapes) => shapes.iter().for_each(|s| svg_shape(s, out)),
@@ -153,6 +158,7 @@ fn svg_shape(shape: &Shape, out: &mut String) {
     }
 }
 
+/// Writes a label at `at`, anchored at its start, middle or end.
 fn text(out: &mut String, at: Pos2, size: f32, fill: Color32, anchor: &str, weight: u16, s: &str) {
     out.push_str(&format!(
         "<text x=\"{:.1}\" y=\"{:.1}\" font-size=\"{size}\" fill=\"{}\" text-anchor=\"{anchor}\" font-weight=\"{weight}\">{s}</text>\n",
@@ -212,6 +218,8 @@ fn sheet(t: &Tokens, theme: &str) -> (String, Vec<Vec<Vec<Shape>>>) {
     (out, cells)
 }
 
+/// Every style draws every type and state in both themes, each badge's symbol apart from its fill;
+/// with `SOLIDCRAFT_JOINT_SHEET` set, the sheet is written there.
 #[test]
 fn joint_symbol_sheet_draws_every_type_in_every_style() {
     for (t, theme) in [(Tokens::dark(), "dark"), (Tokens::light(), "light")] {
