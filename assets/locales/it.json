@@ -4854,6 +4854,8 @@
   "ui.mesh_format_3mf": "3MF",
   "ui.mesh_format_3mf_tagged": "3MF con etichette delle facce",
   "ui.mesh_format_stl": "STL",
+  "ui.mesh_import_origin": "Sposta all'origine",
+  "ui.mesh_import_origin_tip": "Centra la mesh in X e Y con la base su Z = 0. Se disattivato, la mesh mantiene le coordinate salvate nel file.",
   "ui.minor_radius": "Raggio minore",
   "ui.mirror": "Specchia",
   "ui.mirror_line": "Asse di simmetria",

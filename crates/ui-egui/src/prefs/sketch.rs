@@ -96,8 +96,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch.auto_locate",
             "ui.first_dimension_scales",
         ];
-        let right_labels =
-            ["prefs.sketch.shortcut_cycles_modes", "prefs.ribbon_click_ends_tool", "ui.project_face_edges_sketch", "prefs.sketch.project_options"];
+        let right_labels = [
+            "prefs.sketch.shortcut_cycles_modes",
+            "prefs.ribbon_click_ends_tool",
+            "ui.project_face_edges_sketch",
+            "ui.project_references_construction",
+            "prefs.sketch.project_options",
+        ];
         let natural = [left_labels.as_slice(), right_labels.as_slice()]
             .map(|labels| labels.iter().map(|id| check_width(ui, app.tr(id), true)).fold(0.0, f32::max));
         let available = ui.available_width();
@@ -177,6 +182,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 check(
                     ui,
+                    "project_construction",
+                    "ui.project_references_construction",
+                    Some("ui.project_references_construction_note"),
+                    &mut app.session.project_construction,
+                );
+                check(
+                    ui,
                     "project_options_dialog",
                     "prefs.sketch.project_options",
                     Some("prefs.project_options_dialog_note"),
@@ -204,6 +216,13 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch_open_look_at",
             Some("prefs.sketch_open_look_at_note"),
             &mut app.preferences.sketch_open_look_at,
+        );
+        check(
+            ui,
+            "escape_twice_finishes_sketch",
+            "prefs.sketch.escape_twice_finishes",
+            Some("prefs.sketch.escape_twice_finishes_note"),
+            &mut app.preferences.escape_twice_finishes_sketch,
         );
         picture_group(ui, app.tr("prefs.sketch_exit_view"), |ui| {
             let label = app.tr("prefs.sketch_exit_view");

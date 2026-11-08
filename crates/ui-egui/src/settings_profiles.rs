@@ -56,6 +56,7 @@ const PROFILE_KEYS: &[&str] = &[
     "dialog_buttons",
     "dialog_place",
     "direct_interaction",
+    "escape_twice_finishes_sketch",
     "free_orbit",
     "free_orbit_upright",
     "hidden_toolbar_tabs",
@@ -323,7 +324,7 @@ pub fn sanitize(v: &Value) -> Result<Value, String> {
         .into_iter()
         .flatten()
         .filter(|(id, _)| id.chars().count() <= MAX_ID)
-        .filter_map(|(id, keys)| Some((id.clone(), shortcut_keys(keys)?)))
+        .filter_map(|(id, keys)| Some((id.clone(), shortcut_keys(id, keys)?)))
         .take(MAX_SHORTCUTS)
         .collect();
     let favourites: Vec<String> = o.get("favourites").and_then(Value::as_array).into_iter().flatten().filter_map(text).take(MAX_FAVOURITES).collect();
@@ -381,8 +382,8 @@ pub fn sanitize(v: &Value) -> Result<Value, String> {
 
 /// A command's keys in a profile, as the keymap saves them (`""`, one key or a list of them), or
 /// `None` when they can't be read or a key name is too long.
-fn shortcut_keys(v: &Value) -> Option<Value> {
-    let keys = crate::keymap::saved_keys(v)?;
+fn shortcut_keys(id: &str, v: &Value) -> Option<Value> {
+    let keys = crate::keymap::saved_keys(id, v)?;
     keys.iter().all(|k| k.chars().count() <= MAX_ID).then(|| crate::keymap::keys_value(&keys))
 }
 

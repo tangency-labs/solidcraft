@@ -675,8 +675,8 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
     let (body, mut snap) = match sel {
         Sel::Face { body, index, point } => {
             let b = st.body(body)?;
-            let tol = (b.body.size() * 2e-3).max(1e-3);
-            let f = b.body.faces(tol).ok()?.into_iter().find(|f| f.index == *index)?;
+            let faces = b.joint_faces().ok()?;
+            let f = faces.iter().find(|f| f.index == *index)?;
             match f.plane_normal {
                 Some(n) => (body.as_str(), SnapPt { at: f.centroid, z: n, kind: SnapKind::FaceCenter, param: json!({"face": pt(*point)}) }),
                 None => {
@@ -748,6 +748,45 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
         m.insert("occurrence".into(), json!(occ));
     }
     Some(snap)
+}
+
+/// Each pick's snap, measured once for the world state, design and open sketch it was measured in.
+#[derive(Default)]
+pub(crate) struct SnapMemo(std::sync::Mutex<Snaps>);
+
+#[derive(Default)]
+struct Snaps {
+    world: std::sync::Weak<solidcraft_engine::doc::ModelState>,
+    doc: std::sync::Weak<solidcraft_engine::doc::Document>,
+    active_sketch: Option<u64>,
+    /// Least recently used first.
+    snaps: Vec<(Sel, Option<SnapPt>)>,
+}
+
+/// Snaps kept: the picks, and the hovered items since the last one picked.
+const SNAPS_KEPT: usize = 16;
+
+/// [`snap_of`] from the app's memo while the world it was measured in stands.
+pub(crate) fn picked_snap(app: &SolveApp, sel: &Sel) -> Option<SnapPt> {
+    let s = &app.session;
+    let Ok(mut memo) = app.snaps.0.lock() else { return snap_of(s, sel) };
+    let world = std::sync::Arc::downgrade(&crate::open_meshing::session_world(s));
+    let doc = std::sync::Arc::downgrade(&s.doc);
+    if !(memo.world.ptr_eq(&world) && memo.doc.ptr_eq(&doc) && memo.active_sketch == s.active_sketch) {
+        *memo = Snaps { world, doc, active_sketch: s.active_sketch, snaps: Vec::new() };
+    }
+    if let Some(i) = memo.snaps.iter().position(|(x, _)| x == sel) {
+        let hit = memo.snaps.remove(i);
+        let snap = hit.1.clone();
+        memo.snaps.push(hit);
+        return snap;
+    }
+    let snap = snap_of(s, sel);
+    if memo.snaps.len() >= SNAPS_KEPT {
+        memo.snaps.remove(0);
+    }
+    memo.snaps.push((sel.clone(), snap.clone()));
+    snap
 }
 
 /// A snap moved across its own plane by (x, y) (the joint's offset), as an explicit frame.
@@ -1460,7 +1499,7 @@ fn occurrences(s: &Session, items: &[Sel]) -> Vec<u64> {
 pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
     let snap = |i: usize, what: &str| -> Result<SnapPt, String> {
-        sel_items(inputs, i).first().and_then(|x| snap_of(s, x)).ok_or_else(|| format!("select {what} first"))
+        sel_items(inputs, i).first().and_then(|x| picked_snap(app, x)).ok_or_else(|| format!("select {what} first"))
     };
     let eval = |e: &str, kind: ValueKind| -> Result<f64, String> {
         if e.trim().is_empty() { Ok(0.0) } else { crate::length_input::eval(&s.doc, e, kind).map_err(|e| e.to_string()) }
@@ -1528,7 +1567,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 if !custom_name.is_empty() {
                     p["name"] = json!(custom_name);
                 }
-                if let Some(x) = sel_items(inputs, 1).first().and_then(|x| snap_of(s, x)) {
+                if let Some(x) = sel_items(inputs, 1).first().and_then(|x| picked_snap(app, x)) {
                     p["at"] = x.param;
                 }
                 return Ok(cmd("joint.as_built", p));
@@ -1759,7 +1798,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         .iter()
         .enumerate()
         .filter(|(_, i)| i.accept == SNAPS)
-        .filter_map(|(n, i)| i.items.first().and_then(|x| snap_of(&app.session, x)).map(|s| (s, if n == 0 { t.accent } else { t.warning })))
+        .filter_map(|(n, i)| i.items.first().and_then(|x| picked_snap(app, x)).map(|s| (s, if n == 0 { t.accent } else { t.warning })))
         .collect();
     for (n, (s, c)) in picked.iter().enumerate() {
         let tag = format!("Component {}", n + 1);
@@ -1772,7 +1811,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         Some(sel) => {
             let fresh = !matches!(hover, Some((s, _)) if *s == sel);
             if fresh {
-                *hover = Some((sel.clone(), snap_of(&app.session, &sel)));
+                *hover = Some((sel.clone(), picked_snap(app, &sel)));
             }
             if let Some((_, Some(s))) = hover.as_ref() {
                 glyph(painter, proj, s, t.hover_profile_edge, app.cam.half_height(), Some(snap_name(s.kind)));

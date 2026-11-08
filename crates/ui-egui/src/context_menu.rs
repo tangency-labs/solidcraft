@@ -68,6 +68,13 @@ pub enum Target {
     InsertDesign,
     /// Model › Edit Sketch: choose an existing sketch when none is uniquely selected.
     EditSketch,
+    /// Replace Sketch from a design file (#11125): the file's sketches, one of which takes the
+    /// place of sketch `sketch`'s contents.
+    ReplaceSketchFile {
+        sketch: u64,
+        path: String,
+        sketches: Vec<(u64, String)>,
+    },
     /// View › Visual style: the four styles, the current one marked (#8868).
     VisualStyle,
     /// View › Navigation tool: Orbit, Pan, Zoom; the latched one marked (#8868).
@@ -467,6 +474,10 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             .collect(),
         Target::NamedView { name } => crate::browser::view_items(app, name),
         Target::InsertDesign => insert_design_items(app),
+        Target::ReplaceSketchFile { sketch, path, sketches } => sketches
+            .iter()
+            .map(|(from, name)| cmd(app, "sketch.replace", name).with(json!({ "sketch": sketch, "from": from, "file": path })))
+            .collect(),
         Target::EditSketch => {
             let items: Vec<Item> = app
                 .session
@@ -879,6 +890,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::sep(),
         act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing),
         act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id })),
+        replace_sketch_item(app, id).on(!editing),
         act("ui.exportDxf", "Export DXF…", "export").with(json!({ "sketch": id })),
         Item::sep(),
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)),
@@ -897,6 +909,41 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     ];
     items.retain(|item| parts || item.id != "component.move_sketches.to_parts");
     items
+}
+
+/// Replace Sketch (#11125): each other sketch of the design, whose contents can take the place
+/// of this one's, then a design file to take a sketch from.
+fn replace_sketch_item(app: &SolveApp, id: u64) -> Item {
+    let mut item = act("ui.replaceSketch", "Replace Sketch", "sketch");
+    let others = app.session.doc.features.iter().filter(|f| f.id != id && matches!(f.kind, FeatureKind::Sketch { .. }));
+    for f in others {
+        item.children.push(cmd(app, "sketch.replace", &f.name).with(json!({ "sketch": id, "from": f.id })));
+    }
+    if !item.children.is_empty() {
+        item.children.push(Item::sep());
+    }
+    item.children.push(act("ui.replaceSketchFromFile", app.tr("ui.replace_sketch.from_file"), "open").with(json!({ "sketch": id })));
+    item
+}
+
+/// Replace Sketch from a file: the design file's sketches to choose from, in a menu at `at`;
+/// a file with one sketch replaces at once.
+fn replace_sketch_from_file(app: &mut SolveApp, sketch: u64, at: Pos2) {
+    app.pick_open_for(&solidcraft_engine::io::DESIGN_EXTS, move |app, path| {
+        let Some(path) = path else { return };
+        let sketches: Vec<(u64, String)> = match solidcraft_engine::io::read_design_file(&path, None::<fn(solidcraft_engine::io::DesignPreview)>) {
+            Ok((doc, _)) => doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| (f.id, f.name.clone())).collect(),
+            Err(e) => {
+                app.set_status(format!("{path}: {e}"), true);
+                return;
+            }
+        };
+        match sketches.as_slice() {
+            [] => app.set_status(app.tr("ui.replace_sketch.no_sketches").to_string(), true),
+            [(from, _)] => drop(app.run("sketch.replace", json!({ "sketch": sketch, "from": from, "file": path }))),
+            _ => open_for(app, at, Target::ReplaceSketchFile { sketch, path, sketches }),
+        }
+    });
 }
 
 /// Construction geometry's row: edit, delete, rename, show or hide; sketch on planes.
@@ -1732,6 +1779,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::browser::redefine_sketch(app, id);
             }
         }
+        // Its entries are in its submenu.
+        "ui.replaceSketch" => {}
+        "ui.replaceSketchFromFile" => {
+            if let Some(id) = id_of(&p, "sketch") {
+                replace_sketch_from_file(app, id, at);
+            }
+        }
         "ui.hideSketch" | "ui.showSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
                 crate::browser::set_sketch_visible(app, id, item.id == "ui.showSketch");
@@ -1802,7 +1856,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.isolateOccurrence" => {
             let _ = app.run("browser.visibility", json!({"visible": true, "paths": [p["path"]], "isolate": true}));
         }
-        "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
+        "ui.canvasVisible" | "ui.canvasLocked" => drop(app.run("canvas.edit", p)),
         "ui.toolbarPin"
         | "ui.toolbarRemove"
         | "ui.toolbarReset"
@@ -2333,7 +2387,9 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         | Target::NamedViews
         | Target::ViewGizmo => true,
         Target::Body { name } => crate::open_meshing::session_world(&app.session).body(name).is_some(),
-        Target::Sketch { id } => doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })),
+        Target::Sketch { id } | Target::ReplaceSketchFile { sketch: id, .. } => {
+            doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
+        }
         // Construction geometry, as the browser's Construction folder lists it.
         Target::Plane { id } => doc.feature(*id).is_some_and(|f| {
             matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })

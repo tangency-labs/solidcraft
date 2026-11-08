@@ -5,16 +5,20 @@
 //! fields whose descriptions say so; the contracts don't check the combinations, and the
 //! handlers ignore those keys otherwise.
 
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+use super::check::whole;
+use super::config::NameList;
 use super::types::{
-    AngleExpr, AxisDir, AxisLine, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FacesParam, FeatureCommon,
-    FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr, OperationParam,
-    PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, TouchingParam,
-    feature_common, present,
+    AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FacesParam,
+    FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr,
+    OperationParam, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint,
+    TouchingParam, feature_common, present,
 };
+use crate::params::MAX_STRING_LIST;
 
 /// Add a box primitive.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -398,6 +402,80 @@ pub struct ScaleParams {
     pub participants: Option<StringList>,
 }
 
+/// Combine bodies: join the tool bodies to the target, cut them from it, or keep only the space
+/// the target shares with them. Whether each body exists stays the handler's to check.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CombineParams {
+    /// The body the tools combine with, by name.
+    #[serde(deserialize_with = "target_body")]
+    #[schemars(with = "String")]
+    pub target: String,
+    #[serde(deserialize_with = "tool_bodies")]
+    #[schemars(schema_with = "tool_bodies_schema")]
+    pub tools: NameList,
+    /// What the tools do to the target. Default: join.
+    #[serde(default)]
+    pub operation: Option<CombineOperation>,
+    /// What a join makes of pieces that share no face. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
+    /// Keep the tool bodies as they are. Default: false (the combine uses them up).
+    #[serde(default)]
+    pub keep_tools: Option<bool>,
+    /// Move the result into a new component, made for it. Default: false.
+    #[serde(default)]
+    pub new_component: Option<bool>,
+    /// With `new_component`: the new component's name. Default: the target's name and
+    /// " Combined".
+    #[serde(default)]
+    pub component_name: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// `target`: a body name, with the handler's message for anything else, `null` included.
+fn target_body<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    match Value::deserialize(d)? {
+        Value::String(name) => Ok(name),
+        _ => Err(D::Error::custom(whole("`target` must be a body name"))),
+    }
+}
+
+/// The handler's message for no tools.
+const NO_TOOLS: &str = "`tools` must list bodies";
+
+/// `tools`: a name or a list of names, as `params::string_list` reads it and with its messages,
+/// and at least one. An empty list, and `null` (which the reader reads as none), get the
+/// handler's message for no tools.
+fn tool_bodies<'de, D: Deserializer<'de>>(d: D) -> Result<NameList, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Err(D::Error::custom(whole(NO_TOOLS))),
+        v => match NameList::deserialize(v).map_err(D::Error::custom)? {
+            NameList(names) if names.is_empty() => Err(D::Error::custom(whole(NO_TOOLS))),
+            names => Ok(names),
+        },
+    }
+}
+
+fn tool_bodies_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "The bodies combined with the target, by name: a name, or a list of one or more names (at most 10000).",
+        "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": MAX_STRING_LIST}]
+    })
+}
+
+/// What `solid.combine` returns: a feature command's reply, with the new component's id when
+/// `new_component` moved the result into one.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CombineResult {
+    #[serde(flatten)]
+    pub feature: FeatureResult,
+    /// With `new_component`: the id of the component the result went into.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<u64>,
+}
+
 /// Add a construction plane parallel to `base`: `offset` away along its normal, or through a
 /// point.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -451,7 +529,8 @@ pub struct FilletParams {
     /// The radius; the chord's width with `type: chord`, the equivalent circular setback with
     /// `type: curvature`, the start radius with `type: variable` or `spline`.
     pub radius: LengthExpr,
-    /// The body whose edges the points pick. Default: whichever body has an edge there.
+    /// The body whose edges the points pick. Default: each point is looked up on every placed
+    /// body, shown or hidden, and a point on edges of 2 bodies is refused, naming them.
     #[serde(default)]
     pub body: Option<String>,
     /// Round each picked edge's tangent chain with it. Default: true; false rounds exactly the
