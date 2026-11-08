@@ -646,11 +646,13 @@ mod reset_tests {
     use super::*;
     use crate::scenario::{Harness, handle_at, rect_of};
 
+    /// A real click at `at`, then frames for the window to answer it.
     fn click(h: &mut Harness, at: egui::Pos2) {
         h.call("ui.click", json!({"x": at.x, "y": at.y}));
         h.frames(2);
     }
 
+    /// The customised panels, as `"<workspace>/<tab>/<panel>"` keys.
     fn design_keys(h: &Harness) -> Vec<String> {
         h.app.toolbar_custom.panels.keys().cloned().collect()
     }

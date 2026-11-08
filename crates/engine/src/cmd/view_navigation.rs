@@ -363,6 +363,8 @@ fn ribbon_tabs_only(_s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(RibbonTabsOnly { on: request.on, param_warnings: Vec::new() }).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
+/// `view.toolbar_reset_all`: check that the call has no parameters. The window then resets its
+/// toolbar customisation; the session and the design are not changed.
 fn toolbar_reset_all(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.toolbar_reset_all";
     let p = match p {
@@ -724,6 +726,7 @@ mod tests {
         assert!(s.camera.is_none());
     }
 
+    /// `view.toolbar_reset_all` takes no parameters, refuses any, and leaves the design and undo.
     #[test]
     fn toolbar_reset_all_takes_no_parameters_and_leaves_the_design() {
         let mut s = Session::default();
