@@ -35,7 +35,6 @@ render.scene
 render.start
 render.status
 sheet.export_dxf
-sketch.dimension
 sketch.draw.dimensioned
 sketch.slot.center_to_center
 sketch.slot.overall

@@ -582,7 +582,7 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
 
 /// A model's reference among a command's operands (#6348): an `{edge: [x,y,z], body?}` or a
 /// `{vertex: [x,y,z], body?}`.
-fn model_ref(v: &Value) -> bool {
+pub(crate) fn model_ref(v: &Value) -> bool {
     v.get("edge").is_some() || v.get("vertex").is_some()
 }
 
@@ -601,7 +601,7 @@ fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Va
 
 /// Most model references one call may project into a sketch: each one is a link and a resolve,
 /// so the count is capped before any of them is projected.
-const MAX_PROJECTED_ENTITIES: usize = 1_000;
+pub(crate) const MAX_PROJECTED_ENTITIES: usize = 1_000;
 
 /// A dimension's entities may be model geometry (#7912): an `{edge: [x,y,z], body?}` or
 /// `{vertex: [x,y,z], body?}` among them is projected into the sketch first, as Project does,
