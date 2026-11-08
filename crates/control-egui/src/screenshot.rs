@@ -25,12 +25,12 @@ pub type Pending = (u64, Option<String>, Sender<Value>, f64);
 /// A frame egui handed back, by its token.
 pub type Shot = (u64, Arc<ColorImage>);
 
-/// The reply when the window presents no frame.
-const NO_FRAME: &str = "no frame was presented (window hidden?); use ui.render";
-
 /// The window's screenshots in flight. The app may queue frames of its own (an issue report's)
 /// with tokens from [`Shots::token`]; [`Shots::collect`] hands those back.
 pub struct Shots {
+    /// The error a request gets when the window presents no frame: the app's words, which may
+    /// name its other ways to a picture.
+    no_frame: String,
     /// The last token given out.
     pub token: u64,
     /// Frames asked for and not yet requested from egui.
@@ -44,21 +44,21 @@ pub struct Shots {
     rx: Receiver<Shot>,
 }
 
-impl Default for Shots {
-    fn default() -> Self {
-        let (tx, rx) = channel();
-        Shots { token: 0, queued: Vec::new(), pending: Vec::new(), turns: HashMap::new(), tx, rx }
-    }
-}
-
 impl Shots {
+    /// No screenshots in flight; a request the window presents no frame for is answered with the
+    /// error `no_frame`.
+    pub fn new(no_frame: impl Into<String>) -> Self {
+        let (tx, rx) = channel();
+        Shots { no_frame: no_frame.into(), token: 0, queued: Vec::new(), pending: Vec::new(), turns: HashMap::new(), tx, rx }
+    }
+
     /// Take the window's picture for a request that answers on `reply`, saved at `path`; `turn`:
     /// the agent chat turn it belongs to. `now` is in ms. A window that is minimised or covered
     /// (another macOS Space) presents no frame: that is said at once rather than after the
     /// deadline (#1677).
     pub fn request(&mut self, ctx: &egui::Context, path: Option<String>, reply: Sender<Value>, turn: Option<Arc<AtomicBool>>, now: f64) {
         if hidden(ctx) {
-            let _ = reply.send(json!({"ok": false, "hidden": true, "error": NO_FRAME}));
+            let _ = reply.send(json!({"ok": false, "hidden": true, "error": self.no_frame}));
             return;
         }
         self.token += 1;
@@ -125,12 +125,12 @@ impl Shots {
         }
         // Hidden while waiting: no frame is coming.
         let hidden = hidden(ctx);
-        let turns = &mut self.turns;
+        let (turns, no_frame) = (&mut self.turns, &self.no_frame);
         self.pending.retain(|(token, _, reply, deadline)| {
             if now < *deadline && !hidden {
                 return true;
             }
-            let _ = reply.send(json!({"ok": false, "error": NO_FRAME}));
+            let _ = reply.send(json!({"ok": false, "error": no_frame}));
             turns.remove(token);
             false
         });
@@ -156,6 +156,9 @@ pub fn encode(image: &ColorImage, path: &str) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
 
+    /// The app's reply for no frame.
+    const NO_FRAME: &str = "no frame here";
+
     fn pixel_image() -> Arc<ColorImage> {
         Arc::new(ColorImage::new([4, 3], vec![egui::Color32::from_rgb(10, 20, 30); 12]))
     }
@@ -166,7 +169,7 @@ mod tests {
     #[test]
     fn a_request_is_answered_with_its_frame_or_its_deadline() {
         let ctx = egui::Context::default();
-        let mut shots = Shots::default();
+        let mut shots = Shots::new(NO_FRAME);
         let (reply, answer) = channel();
         shots.request(&ctx, Some("a.png".into()), reply, None, 0.0);
         assert_eq!((shots.token, shots.queued.len(), shots.pending.len()), (1, 1, 1));
@@ -192,7 +195,7 @@ mod tests {
     #[test]
     fn a_request_whose_turn_ended_is_refused() {
         let ctx = egui::Context::default();
-        let mut shots = Shots::default();
+        let mut shots = Shots::new(NO_FRAME);
         let (reply, answer) = channel();
         let turn = Arc::new(AtomicBool::new(true));
         shots.request(&ctx, None, reply, Some(Arc::clone(&turn)), 0.0);

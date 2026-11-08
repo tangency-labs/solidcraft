@@ -978,7 +978,7 @@ impl SolveApp {
             control_job: None,
             control_answering: Vec::new(),
             agent: Default::default(),
-            shots: Default::default(),
+            shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
             fitted: false,
             pending_fit: None,
