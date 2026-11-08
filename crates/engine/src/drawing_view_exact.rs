@@ -11,10 +11,17 @@
 //! the mesh projection's rule: their lines are tested against everything, and the model's see
 //! through them unless the view says they hide it. So their lines come from a second `hlr` call
 //! with them in the scene.
+//!
+//! A sheet's views lend each other the bodies they prepare for `hlr` ([`PreparedBodies`], #13218):
+//! preparing doesn't depend on the view, so each body is prepared once for the sheet, and both of a
+//! view's `hlr` calls use it.
 
 use std::cell::OnceCell;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use solidcore_record::{Seg2, Vec2, Vec3};
+use solidcraft_doc::ModelState;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::{self, HlrError, Source, Visibility};
 use solidcraft_geom::prelude::*;
@@ -67,6 +74,8 @@ pub(super) struct Exact {
     pub covered: usize,
     /// Pieces whose visibility `hlr` couldn't tell, drawn as visible.
     pub uncertain: usize,
+    /// Bodies this view prepared for `hlr`; an earlier view of the sheet lent it the rest.
+    pub prepared: usize,
     pub prepare_ms: f64,
     pub projection_ms: f64,
     pub occlusion_ms: f64,
@@ -79,6 +88,25 @@ struct Group {
     tangent: Vec<bool>,
 }
 
+/// The bodies one shown set's views have prepared for `hlr`, with [`options`]: each body is prepared
+/// when the first view that shows it asks, and lent to the views after it. A view of another model
+/// state prepares its own and lends nothing. A cancelled prepare leaves nothing behind.
+#[derive(Default)]
+pub struct PreparedBodies {
+    state: Option<Arc<ModelState>>,
+    defs: Vec<hlr::Prepared>,
+    /// Per body, by its index among the state's bodies: its index in `defs`, or why it can't be
+    /// drawn exact whatever the view.
+    bodies: BTreeMap<usize, std::result::Result<usize, Fallback>>,
+}
+
+impl PreparedBodies {
+    /// Whether these are, or can now become, the bodies of `state`.
+    fn serves(&mut self, state: &Arc<ModelState>) -> bool {
+        Arc::ptr_eq(self.state.get_or_insert_with(|| state.clone()), state)
+    }
+}
+
 /// What a view asks of `hlr`: every edge it can draw (the view's rule picks which are kept), no
 /// freeform faces (their bodies fall back), on the meshes' own worker cap, within `hlr`'s budgets.
 pub(super) fn options() -> hlr::Options {
@@ -87,7 +115,8 @@ pub(super) fn options() -> hlr::Options {
 
 /// The exact lines of the bodies `placed` holds, one per shown body of `shown` and in its order, in
 /// the view `frame` places on paper, as `request` asks, with `hlr`'s `opts` ([`options`]) and the
-/// `edges` the view draws. `None` when cancelled.
+/// `edges` the view draws. Bodies come from `prepared` when an earlier view prepared them, and those
+/// this view prepares are kept there. `None` when cancelled.
 pub(super) fn lines(
     placed: &[Placed],
     shown: &ShownSet,
@@ -95,11 +124,16 @@ pub(super) fn lines(
     request: &LineRequest,
     opts: &hlr::Options,
     edges: &Edges,
+    prepared: &mut PreparedBodies,
 ) -> Option<Exact> {
     let started = web_time::Instant::now();
     let stage = Stage::new("hidden_lines", placed.len());
     let cancel = || stage.check().is_err();
-    let (defs, groups) = prepare(placed, opts, edges, &cancel)?;
+    let mut own = PreparedBodies::default();
+    let prepared = if prepared.serves(&shown.state) { prepared } else { &mut own };
+    let made = prepared.defs.len();
+    let groups = prepare(placed, shown, opts, edges, &cancel, prepared)?;
+    let (defs, prepared) = (&prepared.defs, prepared.defs.len() - made);
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
     let reference: Vec<bool> = (0..placed.len()).map(|i| shown.bodies.get(i).is_some_and(|b| b.reference)).collect();
     let mut drawn: Vec<std::result::Result<Vec<ViewLine>, Fallback>> = placed
@@ -114,14 +148,14 @@ pub(super) fn lines(
     if drawn.iter().any(Result::is_err) {
         in_front(&reference, request.reference_hides_model, boxes(), &mut drawn);
     }
-    let mut exact = Exact { drawn, split: Vec::new(), covered: 0, uncertain: 0, prepare_ms, projection_ms: 0.0, occlusion_ms: 0.0 };
+    let mut exact = Exact { drawn, split: Vec::new(), covered: 0, uncertain: 0, prepared, prepare_ms, projection_ms: 0.0, occlusion_ms: 0.0 };
     // `hlr` measures x and y from the world origin, the view's plane from the basis's origin.
     let Some(shift) = Similarity2::new(1.0, 0.0, Vec2::new(-basis.origin.dot(basis.x), -basis.origin.dot(basis.y))) else {
         refuse(&mut exact, |_| true);
         return Some(exact);
     };
     let calls = Calls {
-        defs: &defs,
+        defs,
         groups: &groups,
         placed,
         reference: &reference,
@@ -350,43 +384,63 @@ fn refuse(exact: &mut Exact, which: impl Fn(usize) -> bool) {
     }
 }
 
-/// Each placement group's first body prepared for `hlr` once, or why it can't be drawn exact: the
-/// prepared bodies, and per group its body's index among them with the `edges` the view draws.
-/// `None` when cancelled.
-#[allow(clippy::type_complexity)]
+/// Per placement group, its first body as `prepared` holds it, prepared for `hlr` with `opts` when no
+/// earlier view has, or why it can't be drawn exact; with the `edges` this view draws of it. Each
+/// body is known by its index among the shown set's state's bodies. `None` when cancelled, keeping
+/// only the bodies prepared whole.
 fn prepare(
     placed: &[Placed],
+    shown: &ShownSet,
     opts: &hlr::Options,
     edges: &Edges,
     cancel: &(dyn Fn() -> bool + Sync),
-) -> Option<(Vec<hlr::Prepared>, Vec<std::result::Result<Group, Fallback>>)> {
-    let mut defs = Vec::new();
+    prepared: &mut PreparedBodies,
+) -> Option<Vec<std::result::Result<Group, Fallback>>> {
     let mut groups = Vec::new();
     // Groups are numbered in the order of their first bodies.
-    for item in placed.iter().filter(|item| item.first) {
-        let body = &item.body.body;
-        if body.is_mesh() {
-            groups.push(Err(Fallback::MeshBody));
-            continue;
-        }
-        let group = match hlr::prepare_cancellable(body.record(), opts, cancel) {
-            Err(HlrError::Cancelled) => return None,
-            Err(_) => Err(Fallback::Unread),
-            Ok(def) if !(def.report.freeform_faces.is_empty() && def.report.unsupported_trims.is_empty()) => Err(Fallback::Unsupported),
-            Ok(def) => {
-                // The edges come in the record's order, as `hlr`'s do.
-                let (drawn, tangent) = edges(item);
-                if drawn.len() == def.report.edges {
-                    defs.push(def);
-                    Ok(Group { def: defs.len() - 1, drawn, tangent })
-                } else {
-                    Err(Fallback::Unread)
+    for (i, item) in placed.iter().enumerate().filter(|(_, item)| item.first) {
+        let index = shown.bodies.get(i).map(|b| b.index);
+        let def = match index.and_then(|index| prepared.bodies.get(&index)) {
+            Some(known) => *known,
+            None => {
+                let made = prepare_body(item, opts, cancel, &mut prepared.defs)?;
+                if let Some(index) = index {
+                    prepared.bodies.insert(index, made);
                 }
+                made
             }
         };
-        groups.push(group);
+        // The edges come in the record's order, as `hlr`'s do; this view's must all be `hlr`'s.
+        groups.push(def.and_then(|def| {
+            let (drawn, tangent) = edges(item);
+            let all = prepared.defs.get(def).is_some_and(|d| d.report.edges == drawn.len());
+            if all { Ok(Group { def, drawn, tangent }) } else { Err(Fallback::Unread) }
+        }));
     }
-    Some((defs, groups))
+    Some(groups)
+}
+
+/// `item`'s body prepared for `hlr` with `opts`, pushed onto `defs`: its index there, or why it can't
+/// be drawn exact whatever the view. `None` when cancelled.
+fn prepare_body(
+    item: &Placed,
+    opts: &hlr::Options,
+    cancel: &(dyn Fn() -> bool + Sync),
+    defs: &mut Vec<hlr::Prepared>,
+) -> Option<std::result::Result<usize, Fallback>> {
+    let body = &item.body.body;
+    if body.is_mesh() {
+        return Some(Err(Fallback::MeshBody));
+    }
+    Some(match hlr::prepare_cancellable(body.record(), opts, cancel) {
+        Err(HlrError::Cancelled) => return None,
+        Err(_) => Err(Fallback::Unread),
+        Ok(def) if !(def.report.freeform_faces.is_empty() && def.report.unsupported_trims.is_empty()) => Err(Fallback::Unsupported),
+        Ok(def) => {
+            defs.push(def);
+            Ok(defs.len() - 1)
+        }
+    })
 }
 
 /// A body's box on the view: x and y across it, and its depth along the line of sight. `None` when
@@ -534,6 +588,24 @@ mod tests {
     use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2};
 
     use super::*;
+
+    /// A prepare cancelled before its body is whole keeps nothing, so the next view prepares the body
+    /// itself and draws it exact; a body prepared is lent by its index among the state's bodies.
+    #[test]
+    fn a_cancelled_prepare_keeps_nothing() {
+        let mut s = crate::Session::default();
+        s.execute("solid.box", &serde_json::json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"})).unwrap();
+        let shown = crate::drawing_view::shown(&s).unwrap();
+        let placed = mesh_lines::placed(&s, &shown.state, |_| true, "test").unwrap();
+        let ask = mesh_lines::Ask { tangent_edges: false, sources: true };
+        let edges = |item: &Placed| mesh_lines::drawn_edges(&item.body.mesh(), ask);
+        let mut prepared = PreparedBodies::default();
+        assert!(prepare(&placed, &shown, &options(), &edges, &|| true, &mut prepared).is_none());
+        assert!(prepared.defs.is_empty() && prepared.bodies.is_empty());
+        let groups = prepare(&placed, &shown, &options(), &edges, &|| false, &mut prepared).unwrap();
+        assert!(matches!(groups.as_slice(), [Ok(Group { def: 0, .. })]));
+        assert_eq!((prepared.defs.len(), prepared.bodies.get(&shown.bodies[0].index)), (1, Some(&Ok(0))));
+    }
 
     /// A quarter of a circle of 5 round (1, 2), from 0 to 90 degrees, as a conic.
     fn quarter(clockwise: bool) -> (Vec2, Vec2, Vec2) {

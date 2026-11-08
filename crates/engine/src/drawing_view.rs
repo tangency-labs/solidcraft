@@ -31,7 +31,7 @@ mod exact;
 #[path = "drawing_view_lines.rs"]
 mod lines;
 
-pub use exact::Fallback;
+pub use exact::{Fallback, PreparedBodies};
 pub use lines::{CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Made, Piece, Stats, ViewLine, lines, paper_group, paper_lines};
 
 #[path = "drawing_view_flat.rs"]

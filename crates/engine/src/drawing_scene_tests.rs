@@ -2475,7 +2475,8 @@ fn a_sheet_note_paints_over_view_annotations_whatever_order_they_join_in() {
     let lettering = Lettering::of(&s, &d);
     let (text, _) = block_text(record, &lettering, &[], true).unwrap();
     let (notes, _) = sheet_notes(&s, &d, sheet, &lettering, true);
-    let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(&s, &[], &shown, *id, view)));
+    let mut prepared = PreparedBodies::default();
+    let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(&s, &[], &shown, &mut prepared, *id, view)));
     let mut assembly = assemble(record, d.projection, &text, &[], &[], &[], drawn).unwrap();
     let frames: BTreeMap<_, _> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let line_group = |view: u64| on.iter().find(|(id, ..)| *id == view).map(|(_, v, _)| v.line_group.value);
