@@ -888,7 +888,7 @@ fn sketch_previews_selection_band_and_number_focus_follow_sketch_accent() {
             }
             h.app.ui.tab = "MODEL".into(); // A sketch remains open when another ribbon tab is selected.
             h.app.tool = crate::tools::Tool::for_command("sketch.line");
-            crate::theme::TabAccent::publish(&h.app, &h.ctx);
+            h.app.publish_tab_accent(&h.ctx);
             let output = draw(&h.ctx, |ui| {
                 let r = ui.add(egui::TextEdit::singleline(&mut String::from("20")));
                 r.request_focus();

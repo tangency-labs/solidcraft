@@ -1216,7 +1216,7 @@ const ELEMENTS: &[Element] = &[
         let (r, _) = ui.allocate_exact_size(vec2(360.0, 360.0), egui::Sense::hover());
         let mut app = crate::test_support::sample_app();
         app.ui.tab = "SURFACE".into();
-        crate::theme::TabAccent::publish(&app, ui.ctx());
+        app.publish_tab_accent(ui.ctx());
         radial_menu(ui, r.center(), &crate::context_menu::radial_items(&app), Some(3));
     }),
     element!("workspace_menu", |ui, _| {
@@ -2773,7 +2773,7 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
             ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
             let mut app = crate::SolveApp::new(Default::default(), Default::default());
             app.ui.tab = tab.into();
-            crate::theme::TabAccent::publish(&app, &ctx);
+            app.publish_tab_accent(&ctx);
             let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(600.0, 360.0));
             let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
                 ui.painter().rect_filled(bounds, 0.0, Tokens::get().panel);
