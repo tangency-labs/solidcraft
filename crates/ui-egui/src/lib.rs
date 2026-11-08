@@ -2179,12 +2179,12 @@ impl SolveApp {
             }
             let empty = sel.is_empty();
             self.start("solid.extrude");
-            if empty
-                && let Some(d) = &mut self.dialog
-                && let Some(input) = d.inputs.first_mut()
-            {
-                input.accept |= selection::FACES | selection::EDGES;
+            if let Some(d) = &mut self.dialog {
+                // Opened by Press Pull, so the dialog says so, whatever was picked (#11705).
                 d.press_pull = true;
+                if empty && let Some(input) = d.inputs.first_mut() {
+                    input.accept |= selection::FACES | selection::EDGES;
+                }
             }
             return;
         }
