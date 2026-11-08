@@ -76,13 +76,21 @@ pub use p9::{make_vertex_loop, orient_sheet_surfaces};
 /// the pointer check is what refuses it. A valid body turned inside out (its loops and
 /// surfaces reversed with its uses) has a negative volume.
 ///
+/// A sign the enclosure leaves undecided (its interval still holds 0 when refinement ends:
+/// a gap between faces as large as the volume, or the cell budget spent) is "not a solid" on
+/// purpose: a solid is what is proved one, so ops' `finish` refuses the body as `NotSolid`.
+/// A body the enclosure cannot read at all is an error, not `false`: a face with no NURBS form
+/// (an offset surface, as the offset of a round keeps; a curve-bounded or in-volume surface),
+/// a face without trim loops, or weights not proved positive.
+///
 /// A region the kernel is unsure of is [`crate::SolidError::UnsureRegion`], not "not a solid":
 /// the volume's sign would read it as void.
 ///
 /// # Errors
 ///
-/// Those of the manifold test, the validity check and the volume;
-/// [`crate::SolidError::UnsureRegion`].
+/// Those of the manifold test, the validity check and the volume
+/// ([`crate::mass::enclosure::volume_sign`]: [`crate::SolidError::Unsupported`] for a body
+/// it cannot read); [`crate::SolidError::UnsureRegion`].
 pub fn is_outward_solid(
     k: &mut crate::kernel::Kernel,
     b: &mut crate::topology::Brep,

@@ -11,19 +11,18 @@
 //! - **Cells.** Each trim piece (a polynomial piece of a pcurve, or a straight uv segment
 //!   closing a loop between two of them) is swept down to the base piecewise between the
 //!   surface's v knots, `phi(t, sigma) = (u(t), a + sigma b(t))`, `sigma` in `[0, 1]`: a
-//!   whole v span (`a` a knot, `b` its length) or the part up to the trim (`b(t) = v(t) - a`).
-//!   On a cell of `(t, sigma)` the integrand `-(S_z - z0) (S_u x S_v)_z u'(t) b(t)` at
+//!   whole v span (`a` a knot, `b` its length) or the part up to the trim
+//!   (`b(t) = v(t) - a`). On a cell of `(t, sigma)` the integrand `-(S_z - z0) (S_u x S_v)_z u'(t) b(t)` at
 //!   `phi(t, sigma)` (`u' b` the Jacobian of `phi`; in this factored form no product cancels
-//!   another, which an interval could not follow) is a Taylor model [1, 2]: its Taylor polynomial of degree `ORDER - 1` at the cell's
-//!   middle, every coefficient enclosed at that point and the polynomial integrated exactly,
-//!   and the Lagrange remainder from the coefficients of degree `ORDER` enclosed over the
-//!   whole cell (rounded interval arithmetic, [`Ivl`]; the surface's partials over a box,
-//!   [`nurbs_partials_within_span`]). A cell is first evaluated at the low degree
-//!   [`FIRST_ORDER`] and at `ORDER` only once it is the widest. The expansion holds where
-//!   the cell's image lies on one
-//!   polynomial piece of the surface; a cell whose image may cross a knot line is enclosed
-//!   by the integrand's range over it times its area [3, ch. 9], which holds whatever the
-//!   continuity there.
+//!   another, which an interval could not follow) is a Taylor model [1, 2]: its Taylor
+//!   polynomial of degree `ORDER - 1` at the cell's middle, every coefficient enclosed at
+//!   that point and the polynomial integrated exactly, and the Lagrange remainder from the
+//!   coefficients of degree `ORDER` enclosed over the whole cell (rounded interval
+//!   arithmetic, [`Ivl`]; the surface's partials over a box, [`nurbs_partials_within_span`]).
+//!   A cell is first evaluated at the low degree [`FIRST_ORDER`] and at `ORDER` only once it
+//!   is the widest. The expansion holds where the cell's image lies on one polynomial piece
+//!   of the surface; a cell whose image may cross a knot line is enclosed by the integrand's
+//!   range over it times its area [3, ch. 9], which holds whatever the continuity there.
 //! - **Gaps.** Two faces' trimmed boundaries along an edge need not meet: their curves
 //!   `X_1(t)`, `X_2(t)` (one edge parameter) are joined by the ruled strip
 //!   `X_1 + s (X_2 - X_1)`, whose flux is at most `max |z - z0|` times its area, at most
@@ -135,8 +134,9 @@ pub enum VolumeSign {
     Positive(VolumeEnclosure),
     /// `hi < 0`: the volume is negative (the body is inside out).
     Negative(VolumeEnclosure),
-    /// The enclosure still holds 0 when refinement ends: [`CELL_BUDGET`] cells spent, or
-    /// every cell cut [`MAX_DEPTH`] times.
+    /// The enclosure still holds 0 when refinement ends: the cells that no cut narrows (gaps
+    /// between faces) already hold it whatever the rest becomes, [`CELL_BUDGET`] cells are
+    /// spent, or every cell is cut [`MAX_DEPTH`] times.
     Undecided(VolumeEnclosure),
 }
 
@@ -158,19 +158,31 @@ pub fn enclose_volume(k: &Kernel, b: &mut Brep, width: f64) -> Result<VolumeEncl
         return Err(SolidError::invalid_input(OP, "width not positive"));
     }
     let mut w = Work::new(k, b)?;
-    w.refine(|e| e.hi - e.lo <= width)
+    // past a width the settled cells alone exceed, no refining narrows it
+    w.refine(|e| e.hi - e.lo <= width, |_, still| still + still > width)
 }
 
 /// The sign of the volume of the closed body `b`, from its enclosure refined until it
 /// decides; [`VolumeSign::Undecided`] only when the enclosure still holds 0 when
-/// refinement ends ([`CELL_BUDGET`] cells, or every cell cut [`MAX_DEPTH`] times).
+/// refinement ends ([`VolumeSign::Undecided`] says when).
 ///
 /// # Errors
 ///
 /// Those of [`enclose_volume`].
 pub fn volume_sign(k: &Kernel, b: &mut Brep) -> Result<VolumeSign> {
+    volume_sign_within(k, b, CELL_BUDGET)
+}
+
+/// [`volume_sign`] within `budget` cells.
+fn volume_sign_within(k: &Kernel, b: &mut Brep, budget: usize) -> Result<VolumeSign> {
     let mut w = Work::new(k, b)?;
-    let e = w.refine(|e| e.lo > 0.0 || e.hi < 0.0)?;
+    w.budget = budget;
+    // the settled cells and the fixed terms are symmetric about 0: once their half width is
+    // at least the magnitude of everything else, 0 stays inside however the rest is refined
+    let e = w.refine(
+        |e| e.lo > 0.0 || e.hi < 0.0,
+        |rest, still| still >= rest.mag(),
+    )?;
     Ok(if e.lo > 0.0 {
         VolumeSign::Positive(e)
     } else if e.hi < 0.0 {
@@ -393,6 +405,9 @@ struct Item {
     depth: u32,
     /// The remainder degree it is evaluated at ([`FIRST_ORDER`], then [`ORDER`]).
     order: usize,
+    /// A strip cell whose width is mostly a gap no cut removes ([`Work::strip_cell`]): kept
+    /// as it is.
+    settled: bool,
     enc: Ivl,
     split_t: bool,
 }
@@ -409,6 +424,8 @@ struct Work<'a> {
     heap: BinaryHeap<(u64, Reverse<usize>)>,
     /// The caps' and the loops' rounding terms, `[-w, w]`.
     fixed: Ivl,
+    /// The cells past which it is no longer refined ([`CELL_BUDGET`]).
+    budget: usize,
     counts: EnclosureCounts,
 }
 
@@ -642,6 +659,7 @@ impl<'a> Work<'a> {
             alive: Vec::new(),
             heap: BinaryHeap::new(),
             fixed: IZ,
+            budget: CELL_BUDGET,
             counts: EnclosureCounts::default(),
         };
         let mut sides: BTreeMap<EdgeId, Vec<(usize, NurbsCurve, bool)>> = BTreeMap::new();
@@ -908,6 +926,7 @@ impl<'a> Work<'a> {
                         s: (0.0, 1.0),
                         depth: 0,
                         order: FIRST_ORDER,
+                        settled: false,
                         enc: IZ,
                         split_t: true,
                     })?;
@@ -982,6 +1001,7 @@ impl<'a> Work<'a> {
                     s: (0.0, 1.0),
                     depth: 0,
                     order: FIRST_ORDER,
+                    settled: false,
                     enc: IZ,
                     split_t: true,
                 });
@@ -1042,7 +1062,9 @@ impl<'a> Work<'a> {
             }
             Kind::Strip { strip, spans } => {
                 self.counts.strips += 1;
-                (self.strip_cell(strip, spans, it.t, it.order)?, true)
+                let (enc, settled) = self.strip_cell(strip, spans, it.t, it.order)?;
+                it.settled = settled;
+                (enc, true)
             }
         };
         it.enc = enc;
@@ -1205,14 +1227,19 @@ impl<'a> Work<'a> {
         Ok((sign * sum, wt >= ws))
     }
 
-    /// A strip cell's enclosure: `[-w, w]`, `w` its flux's bound.
+    /// A strip cell's enclosure, `[-w, w]` with `w` its flux's bound, and whether it is
+    /// settled: at least half of `int |D|` is the gap's least size over the cell (at its
+    /// middle, less the slope's bound times the half length) times its length, which every
+    /// cut of it keeps, so cutting it can at most halve that factor. A
+    /// real gap between two faces' boundaries (not their rounding) is such a cell: refining
+    /// it would spend the budget without deciding.
     fn strip_cell(
         &self,
         strip: usize,
         spans: [usize; 2],
         t: (f64, f64),
         ord: usize,
-    ) -> Result<Ivl> {
+    ) -> Result<(Ivl, bool)> {
         let tc = 0.5 * (t.0 + t.1);
         let (xl, xh) = (
             Ivl::from(t.0) - Ivl::from(tc),
@@ -1257,7 +1284,7 @@ impl<'a> Work<'a> {
                     taylor = false;
                     let (du, dv, u, v) = at(Ivl::new(t.0, t.1), 1)?;
                     let Some(p) = partials_over(&face.cn, u, v, 1)? else {
-                        return Ok(Ivl::whole());
+                        return Ok((Ivl::whole(), false));
                     };
                     over.push(compose(&p, &du, &dv, 1));
                 }
@@ -1289,7 +1316,28 @@ impl<'a> Work<'a> {
             _ => Ivl::from(mag3(diff(comp(o1, 0), comp(o2, 0)))) * (xh - xl),
         };
         let w = Ivl::from(zmax) * Ivl::from(speed) * gap;
-        Ok(Ivl::new(-w.hi, w.hi))
+        // the gap's least size over the cell, in the norm `int |D|` is taken in (the sum of
+        // the components, `mag3`): at the middle less its derivative's bound times the half
+        // length, or over the whole cell where there is no middle series
+        let least_sum = |d: [Ivl; 3]| {
+            d.iter()
+                .fold(Ivl::from(0.0), |sum, c| sum + Ivl::from(c.mig()))
+                .lo
+        };
+        let least = match (taylor, mid.first(), mid.get(1)) {
+            (true, Some(m1), Some(m2)) => {
+                let slope = mag3(diff(comp(o1, 1), comp(o2, 1)));
+                let half = xl.mag().max(xh.mag());
+                (Ivl::from(least_sum(diff(comp(m1, 0), comp(m2, 0))))
+                    - Ivl::from(slope) * Ivl::from(half))
+                .lo
+                .max(0.0)
+            }
+            _ => least_sum(diff(comp(o1, 0), comp(o2, 0))),
+        };
+        let kept = (Ivl::from(least) * (xh - xl)).lo;
+        let settled = kept + kept >= gap.hi;
+        Ok((Ivl::new(-w.hi, w.hi), settled))
     }
 
     /// The enclosure: the cells' sum and the fixed terms, in insertion order.
@@ -1303,9 +1351,33 @@ impl<'a> Work<'a> {
         sum
     }
 
+    /// The enclosure in two parts: the sum of the cells still refined, and the half width
+    /// of the rest (the settled strip cells and the fixed terms, each `[-w, w]`), rounded
+    /// up.
+    fn parts(&self) -> (Ivl, f64) {
+        let mut rest = Ivl::from(0.0);
+        let mut still = Ivl::from(self.fixed.hi);
+        for (it, alive) in self.items.iter().zip(&self.alive) {
+            if !*alive {
+                continue;
+            }
+            if it.settled {
+                still = still + Ivl::from(it.enc.hi);
+            } else {
+                rest = rest + it.enc;
+            }
+        }
+        (rest, still.hi)
+    }
+
     /// Refines the widest cell, one bisection at a time, until `done` holds of the
-    /// enclosure or [`CELL_BUDGET`] cells are spent.
-    fn refine(&mut self, done: impl Fn(Ivl) -> bool) -> Result<VolumeEnclosure> {
+    /// enclosure, `hopeless` of its parts ([`Work::parts`]: no refining can make `done`
+    /// hold), or the budget is spent.
+    fn refine(
+        &mut self,
+        done: impl Fn(Ivl) -> bool,
+        hopeless: impl Fn(Ivl, f64) -> bool,
+    ) -> Result<VolumeEnclosure> {
         let out = |w: &Self| {
             let e = w.total();
             VolumeEnclosure {
@@ -1328,11 +1400,15 @@ impl<'a> Work<'a> {
                 if done(total) {
                     return Ok(out(self));
                 }
+                let (rest, still) = self.parts();
+                if hopeless(rest, still) {
+                    return Ok(out(self));
+                }
                 (lo, hi) = (total.lo, total.hi);
                 checked = self.counts.cells;
                 next_check = self.counts.cells + (self.items.len() / 4).max(64);
             }
-            if self.counts.cells >= CELL_BUDGET {
+            if self.counts.cells >= self.budget {
                 return Ok(out(self));
             }
             let Some((_, Reverse(i))) = self.heap.pop() else {
@@ -1341,6 +1417,9 @@ impl<'a> Work<'a> {
             let Some(it) = self.items.get(i).copied() else {
                 continue;
             };
+            if it.settled {
+                continue; // a gap no cut narrows: kept as it is
+            }
             if it.order < ORDER {
                 // evaluated again at the full order before it is cut
                 if let Some(a) = self.alive.get_mut(i) {
@@ -1673,6 +1752,28 @@ mod tests {
     fn bounds_round_up() {
         assert!(mag3([Ivl::from(1.0), Ivl::from(1e-16), IZ]) > 1.0);
         assert!(width(Ivl::new(-1e-16, 1.0)) > 1.0);
+    }
+
+    /// A budget too small to decide leaves the sign undecided, its enclosure holding the
+    /// volume (the quarter shell R 1e4, t 1e-3, V 157.08, decides within some 150 cells).
+    #[test]
+    fn a_spent_budget_leaves_the_sign_undecided() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_cylindrical_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            1e4,
+            1e4 + 1e-3,
+            0.0,
+            90.0,
+        )
+        .unwrap();
+        let v = 157.0796;
+        match volume_sign_within(&k, &mut b, 16).unwrap() {
+            VolumeSign::Undecided(e) => assert!(e.lo < v && v < e.hi, "{e:?}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     /// The moments hold the closed forms.
