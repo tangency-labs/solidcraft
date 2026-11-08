@@ -11,8 +11,6 @@ doc.open
 doc.recover
 doc.recovery_discard
 doc.recovery_list
-document.inspect
-engine.commands
 face.delete
 file.export
 file.insert_mesh
@@ -22,7 +20,6 @@ file.save
 file.save_as
 file.save_mesh
 file.slicers
-inspect.measure
 joint.cam
 joint.gear
 joint.motion_link
@@ -32,8 +29,6 @@ joint.reach
 joint.rigid_group
 joint.screw
 joint.sweep
-material.assign
-material.list
 mesh.convert
 motion.export_animation
 motion.interference
@@ -63,12 +58,7 @@ sheet.export_bend_table
 sheet.export_dxf
 sheet.flat_pattern
 sheet.path_flange
-sketch.auto_constrain
-sketch.auto_constrain_from_datum
 sketch.chain
-sketch.constrainer
-sketch.constraint.curvature
-sketch.constraint.polygon
 sketch.construction
 sketch.create
 sketch.delete
@@ -78,16 +68,10 @@ sketch.drag
 sketch.drag_end
 sketch.draw.dimensioned
 sketch.export_dxf
-sketch.finish_auto_constrain
-sketch.glyphs
 sketch.insert_dxf
 sketch.insert_svg
-sketch.inspect
-sketch.line3d
-sketch.move3d
 sketch.move_point
 sketch.options
-sketch.point3d
 sketch.polygon.circumscribed
 sketch.polygon.edge
 sketch.polygon.inscribed
@@ -97,10 +81,7 @@ sketch.rectangle.three_point
 sketch.rectangle.two_point
 sketch.slot.center_to_center
 sketch.slot.overall
-sketch.snap
 sketch.solve
-sketch.spline3d
-sketch.toggle_driven
 solid.align
 solid.chamfer
 solid.coil
