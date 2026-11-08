@@ -895,6 +895,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `ground_shadow_follows_model` (Graphics, default false): raised models cast their ground shadow on the origin ground plane; true restores the shadow below the lowest visible body. Both modes keep the shadow below bodies extending beneath the origin, and follow the selected up axis.
 - `hidden_toolbar_tabs` (default `[]`: all existing tabs, including Sheet Metal and Weldments, stay visible; lists tabs to hide, each once, e.g. `["SURFACE", "SHEET METAL"]`; hidden tabs stay hidden regardless of the design's features; [ribbon layout](ribbon-layout.md))
 - `history_sketches` (`in_order` (default), `under_feature`: the History at the left lists a sketch under the first feature built from it, #6489; the timeline at the bottom keeps the creation order)
+- `hole_group` (default false: the holes one Hole command makes, two or more, go into a feature folder in History, closed at first)
 - `hole_moves` (default false: a placed Single hole has a drag handle (`hole:<n>`), and a pick on a face that has a hole moves it there)
 - `hole_several` (default false: a face takes several Single holes; a pick elsewhere on a face that has a hole adds another, and a pick on a hole takes it out)
 - `hole_snaps` (default false: a Single hole snaps to its face's middle and round edges' centres)
