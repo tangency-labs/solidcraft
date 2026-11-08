@@ -1,0 +1,155 @@
+{
+  "area": "tessellation",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "819-cup-pocket-splits-wall-seam",
+  "expected": {
+    "area_mm2": 21262.299,
+    "body_count": 1,
+    "faces": 5,
+    "method": "disc r=50 h=10 with a coaxial pocket r=48 depth 8 (floor at z=2). V = pi*50^2*10 - pi*48^2*8 = 78539.816 - 57905.836 = 20633.980. Area = bottom pi*50^2 + outer wall 2 pi 50 *10 + top ring pi(50^2-48^2) + pocket wall 2 pi 48 *8 + floor pi 48^2. Five faces. The shelled-top disc (shell 2 mm, top face removed) is the same solid.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#819",
+      "tangency-labs/solidcraft#921"
+    ],
+    "volume_mm3": 20633.981,
+    "what": "a disc with a pocket that splits the outer cylinder wall's seam edges at the pocket floor: the wall used to be meshed with fans cutting through the disc, so the measured volume and the STL read too small"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 6,
+      "faces": 5,
+      "vertices": 4
+    }
+  },
+  "records": "819-cup-pocket-splits-wall-seam.bodies.json.gz",
+  "result": [
+    {
+      "body": "Cup",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 21262.299079658016,
+      "body_count": 1,
+      "edges": 6,
+      "faces": 5,
+      "vertices": 4,
+      "volume_mm3": 20633.980549431995
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#819",
+    "tangency-labs/solidcraft#921"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a disc with a pocket that splits the outer cylinder wall's seam edges at the pocket floor: the wall used to be meshed with fans cutting through the disc, so the measured volume and the STL read too small",
+  "why_not": []
+}

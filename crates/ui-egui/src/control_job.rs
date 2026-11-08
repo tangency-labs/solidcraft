@@ -182,7 +182,7 @@ impl ControlJob {
 }
 
 fn label(app: &SolveApp, command: &str) -> String {
-    let language = crate::i18n::Locale::for_language(&app.preferences.language);
+    let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     language.label(solidcraft_engine::find_command(command).map_or(command, |c| c.label)).to_string()
 }
 
@@ -473,7 +473,7 @@ impl SolveApp {
         let reply = reply.unwrap_or_else(|| json!({"ok": false, "error": format!("`{}` ended without a reply", job.label)}));
         let export = executed(&job.req.params).and_then(|(command, _)| spec_id(command)).is_some_and(|id| ANSWERED_ON_A_COPY.contains(&id));
         if reply["ok"] == true && export {
-            let language = crate::i18n::Locale::for_language(&self.preferences.language);
+            let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
             self.session.echo(language.format("ui.command_done", &[("command", job.label.as_str())]));
         }
         let _ = job.req.reply.send(reply);

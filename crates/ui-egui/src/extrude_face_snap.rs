@@ -20,8 +20,8 @@ use solidcraft_engine::geom::{Mesh, prelude::*};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
-use crate::theme::Tokens;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 /// How near (screen points) the arrow's tip must come to a face's plane to stop there.
 pub const SNAP_PX: f32 = 8.0;

@@ -366,8 +366,11 @@ fn issues_are_read_from_the_commands_own_contract() {
     let issues = super::issues("solid.box", &json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"}));
     assert_eq!(messages(&issues), ["unknown key `operaton`; did you mean `operation`?"]);
     assert_eq!(issues, box_contract().check(&json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"})));
-    // No contract, or no such command: nothing to say.
-    assert!(super::issues("solid.chamfer", &json!({"nonsense": 1})).is_empty());
+    // No contract, or no such command: nothing to say. The first command without a contract
+    // stands for them all, so converting a command doesn't break this.
+    if let Some(c) = crate::cmd::command_specs().into_iter().find(|c| c.contract.is_none()) {
+        assert!(super::issues(c.id, &json!({"nonsense": 1})).is_empty(), "{}", c.id);
+    }
     assert!(super::issues("no.such", &json!({"nonsense": 1})).is_empty());
 }
 

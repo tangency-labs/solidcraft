@@ -2757,7 +2757,7 @@ mod retained_request_tests {
         assert!(frame.linear_exr().is_some());
         let color = [128, 64, 255].map(|v| {
             let x = crate::surface::srgb8_to_linear(v) as f32 as f64;
-            solidcraft_geom::srgb::encode8(x / (1.0 + x))
+            solidcraft_color::srgb::encode8(x / (1.0 + x))
         });
         assert_eq!(image::load_from_memory(frame.png()).unwrap().to_rgba8().get_pixel(0, 0).0, [color[0], color[1], color[2], 255]);
         let held = job.clone();

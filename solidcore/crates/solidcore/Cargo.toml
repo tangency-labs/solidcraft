@@ -1,0 +1,30 @@
+[package]
+name = "solidcore"
+description = "B-rep solid modeling kernel: a pure-Rust port of NVIDIA's SMLib (usd-brep v1.0.1), matched against the C++ to 1e-9"
+edition.workspace = true
+license.workspace = true
+# Tracks the upstream SMLib release it is ported from and matched against (usd-brep v1.0.1).
+version = "1.0.1"
+rust-version.workspace = true
+repository = "https://github.com/tangency-labs/solidcore"
+readme = "README.md"
+keywords = ["cad", "brep", "nurbs", "geometry", "solid-modeling"]
+categories = ["graphics", "mathematics", "science"]
+
+[features]
+# Kernels start with the curve cache memo off (`Kernel::memoize_curve_caches`), to
+# run difftest and the tests in both positions. Results never depend on it.
+curve-memo-off = []
+# The profiler (`solidcore::profile`): scopes and counters recorded in `Kernel::profiler`,
+# written as JSON Lines. Off, every scope compiles to nothing. Results never depend on it.
+profile = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[lints]
+workspace = true

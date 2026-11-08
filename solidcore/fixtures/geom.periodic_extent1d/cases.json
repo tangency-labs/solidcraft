@@ -1,0 +1,1408 @@
+{
+ "cases": [
+  {
+   "name": "face_new_full_u",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:16873",
+   "inputs": {
+    "op": "new_full",
+    "a": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     6.283185307179586,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "face_setminmax_zero_pt",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:16873",
+   "inputs": {
+    "op": "set_min_max",
+    "a": [
+     0.0,
+     6.283185307179586,
+     6.283185307179586,
+     1.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": true,
+    "has_period": false
+   }
+  },
+  {
+   "name": "face_add_interval_fwd",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:17124",
+   "inputs": {
+    "op": "add_interval",
+    "a": [
+     0.0,
+     0.0,
+     6.283185307179586,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.5,
+     1.5,
+     0.0
+    ],
+    "flag": true,
+    "has_period": false
+   }
+  },
+  {
+   "name": "face_add_interval_bwd",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:17124",
+   "inputs": {
+    "op": "add_interval",
+    "a": [
+     0.0,
+     0.0,
+     6.283185307179586,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     1.5,
+     0.5,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "face_add_interval_seam",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:17124",
+   "inputs": {
+    "op": "add_interval",
+    "a": [
+     0.5,
+     1.5,
+     6.283185307179586,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     6.0,
+     0.2,
+     0.0
+    ],
+    "flag": true,
+    "has_period": false
+   }
+  },
+  {
+   "name": "face_add_interval_to_full",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:17124",
+   "inputs": {
+    "op": "add_interval",
+    "a": [
+     0.5,
+     6.0,
+     6.283185307179586,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     5.9,
+     0.6,
+     0.0
+    ],
+    "flag": true,
+    "has_period": false
+   }
+  },
+  {
+   "name": "face_is_full_u",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:17621",
+   "inputs": {
+    "op": "is_full_period",
+    "a": [
+     0.0,
+     6.283185307179586,
+     6.283185307179586,
+     1.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "face_copy",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:17426",
+   "inputs": {
+    "op": "copy",
+    "a": [
+     5.0,
+     1.0,
+     6.283185307179586,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "curve_sector_setminmax",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:12001",
+   "inputs": {
+    "op": "set_min_max",
+    "a": [
+     1e+20,
+     -1e+20,
+     -1e+20,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.25,
+     4.0,
+     6.283185307179586
+    ],
+    "flag": false,
+    "has_period": true
+   }
+  },
+  {
+   "name": "curve_sector_setminmax_eq_full",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:12001",
+   "inputs": {
+    "op": "set_min_max",
+    "a": [
+     1e+20,
+     -1e+20,
+     -1e+20,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     1.0,
+     1.0,
+     6.283185307179586
+    ],
+    "flag": false,
+    "has_period": true
+   }
+  },
+  {
+   "name": "curve_sector_setminmax_cross",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:12001",
+   "inputs": {
+    "op": "set_min_max",
+    "a": [
+     1e+20,
+     -1e+20,
+     -1e+20,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     5.0,
+     1.0,
+     6.283185307179586
+    ],
+    "flag": false,
+    "has_period": true
+   }
+  },
+  {
+   "name": "rev_full_360",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:3566",
+   "inputs": {
+    "op": "new_full",
+    "a": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     360.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "rev_disjoint_true",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:3558",
+   "inputs": {
+    "op": "are_disjoint",
+    "a": [
+     10.0,
+     80.0,
+     360.0,
+     0.0
+    ],
+    "b": [
+     100.0,
+     200.0,
+     360.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "rev_disjoint_touch",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:3558",
+   "inputs": {
+    "op": "are_disjoint",
+    "a": [
+     10.0,
+     100.0,
+     360.0,
+     0.0
+    ],
+    "b": [
+     100.0,
+     200.0,
+     360.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "rev_disjoint_seam",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:3558",
+   "inputs": {
+    "op": "are_disjoint",
+    "a": [
+     300.0,
+     30.0,
+     360.0,
+     0.0
+    ],
+    "b": [
+     20.0,
+     40.0,
+     360.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "rev_disjoint_embrace",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:3558",
+   "inputs": {
+    "op": "are_disjoint",
+    "a": [
+     300.0,
+     90.0,
+     360.0,
+     0.0
+    ],
+    "b": [
+     10.0,
+     40.0,
+     360.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "rev_disjoint_full",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:3558",
+   "inputs": {
+    "op": "are_disjoint",
+    "a": [
+     0.0,
+     360.0,
+     360.0,
+     1.0
+    ],
+    "b": [
+     10.0,
+     40.0,
+     360.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "rev_disjoint_empty",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:3558",
+   "inputs": {
+    "op": "are_disjoint",
+    "a": [
+     1e+20,
+     -1e+20,
+     360.0,
+     0.0
+    ],
+    "b": [
+     10.0,
+     40.0,
+     360.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "contains_cross_seam",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:390",
+   "inputs": {
+    "op": "contains_value",
+    "a": [
+     0.8,
+     0.2,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.9,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "contains_cross_seam_out",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:390",
+   "inputs": {
+    "op": "contains_value",
+    "a": [
+     0.8,
+     0.2,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.5,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "contains_point",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:390",
+   "inputs": {
+    "op": "contains_value",
+    "a": [
+     0.4,
+     0.4,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.4,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "contains_empty",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:390",
+   "inputs": {
+    "op": "contains_value",
+    "a": [
+     1e+20,
+     -1e+20,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.4,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "compliment_empty",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:146",
+   "inputs": {
+    "op": "compliment",
+    "a": [
+     1e+20,
+     -1e+20,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "compliment_full",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:146",
+   "inputs": {
+    "op": "compliment",
+    "a": [
+     0.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "compliment_point",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:146",
+   "inputs": {
+    "op": "compliment",
+    "a": [
+     0.3,
+     0.3,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "compliment_ivl",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:146",
+   "inputs": {
+    "op": "compliment",
+    "a": [
+     0.2,
+     0.6,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "normalize_neg",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:1320",
+   "inputs": {
+    "op": "normalize_value",
+    "a": [
+     0.2,
+     0.6,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     -0.25,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "normalize_over",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:1320",
+   "inputs": {
+    "op": "normalize_value",
+    "a": [
+     0.2,
+     0.6,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     1.25,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "normalize_snap0",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:1320",
+   "inputs": {
+    "op": "normalize_value",
+    "a": [
+     0.2,
+     0.6,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     1e-13,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "map_snap_period",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:1320",
+   "inputs": {
+    "op": "map_value",
+    "a": [
+     0.2,
+     0.6,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.9999999999999,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "normalize_empty",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:1320",
+   "inputs": {
+    "op": "normalize_value",
+    "a": [
+     1e+20,
+     -1e+20,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.5,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "mid_plain",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:1153",
+   "inputs": {
+    "op": "get_mid",
+    "a": [
+     0.2,
+     0.6,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "mid_seam_second_half",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:1153",
+   "inputs": {
+    "op": "get_mid",
+    "a": [
+     0.8,
+     0.1,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "mid_seam_first_half",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:1153",
+   "inputs": {
+    "op": "get_mid",
+    "a": [
+     0.9,
+     0.2,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "mid_empty",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:1153",
+   "inputs": {
+    "op": "get_mid",
+    "a": [
+     1e+20,
+     -1e+20,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "add_empty_quirk",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:262",
+   "inputs": {
+    "op": "add_interval",
+    "a": [
+     1e+20,
+     -1e+20,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.2,
+     0.3,
+     0.0
+    ],
+    "flag": true,
+    "has_period": false
+   }
+  },
+  {
+   "name": "add_out_of_range",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:262",
+   "inputs": {
+    "op": "add_interval",
+    "a": [
+     0.2,
+     0.4,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     1.5,
+     0.3,
+     0.0
+    ],
+    "flag": true,
+    "has_period": false
+   }
+  },
+  {
+   "name": "add_case0_disjoint",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:262",
+   "inputs": {
+    "op": "add_interval",
+    "a": [
+     0.2,
+     0.4,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.6,
+     0.7,
+     0.0
+    ],
+    "flag": true,
+    "has_period": false
+   }
+  },
+  {
+   "name": "add_case2_disjoint_restore",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:262",
+   "inputs": {
+    "op": "add_interval",
+    "a": [
+     0.8,
+     0.1,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.3,
+     0.5,
+     0.0
+    ],
+    "flag": true,
+    "has_period": false
+   }
+  },
+  {
+   "name": "add_case3_full",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:262",
+   "inputs": {
+    "op": "add_interval",
+    "a": [
+     0.8,
+     0.3,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.5,
+     0.4,
+     0.0
+    ],
+    "flag": true,
+    "has_period": false
+   }
+  },
+  {
+   "name": "add_full_input",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:262",
+   "inputs": {
+    "op": "add_interval",
+    "a": [
+     0.2,
+     0.4,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "flag": true,
+    "has_period": false
+   }
+  },
+  {
+   "name": "setminmax_bad",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:512",
+   "inputs": {
+    "op": "set_min_max",
+    "a": [
+     0.1,
+     0.2,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     -0.5,
+     0.5,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "setminmax_full_by_len",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:512",
+   "inputs": {
+    "op": "set_min_max",
+    "a": [
+     0.1,
+     0.2,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "contained_cross_in_cross",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:586",
+   "inputs": {
+    "op": "is_contained_by",
+    "a": [
+     0.9,
+     0.1,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.8,
+     0.2,
+     1.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "contained_plain_in_cross",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:586",
+   "inputs": {
+    "op": "is_contained_by",
+    "a": [
+     0.85,
+     0.9,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.8,
+     0.2,
+     1.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "contained_cross_in_plain",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:586",
+   "inputs": {
+    "op": "is_contained_by",
+    "a": [
+     0.8,
+     0.2,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.1,
+     0.9,
+     1.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "contained_equal",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:586",
+   "inputs": {
+    "op": "is_contained_by",
+    "a": [
+     0.1,
+     0.9,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.1,
+     0.9,
+     1.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "contained_in_empty",
+   "upstream_ref": "source/SMLib/src/SmPeriodicExtent1d.cpp:586",
+   "inputs": {
+    "op": "is_contained_by",
+    "a": [
+     0.1,
+     0.9,
+     1.0,
+     0.0
+    ],
+    "b": [
+     1e+20,
+     -1e+20,
+     1.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "set_full_false",
+   "upstream_ref": "source/SMLib/inc/SmPeriodicExtent1d.h:125",
+   "inputs": {
+    "op": "set_full_period",
+    "a": [
+     0.1,
+     0.9,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "set_full_true",
+   "upstream_ref": "source/SMLib/inc/SmPeriodicExtent1d.h:125",
+   "inputs": {
+    "op": "set_full_period",
+    "a": [
+     0.1,
+     0.9,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": true,
+    "has_period": false
+   }
+  },
+  {
+   "name": "is_empty_yes",
+   "upstream_ref": "source/SMLib/inc/SmPeriodicExtent1d.h:131",
+   "inputs": {
+    "op": "is_empty",
+    "a": [
+     1e+20,
+     -1e+20,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "crosses_seam_yes",
+   "upstream_ref": "source/SMLib/inc/SmPeriodicExtent1d.h:135",
+   "inputs": {
+    "op": "crosses_seam",
+    "a": [
+     0.9,
+     0.1,
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "get_period",
+   "upstream_ref": "source/SMLib/inc/SmPeriodicExtent1d.h:121",
+   "inputs": {
+    "op": "get_period",
+    "a": [
+     0.9,
+     0.1,
+     360.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  },
+  {
+   "name": "new_full_zero",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:4522",
+   "inputs": {
+    "op": "new_full",
+    "a": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "flag": false,
+    "has_period": false
+   }
+  }
+ ]
+}
