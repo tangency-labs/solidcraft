@@ -615,12 +615,13 @@ impl DialogComputation {
     }
 }
 
-fn adopt_dialog(app: &mut SolveApp, prepared: solidcraft_engine::ComputedCommands) -> Result<(), String> {
+fn adopt_dialog(app: &mut SolveApp, prepared: solidcraft_engine::ComputedCommands, d: &Dialog) -> Result<(), String> {
     if app.file_load.busy() || app.file_picker_busy() {
         return Err("a file operation is in progress".into());
     }
     let replies = app.session.accept_commands(prepared).map_err(|e| e.to_string())?;
     app.big_operation = true;
+    let made = crate::hole_place::holes_made(&replies);
     for (id, reply) in replies {
         let stop = (id == "joint.drive").then(|| crate::dialogs_assembly::drive_stop(&reply)).flatten();
         app.command_completed(&id, Ok(reply))?;
@@ -628,6 +629,7 @@ fn adopt_dialog(app: &mut SolveApp, prepared: solidcraft_engine::ComputedCommand
             app.set_status(why, false);
         }
     }
+    crate::hole_place::group_made(app, d, made);
     Ok(())
 }
 
@@ -4138,7 +4140,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 Err(error) => d.refuse(app, error),
             }
         } else {
-            let run = result.and_then(|prepared| adopt_dialog(app, prepared));
+            let run = result.and_then(|prepared| adopt_dialog(app, prepared, &d));
             match run {
                 Ok(()) => {
                     cancel = !apply_again;
@@ -4888,16 +4890,18 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
     }
     if d.previews() {
         let prepared = DialogComputation::new(app, d)?.compute()?;
-        return adopt_dialog(app, prepared);
+        return adopt_dialog(app, prepared, d);
     }
     let commands = apply_commands(app, d)?;
     if let Some((_, marker)) = d.editing {
         // Record the actual pre-edit timeline state in the command's undo snapshot.
         roll_marker(app, marker)?;
     }
+    let mut replies = Vec::new();
     for (cmd, params) in commands {
         match app.run(&cmd, params) {
             Ok(reply) => {
+                replies.push((cmd.clone(), reply.clone()));
                 // A drive that stopped short says where, and why.
                 if cmd == "joint.drive"
                     && let Some(why) = crate::dialogs_assembly::drive_stop(&reply)
@@ -4914,6 +4918,8 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
             }
         }
     }
+    let made = crate::hole_place::holes_made(&replies);
+    crate::hole_place::group_made(app, d, made);
     if let Kind::Section { offset, flip, hatch } = &d.kind
         && let Some(cut) = app.session.section
     {

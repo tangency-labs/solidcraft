@@ -1929,6 +1929,8 @@
   "prefs.design_tools.degrees": "도",
   "prefs.design_tools.double_click_help": "연결된 구성요소를 제자리에서 편집할 수도 있습니다.",
   "prefs.design_tools.ghost": "이동한 부품의 이전 위치를 고스트로 표시",
+  "prefs.design_tools.hole_group": "함께 만든 구멍 그룹화",
+  "prefs.design_tools.hole_group_help": "한 번에 만든 구멍은 기록에서 하나의 폴더를 공유하며, 처음에는 닫혀 있습니다. 폴더를 열어 각 구멍을 개별적으로 편집하세요.",
   "prefs.design_tools.hole_moves_help": "면을 다시 선택하면 구멍을 제거하지 않고 이동합니다.",
   "prefs.design_tools.hole_snaps_help": "면의 가운데와 원형 모서리의 중심입니다.",
   "prefs.design_tools.imported_files": "가져온 파일",

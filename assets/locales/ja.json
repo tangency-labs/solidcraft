@@ -2561,6 +2561,8 @@
   "prefs.design_tools.degrees": "度",
   "prefs.design_tools.double_click_help": "リンクされたコンポーネントをその場で編集することもできます。",
   "prefs.design_tools.ghost": "移動したパーツの元の位置をゴースト表示",
+  "prefs.design_tools.hole_group": "一緒に作成した穴をまとめる",
+  "prefs.design_tools.hole_group_help": "一度に作成した穴は履歴で1つのフォルダーにまとめられ、最初は閉じています。開くと穴を個別に編集できます。",
   "prefs.design_tools.hole_moves_help": "面をもう一度選ぶと穴を削除せずに移動します。",
   "prefs.design_tools.hole_several": "1つの面に複数の穴",
   "prefs.design_tools.hole_several_help": "面の別の場所を選ぶと穴を追加し、穴を選ぶとその穴を削除します。",

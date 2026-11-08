@@ -2561,6 +2561,8 @@
   "prefs.design_tools.degrees": "Độ",
   "prefs.design_tools.double_click_help": "Hoặc để chỉnh sửa thành phần được liên kết tại chỗ.",
   "prefs.design_tools.ghost": "Hiện vị trí cũ của chi tiết đã di chuyển dưới dạng bóng mờ",
+  "prefs.design_tools.hole_group": "Nhóm các lỗ được tạo cùng lúc",
+  "prefs.design_tools.hole_group_help": "Các lỗ được tạo trong một lần dùng chung một thư mục trong Lịch sử, ban đầu được đóng; mở thư mục để sửa từng lỗ.",
   "prefs.design_tools.hole_moves_help": "Chọn lại mặt sẽ di chuyển lỗ thay vì xóa lỗ.",
   "prefs.design_tools.hole_several": "Nhiều lỗ trên một mặt",
   "prefs.design_tools.hole_several_help": "Chọn chỗ khác trên mặt sẽ thêm một lỗ; chọn một lỗ sẽ xóa lỗ đó.",

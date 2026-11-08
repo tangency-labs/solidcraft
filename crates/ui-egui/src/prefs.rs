@@ -1496,6 +1496,9 @@ preference_settings! {
     /// and a pick on a hole takes it out (`hole_place`). Off by default: a face takes one Single
     /// hole, and a second pick on it takes the hole out (or moves it, with `hole_moves`).
     hole_several: bool = false, PAGE_TOOLS => check_id("prefs.design_tools.hole_several");
+    /// The holes one Hole command makes (two or more) go into a feature folder in History, closed
+    /// at first (`hole_place`). Off by default: each hole is its own entry in History, as before.
+    hole_group: bool = false, PAGE_TOOLS => check_id("prefs.design_tools.hole_group");
     /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
     hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
     /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit): a marker that
@@ -6412,6 +6415,7 @@ mod tests {
             ("hole_snaps", json!(true), PAGE_TOOLS),
             ("hole_moves", json!(true), PAGE_TOOLS),
             ("hole_several", json!(true), PAGE_TOOLS),
+            ("hole_group", json!(true), PAGE_TOOLS),
             ("extrude_arrow_face_stops", json!(false), PAGE_TOOLS),
             ("extrude_auto_to_object", json!(false), PAGE_TOOLS),
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
