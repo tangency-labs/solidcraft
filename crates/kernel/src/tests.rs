@@ -1436,6 +1436,25 @@ fn draft_of_a_pocket_on_a_body_with_a_far_rounded_edge() {
     assert_eq!(m.merged.faces, faces_before, "the round and every other face survive");
 }
 
+/// A body's exact box is measured once for its record and shared by its clones: a cut's
+/// skip test asks it of the same body before every cut, and on a body with modelled threads
+/// each measurement takes up to half a second (#13480). A new record measures its own.
+#[test]
+fn exact_bounds_are_measured_once_per_record() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let c = b.clone();
+    assert!(c.exact_box.get().is_none());
+    let bb = b.exact_bounds().unwrap();
+    assert!(bb.min.dist(Vec3::ZERO) < 1e-6 && bb.max.dist(Vec3::new(10.0, 20.0, 30.0)) < 1e-6, "{bb:?}");
+    assert_eq!(c.exact_box.get(), Some(&bb), "a clone shares the measurement");
+    assert_eq!(c.exact_bounds().unwrap(), bb);
+    let tool = box_solid(Vec3::new(5.0, -1.0, 15.0), Vec3::new(11.0, 21.0, 31.0)).unwrap();
+    let cut = boolean(&b, &tool, BoolOp::Cut).unwrap().unwrap();
+    assert!(cut.exact_box.get().is_none(), "a new record is measured afresh");
+    let cb = cut.exact_bounds().unwrap();
+    assert!(cb.max.dist(Vec3::new(10.0, 20.0, 30.0)) < 1e-6 && cb.min.dist(Vec3::ZERO) < 1e-6, "{cb:?}");
+}
+
 /// A round wall is stored in pieces (a cylinder's two halves); one pick drafts all of it (#547).
 /// A hole drafted from the top narrows going down: a frustum from R 10 to 10 − 25 · tan 5°.
 #[test]
