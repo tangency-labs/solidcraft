@@ -15,15 +15,33 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 }
 
 #[test]
+fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_apply() {
+    let mut h = Harness::new();
+    crate::keymap::bind(&mut h.app, "panel.sash.left", "Ctrl+Left", false).unwrap();
+    crate::keymap::bind(&mut h.app, "panel.sash.right", "", false).unwrap();
+    run(&mut h, "settings.profile.save", json!({"name":"Panels"}));
+    let profile = run(&mut h, "settings.profile.export", json!({"name":"Panels"}))["profile"].clone();
+    assert_eq!(profile["shortcuts"]["panel.sash.left"], "Ctrl+Left");
+    assert_eq!(profile["shortcuts"]["panel.sash.right"], "");
+    crate::keymap::reset(&mut h.app, None);
+    run(&mut h, "settings.profile.import", json!({"profile":profile,"name":"Imported panels"}));
+    run(&mut h, "settings.profile.apply", json!({"name":"Imported panels"}));
+    assert_eq!(crate::keymap::keys(&h.app, "panel.sash.left"), ["Ctrl+Left"]);
+    assert!(crate::keymap::keys(&h.app, "panel.sash.right").is_empty());
+}
+
+#[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 100, "page presentation must not alter profile membership");
+    assert_eq!(keys.len(), 103, "Appearance includes its two system-theme slots");
     for key in [
         "nav",
         "mouse_gestures",
         "radial_context_menu",
         "zoom_reverse",
         "theme",
+        "theme_day",
+        "theme_night",
         "ui_scale",
         "ui_font",
         "navigator_style",
@@ -60,6 +78,38 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let doc = capture(&h.app, "Laptop");
     assert_eq!(doc["format"], FORMAT);
     assert_eq!(sanitize(&doc).unwrap(), doc, "a captured profile passes its own checks unchanged");
+}
+
+#[test]
+fn profile_panel_layout_is_checked_separately_from_ordinary_preferences() {
+    use solidcraft_engine::panels::{Layout, LayoutEnvelope, PanelRegistry, WorkspaceId, encode};
+
+    let h = Harness::new();
+    let mut doc = capture(&h.app, "Layout");
+    assert!(doc.get("panel_layout").is_none(), "Classic does not acquire an opt-in layout through profile capture");
+    let envelope = LayoutEnvelope::new(Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()));
+    let bytes = encode(&envelope, &PanelRegistry::default()).unwrap();
+    let layout = json!({"version":1,"envelope":String::from_utf8(bytes).unwrap()});
+    doc["panel_layout"] = layout.clone();
+    assert_eq!(sanitize(&doc).unwrap()["panel_layout"], layout, "the current layout travels by value");
+    let workspaces = json!({"version":2,"selected":"fixture.workspace","workspaces":{"fixture.workspace":layout["envelope"]}});
+    doc["panel_layout"] = workspaces.clone();
+    assert_eq!(sanitize(&doc).unwrap()["panel_layout"], workspaces, "workspace arrangements and selection travel together");
+
+    for invalid in [
+        Value::Null,
+        json!([]),
+        json!({"version":99,"envelope":"future"}),
+        json!({"version":1,"envelope":"not a layout"}),
+        json!({"version":1,"envelope":"x".repeat(256 * 1024 + 1)}),
+        json!({"version":1,"catalogue":[1,2,3]}),
+        json!({"version":2,"selected":"fixture.workspace","workspaces":{}}),
+        json!({"version":2,"selected":"missing","workspaces":{"fixture.workspace":layout["envelope"]}}),
+        json!({"version":2,"selected":"different","workspaces":{"different":layout["envelope"]}}),
+    ] {
+        doc["panel_layout"] = invalid;
+        assert!(sanitize(&doc).is_err(), "an explicit invalid layout must not become a profile that silently omits it");
+    }
 }
 
 #[test]
@@ -753,6 +803,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "dialog_buttons",
         "dialog_place",
         "direct_interaction",
+        "escape_twice_finishes_sketch",
         "free_orbit",
         "free_orbit_upright",
         "hidden_toolbar_tabs",
@@ -817,7 +868,9 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "status_bar",
         "suppress_sketch_snap",
         "theme",
+        "theme_day",
         "theme_follow",
+        "theme_night",
         "theme_options",
         "timeline_collapsed",
         "timeline_left",
@@ -844,7 +897,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 100);
+    assert_eq!(expected.len(), 103);
     assert_eq!(actual, expected);
 }
 
@@ -923,6 +976,24 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
         let out = run(&mut h, "settings.profile.apply", json!({"name":imported["name"]}));
         assert_eq!(out["skipped"], json!(["home_fit_size"]));
         assert_eq!(h.app.preferences.home_fit_size, 0.5, "an out-of-range profile value is refused");
+    }
+}
+
+#[test]
+fn theme_day_and_night_are_captured_restored_and_saved_in_appearance_profiles() {
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"theme":"system", "theme_day":"akari", "theme_night":"onyx"}));
+    run(&mut h, "settings.profile.save", json!({"name":"System pair"}));
+    let saved = h.app.settings_profiles.list[0].clone();
+    assert_eq!(saved["preferences"]["theme_day"], "akari");
+    assert_eq!(saved["preferences"]["theme_night"], "onyx");
+    assert_eq!(sanitize(&saved).unwrap(), saved);
+    h.call("ui.prefs", json!({"theme_day":"light", "theme_night":"dark"}));
+    run(&mut h, "settings.profile.apply", json!({"name":"System pair"}));
+    assert_eq!((&h.app.preferences.theme_day[..], &h.app.preferences.theme_night[..]), ("akari", "onyx"));
+    for key in ["theme_day", "theme_night"] {
+        let pages: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter(|(field, _)| *field == key).map(|(_, page)| *page).collect();
+        assert_eq!(pages, [Some(crate::prefs::PAGE_APPEARANCE)]);
     }
 }
 

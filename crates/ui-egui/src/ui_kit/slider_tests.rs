@@ -48,15 +48,15 @@ fn theme_notice_actions_fit_wrap_and_accept_native_pointer_clicks_in_both_themes
     for dark in [false, true] {
         crate::theme::set_dark(dark);
         for language in ["en", "de"] {
-            let _language = crate::i18n::scope(language);
+            let _language = solidcraft_ui_text::scope(language);
             let t = Tokens::get();
             let mut undo_width = 0.0;
             let mut dismiss_width = 0.0;
             let mut label_wrap_width = 0.0;
             test_support::frame(&crate::fonts::test_context(), vec![], |ui| {
-                undo_width = ContentWidth::button(ui, crate::i18n::tr("ui.undo"));
-                dismiss_width = ContentWidth::button(ui, crate::i18n::tr("prefs.theme_notice_dismiss"));
-                label_wrap_width = (ContentWidth::label(ui, crate::i18n::tr("prefs.theme_notice_dismiss")) / 3.0).ceil();
+                undo_width = ContentWidth::button(ui, solidcraft_ui_text::tr("ui.undo"));
+                dismiss_width = ContentWidth::button(ui, solidcraft_ui_text::tr("prefs.theme_notice_dismiss"));
+                label_wrap_width = (ContentWidth::label(ui, solidcraft_ui_text::tr("prefs.theme_notice_dismiss")) / 3.0).ceil();
             });
             let actions_width = undo_width + dismiss_width + t.space_8 * 2.0;
             let narrow_width = undo_width.max(dismiss_width);
@@ -116,11 +116,12 @@ fn blur_meter_boundaries_and_off_thumb() {
             let ctx = crate::fonts::test_context();
             let t = Tokens::get();
             let mut value = radius;
-            let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 scope(ui, |ui| {
                     slider(ui, &mut value, 0.0..=40.0, Slider { step: Some(1.0), show_value: false, off_endpoint: true, ..Default::default() });
                 });
             });
+            out.textures_delta.clear();
             assert_eq!(value, radius, "drawing cannot round persisted fractional values");
             assert_eq!(out.shapes.iter().filter(|s| matches!(s.shape, egui::Shape::Circle(_))).count(), 1, "off/solid thumb has no native duplicate");
             let hit = scenario::rect_of("dialog:slider_track:").expect("blur slider track");

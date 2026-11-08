@@ -285,7 +285,7 @@ fn collision_rows(
             ui.vertical(|ui| {
                 ui.vertical(|ui| {
                     if hits.is_empty() {
-                        ui.label(RichText::new(crate::i18n::tr("motion.no_collisions")).color(t.text_dim));
+                        ui.label(RichText::new(solidcraft_ui_text::tr("motion.no_collisions")).color(t.text_dim));
                     }
                     for (i, c) in hits.iter().enumerate() {
                         let steps: Vec<String> = c["steps"]
@@ -298,7 +298,8 @@ fn collision_rows(
                             })
                             .collect();
                         let name = |k: &str| c[k].as_str().unwrap_or_default().to_string();
-                        let text = crate::i18n::format("motion.collision", &[("a", &name("a")), ("b", &name("b")), ("steps", &steps.join(", "))]);
+                        let text =
+                            solidcraft_ui_text::format("motion.collision", &[("a", &name("a")), ("b", &name("b")), ("steps", &steps.join(", "))]);
                         // A click shows where they first collide.
                         let link = ui.link(RichText::new(text).color(t.error));
                         crate::scenario::publish_handle(&format!("motion:collision:{i}"), link.rect.center());
@@ -310,14 +311,14 @@ fn collision_rows(
                     }
                     if v["truncated"] == true {
                         let to = v["checked_to"].as_f64().map(|x| x.round().to_string()).unwrap_or_default();
-                        ui.label(RichText::new(crate::i18n::format("motion.checked_to", &[("step", &to)])).color(t.warning));
+                        ui.label(RichText::new(solidcraft_ui_text::format("motion.checked_to", &[("step", &to)])).color(t.warning));
                     }
                 });
             });
         }
         Some(Err(e)) => {
             ui.vertical(|ui| {
-                ui.add(egui::Label::new(RichText::new(crate::i18n::tr_label(e)).color(t.error)).wrap());
+                ui.add(egui::Label::new(RichText::new(solidcraft_ui_text::tr_label(e)).color(t.error)).wrap());
             });
         }
         None => {}
@@ -385,7 +386,7 @@ fn plot_rows(
                 });
             }
             Some(Err(e)) => {
-                ui.add(egui::Label::new(RichText::new(crate::i18n::tr_label(e)).color(t.text_dim)).wrap());
+                ui.add(egui::Label::new(RichText::new(solidcraft_ui_text::tr_label(e)).color(t.text_dim)).wrap());
             }
             None => {}
         });

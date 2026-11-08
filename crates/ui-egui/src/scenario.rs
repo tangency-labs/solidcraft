@@ -16,6 +16,8 @@
 //!   cursor can act it out first); fails if the answer came in fewer than `min_frames` frames
 //! - `{"call": "ui.view", "params": {…}}`: any other control request (`fail: true` expects an
 //!   error)
+//! - `{"panel_fixture": {"enabled": true, "preset": "docks"}}`: explicit synthetic content
+//!   in the real workspace panel host; `{}` inspects and `{"enabled": false}` tears it down
 //! - `{"make_image": "pic.png"}`: a picture in the scenario's folder
 //! - `{"choose_file": "part.step"}`: the next Open picker returns that file of the scenario's
 //!   folder (Save pickers save there)
@@ -51,74 +53,15 @@ use solidcraft_engine::Session;
 use crate::control::{ControlRequest, Outcome, handle};
 use crate::{Services, SolveApp};
 
+// The widget registry (handles, rects and counts drawn this frame) lives in its own crate so UI
+// components can publish without depending on the app; re-exported here for the scenario runner.
+pub use solidcraft_ui_registry::{
+    clear_handles, count_of, handle_at, handles, publish_count, publish_handle, publish_rect, publish_target, publish_target_as, rect_of, rects,
+};
+
 thread_local! {
-    /// Drag handles drawn this frame (name, screen point): manipulators publish theirs so
-    /// scenarios (and the control channel's `ui.at {handle}`) can grab them.
-    static HANDLES: RefCell<Vec<(String, egui::Pos2)>> = const { RefCell::new(Vec::new()) };
-    /// Painted parts with no widget of their own (the toolbar, the workspace switcher…): rects
-    /// and counts by name, for checks.
-    static RECTS: RefCell<Vec<(String, egui::Rect)>> = const { RefCell::new(Vec::new()) };
-    static COUNTS: RefCell<Vec<(String, f64)>> = const { RefCell::new(Vec::new()) };
     /// Widths a scenario's `same_width` checks remembered (by rect name).
     static WIDTHS: RefCell<Vec<(String, f32)>> = const { RefCell::new(Vec::new()) };
-}
-
-/// A manipulator's handle drawn this frame at `at` (screen), by name: "arrow" (a dialog's value
-/// arrow), "triad_x"… Call it from the code that draws the handle, every frame it shows.
-pub fn publish_handle(name: &str, at: egui::Pos2) {
-    // The latest wins (lookups search from the end), so publishing is cheap for browser rows.
-    HANDLES.with(|h| h.borrow_mut().push((name.to_string(), at)));
-}
-
-/// Publish a rectangle and its centered interaction handle with the same explicit identity.
-pub(crate) fn publish_target(name: &str, rect: egui::Rect) {
-    publish_target_as(name, name, rect);
-}
-
-/// Publish centered geometry with explicit, independently named handle and rectangle aliases.
-pub(crate) fn publish_target_as(handle: &str, rect_name: &str, rect: egui::Rect) {
-    publish_handle(handle, rect.center());
-    publish_rect(rect_name, rect);
-}
-
-/// Where a handle was drawn last frame.
-pub fn handle_at(name: &str) -> Option<egui::Pos2> {
-    HANDLES.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
-}
-
-/// Every handle drawn last frame whose name starts with `prefix`.
-pub fn handles(prefix: &str) -> Vec<(String, egui::Pos2)> {
-    HANDLES.with(|h| h.borrow().iter().filter(|(n, _)| n.starts_with(prefix)).cloned().collect())
-}
-
-/// A painted part's rect this frame, by name ("toolbar", "workspace_switcher").
-pub fn publish_rect(name: &str, r: egui::Rect) {
-    RECTS.with(|h| h.borrow_mut().push((name.to_string(), r)));
-}
-
-pub fn rect_of(name: &str) -> Option<egui::Rect> {
-    RECTS.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
-}
-
-#[cfg(test)]
-pub(crate) fn rects(prefix: &str) -> Vec<(String, egui::Rect)> {
-    RECTS.with(|r| r.borrow().iter().filter(|(name, _)| name.starts_with(prefix)).cloned().collect())
-}
-
-/// A number about this frame's drawing, by name ("axis_view_highlights": the axis view's highlighted tips).
-pub fn publish_count(name: &str, v: f64) {
-    COUNTS.with(|h| h.borrow_mut().push((name.to_string(), v)));
-}
-
-pub fn count_of(name: &str) -> Option<f64> {
-    COUNTS.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
-}
-
-/// Forget last frame's handles, rects and counts (called as a frame starts).
-pub fn clear_handles() {
-    HANDLES.with(|h| h.borrow_mut().clear());
-    RECTS.with(|h| h.borrow_mut().clear());
-    COUNTS.with(|h| h.borrow_mut().clear());
 }
 
 /// `v` with "$DIR" in its strings replaced by `dir`.
@@ -179,7 +122,7 @@ impl Drop for Harness {
 
 impl Harness {
     pub fn new() -> Harness {
-        crate::i18n::pin_system_language();
+        solidcraft_ui_text::pin_system_language();
         let mut h = Harness {
             app: SolveApp::new(Session::default(), Services::default()),
             ctx: {
@@ -475,7 +418,9 @@ impl Harness {
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
         let res =
-            if let Some(id) = s.get("start").and_then(Value::as_str) {
+            if let Some(params) = s.get("panel_fixture") {
+                self.call("ui.panel_fixture", params.clone())
+            } else if let Some(id) = s.get("start").and_then(Value::as_str) {
                 self.call("ui.start", json!({ "command": id }))
             } else if let Some(k) = s.get("key").and_then(Value::as_str) {
                 {
@@ -667,7 +612,7 @@ impl Harness {
                     eprintln!("widgets: {texts:?}");
                 }
                 if s["debug"] == json!("handles") {
-                    let names: Vec<String> = HANDLES.with(|h| h.borrow().iter().map(|(n, p)| format!("{n} @{:.0},{:.0}", p.x, p.y)).collect());
+                    let names: Vec<String> = handles("").iter().map(|(n, p)| format!("{n} @{:.0},{:.0}", p.x, p.y)).collect();
                     eprintln!("handles: {names:?}");
                 }
                 return Ok(());

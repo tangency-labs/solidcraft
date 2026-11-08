@@ -217,6 +217,9 @@ fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
                 continue;
             }
             let src = std::fs::read_to_string(&path).unwrap();
+            if src.trim_start().starts_with("#![cfg(test)]") {
+                continue;
+            }
             let code = src.split("#[cfg(test)]").next().unwrap_or(&src);
             let n: usize = COLOUR_LITERALS.iter().map(|p| code.matches(p).count()).sum();
             let allowed = ALLOWED_LITERALS.iter().find(|(f, _, _)| *f == relative).map_or(0, |(_, n, _)| *n);
@@ -262,7 +265,7 @@ fn analysis_shader_colours_come_from_the_uniform() {
             "vec3<f32>(0.35)",
             "vec3<f32>(1.0)",
         ],
-        "a new colour in the analysis shader must come from `ana_c` (theme::AnalysisColors)"
+        "a new colour in the analysis shader must come from `ana_c` (solidcraft_color::AnalysisColors)"
     );
     assert_eq!(body.matches("u.ana_c[").count(), 9, "every analysis colour reads `ana_c`");
 }

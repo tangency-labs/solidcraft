@@ -1,6 +1,6 @@
 //! Appearance inheritance selector. The caller owns selection and commands.
 use super::{Sphere, sphere::paint_sphere};
-use crate::{scenario, theme::Tokens};
+use crate::theme::Tokens;
 use egui::{Rect, Sense, Stroke, Ui, pos2, vec2};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,10 +79,10 @@ pub fn look_chain(ui: &mut Ui, id: &str, labels: [&str; 4], looks: [Option<Spher
         let label_left = (cell.center().x - label_width / 2.0).max(cell.left());
         let label_rect = Rect::from_min_max(pos2(label_left, cell.top() + side + t.space_2), cell.max);
         super::text::paint_text(ui, label_rect, label, font, if step == active { t.render_accent } else { t.form_dim }, false);
-        scenario::publish_rect(&key, cell);
-        scenario::publish_handle(&key, cell.center());
+        solidcraft_ui_registry::publish_rect(&key, cell);
+        solidcraft_ui_registry::publish_handle(&key, cell.center());
     }
-    scenario::publish_rect(id, rect);
+    solidcraft_ui_registry::publish_rect(id, rect);
     clicked
 }
 

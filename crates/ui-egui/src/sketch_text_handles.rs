@@ -294,7 +294,7 @@ pub(crate) fn show(app: &SolveApp, ui: &egui::Ui, painter: &Painter, proj: &Proj
     let line = Stroke::new(1.0, tk.accent);
     let mut outline = s.corners.to_vec();
     outline.push(s.corners[0]);
-    painter.extend(crate::viewport::dashed_line(&outline, painter.clip_rect(), line, 5.0, 4.0));
+    painter.extend(crate::ui_kit::dashed_line(&outline, painter.clip_rect(), line, 5.0, 4.0));
     painter.line_segment([s.knob_base, s.knob], line);
     let drag = DRAG.with(|d| d.borrow().as_ref().map(|d| d.grab));
     let under = hover.and_then(|p| hit(app, proj, p)).map(|(_, g)| g);

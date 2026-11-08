@@ -114,6 +114,9 @@ struct DimensionDraft {
     driven: bool,
     /// Draw ellipses with their axes, when the draft was made (see [`ellipse_as_before`]).
     half_axes: bool,
+    /// The first dimension of a sketch scales it rather than distorting it (#1365), unless the
+    /// Sketch preference is off (#4109).
+    scale_sketch: bool,
 }
 
 impl DimensionDraft {
@@ -125,8 +128,9 @@ impl DimensionDraft {
             && app.session.pending_moves == self.pending
     }
     fn params(&self, expr: &str) -> serde_json::Value {
-        // The first dimension of a sketch scales it rather than distorting it (#1365).
-        let mut params = json!({"entities": entities_value(&self.entities), "value": expr, "scale_sketch": true});
+        // The first dimension of a sketch scales it rather than distorting it (#1365), unless the
+        // Sketch preference is off (#4109).
+        let mut params = json!({"entities": entities_value(&self.entities), "value": expr, "scale_sketch": self.scale_sketch});
         if let Some(at) = self.at {
             params["text_at"] = json!([at.x, at.y]);
         }
@@ -159,7 +163,7 @@ impl DimensionDraft {
 /// of its id, and without the `value:` field tag, since the box is the value
 /// ("Sketch Dimension: `mm` is a unit name, so it cannot be a parameter name").
 fn shown_error(id: &str, e: &str) -> String {
-    let label = crate::i18n::tr_label(crate::command_label(id));
+    let label = solidcraft_ui_text::tr_label(crate::command_label(id));
     crate::friendly_error(id, e).replacen(&format!("{label}: value: "), &format!("{label}: "), 1)
 }
 
@@ -222,7 +226,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
         ellipse_as_before(draft.half_axes, &mut params);
         AXIS.with(|axis| *axis.borrow_mut() = None);
         app.run("sketch.dimension", params)?;
-        app.set_status(crate::i18n::tr("sketch.dimension_added_driven"), false);
+        app.set_status(solidcraft_ui_text::tr("sketch.dimension_added_driven"), false);
         return Ok(());
     }
     EDIT.with(|edit| {
@@ -307,8 +311,8 @@ pub fn pin(app: &SolveApp, at: Vec2) {
 }
 
 /// Move a draft's text to `at`. Where the text goes can change what the dimension measures
-/// (two points or a slanted line: inside the box they span the distance between them, above or
-/// below it the horizontal one, beside it the vertical one), so a value nothing was typed into yet
+/// (two points or a slanted line: across from them the distance between them, pulled past an
+/// end up or down the horizontal one, sideways the vertical one), so a value nothing was typed into yet
 /// becomes what the new dimension measures; carrying the old one over would preview, and on
 /// Enter apply, the aligned length as a horizontal or vertical span, moving the picked points.
 fn move_text(app: &SolveApp, e: &mut Edit, at: Vec2) {
@@ -404,6 +408,7 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
         error: None,
         driven,
         half_axes: app.preferences.ellipse_axes,
+        scale_sketch: app.preferences.first_dimension_scales,
     };
     if !draft.preview.sketch(sketch).is_some_and(|solved| solved.report.ok()) {
         return Err("That dimension conflicts with the sketch constraints".into());
@@ -748,7 +753,7 @@ fn label_marked(k: &ConstraintKind, radius_mark: bool, expr: Option<&str>, drive
     let plain = expr.is_none_or(|e| {
         let e = e.trim();
         let e = ["mm", "cm", "in", "ft", "m", "deg", "rad", "°"].iter().find_map(|unit| e.strip_suffix(unit)).unwrap_or(e);
-        crate::prefs::parse_number(e).is_some()
+        crate::ui_kit::parse_number(e).is_some()
     });
     let text = if plain { num } else { format!("fx: {num}") };
     if driven { format!("({text})") } else { text }
@@ -1081,26 +1086,47 @@ pub fn pick_reference(app: &SolveApp, ctx: &egui::Context, pos: Pos2, double: bo
 /// The gap the value box keeps from the point it belongs to (#11057): a click at the pointer
 /// reaches the sketch (to place the text or pick a second entity) instead of the box.
 const EDIT_GAP: f32 = 30.0;
-/// The box's height as its placement works it out: a name line, the value and a possible error.
+/// The box's least height as its placement works it out: a name line, the value and a possible
+/// error. A box drawn taller (a wrapped error) is placed by the height it was drawn at.
 const EDIT_HEIGHT: f32 = 80.0;
+/// The room the box leaves at the view's right and bottom edges.
+const EDIT_MARGIN: f32 = 6.0;
 
 /// Where the value box opens: beside the text, or beside the pointer while a value is typed
-/// first. Near the viewport's edge it opens on the point's other side rather than slide back
-/// over it.
-fn edit_anchor(at: Pos2, live: bool, drawable: Option<egui::Rect>, popup_width: f32) -> Pos2 {
-    let mut anchor = if live { at + vec2(EDIT_GAP, EDIT_GAP) } else { at - vec2(45.0, 11.0) };
-    let Some(rect) = drawable else { return anchor };
-    if live {
-        if anchor.x + popup_width > rect.right() - 6.0 {
-            anchor.x = at.x - popup_width - EDIT_GAP;
-        }
-        if anchor.y + EDIT_HEIGHT > rect.bottom() - 6.0 {
-            anchor.y = at.y - EDIT_HEIGHT - EDIT_GAP;
-        }
+/// first. `size` is the box's (at least as wide as its field and [`EDIT_HEIGHT`] tall).
+///
+/// Beside the pointer the box keeps [`EDIT_GAP`] from it on at least one axis, so it never
+/// covers the square around the pointer a click picks in (#11057). It opens below and right of
+/// the pointer; where the view has no room there it tries left, then above, then above and left.
+/// Where no corner fits it keeps the gap on one axis and slides along the other, and it only
+/// gives up the gap when the view is too small for the box on either side.
+fn edit_anchor(at: Pos2, live: bool, drawable: Option<egui::Rect>, size: egui::Vec2) -> Pos2 {
+    let (w, h) = (size.x, size.y);
+    let Some(rect) = drawable else {
+        return if live { at + vec2(EDIT_GAP, EDIT_GAP) } else { at - vec2(45.0, 11.0) };
+    };
+    let clamp_x = |x: f32| x.clamp(rect.left(), (rect.right() - w - EDIT_MARGIN).max(rect.left()));
+    let clamp_y = |y: f32| y.clamp(rect.top(), (rect.bottom() - h - EDIT_MARGIN).max(rect.top()));
+    if !live {
+        return Pos2::new(clamp_x(at.x - 45.0), clamp_y(at.y - 11.0));
     }
-    anchor.x = anchor.x.clamp(rect.left(), (rect.right() - popup_width - 6.0).max(rect.left()));
-    anchor.y = anchor.y.clamp(rect.top(), (rect.bottom() - EDIT_HEIGHT).max(rect.top()));
-    anchor
+    let fits_x = |x: f32| x >= rect.left() && x + w <= rect.right() - EDIT_MARGIN;
+    let fits_y = |y: f32| y >= rect.top() && y + h <= rect.bottom() - EDIT_MARGIN;
+    let (right, left) = (at.x + EDIT_GAP, at.x - EDIT_GAP - w);
+    let (below, above) = (at.y + EDIT_GAP, at.y - EDIT_GAP - h);
+    let corners = [(right, below), (left, below), (right, above), (left, above)];
+    if let Some(&(x, y)) = corners.iter().find(|(x, y)| fits_x(*x) && fits_y(*y)) {
+        return Pos2::new(x, y);
+    }
+    // No corner fits: clear of the pointer below or above it, slid sideways into the view, or
+    // else clear of it to one side, slid up or down.
+    if let Some(y) = [below, above].into_iter().find(|y| fits_y(*y)) {
+        return Pos2::new(clamp_x(right), y);
+    }
+    if let Some(x) = [right, left].into_iter().find(|x| fits_x(*x)) {
+        return Pos2::new(x, clamp_y(below));
+    }
+    Pos2::new(clamp_x(right), clamp_y(below))
 }
 
 fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
@@ -1127,7 +1153,11 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     // picks next, and it opens on the pointer's other side at the viewport's edge (#11057).
     let drawable = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive());
     let popup_width = drawable.map_or(220.0, |rect| (rect.width() - 8.0).clamp(24.0, 220.0));
-    let anchor = edit_anchor(at, e.live.is_some(), drawable, popup_width);
+    // Placed by the size it was drawn at last frame (its frame's margins included), so a
+    // taller box flipped above the pointer still ends short of it.
+    let drawn = ctx.memory(|m| m.area_rect(egui::Id::unique("sc_dim_edit_area"))).map(|r| r.size()).filter(|s| s.is_finite());
+    let size = drawn.map_or(vec2(popup_width, EDIT_HEIGHT), |s| s.max(vec2(popup_width, EDIT_HEIGHT)));
+    let anchor = edit_anchor(at, e.live.is_some(), drawable, size);
     // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
     Container::new(ctx, Surface::Canvas).area(egui::Id::unique("sc_dim_edit_area")).fixed_pos(anchor).order(egui::Order::Background).show(
         ctx,
@@ -1136,8 +1166,8 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
             Container::show_backing(ui, frame, |ui| {
                 crate::ui_kit::scope(ui, |ui| {
                     ui.set_max_width(popup_width);
-                    crate::ui_kit::text(ui, &crate::i18n::format("dialog.dimension_name", &[("name", &e.param)]), crate::ui_kit::Text::Inline)
-                        .backing_on_hover_text(crate::i18n::tr("dialog.dimension_insert_hint"));
+                    crate::ui_kit::text(ui, &solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]), crate::ui_kit::Text::Inline)
+                        .backing_on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"));
                     if !e.owned {
                         // The whole value is selected before the field reads its state, every frame
                         // until the person takes it over, so typing replaces it (#11204). Only on the
@@ -1236,9 +1266,9 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
                     // The sentence comes from the catalog, so it reads in the interface language (#8863).
                     let named = reply.get("renamed").and_then(|r| r.get("to")).and_then(serde_json::Value::as_str);
                     let status = match (reply.get("defined").and_then(serde_json::Value::as_str), named) {
-                        (Some(name), _) => crate::i18n::format("sketch.dimension_applied_defined", &[("name", name)]),
-                        (None, Some(name)) => crate::i18n::format("sketch.dimension_applied_renamed", &[("name", name)]),
-                        (None, None) => crate::i18n::tr("sketch.dimension_applied").to_string(),
+                        (Some(name), _) => solidcraft_ui_text::format("sketch.dimension_applied_defined", &[("name", name)]),
+                        (None, Some(name)) => solidcraft_ui_text::format("sketch.dimension_applied_renamed", &[("name", name)]),
+                        (None, None) => solidcraft_ui_text::tr("sketch.dimension_applied").to_string(),
                     };
                     app.set_status(status, false);
                 }
@@ -1352,13 +1382,81 @@ mod tests {
     fn the_value_box_keeps_its_gap_from_the_pointer() {
         use egui::pos2;
         let view = egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
-        let a = edit_anchor(pos2(300.0, 200.0), true, Some(view), 220.0);
+        let size = vec2(220.0, 80.0);
+        let a = edit_anchor(pos2(300.0, 200.0), true, Some(view), size);
         assert_eq!(a, pos2(330.0, 230.0), "30 px below and right of the pointer");
         // Its right and bottom edges stop 30 px short of the pointer.
-        let a = edit_anchor(pos2(960.0, 560.0), true, Some(view), 220.0);
+        let a = edit_anchor(pos2(960.0, 560.0), true, Some(view), size);
         assert_eq!((a.x + 220.0, a.y + 80.0), (930.0, 530.0), "left of and above the pointer");
         // Editing an existing dimension still opens where its text is.
-        assert_eq!(edit_anchor(pos2(300.0, 200.0), false, Some(view), 220.0), pos2(255.0, 189.0));
+        assert_eq!(edit_anchor(pos2(300.0, 200.0), false, Some(view), size), pos2(255.0, 189.0));
+    }
+
+    /// #11057: wherever the pointer is and whatever the box's size, the box stays inside the view
+    /// and out of the square of `EDIT_GAP` around the pointer: a box drawn taller than its
+    /// estimate, flipped above the pointer, ends short of it, and in a small view the box slides
+    /// along one axis but keeps its gap on the other.
+    #[test]
+    fn the_value_box_never_covers_the_pointer_and_stays_in_the_view() {
+        use egui::pos2;
+        let clear = |a: Pos2, size: egui::Vec2, p: Pos2| {
+            let r = Rect::from_min_size(a, size);
+            r.left() >= p.x + EDIT_GAP - 1e-3
+                || r.right() <= p.x - EDIT_GAP + 1e-3
+                || r.top() >= p.y + EDIT_GAP - 1e-3
+                || r.bottom() <= p.y - EDIT_GAP + 1e-3
+        };
+        // A tall box (a wrapped error line) near the bottom: above the pointer by its real height.
+        let view = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
+        let tall = vec2(228.0, 130.0);
+        let a = edit_anchor(pos2(300.0, 560.0), true, Some(view), tall);
+        assert_eq!(a.y + tall.y, 530.0, "the bottom edge stops 30 px above the pointer");
+        // A view too short for the box above or below the pointer but wide enough beside it.
+        let short = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 120.0));
+        let a = edit_anchor(pos2(500.0, 60.0), true, Some(short), vec2(220.0, 80.0));
+        assert_eq!(a.x, 530.0, "beside the pointer, right of it");
+        assert!(clear(a, vec2(220.0, 80.0), pos2(500.0, 60.0)));
+        // A view too narrow for the box beside the pointer but tall enough below it.
+        let narrow = Rect::from_min_size(pos2(0.0, 0.0), vec2(260.0, 600.0));
+        let a = edit_anchor(pos2(130.0, 100.0), true, Some(narrow), vec2(220.0, 80.0));
+        assert_eq!(a.y, 130.0, "below the pointer, slid sideways into the view");
+        assert!(clear(a, vec2(220.0, 80.0), pos2(130.0, 100.0)));
+        // A sweep of pointers over views of several sizes and offsets, and boxes of several sizes.
+        let views = [
+            view,
+            Rect::from_min_size(pos2(240.0, 60.0), vec2(700.0, 420.0)),
+            Rect::from_min_size(pos2(40.0, 30.0), vec2(300.0, 260.0)),
+            short,
+            narrow,
+        ];
+        for view in views {
+            for size in [vec2(220.0, 80.0), vec2(236.0, 96.0), vec2(228.0, 140.0), vec2(120.0, 80.0)] {
+                for i in 0..=20 {
+                    for j in 0..=20 {
+                        let p = pos2(view.left() + view.width() * i as f32 / 20.0, view.top() + view.height() * j as f32 / 20.0);
+                        let a = edit_anchor(p, true, Some(view), size);
+                        let r = Rect::from_min_size(a, size);
+                        let room = view.width() >= size.x + EDIT_MARGIN && view.height() >= size.y + EDIT_MARGIN;
+                        if room {
+                            assert!(r.left() >= view.left() && r.top() >= view.top(), "{view:?} {size:?} {p:?}: {r:?}");
+                            assert!(
+                                r.right() <= view.right() - EDIT_MARGIN + 1e-3 && r.bottom() <= view.bottom() - EDIT_MARGIN + 1e-3,
+                                "{view:?} {size:?} {p:?}: {r:?}"
+                            );
+                        }
+                        // Clear of the pointer whenever the view has room for the box on one of its
+                        // sides: above or below it, or left or right of it.
+                        let vertical = p.y + EDIT_GAP + size.y <= view.bottom() - EDIT_MARGIN || p.y - EDIT_GAP - size.y >= view.top();
+                        let horizontal = p.x + EDIT_GAP + size.x <= view.right() - EDIT_MARGIN || p.x - EDIT_GAP - size.x >= view.left();
+                        if room && (vertical || horizontal) {
+                            assert!(clear(a, size, p), "{view:?} {size:?} {p:?}: {r:?}");
+                        }
+                    }
+                }
+            }
+        }
+        // A view or pointer that is not a number does not panic.
+        let _ = edit_anchor(pos2(f32::NAN, f32::INFINITY), true, Some(view), vec2(220.0, 80.0));
     }
 
     #[test]

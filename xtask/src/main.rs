@@ -18,8 +18,10 @@ mod layers;
 mod licences;
 mod lists;
 mod mesh_decisions;
+mod params;
 mod pending;
 mod render_assets;
+mod shared;
 mod skills;
 mod test;
 mod test_nextest;
@@ -36,6 +38,10 @@ usage: cargo xtask <command>
 commands:
   ui-containers   enforce the universal container for all UI hosts
   layers          enforce the crate dependency layering (plan/architecture.md §3)
+  shared          check that each shared crate (layers' Shared class) has workspace lints, a licence,
+                  a README and no includes from outside its directory, then build and test it in a
+                  scratch workspace holding only it and the shared crates it uses
+                  (target/xtask-shared): it would build after extraction
   assets          check that every non-code asset file is attributed in ATTRIBUTION.md
   app-icons       regenerate shared app-icon exports for Linux, FreeBSD and Windows
   icons           validate UI icon standards, discovery and review-tool behavior (Python 3.11+)
@@ -128,8 +134,8 @@ commands:
   web-offline-test [--site DIR]
                   check in headless Chrome that the web app works offline and updates to a new
                   build (a stand-in app, or the web build in DIR such as dist/web)
-  ci              fmt --check, assets, icons, licences --check, lists, skills, layers, ui-containers,
-                  mesh-decisions, clippy -D warnings, then the tests
+  ci              fmt --check, assets, icons, licences --check, lists, skills, layers, shared,
+                  ui-containers, mesh-decisions, clippy -D warnings, then the tests
                   with the wasm check alongside, then web-offline-test when Chrome is installed
                   (stops at the first failing step)
 ";
@@ -139,6 +145,7 @@ fn main() -> ExitCode {
     let rest: Vec<&str> = args.iter().skip(1).map(String::as_str).collect();
     let result = match args.first().map(String::as_str) {
         Some("layers") => cmd_layers(),
+        Some("shared") => shared::run(&root()),
         Some("ui-containers") => ui_containers::run(&root()),
         Some("assets") => assets::run(&root()),
         Some("icons") => icons::run(&root()),
@@ -201,7 +208,7 @@ pub fn cargo() -> Command {
     c
 }
 
-fn run(mut cmd: Command, what: &str) -> Result<(), String> {
+pub(crate) fn run(mut cmd: Command, what: &str) -> Result<(), String> {
     eprintln!("$ {what}");
     let status = cmd.status().map_err(|e| format!("{what}: failed to spawn: {e}"))?;
     if status.success() { Ok(()) } else { Err(format!("{what}: exited with {status}")) }
@@ -424,8 +431,11 @@ fn cmd_wasm() -> Result<(), String> {
 /// scripts and proc macros built for clippy and the tests are reused.
 fn wasm_check() -> Result<(Command, usize), String> {
     let crates = layers::from_metadata(&metadata()?)?;
-    let mut set: Vec<String> =
-        crates.iter().filter(|c| matches!(layers::classify(&c.name), Some(layers::Class::Layer(_)))).map(|c| c.name.clone()).collect();
+    let mut set: Vec<String> = crates
+        .iter()
+        .filter(|c| matches!(layers::classify(&c.name), Some(layers::Class::Layer(_) | layers::Class::Shared)))
+        .map(|c| c.name.clone())
+        .collect();
     set.push("solidcraft-web".into());
     let mut c = cargo();
     c.args(["check", "--target", "wasm32-unknown-unknown", "--profile", "ci"]);
@@ -447,6 +457,7 @@ fn cmd_ci() -> Result<(), String> {
     lists::run(&root(), false)?;
     skills::run(&root())?;
     cmd_layers()?;
+    shared::run(&root())?;
     ui_containers::run(&root())?;
     mesh_decisions::run(&root())?;
     let mut c = cargo();

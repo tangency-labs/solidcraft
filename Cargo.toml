@@ -5,7 +5,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.40.0-rc.2"
+version = "0.40.0-rc.3"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -28,6 +28,9 @@ solidcraft-doc = { path = "crates/doc" }
 solidcraft-io = { path = "crates/io" }
 solidcraft-engine = { path = "crates/engine" }
 solidcraft-ui-egui = { path = "crates/ui-egui" }
+solidcraft-ui-registry = { path = "crates/ui-registry" }
+solidcraft-color = { path = "crates/color" }
+solidcraft-ui-text = { path = "crates/ui-text" }
 solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }
 solidcraft-derive = { path = "crates/derive" }
@@ -36,10 +39,10 @@ solidcraft-3dx-client = { path = "crates/threedx-client" }
 # move the rev on its own commit. For a
 # local checkout, add `[patch."https://github.com/tangency-labs/solidcore"] solidcore = { path =
 # "../solidcore/crates/solidcore" }` to a `.cargo/config.toml` outside the repository.
-solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "8ddce901671f1cebd9214a31d21895d725e886c8" }
+solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "a445bdaac60a980b0e9d1dba3ee28eb7ada44f50" }
 # Geometry as data (solidcore's layers §1, "Record"): the B-rep record, its structural validation
 # and the native body file. Pinned like solidcore; for a local checkout, patch it as above.
-solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "f5e8e9a29e0c9b7cf6c4040a5bc8878382b3c62f" }
+solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "a445bdaac60a980b0e9d1dba3ee28eb7ada44f50" }
 # test tooling: a dev-dependency only (xtask/src/layers.rs)
 solidcraft-testkit = { path = "crates/testkit" }
 

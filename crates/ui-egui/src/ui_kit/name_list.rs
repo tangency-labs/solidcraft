@@ -2,8 +2,8 @@
 //! cells leave. Built on the kit's table grid; see `docs/ui-kit.md` for tokens and usage.
 use super::metrics::dimension;
 use super::table::{Column, Table, TableRow, table_custom};
+use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{scenario, theme::Tokens};
 use egui::{Response, Ui, vec2};
 
 /// Columns past this are ignored: a list of named rows has a handful of cells.
@@ -111,7 +111,7 @@ fn name_text(ui: &mut Ui, name: &str) -> Response {
     super::text::paint_text(ui, rect, name, font, t.form_ink, false);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), name));
     let id = format!("dialog:name:{name}");
-    scenario::publish_rect(&id, rect);
-    scenario::publish_count(&format!("{id}:cut"), f64::from(u8::from(cut)));
+    solidcraft_ui_registry::publish_rect(&id, rect);
+    solidcraft_ui_registry::publish_count(&format!("{id}:cut"), f64::from(u8::from(cut)));
     if cut { response.backing_on_hover_text(name) } else { response }
 }

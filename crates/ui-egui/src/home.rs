@@ -588,9 +588,13 @@ fn ask_present(h: &mut HomeState, ctx: &egui::Context, recent: &[String]) {
             }
         }
     }
+    // The browser's files are in memory, so they are looked up here; no thread wakes the page.
     #[cfg(target_arch = "wasm32")]
-    for p in recent {
-        h.present.insert(p.clone(), solidcraft_engine::io::vfs::exists(p));
+    {
+        let _ = ctx;
+        for p in recent {
+            h.present.insert(p.clone(), solidcraft_engine::io::vfs::exists(p));
+        }
     }
 }
 
@@ -802,7 +806,7 @@ fn content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction
 fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>) {
     let t = Tokens::get();
     if let Some(entry) = app.recoverable.first().cloned() {
-        let title = crate::i18n::format("home.recovery_count", &[("count", &app.recoverable.len().to_string())]);
+        let title = solidcraft_ui_text::format("home.recovery_count", &[("count", &app.recoverable.len().to_string())]);
         let filename = entry
             .path
             .as_deref()
@@ -831,7 +835,7 @@ fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<File
         ui.add_space(t.file_section_gap);
     }
     let shortcut = if cfg!(target_os = "macos") { "⌘O" } else { "Ctrl+O" };
-    let open_hint = crate::i18n::format("home.open_hint", &[("shortcut", shortcut)]);
+    let open_hint = solidcraft_ui_text::format("home.open_hint", &[("shortcut", shortcut)]);
     let tiles = [
         ("home:new_mm", "new", app.tr("home.new_mm"), app.tr("home.new_mm_hint"), true),
         ("home:new_inches", "new", app.tr("home.new_inches"), app.tr("home.new_inches_hint"), false),
@@ -998,9 +1002,9 @@ fn recent_time_at(app: &SolveApp, time: u64, now: u64) -> String {
         let mut parts = date.rsplitn(3, '-');
         let day = parts.next().unwrap_or("").trim_start_matches('0');
         let month = parts.next().unwrap_or("");
-        return crate::i18n::format("home.short_date", &[("day", day), ("month", app.tr(&format!("home.month_{month}")))]);
+        return solidcraft_ui_text::format("home.short_date", &[("day", day), ("month", app.tr(&format!("home.month_{month}")))]);
     };
-    crate::i18n::format(key, &[("count", &count.to_string())])
+    solidcraft_ui_text::format(key, &[("count", &count.to_string())])
 }
 
 fn recovery_content(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>) {
@@ -1008,7 +1012,7 @@ fn recovery_content(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileA
         ui_kit::text(ui, app.tr("home.recovery_empty"), ui_kit::Text::Inline);
     }
     for (index, entry) in app.recoverable.iter().take(20).enumerate() {
-        let detail = crate::i18n::format(
+        let detail = solidcraft_ui_text::format(
             "recovery.detail",
             &[
                 ("file", entry.path.as_deref().unwrap_or(app.tr("recovery.never_saved"))),
@@ -1622,7 +1626,7 @@ mod tests {
     fn the_entry_that_opens_preferences_carries_the_windows_name() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.show(0);
-        assert_eq!(crate::i18n::tr("home.settings"), crate::i18n::tr("ui.preferences"), "one name for the window");
+        assert_eq!(solidcraft_ui_text::tr("home.settings"), solidcraft_ui_text::tr("ui.preferences"), "one name for the window");
         click_file(&mut h, "home:settings");
         assert!(h.app.prefs_window.open, "the entry opens Preferences");
     }

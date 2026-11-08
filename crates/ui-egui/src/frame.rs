@@ -61,7 +61,13 @@ pub fn offset_anchor(docked: Pos2, offset: egui::Vec2, vp: egui::Rect, side: Sid
 /// `moved` (as last frame left it; `applied` of it is where the dialog is now, after keeping
 /// it on screen). Called before the band's buttons are added, so they keep their clicks.
 pub fn drag_dock(ui: &Ui, band: egui::Rect, key: &str, moved: egui::Vec2, applied: egui::Vec2) {
-    crate::scenario::publish_handle("dialog:title", band.center());
+    drag_dock_named(ui, "dialog:title", band, key, moved, applied);
+}
+
+/// [`drag_dock`] for a panel that stays on screen beside a command dialog (the Sketch palette),
+/// so its band is published under its own scenario `handle` instead of the dialog's.
+pub fn drag_dock_named(ui: &Ui, handle: &str, band: egui::Rect, key: &str, moved: egui::Vec2, applied: egui::Vec2) {
+    crate::scenario::publish_handle(handle, band.center());
     let response = ui.interact(band, ui.scope_id().with("sc_dock_drag"), egui::Sense::drag());
     if response.dragged() {
         let frame = ui.ctx().cumulative_frame_nr();
@@ -95,7 +101,7 @@ pub fn drag_dock(ui: &Ui, band: egui::Rect, key: &str, moved: egui::Vec2, applie
 mod tests {
     #[test]
     fn feature_forms_use_available_height_and_keep_actions_visible() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             use crate::scenario::Harness;
             use serde_json::json;
             for (width, height, scale) in [(1400.0, 900.0, 1.0), (1400.0, 950.0, 2.0)] {
@@ -161,7 +167,7 @@ mod tests {
         use crate::scenario::Harness;
         use serde_json::json;
 
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = Harness::new();
             h.call("ui.set", json!({"layout": mode}));
             h.call("ui.resize", json!({"width": 2400, "height": 900}));
@@ -208,7 +214,7 @@ mod tests {
     /// drags it; reopening keeps its position.
     #[test]
     fn a_docked_dialog_keeps_its_size_under_the_pointer_and_moves_by_its_title() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             use crate::scenario::Harness;
             use serde_json::json;
             let mut h = Harness::new();
@@ -248,7 +254,7 @@ mod tests {
     fn command_dialogs_keep_the_dragged_position_after_closing() {
         use crate::scenario::Harness;
         use serde_json::json;
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = Harness::new();
             h.call("ui.set", json!({"layout":mode}));
             h.call("ui.resize", json!({"width":1400.0,"height":900.0}));

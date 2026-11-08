@@ -1,32 +1,8 @@
 //! Transient shell geometry shared by automation, drawing and viewport occlusion.
-use crate::ui_kit::{Container, Surface};
-use egui::{Rect, pos2, vec2};
-use serde::{Deserialize, Serialize};
+use crate::ui_kit::{Container, LayoutMode, SHELL_GAP, Surface, within};
+use egui::{Rect, pos2};
 
-use crate::{SolveApp, theme::Tokens, toolbar};
-
-/// Saved workspace layout; automation may override it for a session.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LayoutMode {
-    #[default]
-    Floating,
-    #[serde(rename = "compact", alias = "docked")]
-    Docked,
-}
-
-impl LayoutMode {
-    pub(crate) fn publish(self, ctx: &egui::Context) {
-        ctx.data_mut(|data| data.insert_temp(egui::Id::unique("sc_container_layout"), self));
-    }
-
-    pub(crate) fn current(ctx: &egui::Context) -> Self {
-        ctx.data(|data| data.get_temp(egui::Id::unique("sc_container_layout"))).unwrap_or_default()
-    }
-}
-
-/// The gap from the viewport edge to the floating cards and between the cards.
-pub(crate) const SHELL_GAP: f32 = 7.0;
+use crate::{SolveApp, theme::Tokens};
 
 /// The viewport's top corners are rounded concentrically with the cards: the card margin plus the
 /// card radius.
@@ -59,32 +35,6 @@ pub(crate) fn paint_top_corners(painter: &egui::Painter, viewport: Rect, color: 
             mesh.add_triangle(0, i + 1, i + 2);
         }
         painter.add(egui::Shape::mesh(mesh));
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Cards {
-    pub workspace: Rect,
-    pub ribbon: Rect,
-    pub bottom: f32,
-}
-
-impl Cards {
-    pub fn new(available: Rect, mode: LayoutMode, ribbon_height: f32) -> Self {
-        let margin = Container::for_layout(mode, Surface::Chrome).gap();
-        let gap = margin;
-        let left = available.left() + margin;
-        let top = available.top() + margin;
-        let right = (available.right() - margin).max(left);
-        let workspace = Rect::from_min_size(
-            pos2(left, top),
-            vec2(
-                toolbar::WORKSPACE_WIDTH.min((right - left).max(0.0)),
-                ribbon_height - if !Container::for_layout(mode, Surface::Chrome).floating() { 1.0 } else { 0.0 },
-            ),
-        );
-        let ribbon = Rect::from_min_max(pos2((workspace.right() + gap).min(right), top), pos2(right, top + ribbon_height));
-        Self { workspace, ribbon, bottom: ribbon.bottom() + margin }
     }
 }
 
@@ -148,45 +98,88 @@ pub(crate) fn panel_bounds(app: &SolveApp, mut available: Rect) -> Rect {
 
 /// One source of occlusion for navigation, picking and overlays.
 pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
-    occluding_rects(app, false)
+    occluding_rects(app, false, false, true)
 }
 
 /// Selection controls follow the projected model, so they must not influence its fit.
 pub(crate) fn fit_rects(app: &SolveApp) -> Vec<Rect> {
-    occluding_rects(app, true)
+    occluding_rects(app, true, false, true)
 }
 
-fn occluding_rects(app: &SolveApp, fitting: bool) -> Vec<Rect> {
+/// Actual persistent workspace footprints for the opt-in host. Transient menus
+/// remain input shields, without becoming targets for framing or control placement.
+pub(crate) fn host_usable(app: &SolveApp) -> solidcraft_engine::panels::PanelResult<crate::panel_runtime::HostUsableRegion> {
+    use crate::panel_runtime::{MAX_USABLE_OBSTACLES, egui_rect, logical_rect, resolve_usable_region};
+    use solidcraft_engine::panels::{Rule, error};
+    let frame = app.universal_panel_frame().ok_or_else(|| error(Rule::Lifecycle, "universal host geometry is unavailable"))?;
+    let windows = app.viewport.host_windows.as_ref().ok_or_else(|| error(Rule::CollectionLimit, "persistent window footprint limit"))?;
+    let mut obstacles = frame.layout.usable.obstacles.clone();
+    for bounds in occluding_rects(app, true, false, false).into_iter().chain(windows.iter().copied()).chain(app.viewport.host_confirm) {
+        if !bounds.is_positive() || !bounds.is_finite() || !bounds.intersect(egui_rect(frame.layout.render_domain)).is_positive() {
+            continue;
+        }
+        let bounds = logical_rect(bounds);
+        bounds.validate()?;
+        if !obstacles.contains(&bounds) {
+            if obstacles.len() >= MAX_USABLE_OBSTACLES {
+                return Err(error(Rule::CollectionLimit, "effective usable-space obstacle limit"));
+            }
+            obstacles.push(bounds);
+        }
+    }
+    resolve_usable_region(frame.layout.render_domain, &obstacles)
+}
+
+fn occluding_rects(app: &SolveApp, fitting: bool, input: bool, include_confirm: bool) -> Vec<Rect> {
     let mut rects = Vec::new();
+    if let Some(frame) = app.universal_panel_frame() {
+        let regions = if input { &frame.layout.input } else { &frame.layout.occlusion };
+        rects.extend(regions.iter().copied().map(crate::panel_runtime::egui_rect));
+        if !fitting {
+            rects.extend(frame.menu_bounds.map(crate::panel_runtime::egui_rect));
+            rects.extend(frame.owned_overlays.iter().map(|region| crate::panel_runtime::egui_rect(region.bounds)));
+        }
+    }
     rects.extend(app.shell.workspace_panels.iter().filter(|(id, _)| !fitting || **id != "render:selection").map(|(_, (rect, _))| *rect));
-    if crate::render_workspace::active(app) || Container::for_layout(app.ui.layout, Surface::Panel).floating() {
+    if app.universal_panel_host_enabled() || crate::render_workspace::active(app) || Container::for_layout(app.ui.layout, Surface::Panel).floating() {
         rects.extend(app.shell.cards.iter().copied());
         rects.extend(app.shell.panels.iter().copied());
-        if crate::agent_chat::shown(app) && app.agent_chat.open && !app.preferences.agent_chat_popped {
+        if !app.universal_panel_host_enabled() && crate::agent_chat::shown(app) && app.agent_chat.open && !app.preferences.agent_chat_popped {
             rects.extend(app.agent_chat.panel_rect);
         }
     }
-    rects.extend(app.shell.history.filter(|_| app.ui.show_timeline));
-    if app.ui.show_timeline && app.preferences.timeline_left {
-        rects.extend(app.shell.history.map(|card| crate::ui_kit::HistorySeam::new(card).pill));
+    if !app.universal_panel_host_enabled() {
+        rects.extend(app.shell.history.filter(|_| app.ui.show_timeline));
+        if app.ui.show_timeline && app.preferences.timeline_left {
+            rects.extend(app.shell.history.map(|card| crate::ui_kit::HistorySeam::new(card).pill));
+        }
+        rects.extend(app.shell.browser.filter(|_| app.ui.show_browser));
     }
-    rects.extend(app.shell.browser.filter(|_| app.ui.show_browser));
-    rects.extend(app.viewport.palette_rect.filter(|_| app.session.active_sketch.is_some()));
-    rects.extend(app.viewport.dialog_rect.filter(|_| app.dialog.is_some() || app.tree.redefine.is_some()));
-    rects.extend(crate::view_confirm::rect(app));
+    rects.extend(app.viewport.palette_rect.filter(|_| app.universal_panel_host_enabled() || app.session.active_sketch.is_some()));
+    // The host's persistent Window ledger supplies real feature/redefine
+    // paint. This legacy cache is also written by transient modal warnings.
+    if !fitting || !app.universal_panel_host_enabled() {
+        rects.extend(app.viewport.dialog_rect.filter(|_| app.universal_panel_host_enabled() || app.dialog.is_some() || app.tree.redefine.is_some()));
+    }
+    if include_confirm {
+        rects.extend(crate::view_confirm::rect(app));
+    }
     rects.extend(app.shell.status_bar.filter(|_| crate::status_bar::shown(app)));
     rects.retain(|r| r.is_finite() && r.is_positive());
     rects
 }
 
 pub(crate) fn covered(app: &SolveApp, p: egui::Pos2) -> bool {
-    covered_rects(app).iter().any(|r| r.contains(p))
+    occluding_rects(app, false, true, true).iter().any(|r| r.contains(p))
 }
 
 /// Space reserved below viewport overlays by the floating History card. Its rect is set before
 /// the viewport is painted, so showing or hiding History takes effect in the same frame. History
 /// docked as the left sidebar sits beside the viewport, not below it, so it reserves nothing.
 pub(crate) fn viewport_bottom_inset(app: &SolveApp, viewport: Rect) -> f32 {
+    if app.universal_panel_host_enabled() {
+        return 0.0;
+    }
     if app.ui.layout != LayoutMode::Floating || (app.ui.show_timeline && app.preferences.timeline_left) {
         return 0.0;
     }
@@ -212,15 +205,12 @@ pub(crate) fn content_rect(app: &SolveApp, viewport: Rect) -> Rect {
     if content.is_positive() { content } else { viewport }
 }
 
-/// `v` kept within `lo..=hi`, or `lo` when that range is empty: `f32::clamp` panics on
-/// `lo > hi`, which a rect squeezed to nothing between cards gives.
-pub(crate) fn within(v: f32, lo: f32, hi: f32) -> f32 {
-    if lo <= hi { v.clamp(lo, hi) } else { lo }
-}
-
 /// Free anchor space shared by both layouts. Compact edge hosts have already consumed
 /// their allocation; content-hugging Browser and floating overlays reserve their measured span.
 pub(crate) fn workspace_content(app: &SolveApp, mut content: Rect) -> Rect {
+    if let Some(frame) = app.universal_panel_frame() {
+        return frame.layout.viewport.map(crate::panel_runtime::egui_rect).map_or(content, |rect| rect.intersect(content));
+    }
     if crate::render_workspace::active(app) {
         if crate::render_ui::focused(app) {
             return content;

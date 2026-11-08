@@ -2,7 +2,8 @@
 use serde_json::{Value, json};
 use solidcraft_engine::doc::physical_material::{Family, MaterialCard, PropertyData, admit_card};
 
-use crate::{SolveApp, i18n::tr, ui_kit};
+use crate::{SolveApp, ui_kit};
+use solidcraft_ui_text::tr;
 
 const MAX_BYTES: usize = 256 * 1024;
 const KINDS: &[&str] = &[

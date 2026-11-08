@@ -3,8 +3,8 @@
 //! every colour comes from `Tokens`. A card sizes to the width its container gives it and its
 //! figure keeps the figure's aspect ratio.
 use super::{metrics::dimension, preferences::centred_text};
+use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{scenario, theme::Tokens};
 use egui::{Color32, FontId, Painter, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 /// How a card or tile looks in a state. Kept separate from painting so the state rules can be tested.
@@ -111,9 +111,9 @@ pub(crate) fn settings_row_card<R>(ui: &mut Ui, selected: bool, height: f32, add
 }
 
 fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
-    crate::prefs_search::note_unlabelled(ui, &[card.label]);
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[card.label, card.sub.unwrap_or("")]) {
-        return crate::prefs_search::hidden_response(ui);
+    super::settings_search::note_unlabelled(ui, &[card.label]);
+    if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &[card.label, card.sub.unwrap_or("")]) {
+        return super::settings_search::hidden_response(ui);
     }
     let t = Tokens::get();
     let width = dimension(width);
@@ -122,8 +122,8 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
     // Labelled compound rows own their search index (settings_picture_choices, for example).
     // Standalone cards and tiles are independently searchable settings.
     if super::layout::label(ui).is_empty() {
-        crate::prefs_search::remember(ui, card.label, rect);
-        crate::prefs_search::follow(ui, card.label, rect);
+        super::settings_search::remember(ui, card.label, rect);
+        super::settings_search::follow(ui, card.label, rect);
     }
     let look = card_look(card.selected, enabled, response.hovered(), response.has_focus());
     let p = ui.painter();
@@ -187,7 +187,7 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
     }
     let kind = if tile { egui::Role::CheckBox } else { egui::Role::RadioButton };
     response.widget_info(|| egui::WidgetInfo::selected(kind, enabled, card.selected, card.label));
-    scenario::publish_target(&format!("prefs:card:{}", card.label), rect);
+    solidcraft_ui_registry::publish_target(&format!("prefs:card:{}", card.label), rect);
     let response = response.backing_on_hover_text(card.label);
     let response = if let Some(options) = card.options { response.backing_on_hover_text(options) } else { response };
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
@@ -204,7 +204,7 @@ fn tick(p: &Painter, r: Rect, ink: Color32) {
 
 /// A radio card: a figure, a label and an optional sub-label. Click it to choose it.
 pub(crate) fn picture_card(ui: &mut Ui, card: &Card, width: f32) -> Response {
-    crate::prefs_search::note_unlabelled(ui, &[card.sub.unwrap_or("")]);
+    super::settings_search::note_unlabelled(ui, &[card.sub.unwrap_or("")]);
     paint_card(ui, card, width, false)
 }
 
@@ -271,7 +271,7 @@ pub(crate) fn settings_picture_choices_sized(
         + if size.caption { t.space_16 + t.space_10 } else { 0.0 };
     super::settings_form(ui, 0.0, |ui| {
         super::layout::sized_row(ui, label, height, |ui| {
-            crate::prefs_search::note_choices(ui, &options.iter().map(|o| o.label).collect::<Vec<_>>());
+            super::settings_search::note_choices(ui, &options.iter().map(|o| o.label).collect::<Vec<_>>());
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing = vec2(t.space_10, t.space_10);
                 // Use the real control child, including the scrollbar and form bounds. Round
@@ -283,19 +283,19 @@ pub(crate) fn settings_picture_choices_sized(
                     super::settings_inline_note(ui, label);
                 }
                 let mut picked = None;
-                let mut indexed = crate::prefs_search::texts_hit(ui, &[label]);
+                let mut indexed = super::settings_search::texts_hit(ui, &[label]);
                 for (row, choices) in options.chunks(columns).enumerate() {
                     ui.horizontal_top(|ui| {
                         for (column, option) in choices.iter().enumerate() {
                             let index = row * columns + column;
                             let response = picture_card(ui, &option.card(selected == index, enabled, size.aspect), width);
-                            scenario::publish_target(&format!("prefs:{key}:{}", option.key), response.rect);
-                            scenario::publish_target(&format!("dialog:{label}:{}", option.label), response.rect);
-                            if !indexed && crate::prefs_search::texts_hit(ui, &[option.label]) {
-                                crate::prefs_search::remember(ui, option.label, response.rect);
+                            solidcraft_ui_registry::publish_target(&format!("prefs:{key}:{}", option.key), response.rect);
+                            solidcraft_ui_registry::publish_target(&format!("dialog:{label}:{}", option.label), response.rect);
+                            if !indexed && super::settings_search::texts_hit(ui, &[option.label]) {
+                                super::settings_search::remember(ui, option.label, response.rect);
                                 indexed = true;
                             }
-                            crate::prefs_search::follow(ui, option.label, response.rect);
+                            super::settings_search::follow(ui, option.label, response.rect);
                             if response.clicked() && enabled {
                                 picked = Some(index);
                             }
@@ -311,7 +311,7 @@ pub(crate) fn settings_picture_choices_sized(
 
 /// A toggle tile: the same picture with a checkbox in the corner. Click it to flip `card.selected`.
 pub(crate) fn toggle_tile(ui: &mut Ui, card: &Card, width: f32) -> Response {
-    crate::prefs_search::note_unlabelled(ui, &[card.sub.unwrap_or("")]);
+    super::settings_search::note_unlabelled(ui, &[card.sub.unwrap_or("")]);
     paint_card(ui, card, width, true)
 }
 
@@ -326,9 +326,9 @@ pub(crate) fn preset_card(
     icon: &dyn Fn(&Painter, Rect, Color32),
     width: f32,
 ) -> Response {
-    crate::prefs_search::note_unlabelled(ui, &[name, word]);
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[name, word]) {
-        return crate::prefs_search::hidden_response(ui);
+    super::settings_search::note_unlabelled(ui, &[name, word]);
+    if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &[name, word]) {
+        return super::settings_search::hidden_response(ui);
     }
     let t = Tokens::get();
     let enabled = enabled && ui.is_enabled();
@@ -336,8 +336,8 @@ pub(crate) fn preset_card(
     let height = t.space_24 * 3.0 - t.space_2;
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), if enabled { Sense::click() } else { Sense::hover() });
     if super::layout::label(ui).is_empty() {
-        crate::prefs_search::remember(ui, name, rect);
-        crate::prefs_search::follow(ui, name, rect);
+        super::settings_search::remember(ui, name, rect);
+        super::settings_search::follow(ui, name, rect);
     }
     let look = card_look(selected, enabled, response.hovered(), response.has_focus());
     let dim = |c: Color32| c.gamma_multiply(look.alpha);
@@ -373,7 +373,7 @@ pub(crate) fn preset_card(
         tick(p, Rect::from_center_size(centre, vec2(t.space_12, t.space_12)), dim(t.on_accent));
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, enabled, selected, name));
-    scenario::publish_target(&format!("prefs:preset:{name}"), rect);
+    solidcraft_ui_registry::publish_target(&format!("prefs:preset:{name}"), rect);
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
 
@@ -388,81 +388,8 @@ pub(crate) fn help_icon(ui: &mut Ui, text: &str) -> Response {
     p.circle_filled(pos2(rect.center().x, rect.top() + size * 0.3), 0.9, ink);
     p.line_segment([pos2(rect.center().x, rect.top() + size * 0.46), pos2(rect.center().x, rect.bottom() - size * 0.24)], Stroke::new(1.2, ink));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
-    scenario::publish_target("prefs:help_icon", rect);
+    solidcraft_ui_registry::publish_target("prefs:help_icon", rect);
     response.backing_on_hover_text(text)
-}
-
-/// Which items of a carousel are shown: the first one and how many fit between the two arrows.
-pub(super) fn carousel_window(count: usize, offset: usize, available: f32, item_width: f32, gap: f32, arrow: f32) -> (usize, usize) {
-    if count == 0 {
-        return (0, 0);
-    }
-    let room = dimension(available) - 2.0 * (arrow + gap);
-    let unit = dimension(item_width).max(1.0) + gap.max(0.0);
-    let visible = (((room + gap) / unit).floor() as usize).clamp(1, count);
-    (offset.min(count - visible), visible)
-}
-
-/// A row of items with a previous and a next arrow; an arrow is dimmed and inert at its end.
-/// An arrow moves by the items that fit (#11434); the last page ends on the last item.
-/// `item` paints the item at an index into a column `item_width` wide and `item_height` high.
-pub(crate) fn carousel(
-    ui: &mut Ui,
-    id: impl std::hash::Hash + std::fmt::Debug,
-    count: usize,
-    item_width: f32,
-    item_height: f32,
-    mut item: impl FnMut(&mut Ui, usize),
-) -> (usize, usize) {
-    let t = Tokens::get();
-    let key = ui.make_persistent_id(id);
-    let gap = t.space_8;
-    let arrow = t.space_24 + 2.0;
-    let offset = ui.data(|d| d.get_temp::<usize>(key)).unwrap_or(0);
-    let (first, visible) = carousel_window(count, offset, ui.available_width(), item_width, gap, arrow);
-    let height = dimension(item_height);
-    let mut next_offset = first;
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = gap;
-        let can_back = first > 0;
-        if carousel_arrow(ui, vec2(arrow, height), -1.0, can_back, crate::i18n::tr("prefs.carousel_previous")).clicked() {
-            next_offset = first.saturating_sub(visible);
-        }
-        for index in first..first + visible {
-            ui.allocate_ui_with_layout(vec2(dimension(item_width), height), egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui.set_width(dimension(item_width));
-                item(ui, index);
-            });
-        }
-        let can_forward = first + visible < count;
-        if carousel_arrow(ui, vec2(arrow, height), 1.0, can_forward, crate::i18n::tr("prefs.carousel_next")).clicked() {
-            next_offset = (first + visible).min(count.saturating_sub(visible));
-        }
-    });
-    ui.data_mut(|d| d.insert_temp(key, next_offset));
-    (first, visible)
-}
-
-fn carousel_arrow(ui: &mut Ui, size: egui::Vec2, direction: f32, enabled: bool, label: &str) -> Response {
-    let t = Tokens::get();
-    let (rect, response) = ui.allocate_exact_size(size, if enabled { Sense::click() } else { Sense::hover() });
-    let alpha = if enabled { 1.0 } else { 0.35 };
-    let p = ui.painter();
-    let fill = if enabled && response.hovered() { t.hover } else { t.control_fill };
-    p.rect(rect, f32::from(t.radius_lg), fill.gamma_multiply(alpha), Stroke::new(1.0, t.dialog_border.gamma_multiply(alpha)), StrokeKind::Inside);
-    let icon = Rect::from_center_size(rect.center(), vec2(t.space_16, t.space_16));
-    let ink = t.form_ink.gamma_multiply(alpha);
-    if direction < 0.0 {
-        crate::icons::paint_ink_mirrored(p, icon, "chevron_right", ink);
-    } else {
-        crate::icons::paint_ink(p, icon, "chevron_right", ink);
-    }
-    if enabled && response.has_focus() {
-        p.rect_stroke(rect.expand(t.space_2), f32::from(t.radius_lg) + t.space_2, Stroke::new(t.space_2, t.form_primary), StrokeKind::Outside);
-    }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
-    scenario::publish_target(&format!("prefs:carousel:{label}"), rect);
-    if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
 
 /// Installed add-on row: 12 pt padding, 36 pt mark and centred, unframed folder action.
@@ -488,7 +415,7 @@ pub(crate) fn settings_plugin_card(
         }
         let width = dimension(ui.available_width());
         let tile_side = t.space_24 + t.space_12;
-        let folder_label = crate::i18n::tr_label("Show in folder");
+        let folder_label = solidcraft_ui_text::tr_label("Show in folder");
         let folder_font = FontId::proportional(t.font_body);
         let folder_galley = ui.painter().layout_no_wrap(folder_label.into(), folder_font, t.form_dim);
         let folder_width = folder_galley.size().x + t.space_8 * 2.0 + t.space_14 + t.space_6;
@@ -512,10 +439,10 @@ pub(crate) fn settings_plugin_card(
         let tile = Rect::from_center_size(pos2(rect.left() + tile_side / 2.0, header_center), vec2(tile_side, tile_side));
         ui.painter().rect_filled(tile, t.radius_lg, t.selected_bg);
         crate::icons::paint_ink(ui.painter(), tile.shrink(t.space_8), "settings_plug", t.form_primary);
-        scenario::publish_rect(&format!("prefs:plugin:{key}:icon"), tile);
+        solidcraft_ui_registry::publish_rect(&format!("prefs:plugin:{key}:icon"), tile);
         let at = pos2(tile.right() + t.space_12, header_center - text_height / 2.0);
         let title_rect = Rect::from_min_size(at, title.size());
-        scenario::publish_rect(&format!("prefs:plugin:{key}:title"), title_rect);
+        solidcraft_ui_registry::publish_rect(&format!("prefs:plugin:{key}:title"), title_rect);
         let version_at = pos2(at.x + title.size().x + t.space_8, at.y + (header_height - version_galley.size().y) / 2.0);
         ui.painter().galley(pos2(at.x, at.y + (header_height - title.size().y) / 2.0), title, t.form_ink);
         ui.painter().galley(version_at, version_galley, t.form_dim);
@@ -538,7 +465,7 @@ pub(crate) fn settings_plugin_card(
         if folder.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        let check = super::checkbox_at(ui, check_rect, &format!("{name}: {}", crate::i18n::tr("prefs.plugins_enabled")), enabled);
+        let check = super::checkbox_at(ui, check_rect, &format!("{name}: {}", solidcraft_ui_text::tr("prefs.plugins_enabled")), enabled);
         (folder, check)
     })
 }

@@ -107,7 +107,7 @@ fn segmented_click_changes_selection_and_keeps_all_choices_visible() {
 fn segments_show_their_options_translated() {
     let ctx = crate::fonts::test_context();
     let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 120.0));
-    let _japanese = crate::i18n::scope("ja");
+    let _japanese = solidcraft_ui_text::scope("ja");
     let mut selected = 0;
     let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
         row(ui, "Section", |ui| segmented(ui, &mut selected, &["Circular", "Square"], Default::default()));
@@ -231,7 +231,7 @@ fn stage_chips_reserve_the_selected_weight_for_complete_labels_in_all_five_catal
     let ctx = crate::fonts::test_context();
     let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 120.0));
     for language in ["en", "ja", "zh", "de", "ko"] {
-        let locale = crate::i18n::Locale::for_language(language);
+        let locale = solidcraft_ui_text::Locale::for_language(language);
         let labels: Vec<_> = ["render.stage_look", "render.stage_light", "render.stage_frame", "render.stage_output"]
             .iter()
             .map(|key| locale.text(key).to_string())
@@ -355,7 +355,7 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
         let tokens = if dark { crate::theme::Tokens::dark() } else { crate::theme::Tokens::light() };
         let _restore = crate::theme::scoped_tokens(tokens);
         for language in ["en", "ja", "zh", "de", "ko"] {
-            let locale = crate::i18n::Locale::for_language(language);
+            let locale = solidcraft_ui_text::Locale::for_language(language);
             let ctx = crate::fonts::test_context();
             let mut enabled = true;
             let mut clicked = false;

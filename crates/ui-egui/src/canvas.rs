@@ -340,6 +340,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
 
 /// Draw the manipulator and the value box (called by the viewport after the model is drawn).
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
+    crate::extrude_face_snap::set(None);
     // While OK computes, the inputs hold what it computes: no arrow to drag, no box to type in.
     if app.applying.is_some() {
         return;
@@ -607,22 +608,25 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     }
     // Two sides: the second distance gets its own arrow, the other way from the first side.
     if let (Kind::Extrude { direction: crate::dialogs::TWO_SIDES | crate::dialogs::TWO_SIDES_REVERSED, distance2, .. }, Some(n)) = (&mut d.kind, dir)
-        && let Some(l2) = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
-        drag_arrow(
-            &app.session.doc,
+        // Distance 2 stays on the side Direction gives it, whatever the sign of Distance 1. Only
+        // a reach computed from the model (To Object, Through All) sends it the other way.
+        let n2 = if sign < 0.0 { n } else { -n };
+        let before = distance2.clone();
+        // While its text does not evaluate (cleared, or a `-` typed first) there is no arrow,
+        // but the box stays below the base so the typing can be finished there.
+        let ts = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite()).and_then(|l2| {
+            drag_arrow(&app.session.doc, ui, painter, proj, base, bs, n2, l2, true, egui::Id::unique("sc_manipulator2"), half_height, 0.0, distance2)
+        });
+        value_box_in(
             ui,
-            painter,
-            proj,
-            base,
-            bs,
-            -(n * sign),
-            l2,
-            true,
-            egui::Id::unique("sc_manipulator2"),
-            half_height,
-            0.0,
+            (egui::Id::unique("sc_canvas_area2"), egui::Id::unique("sc_canvas_value2")),
+            "Distance 2",
             distance2,
+            (ts.unwrap_or(bs + vec2(16.0, 14.0)) + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
+            *distance2 != before,
+            false,
+            box_place(app, proj),
         );
     }
     // A chamfer of two distances: Distance 2 gets its own arrow along the other face.
@@ -755,6 +759,12 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     }
     // A placement marker at the base: the arrow stands above it and the base dot is the marker's.
     let clear = crate::place_gizmo::arrow_clearance(app, d);
+    // While an extrude's arrow is dragged, the flat faces it can stop at (#2398).
+    let arrow_id = egui::Id::unique("sc_manipulator");
+    let stops = match dir {
+        Some(n) if ui.ctx().is_being_dragged(arrow_id) => crate::extrude_face_snap::stops(app, d, base, n * sign),
+        _ => Vec::new(),
+    };
     let Some((label, kind, value)) = d.primary() else { return };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() {
@@ -775,21 +785,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         let mut shown_value = format_len(&app.session.doc, half + baseline);
         let original_shown = shown_value.clone();
         let dragged = if to_span.is_some() || symmetric_scale != 1.0 { &mut shown_value } else { &mut *value };
-        if let Some(ts) = drag_arrow(
+        let drawn = drag_arrow_to(
             &app.session.doc,
             ui,
             painter,
             proj,
-            base,
-            bs,
-            n,
-            half + baseline,
-            signed,
-            egui::Id::unique("sc_manipulator"),
+            ArrowLine { base, bs, n, l: half + baseline, signed, clear_px: clear },
+            arrow_id,
             half_height,
-            clear,
+            &stops,
             dragged,
-        ) {
+        );
+        if let Some((_, Some(stop))) = &drawn {
+            crate::extrude_face_snap::outline(app, painter, proj, stop);
+        }
+        crate::extrude_face_snap::set(drawn.as_ref().and_then(|(_, stop)| stop.clone()));
+        if let Some((ts, _)) = drawn {
             if (to_span.is_some() || symmetric_scale != 1.0)
                 && shown_value != original_shown
                 && let Ok(v) = crate::length_input::eval(&app.session.doc, &shown_value, ValueKind::Length)
@@ -944,7 +955,7 @@ fn value_box_full(
         let frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3));
         Container::show_backing(ui, frame, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(crate::i18n::tr_label(label)).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
+                ui.label(egui::RichText::new(solidcraft_ui_text::tr_label(label)).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
                 let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab);
                 crate::params_dialog::complete(ui, &r, value);
                 if select_all {
@@ -1038,7 +1049,7 @@ fn box_size(ui: &egui::Ui, area: egui::Id, label: &str, note: Option<&str>) -> e
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_caption);
     let width = |text: String| ui.painter().layout_no_wrap(text, font.clone(), t.text_dim).size().x;
-    let mut w = width(crate::i18n::tr_label(label).to_string()) + t.space_24 * 3.0;
+    let mut w = width(solidcraft_ui_text::tr_label(label).to_string()) + t.space_24 * 3.0;
     let mut parts = 1;
     if let Some(note) = note {
         w += width(note.to_string());
@@ -1083,6 +1094,39 @@ fn drag_arrow(
     clear_px: f32,
     value: &mut String,
 ) -> Option<Pos2> {
+    let line = ArrowLine { base, bs, n, l, signed, clear_px };
+    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], value).map(|(ts, _)| ts)
+}
+
+/// Where a drag arrow stands: from `base` (on screen `bs`) along `n`, showing `l`; `signed` lets
+/// it go below zero, `clear_px` keeps that much of the base free (see [`drag_arrow`]).
+#[derive(Clone, Copy, Debug)]
+struct ArrowLine {
+    base: Vec3,
+    bs: Pos2,
+    n: Vec3,
+    l: f64,
+    signed: bool,
+    clear_px: f32,
+}
+
+/// [`drag_arrow`] that also stops at `stops` (#2398): a drag whose tip comes near a stop's
+/// plane takes its distance exactly instead of a round step. Returns the tip's screen position
+/// and the stop it took this frame.
+#[allow(clippy::too_many_arguments)]
+fn drag_arrow_to(
+    doc: &solidcraft_engine::doc::Document,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    line: ArrowLine,
+    id: egui::Id,
+    half_height: f64,
+    stops: &[crate::extrude_face_snap::Stop],
+    value: &mut String,
+) -> Option<(Pos2, Option<crate::extrude_face_snap::Stop>)> {
+    let ArrowLine { base, bs, n, l, signed, clear_px } = line;
+    let mut stopped = None;
     let t = Tokens::get();
     let min = f64::from(40.0 + clear_px) * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
     let tip = |length: f64| {
@@ -1124,7 +1168,12 @@ fn drag_arrow(
         let v = v - ui.data(|d| d.get_temp::<f64>(grab)).unwrap_or(0.0);
         let free = crate::tool_modifiers::manipulator_free();
         let step = snap_step(half_height);
-        let mut v = if free { v } else { (v / step).round() * step };
+        stopped = if free { None } else { crate::extrude_face_snap::nearest(proj, base, n, v, stops).cloned() };
+        let mut v = match &stopped {
+            Some(stop) => stop.distance,
+            None if free => v,
+            None => (v / step).round() * step,
+        };
         if !signed {
             v = v.max(if free { 1e-3 } else { step });
         }
@@ -1141,7 +1190,7 @@ fn drag_arrow(
         painter.circle_stroke(ts, 8.0, Stroke::new(1.5, col));
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    Some(ts)
+    Some((ts, stopped))
 }
 
 /// A fillet's radius spline on each of its edges (a spline fillet, or the splines a taper gave
@@ -1275,7 +1324,7 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
         let at = |u: f64| e.start + (e.other - e.start) * u;
         let g = e.spline.greville();
         let tips: Vec<Option<Pos2>> = g.iter().zip(&e.spline.radii).map(|(u, r)| proj.to_screen(at(*u) + e.n * *r)).collect();
-        painter.extend(crate::viewport::dashed_line(
+        painter.extend(crate::ui_kit::dashed_line(
             &tips.iter().flatten().copied().collect::<Vec<_>>(),
             painter.clip_rect(),
             Stroke::new(1.0, t.manipulator),
@@ -1452,11 +1501,11 @@ fn measure_line(
     for s in [sa, sb] {
         painter.circle(s, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
     }
-    pick_numbers(painter, sa, sb);
     let mid = sa + (sb - sa) * 0.5;
     let galley = painter.layout_no_wrap(crate::prefs::show_mm(app, d, 1), egui::FontId::proportional(crate::theme::Tokens::get().font_label), t.text);
     let own = egui::Rect::from_min_size(mid + vec2(10.0, -14.0), galley.size() + vec2(10.0, 6.0));
     let rect = moved_label(proj, own, labels.offset(0));
+    pick_numbers(painter, sa, sb, rect);
     crate::scenario::publish_target("measure:label", rect);
     if app.preferences.measure_axis_distances {
         measure_components(app, ui, painter, proj, a, b, rect, labels);
@@ -1470,21 +1519,44 @@ fn measure_line(
 }
 
 /// "1" and "2" beside the measured line's ends (#6020), as the panel lists the picks: each just
-/// past its end, away from the line and its length in the middle.
-fn pick_numbers(painter: &egui::Painter, sa: Pos2, sb: Pos2) {
+/// past its end, away from the line and from the distance `label`.
+fn pick_numbers(painter: &egui::Painter, sa: Pos2, sb: Pos2, label: egui::Rect) {
     let t = Tokens::get();
-    let along = (sb - sa).normalized();
-    // Ends on one spot (or one behind the other): side by side above it.
-    let (out_a, out_b) = if along.is_finite() && along.length_sq() > 0.5 { (-along, along) } else { (vec2(-0.7, -0.7), vec2(0.7, -0.7)) };
-    for (n, at, out) in [("1", sa, out_a), ("2", sb, out_b)] {
-        let galley = painter.layout_no_wrap(n.to_string(), egui::FontId::proportional(t.font_label), t.text);
-        let size = galley.size() + vec2(8.0, 4.0);
-        let side = size.x.max(size.y);
-        let rect = egui::Rect::from_center_size(at + out * (side * 0.5 + 8.0), vec2(side, size.y));
+    let galleys = ["1", "2"].map(|n| painter.layout_no_wrap(n.to_string(), egui::FontId::proportional(t.font_label), t.text));
+    let size = galleys.iter().map(|g| g.size()).fold(egui::Vec2::ZERO, |a, b| a.max(b)) + vec2(8.0, 4.0);
+    let rects = pick_number_rects(sa, sb, size, label);
+    for ((n, galley), rect) in ["1", "2"].into_iter().zip(galleys).zip(rects) {
         painter.rect(rect, t.radius_sm.saturating_sub(1), t.overlay, Stroke::new(1.0, t.manipulator), egui::StrokeKind::Inside);
         painter.galley(rect.center() - galley.size() * 0.5, galley, t.text);
         crate::scenario::publish_target(&format!("measure:item:{n}"), rect);
     }
+}
+
+/// Where "1" and "2" go, each `size` (text and padding): just past its end of the line, away
+/// from it. Where that would cover the distance `label` or the other number (ends on one spot or
+/// a few pixels apart, as two faces measured at their shared corner, #11833), the first free spot
+/// around its end instead, so the two never hide each other.
+fn pick_number_rects(sa: Pos2, sb: Pos2, size: egui::Vec2, label: egui::Rect) -> [egui::Rect; 2] {
+    let side = size.x.max(size.y);
+    let reach = side * 0.5 + 8.0;
+    let along = (sb - sa).normalized();
+    // Ends on one spot (or one behind the other): side by side above it.
+    let (out_a, out_b) = if along.is_finite() && along.length_sq() > 0.5 { (-along, along) } else { (vec2(-0.7, -0.7), vec2(0.7, -0.7)) };
+    // Below, left, then the other ways round; the distance label sits up and to the right.
+    let around =
+        [vec2(0.0, 1.0), vec2(-1.0, 0.0), vec2(-0.7, 0.7), vec2(0.0, -1.0), vec2(-0.7, -0.7), vec2(1.0, 0.0), vec2(0.7, 0.7), vec2(0.7, -0.7)];
+    let place = |at: Pos2, out: egui::Vec2, taken: Option<egui::Rect>| {
+        let towards = |d: egui::Vec2| egui::Rect::from_center_size(at + d * reach, vec2(side, size.y));
+        let first = towards(out);
+        std::iter::once(first)
+            .chain(around.iter().map(|d| towards(*d)))
+            .chain(around.iter().map(|d| towards(*d * 2.0)))
+            .find(|r| !r.intersects(label) && taken.is_none_or(|t| !r.intersects(t)))
+            .unwrap_or(first)
+    };
+    let a = place(sa, out_a, None);
+    let b = place(sb, out_b, Some(a));
+    [a, b]
 }
 
 /// A world-axis-aligned chain between the same two measured points. Zero-length and
@@ -1516,7 +1588,7 @@ fn measure_components(
         let (at, offset) = if let Some((sa, sb)) = screen {
             let leg = sb - sa;
             if leg.length_sq() > 1.0 {
-                painter.extend(crate::viewport::dashed_line(&[sa, sb], painter.clip_rect(), Stroke::new(1.5, color), 5.0, 3.0));
+                painter.extend(crate::ui_kit::dashed_line(&[sa, sb], painter.clip_rect(), Stroke::new(1.5, color), 5.0, 3.0));
                 let normal = vec2(-leg.y, leg.x).normalized();
                 for p in [sa, sb] {
                     painter.line_segment([p - normal * 3.0, p + normal * 3.0], Stroke::new(1.0, color));
@@ -1637,7 +1709,7 @@ fn taper_handle(
     crate::scenario::publish_handle("taper", es);
     let hot = r.hovered() || r.dragged();
     let col = if hot { t.accent } else { t.manipulator };
-    painter.extend(crate::viewport::dashed_line(&[fs, es], painter.clip_rect(), Stroke::new(1.2, col), 5.0, 3.0));
+    painter.extend(crate::ui_kit::dashed_line(&[fs, es], painter.clip_rect(), Stroke::new(1.2, col), 5.0, 3.0));
     painter.circle(es, if hot { 6.5 } else { 5.0 }, t.overlay, Stroke::new(2.0, col));
     if hot {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -1829,12 +1901,13 @@ fn draw_revolve(
                 } else {
                     "Choose target".into()
                 };
-                ui.label(text).backing_on_hover_text(crate::i18n::tr_label("Determined by To Object. Choose Angle to edit the angular extent."));
+                ui.label(text)
+                    .backing_on_hover_text(solidcraft_ui_text::tr_label("Determined by To Object. Choose Angle to edit the angular extent."));
             });
         });
     } else if let Kind::Revolve { angle, .. } = &mut d.kind {
         let dragging = *angle != angle_before;
-        value_box(ui, crate::i18n::tr_label("Angle"), angle, box_at, focus || dragging, box_place(app, proj));
+        value_box(ui, solidcraft_ui_text::tr_label("Angle"), angle, box_at, focus || dragging, box_place(app, proj));
     }
 }
 
@@ -2015,6 +2088,34 @@ fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// "1" and "2" never cover each other or the distance (#11833): ends on one spot (two faces
+    /// measured at their shared corner, a distance of 0), a few pixels apart, and a line long
+    /// enough that both keep their own place past their ends.
+    #[test]
+    fn pick_numbers_stay_apart_and_off_the_distance() {
+        let size = vec2(16.0, 18.0);
+        let label_at = |sa: Pos2, sb: Pos2| egui::Rect::from_min_size(sa + (sb - sa) * 0.5 + vec2(10.0, -14.0), vec2(70.0, 22.0));
+        let corner = egui::pos2(400.0, 300.0);
+        let mut cases = vec![(corner, corner)];
+        for d in [vec2(1.0, 0.0), vec2(0.5, -0.5), vec2(3.0, 2.0), vec2(-2.0, -4.0), vec2(6.0, 0.0), vec2(0.0, 7.0)] {
+            cases.push((corner, corner + d));
+        }
+        for (sa, sb) in cases {
+            let label = label_at(sa, sb);
+            let [a, b] = pick_number_rects(sa, sb, size, label);
+            assert!(!a.intersects(b), "{sa:?} {sb:?}: 1 {a:?} and 2 {b:?} overlap");
+            for (n, r, own) in [("1", a, sa), ("2", b, sb)] {
+                assert!(!r.intersects(label), "{sa:?} {sb:?}: {n} {r:?} covers the distance {label:?}");
+                assert!(r.center().distance(own) < 80.0, "{sa:?} {sb:?}: {n} strays from its end");
+            }
+        }
+        // A long line: each number just past its own end, as before.
+        let (sa, sb) = (egui::pos2(100.0, 400.0), egui::pos2(300.0, 200.0));
+        let [a, b] = pick_number_rects(sa, sb, size, label_at(sa, sb));
+        let along = (sb - sa).normalized();
+        assert!((a.center() - (sa - along * 17.0)).length() < 1e-3 && (b.center() - (sb + along * 17.0)).length() < 1e-3, "{a:?} {b:?}");
+    }
 
     /// The arrow's point on a picked edge: one point, a zero-length piece, a click past the end.
     #[test]
