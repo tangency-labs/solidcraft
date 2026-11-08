@@ -318,7 +318,7 @@ fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
                 let mut app = SolveApp::new(Default::default(), Default::default());
                 app.ui.layout = mode;
                 app.ui.tab = tab.into();
-                crate::theme::TabAccent::publish(&app, &ctx);
+                app.publish_tab_accent(&ctx);
                 let accent = crate::theme::TabAccent::for_tab(&Tokens::get(), tab);
                 let mut row_rect = Rect::NOTHING;
                 let out = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
@@ -677,7 +677,7 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
             app.ui.tab = "SURFACE".into();
             app.preferences.timeline_left = true;
             app.preferences.timeline_left_browser_collapsed = collapsed;
-            crate::theme::TabAccent::publish(&app, &ctx);
+            app.publish_tab_accent(&ctx);
             let bounds = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 700.0));
             let draw = |app: &mut SolveApp, events| {
                 crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(bounds), events, ..Default::default() }, |ui| {
