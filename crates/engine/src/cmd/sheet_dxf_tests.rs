@@ -999,3 +999,68 @@ fn a_junction_cut_stops_at_its_own_tip_on_a_c_shaped_blank() {
     let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
     assert!(errors.is_empty(), "unfold: {errors:?}");
 }
+
+/// Stretches of one edge that bend to opposite sides at different angles have different setbacks,
+/// so their bend lines are offset: the folded part separates over the strip between them, and the
+/// blank has to be cut over that whole strip too. The cut starts at the inner (deeper) bend line,
+/// not the farther-out one, which left the strip joined and the blank unable to fold (FR-7 #5932).
+/// Its outer end is the nearer far edge: past that only the longer stretch's material remains.
+#[test]
+fn opposite_side_stretches_of_different_angles_cut_from_the_inner_bend_line() {
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[50,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","flip":false},
+            {"from":0.5,"to":1,"angle":"45 deg","height":"20 mm","flip":true}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    // The 2 mm rule (R 1, K 0.5): the 90° stretch's setback is (R + T)·tan(45°) = 3 mm, so its bend
+    // line is y = 3 and its far edge y = 3 − (π + 17); the 45° stretch's setback is
+    // (R + T)·tan(22.5°) = 1.242640687 mm, so its bend line is y = 1.242640687 and its far edge
+    // y = −19.085514953. The bend lines are 1.757359313 mm apart, and the 90° stretch's far edge is
+    // the nearer one. The cut has to run from the inner bend line, y = 3, over that strip to the
+    // nearer far edge; starting at the farther-out bend line, y = 1.242640687, left the strip
+    // y 1.242640687…3 joined.
+    let inner = Vec2::new(50.0, 3.0);
+    let farther_out = Vec2::new(50.0, 3.0 * (PI / 8.0).tan());
+    let nearer_far = Vec2::new(50.0, 3.0 - (PI + 17.0));
+    let offset = inner.y - farther_out.y;
+    assert!(offset > 1.0, "the test's bend lines are only {offset} mm apart, too close to show the strip: {farther_out:?}");
+    let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
+        lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
+    };
+    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    assert!(
+        regions.iter().any(|r| cut(&r.outer, inner, nearer_far) && cut(&r.outer, nearer_far, inner)),
+        "the flat loop has no cut from the inner bend line {inner:?} to the nearer far edge {nearer_far:?}          ({offset} mm apart from the farther-out bend line {farther_out:?}): {:?}",
+        regions
+            .iter()
+            .flat_map(|r| r.outer.segs.iter())
+            .filter_map(|seg| match *seg {
+                Seg2::Line { a, b } if (a.x - 50.0).abs() < 1e-6 && (b.x - 50.0).abs() < 1e-6 => Some((a.y, b.y)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    );
+    // The DXF writes the same two lines, on the outline layer.
+    let outline: Vec<(Vec2, Vec2)> = entities(&export(&mut s, json!({})))
+        .iter()
+        .filter(|e| e.0 == "LINE" && layer_of(e) == "OUTLINE")
+        .map(|e| (point(e, 10), point(e, 11)))
+        .collect();
+    let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
+    let both_ways = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| {
+        lines.iter().any(|&(p, q)| near(p, a) && near(q, b)) && lines.iter().any(|&(p, q)| near(p, b) && near(q, a))
+    };
+    assert!(both_ways(&outline, inner, nearer_far), "the DXF has no cut from the inner bend line to the nearer far edge: {outline:?}");
+    // The cut leaves the part one piece, and refolding then unfolding builds it.
+    run(&mut s, "sheet.unfold", json!({}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "unfold: {errors:?}");
+    run(&mut s, "sheet.refold", json!({}));
+    run(&mut s, "sheet.unfold", json!({}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "unfold: {errors:?}");
+}

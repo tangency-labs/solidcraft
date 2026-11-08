@@ -117,8 +117,12 @@ falls back to the edge's own value, then the feature's.
 - **Junctions:** no bend relief is cut where two segments meet and no corner is closed there; the
   two bends butt along the junction line. Only the outermost segments take part in corner closing
   and end relief. Where the two stretches bend to opposite sides the blank is cut along their
-  junction, from the bend line out to the shorter stretch's far edge, in the flat pattern and the
-  DXF: a blank joined there cannot fold, one stretch up and the next down. Where a cut-out took that
+  junction, from the inner bend line out to the nearer stretch's far edge, in the flat pattern and
+  the DXF: a blank joined there cannot fold, one stretch up and the next down. Stretches at
+  different angles have different setbacks, so their bend lines are offset; the cut starts at the
+  inner of the two and so covers the strip between them, over which the folded part separates, and
+  its outer end is the nearer far edge, past which only the longer stretch's material remains.
+  Where a cut-out took that
   far edge away, the cut is clipped to the material that is left: it runs from the bend line to the
   nearest boundary the junction line meets (a notch's edge, for one), so the blank is parted as far
   as its remaining material allows; a line and a circular arc are met exactly, so a round notch ends

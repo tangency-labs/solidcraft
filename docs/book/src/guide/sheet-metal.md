@@ -204,9 +204,13 @@ differ and the flange's far edge steps where their heights differ. A segment's `
 feature's `flip` outright: `false` is the default direction and `true` the other one, whatever the
 feature's `flip` is, so it is not a turn relative to the feature. No bend relief is cut where two
 segments meet, and
-where the two stretches bend to opposite sides the blank is cut along their junction, from the bend
-line out to the shorter stretch's far edge, in the flat pattern and the DXF: a blank still joined
-there cannot fold one stretch up and the next down, while same-side stretches stay one piece. Where
+where the two stretches bend to opposite sides the blank is cut along their junction, from the inner
+bend line out to the nearer stretch's far edge, in the flat pattern and the DXF: a blank still joined
+there cannot fold one stretch up and the next down, while same-side stretches stay one piece.
+Stretches at different angles have different setbacks, so their bend lines are offset: the cut starts
+at the inner of the two, so it covers the strip between the bend lines, over which the folded part
+separates. Its outer end is the nearer far edge: past that only the longer stretch's material
+remains, so there is nothing of the other stretch left to part. Where
 a cut-out took that far edge away, the cut is clipped to the material that is left: it runs from the
 bend line to the nearest boundary the junction line meets (a notch's edge, for one), so the blank is
 parted as far as its remaining material allows. Only the stretch of the junction line from the bend

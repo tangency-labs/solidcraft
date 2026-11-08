@@ -2890,9 +2890,9 @@ impl SheetBody {
     }
 
     /// Where a split edge's stretches bend to opposite sides: the lines the flat pattern is cut
-    /// along at their junctions. Each runs from the bend line out to the nearer stretch's far edge,
-    /// the deepest bend line to the nearest far edge, so the material either side of the junction
-    /// parts there while the blank stays one piece. A whole-edge flange has no junction.
+    /// along at their junctions. Each runs from the inner bend line out to the nearer stretch's far
+    /// edge, the innermost bend line to the nearest far edge, so the material either side of the
+    /// junction parts there while the blank stays one piece. A whole-edge flange has no junction.
     fn junction_slits(&self) -> Vec<(Vec2, Vec2)> {
         let mut out = Vec::new();
         for (i, a) in self.flanges.iter().enumerate() {
@@ -2913,11 +2913,20 @@ impl SheetBody {
                     continue;
                 }
                 let Some(n) = a.n.normalized() else { continue };
-                // The material each stretch covers from its bend line out: the deeper bend line
+                // The material each stretch covers from its bend line out: the inner bend line
                 // and the nearer far edge bound the stretch both cover, which is the junction.
                 let (sa, sb) = (a.p.dot(n), b.p.dot(n));
                 let (fa, fb) = (sa + self.allowance(a) + a.leg, sb + self.allowance(b) + b.leg);
-                let (start, end) = (sa.max(sb), fa.min(fb));
+                // Stretches at different angles have different setbacks, so their bend lines are
+                // offset. The folded part separates over the whole strip between the two bend
+                // lines, so the cut starts at the inner (smaller, deeper) one and covers that
+                // strip; starting at the farther-out bend line left the strip joined in the flat
+                // pattern and its DXF, which cannot fold one stretch up and the next down.
+                // Its outer end is the nearer far edge: past that only the longer stretch's
+                // material remains, so there is nothing of the other stretch left to part, and
+                // cutting on would slit the longer stretch's leg on its own (a C-shaped blank's
+                // far foot, for one).
+                let (start, end) = (sa.min(sb), fa.min(fb));
                 if end <= start + 1e-9 {
                     continue;
                 }
