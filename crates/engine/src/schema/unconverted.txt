@@ -37,7 +37,6 @@ solid.pattern.path
 solid.pattern.rectangular
 solid.press_pull
 solid.replace_face
-solid.revolve
 solid.shell
 solid.thread
 surface.blend
