@@ -319,33 +319,27 @@ impl Document {
             if expression.len() > 4096 || expression.trim().is_empty() {
                 return Err(DocError::Expr("expression is empty or too long".into()));
             }
-            if let Some(p) = next.text_params.iter_mut().find(|p| p.name == *name) {
-                let text = crate::text_params::unquote(expression);
-                if p.text != text {
-                    changed.insert(name.clone());
+            let unknown = || DocError::Unknown(format!("parameter `{name}`"));
+            let at = next.param_target(name).ok_or_else(unknown)?;
+            let stored = next.stored_expression(at, expression);
+            let target = match at {
+                Target::Text(i) => next.text_params.get_mut(i).map(|p| &mut p.text),
+                Target::User(i) => next.params.get_mut(i).map(|p| &mut p.expr),
+                Target::Input { feature, input, .. } => {
+                    let inputs = next.features.get_mut(feature).map(|f| f.kind.inputs_mut());
+                    let Some((_, target, _)) = inputs.and_then(|inputs| inputs.into_iter().nth(input)) else { return Err(unknown()) };
+                    if *target != stored {
+                        changed.insert(name.clone());
+                    }
+                    *target = stored.into();
+                    continue;
                 }
-                p.text = text;
-                continue;
-            }
-            if let Some(p) = next.params.iter_mut().find(|p| p.name == *name) {
-                if p.expr != expression.trim() {
-                    changed.insert(name.clone());
-                }
-                p.expr = expression.trim().to_string();
-                continue;
-            }
-            let hit = next.features.iter().enumerate().find_map(|(i, f)| f.param_names.iter().position(|n| n == name).map(|k| (i, k)));
-            let Some((i, k)) = hit else { return Err(DocError::Unknown(format!("parameter `{name}`"))) };
-            let kind = next.features.get(i).and_then(|f| f.kind.inputs().get(k).map(|x| x.2)).unwrap_or(Kind::Unitless);
-            let normalized = next.with_design_unit(expression, kind);
-            let Some(feature) = next.features.get_mut(i) else { return Err(DocError::Unknown(format!("parameter `{name}`"))) };
-            let Some((_, target, _)) = feature.kind.inputs_mut().into_iter().nth(k) else {
-                return Err(DocError::Unknown(format!("parameter `{name}`")));
             };
-            if *target != normalized {
+            let target = target.ok_or_else(unknown)?;
+            if *target != stored {
                 changed.insert(name.clone());
             }
-            *target = normalized.into();
+            *target = stored;
         }
         let (_, errors) = next.param_values();
         for (name, error) in errors {
@@ -665,6 +659,15 @@ impl ParamUser {
     }
 }
 
+/// What a parameter's name names, by place: a text parameter, a user parameter, or a feature's input
+/// of a kind.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Target {
+    Text(usize),
+    User(usize),
+    Input { feature: usize, input: usize, kind: Kind },
+}
+
 /// Length unit of the document in mm (bare numbers of unit-less parameters next to lengths).
 fn doc_len(units: &str) -> f64 {
     match expr::unit_info(units) {
@@ -674,6 +677,45 @@ fn doc_len(units: &str) -> f64 {
 }
 
 impl Document {
+    /// What `name` names, in the order a change looks: text parameters, user parameters, then
+    /// named feature inputs.
+    pub(crate) fn param_target(&self, name: &str) -> Option<Target> {
+        if let Some(i) = self.text_params.iter().position(|p| p.name == name) {
+            return Some(Target::Text(i));
+        }
+        if let Some(i) = self.params.iter().position(|p| p.name == name) {
+            return Some(Target::User(i));
+        }
+        let (feature, input) = self.features.iter().enumerate().find_map(|(i, f)| f.param_names.iter().position(|n| n == name).map(|k| (i, k)))?;
+        let kind = self.features.get(feature).and_then(|f| f.kind.inputs().get(input).map(|x| x.2)).unwrap_or(Kind::Unitless);
+        Some(Target::Input { feature, input, kind })
+    }
+
+    /// `expression` as `at` stores it: a text unquoted, a user parameter's trimmed, a feature
+    /// input's with the design's unit on a bare length.
+    pub(crate) fn stored_expression(&self, at: Target, expression: &str) -> String {
+        match at {
+            Target::Text(_) => crate::text_params::unquote(expression),
+            Target::User(_) => expression.trim().to_string(),
+            Target::Input { kind, .. } => self.with_design_unit(expression, kind),
+        }
+    }
+
+    /// A named feature input's definition: its unit is its kind's, but a length worked out from
+    /// other parameters is in the design's units.
+    fn input_def(&self, name: &str, e: String, k: Kind) -> ParamDef {
+        // A bare number stored in an input is mm (the design's units are written in when it is
+        // typed); anything else that comes out unit-less (a unit-less parameter used as a length)
+        // is in the design's units.
+        let unit = match k {
+            Kind::Length if !expr::is_literal(&e) && expr::unit_info(self.units.trim()).is_some_and(|(k, _)| k == Kind::Length) => {
+                self.units.trim().to_string()
+            }
+            _ => unit_of(k).to_string(),
+        };
+        ParamDef { name: name.to_string(), expr: e, unit }
+    }
+
     /// Every parameter with its unit, for evaluation: stored parameters and named feature
     /// inputs (mm / deg / none by their kind).
     pub fn param_defs(&self) -> Vec<ParamDef> {
@@ -682,16 +724,7 @@ impl Document {
         for f in &self.features {
             for (name, (_, e, k)) in f.param_names.iter().zip(f.kind.inputs()) {
                 if !name.is_empty() {
-                    // A bare number stored in an input is mm (the design's units are written in
-                    // when it is typed); anything else that comes out unit-less (a unit-less
-                    // parameter used as a length) is in the design's units.
-                    let unit = match k {
-                        Kind::Length if !expr::is_literal(&e) && expr::unit_info(self.units.trim()).is_some_and(|(k, _)| k == Kind::Length) => {
-                            self.units.trim().to_string()
-                        }
-                        _ => unit_of(k).to_string(),
-                    };
-                    v.push(ParamDef { name: name.clone(), expr: e, unit });
+                    v.push(self.input_def(name, e, k));
                 }
             }
         }
