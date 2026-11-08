@@ -548,7 +548,6 @@ fn offset_rounds(k: &mut Kernel) -> (Brep, Vec<(FaceId, Surface)>) {
 /// classification refuses it, so the offset is the operand here.) The rounds' bound is
 /// about 1e-12 here, so this does not tell S from its net: see the next test.
 #[test]
-#[ignore = "tangency-labs/solidcore#3100: the offset is refused by recertify (a piece of the extended round's net runs across a station of its definition)"]
 fn an_offset_of_a_reopened_round_stands_off_its_definition() {
     use solidcore::query::api_queries::face_internal_point;
     let mut k = kernel(true);
@@ -581,7 +580,6 @@ fn an_offset_of_a_reopened_round_stands_off_its_definition() {
 /// past its sides, its across length measured with an honest rounding bound), not of the
 /// round's net B (`TurnToNURBS` slices a blend to its net, fork 0136260).
 #[test]
-#[ignore = "tangency-labs/solidcore#3100: the offset is refused by recertify (a piece of the extended round's net runs across a station of its definition)"]
 fn the_offset_of_a_round_is_the_offset_of_its_definition() {
     let mut k = kernel(true);
     let (offset, walls) = offset_rounds(&mut k);
@@ -1161,7 +1159,6 @@ fn a_body_s_circle_round_offsets_to_its_round_of_r_minus_d() {
 /// septic nets to degree 112, past its Bernstein forms' cap), to the same faces as with
 /// #2388's fix set.
 #[test]
-#[ignore = "tangency-labs/solidcore#3100: the offset is refused by recertify (a piece of the extended round's net runs across a station of its definition)"]
 fn the_chamfered_box_offsets_with_every_fix_on() {
     let mut faces = Vec::new();
     for all in [false, true] {

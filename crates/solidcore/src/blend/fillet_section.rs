@@ -101,6 +101,7 @@
 //!   A fired token returns `Cancelled`; one that never fires changes nothing.
 
 pub mod certificate;
+pub mod continuation;
 pub mod definition;
 pub mod definition_box;
 pub mod form;

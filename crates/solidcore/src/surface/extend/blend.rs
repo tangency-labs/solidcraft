@@ -59,6 +59,9 @@
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use super::{keeps, op_err, solve, Continuity, Extended, Local, Made, H, OP, REL};
+use crate::blend::fillet_section::continuation::{
+    growth, net_weights, section_degree, section_weight_range,
+};
 use crate::blend::fillet_section::recertify::recertify_with_thumbweight;
 use crate::blend::fillet_section::recertify::{
     net_distance, precision_floor, span_of_definition, DefinitionSpan,
@@ -72,7 +75,6 @@ use crate::math::Vec3;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::math::{gamma, CPoint, NOW};
-use crate::nurbs::srf_basic::Surface as Net;
 use crate::surface::implicit::AnalyticSupport;
 use crate::surface::procedural_blend::ProceduralBlend;
 use crate::surface::side::BoxSide;
@@ -93,13 +95,8 @@ pub(super) fn blend_extended(
         return along(k, pb, dom, at, side, distance);
     }
     let order = pb.order();
-    let n = order as usize;
     // the section's degree in t: the chord's 1, the circle's 2, a G^n section's 3 n + 1
-    let section_degree = match order {
-        0 => 1,
-        1 => 2,
-        _ => 3 * n + 1,
-    };
+    let section_deg = section_degree(order);
     let source_net = pb.net.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
     // a distance below the net side's resolution: none (the blend as it is)
     let Some(grown) = Surface::from(pb.net.clone()).extended_by_distance(
@@ -141,32 +138,20 @@ pub(super) fn blend_extended(
     } else {
         source_net.q()
     };
-    let m = section_degree + net_degree;
+    let m = section_deg + net_degree;
     let x = (2.0 * te - t0 - t1).abs() / (t1 - t0);
-    let cheb = chebyshev(m, x);
-    let (w_hi, w_lo) = match order {
-        0 => (1.0, 1.0),
-        1 => {
-            let off = |t: f64| (t * (t - 1.0)).max(0.0);
-            let hi = 1.0 + 2.0 * off(t0).max(off(t1));
-            let (lo_t, hi_t) = (ts.min(te), ts.max(te));
-            let lo = if lo_t < 1.0 && hi_t > 0.0 { 0.5 } else { 1.0 };
-            (hi, lo)
-        }
-        _ => {
-            let w = thumbweight(k, pb)?;
-            gn_weight_range(n, [t0, t1], [ts.min(te), ts.max(te)], w)?
-        }
-    };
-    let (v_hi, _) = weights(source_net);
-    let (_, v_lo) = weights(out_net);
+    let (w_hi, w_lo) = section_weight_range(order, [t0, t1], [ts.min(te), ts.max(te)], || {
+        thumbweight(k, pb)
+    })?;
+    let (v_hi, _) = net_weights(source_net);
+    let (_, v_lo) = net_weights(out_net);
     if !(v_lo > 0.0 && v_hi.is_finite()) {
         return Err(SolidError::port_invariant(
             OP,
             "a weight of the net is not positive",
         ));
     }
-    let growth = cheb * (w_hi * v_hi) / (w_lo * v_lo) * (1.0 + gamma(4 * m + 16));
+    let growth = growth(m, x, (w_hi, w_lo), (v_hi, v_lo));
     let eps = pb.bound();
     let bound = eps.max(eps * growth + grown.extension) * (1.0 + gamma(2));
     if !bound.is_finite() {
@@ -202,98 +187,6 @@ fn thumbweight(k: &Kernel, pb: &ProceduralBlend) -> Result<[f64; 2]> {
             operation: OP,
             reason: "the equal area thumbweight is not enclosed over the blend",
         })
-}
-
-/// A G^n section's weight `W(t) = A(t) B(t)^n C(t)^n` (`A = (1 - t)^(n+1) + t^(n+1)`,
-/// `B = 1 - w + w t`, `C = 1 - w t`, `w` the thumbweight in `w`): its largest value over the
-/// source's t range `src` and its least over the extension's `ext`, rounded outward. `A`
-/// grows with `|t - 1/2|` (`A' = (n + 1) (t^n - (1 - t)^n)`, of the sign of `t - 1/2`), so
-/// its extremes on an interval are at the point farthest from and nearest to 1/2; `B` and
-/// `C` are bilinear in `(t, w)`, so their extremes on a box are at its corners. A corner of
-/// the extension's box where `B` or `C` is not positive is a weight that vanishes there:
-/// refused ([`super::ExtendRefusal::WeightVanishes`]).
-fn gn_weight_range(n: usize, src: [f64; 2], ext: [f64; 2], w: [f64; 2]) -> Result<(f64, f64)> {
-    let exp = i32::try_from(n).map_err(|_| SolidError::sm_err(OP))?;
-    let a = |t: f64| (1.0 - t).powi(exp + 1) + t.powi(exp + 1);
-    let far = |[x, y]: [f64; 2]| {
-        if (x - 0.5).abs() >= (y - 0.5).abs() {
-            x
-        } else {
-            y
-        }
-    };
-    let near = |[x, y]: [f64; 2]| {
-        if x <= 0.5 && y >= 0.5 {
-            0.5
-        } else if (x - 0.5).abs() <= (y - 0.5).abs() {
-            x
-        } else {
-            y
-        }
-    };
-    let corners = |[t0, t1]: [f64; 2]| {
-        let mut b = [0.0_f64; 4];
-        let mut c = [0.0_f64; 4];
-        for (i, (&t, &wt)) in [t0, t0, t1, t1]
-            .iter()
-            .zip(&[w[0], w[1], w[0], w[1]])
-            .enumerate()
-        {
-            if let (Some(bi), Some(ci)) = (b.get_mut(i), c.get_mut(i)) {
-                *bi = 1.0 - wt + wt * t;
-                *ci = 1.0 - wt * t;
-            }
-        }
-        (b, c)
-    };
-    let (bs, cs) = corners(src);
-    let mag = |x: &[f64; 4]| x.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-    let hi = a(far(src)) * mag(&bs).powi(exp) * mag(&cs).powi(exp);
-    let (be, ce) = corners(ext);
-    let least = |x: &[f64; 4]| x.iter().fold(f64::INFINITY, |m, &v| m.min(v));
-    let (bl, cl) = (least(&be), least(&ce));
-    if !(bl > 0.0 && cl > 0.0) {
-        return Err(SolidError::ExtendRefused {
-            operation: OP,
-            refusal: super::ExtendRefusal::WeightVanishes,
-            distance: None,
-        });
-    }
-    let lo = a(near(ext)) * bl.powi(exp) * cl.powi(exp);
-    // each a product of 3 n + 2 roundings at most: up and down by gamma_(4 n + 8)
-    let g = gamma(4 * n + 8);
-    let (hi, lo) = (hi * (1.0 + g), lo * (1.0 - g));
-    if !(hi.is_finite() && lo > 0.0) {
-        return Err(SolidError::sm_err(OP));
-    }
-    Ok((hi, lo))
-}
-
-/// `T_m(x)` for `x >= 1` (`|x|` taken), by its recurrence (every term positive and
-/// increasing there), rounded up.
-fn chebyshev(m: usize, x: f64) -> f64 {
-    let x = x.abs().max(1.0);
-    let (mut prev, mut cur) = (1.0_f64, x);
-    if m == 0 {
-        return 1.0;
-    }
-    for _ in 1..m {
-        let next = 2.0 * x * cur - prev;
-        prev = cur;
-        cur = next;
-    }
-    cur * (1.0 + gamma(3 * m + 3))
-}
-
-/// The largest and least control weight of a net (1 for a polynomial one).
-fn weights(net: &Net) -> (f64, f64) {
-    let (mut hi, mut lo) = (0.0_f64, f64::INFINITY);
-    for c in net.cpts().iter().flatten() {
-        let w = if c.w == NOW { 1.0 } else { c.w };
-        hi = hi.max(w);
-        lo = lo.min(w);
-    }
-    (hi, lo)
 }
 
 /// Along the spine: the definition continued past its end station and its net by one more

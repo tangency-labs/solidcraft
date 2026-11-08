@@ -22,6 +22,12 @@
 //! - `|H - S|` on the span is the round's own certificate ([`gn_certify_span`]), asked for
 //!   what ε leaves after that.
 //!
+//! A piece past the section's range `[0, 1]` (a round extended across its section,
+//! [`crate::surface::extend::blend`]) is compared with H continued: its rows cut by
+//! blossoms at the piece's range (the rounding of that extrapolation counted), and
+//! `|H - S|` there is the certificate's bound on `[0, 1]` times the growth of
+//! docs/definitions-and-certificates.md 6.4 ([`section_growth`]).
+//!
 //! The bound is their sum with the floor ([`precision_floor`]), a forward error bound of
 //! computing H, at most ε, or the net is refused. A blend stores ε as its certificate, the
 //! net's rounding off its rows and three floors: H computed again is within two floors of
@@ -35,6 +41,7 @@
 use core::cmp::Ordering;
 
 use super::certificate::{gn_certify_span, GnLaw, NurbsCurve};
+use super::continuation::{growth, section_degree, section_weight_range};
 use super::section::{
     certificate_faces, crosses_knot, inner_knots, net_of_spans, param, varying, NetForm,
     StationSystem, GN_THUMBWEIGHT_EQUAL_AREA,
@@ -102,6 +109,61 @@ fn sub_curve(pts: &[Hpt], lo: f64, hi: f64) -> Vec<Hpt> {
         split(&left, lo / hi).1
     } else {
         left
+    }
+}
+
+/// One Bezier curve of homogeneous points re-expressed over `[lo, hi]` of its parameter,
+/// where that range may lie outside `[0, 1]`: the same rational polynomial continued. Its
+/// control points are the blossom `b(lo^(d-i), hi^i)`, each by de Casteljau steps at `lo`
+/// then `hi` (an affine step is valid at any parameter). Returns the points and `E`, a
+/// bound of how far each of their four homogeneous coordinates is from the exact ones: a
+/// step `(1 - tau) a + tau b` is four operations on coordinates of at most `M` (the input's
+/// largest, `Lambda^k M` after k steps, `Lambda = max (|1 - tau| + |tau|)`), so by the
+/// recurrence `e_(k+1) <= Lambda e_k + gamma_4 Lambda^(k+1) M` the d steps are within
+/// `d gamma_4 Lambda^d M`.
+fn extrapolate_curve(pts: &[Hpt], lo: f64, hi: f64) -> Result<(Vec<Hpt>, f64)> {
+    let d = pts
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| SolidError::sm_err(OP))?;
+    let mut out = Vec::new();
+    for i in 0..=d {
+        let mut level: Vec<Hpt> = pts.to_vec();
+        for step in 0..d {
+            let tau = if step < d - i { lo } else { hi };
+            level = level
+                .windows(2)
+                .map(|w| match w {
+                    [(pa, wa), (pb, wb)] => {
+                        (*pa * (1.0 - tau) + *pb * tau, wa * (1.0 - tau) + wb * tau)
+                    }
+                    _ => (Vec3::ZERO, 0.0),
+                })
+                .collect();
+        }
+        out.push(
+            level
+                .first()
+                .copied()
+                .ok_or_else(|| SolidError::sm_err(OP))?,
+        );
+    }
+    let size = pts
+        .iter()
+        .fold(0.0_f64, |m, &(p, w)| m.max(p.length()).max(w.abs()));
+    let lambda = [lo, hi]
+        .iter()
+        .fold(1.0_f64, |m, &tau| m.max((1.0 - tau).abs() + tau.abs()));
+    let exp = i32::try_from(d).map_err(|_| SolidError::sm_err(OP))?;
+    #[allow(clippy::cast_precision_loss)]
+    let err = d as f64 * gamma(4) * lambda.powi(exp) * size;
+    if err.is_finite() {
+        Ok((out, err))
+    } else {
+        Err(SolidError::invalid_input(
+            OP,
+            "the definition's rows are not finite past the section",
+        ))
     }
 }
 
@@ -442,7 +504,8 @@ fn pieces(pb: &ProceduralBlend, ld: usize) -> Result<Vec<Piece>> {
 /// # Errors
 ///
 /// `InvalidInput` where the net is not proved within the bound, or is not a net of its
-/// definition's stations (its degrees, a piece across a station or past the seeds, the
+/// definition's stations (its degrees, a piece across a station or past the seeds, a piece
+/// past the section whose rows' weights past it are not positive or whose section's weight vanishes, the
 /// seeds' stations differing, a foot crossing a face's knot line inside a span);
 /// `SM_ERR` for a support that is not a NURBS surface or is itself a blend by its
 /// definition (its definition is not enclosed yet); those of the station solves and the
@@ -550,15 +613,19 @@ fn recertify_in_frame(
             return Err(SolidError::sm_err(OP));
         };
         let room_s = |x: f64| map_rounding(d.map_a[0], d.map_b[0], (x - d.map_a[0]) / d.map_b[0]);
-        let room_t = |x: f64| map_rounding(d.map_a[1], d.map_b[1], (x - d.map_a[1]) / d.map_b[1]);
-        let inside = piece.s[0] >= a - room_s(a)
-            && piece.s[1] <= b + room_s(b)
-            && piece.t[0] >= -room_t(0.0)
-            && piece.t[1] <= 1.0 + room_t(1.0);
-        if !inside {
+        let along = piece.s[0] >= a - room_s(a) && piece.s[1] <= b + room_s(b);
+        if !along {
             return Err(SolidError::invalid_input(
                 OP,
                 "a piece of the net runs across a station of its definition",
+            ));
+        }
+        // (across, a piece may lie past the section's [0, 1]: the continued section's
+        // growth covers it below; only an unbounded range is refused here)
+        if !(piece.t[0].is_finite() && piece.t[1].is_finite() && piece.t[0] < piece.t[1]) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a piece of the net has no range across the section",
             ));
         }
         span_of.push(span);
@@ -593,7 +660,18 @@ fn recertify_in_frame(
         let (ra, rb) = (net_form.station_rows(a)?, net_form.station_rows(b)?);
         let (homog, w) = net_form.span(a, &ra, b, &rb);
         let h = b.s - a.s;
-        let mut delta = 0.0_f64;
+        // the net's distance from the rows, over the pieces in the section's range and over
+        // those past it (a different bound each)
+        let mut delta_in: Option<f64> = None;
+        let mut delta_out: Option<f64> = None;
+        // past the section's range [0, 1], where it has pieces: the continued section's
+        // growth over the rows (module docs); `reach` the farthest |2 t - 1| and `v_lo` the
+        // least weight of the rows there, `across` the t range of those pieces
+        let mut reach = 0.0_f64;
+        let mut v_lo = f64::INFINITY;
+        let mut across: Option<[f64; 2]> = None;
+        let room_lo = -map_rounding(d.map_a[1], d.map_b[1], (0.0 - d.map_a[1]) / d.map_b[1]);
+        let room_hi = 1.0 + map_rounding(d.map_a[1], d.map_b[1], (1.0 - d.map_a[1]) / d.map_b[1]);
         for (piece, _) in pieces.iter().zip(&span_of).filter(|(_, &sp)| sp == span) {
             // H on the piece: cut along s, then across
             let mut cut: Vec<Vec<Hpt>> = Vec::new();
@@ -608,19 +686,89 @@ fn recertify_in_frame(
                     .collect();
                 columns.push(sub_curve(&col, lo, hi));
             }
+            let beyond = piece.t[0] < room_lo || piece.t[1] > room_hi;
+            let mut rounding = 0.0_f64;
             for i in 0..4 {
                 let row: Vec<Hpt> = columns
                     .iter()
                     .map(|c| c.get(i).copied().unwrap_or((Vec3::ZERO, f64::NAN)))
                     .collect();
-                cut.push(sub_curve(&row, piece.t[0].max(0.0), piece.t[1].min(1.0)));
+                if beyond {
+                    let (x, e) = extrapolate_curve(&row, piece.t[0], piece.t[1])?;
+                    rounding = rounding.max(e);
+                    cut.push(x);
+                } else {
+                    cut.push(sub_curve(&row, piece.t[0].max(0.0), piece.t[1].min(1.0)));
+                }
             }
-            delta = delta.max(net_distance(&piece.net, &cut)?);
+            let mut dist = net_distance(&piece.net, &cut)?;
+            if beyond {
+                // the cut rows are off the exact ones by `rounding` in each homogeneous
+                // coordinate (two for a point's three): a point `N / W` moves by at most
+                // `(2 e + |P| e) / W_min`, `W` convex in the weights, `P` in the points
+                let flat: Vec<Hpt> = cut.iter().flatten().copied().collect();
+                let w_min = flat.iter().fold(f64::INFINITY, |m, q| m.min(q.1)) - rounding;
+                let reach_p = flat
+                    .iter()
+                    .fold(0.0_f64, |m, &(p, wq)| m.max(p.length() / wq));
+                if w_min.partial_cmp(&0.0) != Some(Ordering::Greater) {
+                    return Err(SolidError::invalid_input(
+                        OP,
+                        "a weight of the definition's rows past the section is not positive",
+                    ));
+                }
+                dist += rounding * (2.0 + reach_p) / w_min;
+                v_lo = v_lo.min(w_min);
+                reach = reach.max(
+                    (2.0 * piece.t[0] - 1.0)
+                        .abs()
+                        .max((2.0 * piece.t[1] - 1.0).abs()),
+                );
+                across = Some(match across {
+                    Some([x, y]) => [x.min(piece.t[0]), y.max(piece.t[1])],
+                    None => piece.t,
+                });
+            }
+            let slot = if beyond {
+                &mut delta_out
+            } else {
+                &mut delta_in
+            };
+            *slot = Some(slot.map_or(dist, |x| x.max(dist)));
         }
         // the bound proved: the certificate's, the net's distance from these rows, and how
-        // far these rows may be from the exact ones (the floor)
-        let delta = delta + shift;
-        let target = bound - delta - floor;
+        // far these rows may be from the exact ones (the floor). Over the pieces in the
+        // section's range it is the certificate plus their distance; over those past it,
+        // the certificate grown by the continued section's growth (Chebyshev's extremal
+        // property) plus theirs.
+        let delta_in = delta_in.map(|x| x + shift);
+        let delta_out = delta_out.map(|x| x + shift);
+        let v_hi = w.iter().fold(0.0_f64, |m, &x| m.max(x));
+        // the growth is known before the certificate unless the thumbweight is the equal
+        // area one, enclosed by the certificate itself (stated limit: then the certificate
+        // steers by the pieces in range, and a landing the growth takes over the bound is
+        // refused below, never accepted)
+        let early = match (across, equal_area) {
+            (Some(ext), false) => Some(section_growth(
+                d.order,
+                ld,
+                reach,
+                ext,
+                [v_hi, v_lo],
+                Some([d.thumbweight, d.thumbweight]),
+            )?),
+            _ => None,
+        };
+        let mut target = f64::INFINITY;
+        if let Some(x) = delta_in {
+            target = target.min(bound - x - floor);
+        }
+        if let (Some(x), Some(g)) = (delta_out, early) {
+            target = target.min((bound - x - floor) / g);
+        }
+        if delta_out.is_some() && early.is_none() {
+            target = target.min(bound - delta_out.unwrap_or(0.0) - floor);
+        }
         if target.partial_cmp(&0.0) != Some(Ordering::Greater) {
             return Err(SolidError::invalid_input(
                 OP,
@@ -643,7 +791,24 @@ fn recertify_in_frame(
             law.as_ref(),
             if any_defs { Some(&mut defs) } else { None },
         )?;
-        let total = certified + delta + floor;
+        let late = match (across, early) {
+            (Some(ext), None) => Some(section_growth(
+                d.order,
+                ld,
+                reach,
+                ext,
+                [v_hi, v_lo],
+                Some(vary.w),
+            )?),
+            _ => early,
+        };
+        let mut total = 0.0_f64;
+        if let Some(x) = delta_in {
+            total = total.max(certified + x + floor);
+        }
+        if let (Some(x), Some(g)) = (delta_out, late) {
+            total = total.max(certified * g + x + floor);
+        }
         if !matches!(
             total.partial_cmp(&bound),
             Some(Ordering::Less | Ordering::Equal)
@@ -657,6 +822,55 @@ fn recertify_in_frame(
     }
     let [lo, hi] = vary.w;
     Ok((achieved, (equal_area && lo <= hi).then_some([lo, hi])))
+}
+
+/// The growth, past the section's `[0, 1]` over `ext`, of a distance from the continued
+/// section proved on `[0, 1]` ([`gn_certify_span`]): [`growth`] with `m` twice the
+/// section's degree (the rows are of it), `x` the farthest `|2 t - 1|` (`reach`), the
+/// section's weight over `[0, 1]` and `ext` ([`section_weight_range`]) and `V = [max,
+/// min]` the rows' over `[0, 1]` and over the part past it. `thumbweight` is the G^n
+/// section's proved enclosure of its thumbweight (`None` where not yet enclosed).
+///
+/// # Errors
+///
+/// `ExtendRefused` where the section's weight vanishes past `[0, 1]`; `InvalidInput` for rows
+/// not of the section's degree, a thumbweight not enclosed, a weight of the rows not
+/// positive or a growth not finite.
+fn section_growth(
+    order: u32,
+    ld: usize,
+    reach: f64,
+    ext: [f64; 2],
+    [v_hi, v_lo]: [f64; 2],
+    thumbweight: Option<[f64; 2]>,
+) -> Result<f64> {
+    let degree = section_degree(order);
+    if ld != degree + 1 {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the net's rows are not of its section's degree",
+        ));
+    }
+    let (w_hi, w_lo) = section_weight_range(order, [0.0, 1.0], ext, || {
+        thumbweight.ok_or_else(|| {
+            SolidError::invalid_input(OP, "the thumbweight is not enclosed over the section")
+        })
+    })?;
+    if !(v_lo > 0.0 && v_hi.is_finite()) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a weight of the definition's rows past the section is not positive",
+        ));
+    }
+    let g = growth(2 * degree, reach, (w_hi, w_lo), (v_hi, v_lo));
+    if g.is_finite() {
+        Ok(g)
+    } else {
+        Err(SolidError::invalid_input(
+            OP,
+            "the continued section's growth past its range is not finite",
+        ))
+    }
 }
 
 /// The stations of a definition at `sigma`, its seeds' knots, where `needed`: each solved
@@ -922,5 +1136,119 @@ fn sign(x: f64) -> i32 {
         -1
     } else {
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `T_m(x)` for `x >= 1` by its closed form, independent of the recurrence.
+    fn cheb(m: usize, x: f64) -> f64 {
+        (m as f64 * x.acosh()).cosh()
+    }
+
+    /// The circle section's weight `1 - 2 t (1 - t) (1 - c)` is at most 1 over the
+    /// certificate's `[0, 1]` (the `max W` of the growth: the distance is proved there) and
+    /// exceeds 1 off it; the growth is the closed form of
+    /// definitions-and-certificates 6.4 with that `W`, the chord's being 1.
+    #[test]
+    fn the_growth_past_the_section_is_the_closed_form() {
+        let ext = [-0.697_676_318_880_472_2, 0.0];
+        let (reach, v) = (2.0 * 0.697_676_318_880_472_2 + 1.0, [1.5, 0.75]);
+        let ld = 3;
+        let m = 2 * (ld - 1);
+        let want = cheb(m, reach) * (1.0 * v[0]) / (1.0 * v[1]) * (1.0 + gamma(4 * m + 16));
+        let got = section_growth(1, ld, reach, ext, v, None).unwrap();
+        assert!(
+            (got - want).abs() <= 1e-12 * want,
+            "circle growth {got}, wanted {want}"
+        );
+        let chord = section_growth(0, 2, reach, ext, v, None).unwrap();
+        let want = cheb(2, reach) * v[0] / v[1] * (1.0 + gamma(4 * 2 + 16));
+        assert!((chord - want).abs() <= 1e-12 * want, "chord growth {chord}");
+    }
+
+    /// The circle's weight over a certified range outside `[0, 1]` (an extension of an
+    /// extension) reaches `1 + 2 max(0, t (t - 1))`, the chord's stays 1.
+    #[test]
+    fn the_circles_weight_past_its_arc_is_above_one() {
+        let t = 0.697_676_318_880_472_2;
+        let (hi, lo) =
+            section_weight_range(1, [-t, 0.0], [-2.0 * t, -t], || Ok([0.0, 0.0])).unwrap();
+        assert!(
+            (hi - (1.0 + 2.0 * t * (1.0 + t))).abs() <= 1e-15 * hi,
+            "hi {hi}"
+        );
+        assert_eq!(lo, 1.0);
+        let chord = section_weight_range(0, [-t, 0.0], [-2.0 * t, -t], || Ok([0.0, 0.0]));
+        assert_eq!(chord.unwrap(), (1.0, 1.0));
+    }
+
+    /// A rational curve of degree 7 (weights positive), as homogeneous control points.
+    fn curve() -> Vec<Hpt> {
+        (0..8)
+            .map(|i| {
+                let x = f64::from(i);
+                (
+                    Vec3::new(x, (0.7 * x).sin() * 3.0, (0.3 * x * x).cos()),
+                    1.0 + 0.3 * (1.3 * x).sin(),
+                )
+            })
+            .collect()
+    }
+
+    /// The homogeneous value at `tau` by the Bernstein form (binomials and powers, no
+    /// de Casteljau: independent of the code under test).
+    fn at(pts: &[Hpt], tau: f64) -> (Vec3, f64) {
+        let d = pts.len() - 1;
+        let mut binom = 1.0_f64;
+        let (mut p, mut w) = (Vec3::ZERO, 0.0);
+        for (i, &(q, wq)) in pts.iter().enumerate() {
+            let b = binom * tau.powi(i as i32) * (1.0 - tau).powi((d - i) as i32);
+            p += q * b;
+            w += wq * b;
+            binom = binom * (d - i) as f64 / (i + 1) as f64;
+        }
+        (p, w)
+    }
+
+    fn off(a: (Vec3, f64), b: (Vec3, f64)) -> f64 {
+        let d = a.0 - b.0;
+        d.x.abs()
+            .max(d.y.abs())
+            .max(d.z.abs())
+            .max((a.1 - b.1).abs())
+    }
+
+    #[test]
+    fn extrapolating_over_0_1_returns_the_curve_and_agrees_with_sub_curve_inside() {
+        let c = curve();
+        let (same, _) = extrapolate_curve(&c, 0.0, 1.0).unwrap();
+        assert_eq!(same, c);
+        let (cut, _) = extrapolate_curve(&c, 0.2, 0.7).unwrap();
+        let want = sub_curve(&c, 0.2, 0.7);
+        for (x, y) in cut.iter().zip(&want) {
+            assert!(off(*x, *y) < 1e-13, "{x:?} against {y:?}");
+        }
+    }
+
+    #[test]
+    fn extrapolating_past_0_1_is_the_same_curve_within_its_rounding() {
+        let c = curve();
+        for (lo, hi) in [(-0.7, 0.0), (-1.4, 0.1), (0.9, 1.6), (-0.3, 1.2)] {
+            let (cut, e) = extrapolate_curve(&c, lo, hi).unwrap();
+            let mut worst = 0.0_f64;
+            for j in 0..=10 {
+                let u = f64::from(j) / 10.0;
+                worst = worst.max(off(at(&cut, u), at(&c, lo + u * (hi - lo))));
+            }
+            assert!(worst > 0.0 || e > 0.0);
+            assert!(
+                worst <= e,
+                "[{lo}, {hi}]: observed {worst} over its bound {e}"
+            );
+            assert!(worst < 1e-9, "[{lo}, {hi}]: {worst} is not the same curve");
+        }
     }
 }
