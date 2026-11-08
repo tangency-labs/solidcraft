@@ -32,13 +32,6 @@ fn owner() -> u64 {
     }
 }
 
-pub(crate) struct Execution {
-    pub executor: solidcraft_render::ExecutorId,
-    pub options: solidcraft_render::job::JobOptions,
-    pub environment: Option<solidcraft_render::lighting::environment_input::EnvironmentInput>,
-    pub shot: Option<String>,
-}
-
 struct LiveJob {
     handle: JobHandle,
     shot: Option<String>,
@@ -64,12 +57,24 @@ pub(crate) struct BatchShot {
     pub request: Arc<serde_json::Value>,
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
+/// The shot queue (`render.batch`), as Render Progress and Cancel Render report it. Its schema
+/// is part of their replies (`schema::render_jobs`).
+#[derive(Clone, Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct RenderQueueState {
+    /// How many of this design's jobs are still running.
     pub running: usize,
+    /// How many shots wait for their turn.
     pub waiting: usize,
+    /// A real native preparation claim, separate from an invented running job. Present, and
+    /// true, only while the queue prepares a shot that has no job yet.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub preparing: bool,
+    /// The queue's current job, or `null`.
+    #[schemars(with = "Option<crate::schema::render_jobs::Job>")]
     pub job: Option<JobId>,
+    /// The name of the shot that job renders, or `null`.
     pub shot: Option<String>,
+    /// Why the queue stopped, or `null`.
     pub error: Option<String>,
 }
 
@@ -85,8 +90,10 @@ pub(crate) struct Jobs {
     completed: VecDeque<Completed>,
     selected: Option<solidcraft_render::job::JobId>,
     waiting: VecDeque<BatchShot>,
-    batch_job: Option<JobId>,
-    batch_error: Option<String>,
+    pub(crate) batch_job: Option<JobId>,
+    pub(crate) batch_error: Option<String>,
+    pub(crate) native_batch: Option<crate::render_preparation::batch::NativeState>,
+    pub(crate) native_epoch: u64,
     comparison: Option<[Option<JobId>; 2]>,
 }
 
@@ -106,6 +113,8 @@ impl Default for Jobs {
             waiting: VecDeque::new(),
             batch_job: None,
             batch_error: None,
+            native_batch: None,
+            native_epoch: 0,
             comparison: None,
         }
     }
@@ -113,6 +122,9 @@ impl Default for Jobs {
 
 impl Drop for Jobs {
     fn drop(&mut self) {
+        if let Some(native) = &self.native_batch {
+            native.cancel.cancel();
+        }
         for job in &self.live {
             let _ = job.handle.cancel();
         }
@@ -120,6 +132,9 @@ impl Drop for Jobs {
 }
 
 impl Jobs {
+    pub(crate) fn owner_key(&self) -> u64 {
+        self.owner
+    }
     pub(crate) fn set_comparison(&mut self, sides: Option<[Option<JobId>; 2]>) {
         self.comparison = sides;
         if let Some([left, right]) = sides {
@@ -187,24 +202,66 @@ impl Jobs {
         Ok(())
     }
 
-    pub(crate) fn start_with_environment(
+    pub(crate) fn start_prepared(
         &mut self,
         revision: u64,
-        scene: solidcraft_render::ProductScene,
-        request: solidcraft_render::job::ImageRequest,
+        prepared: solidcraft_render::job::PreparedSubmission,
         replace: bool,
-        execution: Execution,
+        shot: Option<String>,
     ) -> Result<JobStatus, JobError> {
-        let Execution { executor, options, environment, shot } = execution;
-        if self.batch_job.is_some() {
+        self.try_start_prepared(revision, &mut Some(prepared), replace, shot)
+    }
+
+    pub(crate) fn try_start_prepared(
+        &mut self,
+        revision: u64,
+        slot: &mut Option<solidcraft_render::job::PreparedSubmission>,
+        replace: bool,
+        shot: Option<String>,
+    ) -> Result<JobStatus, JobError> {
+        self.try_start_prepared_inner(revision, slot, replace, shot, None)
+    }
+    pub(crate) fn try_start_prepared_inner(
+        &mut self,
+        revision: u64,
+        slot: &mut Option<solidcraft_render::job::PreparedSubmission>,
+        replace: bool,
+        shot: Option<String>,
+        ticket: Option<crate::render_preparation::batch::Ticket>,
+    ) -> Result<JobStatus, JobError> {
+        let prepared = slot.as_ref().ok_or_else(|| JobError::new(ErrorCode::InvalidRequest, "prepared render was already consumed"))?;
+        let batch_next = if let Some(ticket) = ticket {
+            let native = self
+                .native_batch
+                .as_ref()
+                .filter(|n| n.ticket == ticket && n.claimed && !n.cancel.is_cancelled())
+                .ok_or_else(|| JobError::new(ErrorCode::Cancelled, "native shot queue claim is no longer current"))?;
+            if replace || native.next >= native.total {
+                return Err(JobError::new(ErrorCode::InvalidRequest, "invalid native shot queue front"));
+            }
+            Some(native.next + 1)
+        } else {
+            None
+        };
+        if ticket.is_none() && (self.batch_job.is_some() || self.native_batch.is_some()) {
             if !replace {
                 return Err(JobError::new(ErrorCode::QueueFull, "cancel the shot queue before starting another render"));
             }
             self.waiting.clear();
             self.batch_job = None;
+            if let Some(native) = self.native_batch.take() {
+                native.cancel.cancel();
+            }
         }
         self.collect()?;
-        let host = self.host_for(&executor).ok_or_else(|| JobError::new(ErrorCode::HostUnavailable, "resolved image host is not installed"))?.clone();
+        let host = self
+            .host_for(prepared.executor())
+            .ok_or_else(|| JobError::new(ErrorCode::HostUnavailable, "resolved image host is not installed"))?
+            .clone();
+        if !host.same_host(prepared.host()) {
+            return Err(JobError::new(ErrorCode::WrongOwner, "prepared render host changed before enqueue"));
+        }
+        prepared.check_cancel()?;
         if replace {
             for job in self.live.drain(..) {
                 let mut status = job.handle.cancel()?;
@@ -228,18 +285,18 @@ impl Jobs {
         }
         let serial = self.serial.checked_add(1).ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "render job identity exhausted"))?;
         let generation = self.generation.checked_add(1).ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "render generation exhausted"))?;
-        let handle = host.submit_with_environment_and_options(
-            JobId { session: self.owner, serial, generation },
-            revision,
-            scene,
-            request,
-            options,
-            environment,
-        )?;
+        let handle = host.try_submit_prepared(JobId { session: self.owner, serial, generation }, revision, slot)?;
         let status = handle.status()?;
         self.serial = serial;
         self.generation = generation;
         self.live.push(LiveJob { handle, shot });
+        if let Some(next) = batch_next {
+            if let Some(native) = &mut self.native_batch {
+                native.next = next;
+                native.claimed = false;
+            }
+            self.batch_job = Some(status.job);
+        }
         Ok(status)
     }
 
@@ -248,7 +305,7 @@ impl Jobs {
         source_id: JobId,
         presentation: solidcraft_render::job::presentation::Presentation,
     ) -> Result<JobStatus, JobError> {
-        if self.batch_job.is_some() {
+        if self.batch_job.is_some() || self.native_batch.is_some() {
             return Err(JobError::new(ErrorCode::QueueFull, "cancel the shot queue before regrading"));
         }
         self.collect()?;
@@ -290,6 +347,38 @@ impl Jobs {
             .map(|job| &job.handle)
             .chain(self.completed.iter().map(|result| &result.handle))
             .find(|j| j.id() == id)
+            .cloned()
+            .ok_or_else(|| JobError::new(ErrorCode::UnknownJob, "render job is no longer retained"))
+    }
+
+    /// Metadata-only identity validation for deferred native cancellation.
+    /// Do not collect terminal work, clone a handle/frame or advance a queue on
+    /// this read path. Actual cancellation still uses its ordinary handler.
+    pub(crate) fn check_retained_or_historical_job(&self, id: JobId) -> Result<(), JobError> {
+        self.check_owner(id)?;
+        if self.live.iter().any(|job| job.handle.id() == id)
+            || self.completed.iter().any(|result| result.handle.id() == id)
+            || self.history.iter().any(|status| status.job == id)
+        {
+            Ok(())
+        } else {
+            Err(JobError::new(ErrorCode::UnknownJob, "render job is no longer retained"))
+        }
+    }
+
+    /// Snapshot existing status without collecting or evicting registry owners.
+    /// Native queue polling uses this path; ordinary status/result APIs retain
+    /// their existing explicit collection semantics.
+    pub(crate) fn peek_status(&self, id: JobId) -> Result<JobStatus, JobError> {
+        self.check_owner(id)?;
+        if let Some(handle) =
+            self.live.iter().map(|job| &job.handle).chain(self.completed.iter().map(|result| &result.handle)).find(|handle| handle.id() == id)
+        {
+            return handle.status();
+        }
+        self.history
+            .iter()
+            .find(|status| status.job == id)
             .cloned()
             .ok_or_else(|| JobError::new(ErrorCode::UnknownJob, "render job is no longer retained"))
     }
@@ -348,7 +437,12 @@ impl crate::Session {
         let active = self.render_jobs.batch_job.and_then(|id| self.render_jobs.live.iter().find(|job| job.handle.id() == id));
         RenderQueueState {
             running: self.render_jobs.live.iter().filter(|job| job.handle.status().is_ok_and(|status| !status.progress.phase.terminal())).count(),
-            waiting: self.render_jobs.waiting.len(),
+            waiting: self
+                .render_jobs
+                .native_batch
+                .as_ref()
+                .map_or(self.render_jobs.waiting.len(), |n| n.total.saturating_sub(n.next + usize::from(n.claimed))),
+            preparing: self.render_jobs.native_batch.as_ref().is_some_and(|n| n.claimed),
             job: self.render_jobs.batch_job,
             shot: active.and_then(|job| job.shot.clone()),
             error: self.render_jobs.batch_error.clone(),
@@ -356,13 +450,29 @@ impl crate::Session {
     }
 
     pub fn render_batch_ready(&self) -> std::result::Result<(), String> {
+        self.render_batch_ready_with_claim(false)
+    }
+
+    /// Recheck ordinary Batch enablement without treating this exact first
+    /// preparation's own fixed claim as a competing queue.
+    pub(crate) fn render_batch_ready_for_first(&self, ticket: crate::render_preparation::batch::Ticket) -> std::result::Result<(), String> {
+        if !ticket.matches(self) || !self.render_jobs.native_batch.as_ref().is_some_and(|n| n.ticket == ticket && n.claimed && n.next == 0) {
+            return Err("native first shot claim is no longer current".into());
+        }
+        self.render_batch_ready_with_claim(true)
+    }
+
+    fn render_batch_ready_with_claim(&self, own_first_claim: bool) -> std::result::Result<(), String> {
         if self.doc.render.setups.is_empty() {
             return Err("no saved shots to render".into());
         }
         if self.doc.render.setups.len() > 32 {
             return Err("render all shots is limited to 32 shots".into());
         }
-        if self.render_jobs.batch_job.is_some() || self.render_queue_state().running != 0 {
+        if (!own_first_claim && self.render_jobs.native_batch.is_some())
+            || self.render_jobs.batch_job.is_some()
+            || self.render_queue_state().running != 0
+        {
             return Err("a render or shot queue is already active".into());
         }
         Ok(())
@@ -405,6 +515,42 @@ impl crate::Session {
 
     /// Non-blocking queue scheduling. The existing host still owns all render work.
     pub fn advance_render_batch(&mut self) -> crate::Result<()> {
+        // Native foreground/background status polling never captures a shot.
+        if self.render_jobs.native_batch.is_some() {
+            if self.render_jobs.native_batch.as_ref().is_some_and(|n| !n.ticket.matches(self)) {
+                if let Some(native) = self.render_jobs.native_batch.take() {
+                    native.cancel.cancel();
+                }
+                self.render_jobs.batch_job = None;
+                self.render_jobs.batch_error = Some("native shot queue belongs to a previous document owner".into());
+                return Ok(());
+            }
+            if self.render_jobs.native_batch.as_ref().is_some_and(|n| n.cancel.is_cancelled()) {
+                self.render_jobs.native_batch = None;
+                self.render_jobs.batch_job = None;
+                self.render_jobs.batch_error = Some("native shot queue was cancelled".into());
+                return Ok(());
+            }
+            if let Some(job) = self.render_jobs.batch_job {
+                let status = self.render_jobs.peek_status(job).map_err(job_error)?;
+                if status.progress.phase.terminal() {
+                    let failed = status.progress.phase != Phase::Completed;
+                    let finished = self.render_jobs.native_batch.as_ref().is_some_and(|n| n.next == n.total && !n.claimed);
+                    if failed || finished {
+                        if let Some(native) = self.render_jobs.native_batch.take()
+                            && failed
+                        {
+                            native.cancel.cancel();
+                        }
+                        self.render_jobs.batch_job = None;
+                        if failed {
+                            self.render_jobs.batch_error = status.error.map(|e| e.to_string());
+                        }
+                    }
+                }
+            }
+            return Ok(());
+        }
         let Some(job) = self.render_jobs.batch_job else { return Ok(()) };
         let status = self.render_jobs.status(job).map_err(job_error)?;
         if !status.progress.phase.terminal() {
@@ -421,8 +567,22 @@ impl crate::Session {
 
     pub(crate) fn cancel_render_batch(&mut self, job: JobId) {
         if self.render_jobs.batch_job == Some(job) {
+            if let Some(native) = self.render_jobs.native_batch.take() {
+                native.cancel.cancel();
+            }
             self.render_jobs.waiting.clear();
             self.render_jobs.batch_job = None;
+        }
+    }
+
+    pub(crate) fn cancel_native_preparation(&mut self) -> bool {
+        if self.render_jobs.batch_job.is_none() && self.render_jobs.native_batch.as_ref().is_some_and(|n| n.claimed) {
+            if let Some(native) = self.render_jobs.native_batch.take() {
+                native.cancel.cancel();
+            }
+            true
+        } else {
+            false
         }
     }
 
@@ -593,5 +753,292 @@ mod displayed_result_tests {
         assert_eq!(s.undo.len(), undo);
         let reply = s.execute("render.start", &json!({"settings":{"width":8,"height":8}})).unwrap();
         assert!(s.execute("render.result.pin", &json!({"job":reply["job"]})).is_err(), "a pending result is never exportable");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn first_native_plan(s: &mut crate::Session) -> (crate::render_preparation::batch::Plan, JobId) {
+        use crate::render_preparation::batch;
+        use solidcraft_render::job::CancelToken;
+        let mut params = Some(json!({}));
+        let claim = batch::claim(s, &mut params, &mut None, CancelToken::default()).unwrap();
+        let (ready, receiver) = std::sync::mpsc::sync_channel(1);
+        let (returning, returned) = std::sync::mpsc::sync_channel(1);
+        let thread = std::thread::spawn(move || {
+            batch::with_scope(claim, |claim| {
+                ready.send(batch::prepare(claim)).unwrap();
+                drop(returned.recv().unwrap());
+            });
+        });
+        let mut prepared = receiver.recv().unwrap();
+        assert_eq!(batch::finish_retained(s, &mut prepared).unwrap(), json!({"queued":2}));
+        let plan = batch::take_plan(&mut prepared).unwrap().unwrap();
+        returning.send(prepared).unwrap();
+        thread.join().unwrap();
+        (plan, s.render_queue_state().job.unwrap())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_next_discard_uses_cached_status_but_hostile_missing_status_fails_only_its_exact_ticket() {
+        use crate::render_preparation::batch;
+        use solidcraft_render::job::CancelToken;
+        for hostile_missing_status in [false, true] {
+            let mut s = crate::Session::default();
+            let host = CpuHost::cooperative();
+            s.set_render_job_host(Some(host.clone())).unwrap();
+            let old = complete(&mut s, [11, 23, 37]);
+            let old_handle = s.render_job_handle(old).unwrap();
+            let old_frame = old_handle.frame().unwrap().unwrap();
+            let old_png = old_frame.png().to_vec();
+            for name in ["A", "B"] {
+                s.execute("render.settings.set", &json!({"name":name,"set":{"width":2,"height":1,"job":{"method":"raster"}}})).unwrap();
+            }
+            let (plan, first) = first_native_plan(&mut s);
+            for _ in 0..10_000 {
+                if s.render_job_handle(first).unwrap().status().unwrap().progress.phase.terminal() {
+                    break;
+                }
+                host.pump(4096).unwrap();
+            }
+            assert_eq!(s.render_job_handle(first).unwrap().status().unwrap().progress.phase, Phase::Completed);
+            let retained = s.render_retained_results().unwrap();
+            let index = retained.iter().position(|r| r.frame.job == first).unwrap();
+            s.execute("render.result.discard", &json!({"index":index})).unwrap();
+            assert!(s.render_job_handle(first).is_err());
+            assert_eq!(
+                s.render_jobs.status(first).unwrap().progress.phase,
+                Phase::Completed,
+                "ordinary Discard preserves the recent status cache and is not an UnknownJob reproducer"
+            );
+            if hostile_missing_status {
+                // Defensive hostile registry-state injection, not an ordinary
+                // UI Discard claim: public regrade/replace cannot rotate this
+                // status while preserving the same native ticket.
+                s.render_jobs.history.retain(|status| status.job != first);
+            }
+            let bytes = plan.retained_bytes();
+            let held = host.admitted_bytes();
+            let mut slot = Some(plan);
+            let result = batch::claim_next(&mut s, &mut slot, CancelToken::default());
+            if hostile_missing_status {
+                let error = match result {
+                    Err(error) => error,
+                    Ok(_) => panic!("missing current status must refuse"),
+                };
+                let message = error.to_string();
+                assert!(message.contains("render job is no longer retained"));
+                assert_eq!(s.render_queue_state().error.as_deref(), Some(message.as_str()));
+                assert_eq!((s.render_queue_state().waiting, s.render_queue_state().preparing), (0, false));
+                assert!(s.render_queue_state().job.is_none());
+                assert!(slot.is_some());
+                assert_eq!(host.admitted_bytes(), held, "metadata failure cannot release the retained Plan backing");
+                assert_eq!(old_frame.png(), old_png);
+                assert_eq!(s.render_jobs.status(old).unwrap().progress.phase, Phase::Completed);
+                let token = CancelToken::default();
+                let replacement = batch::claim(&mut s, &mut Some(json!({})), &mut None, token.clone()).unwrap();
+                let current = json!(s.render_queue_state());
+                assert!(batch::claim_next(&mut s, &mut slot, CancelToken::default()).is_err());
+                assert_eq!(json!(s.render_queue_state()), current, "stale Plan refusal cannot fail a replacement epoch");
+                assert!(!token.is_cancelled());
+                let before = host.admitted_bytes();
+                let retired = slot.take().unwrap();
+                std::thread::spawn(move || batch::retire_plan(retired)).join().unwrap();
+                assert_eq!(host.admitted_bytes(), before - bytes, "only actual worker retirement releases Plan credit");
+                batch::cancel(&mut s).unwrap();
+                std::thread::spawn(move || batch::with_scope(replacement, drop)).join().unwrap();
+            } else {
+                let claim = result.unwrap().unwrap();
+                assert!(slot.is_none());
+                assert_eq!(s.render_queue_state().waiting, 0);
+                assert!(s.render_queue_state().preparing);
+                assert_eq!(host.admitted_bytes(), held);
+                batch::cancel(&mut s).unwrap();
+                std::thread::spawn(move || batch::with_scope(claim, drop)).join().unwrap();
+                assert_eq!(host.admitted_bytes(), held - bytes);
+            }
+            assert_eq!(old_frame.png(), old_png);
+            assert_eq!(old_handle.status().unwrap().progress.phase, Phase::Completed);
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn immutable_native_cancel_identity_checks_live_completed_and_discarded_history_without_collecting_or_advancing() {
+        use crate::render_preparation::batch;
+        let mut s = crate::Session::default();
+        let host = CpuHost::cooperative();
+        s.set_render_job_host(Some(host.clone())).unwrap();
+        for name in ["A", "B"] {
+            s.execute("render.settings.set", &json!({"name":name,"set":{"width":2,"height":1,"job":{"method":"raster"}}})).unwrap();
+        }
+        let (plan, job) = first_native_plan(&mut s);
+        let document = s.doc.clone();
+        let model = s.model.state();
+        let handle = s.render_job_handle(job).unwrap();
+        let check = |s: &crate::Session| {
+            let identities = || {
+                (
+                    s.render_jobs.live.iter().map(|job| job.handle.id()).collect::<Vec<_>>(),
+                    s.render_jobs.completed.iter().map(|result| result.handle.id()).collect::<Vec<_>>(),
+                    s.render_jobs.history.iter().map(|status| status.job).collect::<Vec<_>>(),
+                    s.render_jobs.serial,
+                    s.render_jobs.generation,
+                    json!(s.render_queue_state()),
+                )
+            };
+            let before = identities();
+            let bytes = host.admitted_bytes();
+            let owners = (Arc::strong_count(&document), Arc::strong_count(&model));
+            let history = (s.revision, s.undo.len(), s.redo.len());
+            assert_eq!(batch::check_cancel(s, &json!({"job":job})).unwrap(), Some(job));
+            assert_eq!(batch::check_cancel(s, &json!({})).unwrap(), None);
+            assert_eq!(identities(), before, "pure cancel validation cannot collect or advance a native shot front");
+            assert_eq!(host.admitted_bytes(), bytes, "validation neither reserves nor drops renderer/plan backing");
+            assert_eq!((Arc::strong_count(&document), Arc::strong_count(&model)), owners, "no source clone or retirement");
+            assert!(Arc::ptr_eq(&s.doc, &document));
+            assert!(Arc::ptr_eq(&s.model.state(), &model));
+            assert_eq!((s.revision, s.undo.len(), s.redo.len()), history);
+        };
+        assert_eq!(handle.status().unwrap().progress.phase, Phase::Queued);
+        check(&s);
+        for _ in 0..10_000 {
+            if !host.pump(4096).unwrap() {
+                break;
+            }
+        }
+        assert_eq!(handle.status().unwrap().progress.phase, Phase::Completed);
+        assert_eq!((s.render_jobs.live.len(), s.render_jobs.completed.len(), s.render_jobs.history.len()), (1, 0, 0));
+        check(&s);
+        assert_eq!(
+            (s.render_jobs.live.len(), s.render_jobs.completed.len(), s.render_jobs.history.len()),
+            (1, 0, 0),
+            "a completed-but-uncollected handle remains in live metadata"
+        );
+        s.render_jobs.collect().unwrap();
+        assert_eq!((s.render_jobs.live.len(), s.render_jobs.completed.len(), s.render_jobs.history.len()), (0, 1, 1));
+        check(&s);
+        let frame = handle.frame().unwrap().unwrap();
+        let png = frame.png().to_vec();
+        s.execute("render.result.discard", &json!({"index":0})).unwrap();
+        assert_eq!((s.render_jobs.live.len(), s.render_jobs.completed.len(), s.render_jobs.history.len()), (0, 0, 1));
+        assert!(s.render_job_handle(job).is_err());
+        check(&s);
+        assert_eq!(frame.png(), png, "checking an actual discarded result uses history, not a replacement image");
+        let unknown = JobId { serial: u64::MAX, generation: u64::MAX, ..job };
+        let foreign = JobId { session: job.session + 1, ..job };
+        for (id, code) in [(unknown, ErrorCode::UnknownJob), (foreign, ErrorCode::WrongOwner)] {
+            let before = json!(s.render_queue_state());
+            let bytes = host.admitted_bytes();
+            assert_eq!(s.render_jobs.check_retained_or_historical_job(id).unwrap_err().code, code);
+            assert!(batch::check_cancel(&s, &json!({"job":id})).is_err());
+            assert_eq!(json!(s.render_queue_state()), before);
+            assert_eq!(host.admitted_bytes(), bytes);
+        }
+        assert_eq!((s.render_queue_state().waiting, s.render_queue_state().preparing), (1, false));
+        let held = host.admitted_bytes();
+        let plan_bytes = plan.retained_bytes();
+        assert!(batch::cancel(&mut s).unwrap(), "terminal history is sufficient to cancel the remaining native queue");
+        assert_eq!((s.render_queue_state().waiting, s.render_queue_state().preparing, s.render_queue_state().job), (0, false, None));
+        assert_eq!((s.render_jobs.live.len(), s.render_jobs.completed.len(), s.render_jobs.history.len()), (0, 0, 1));
+        assert_eq!(host.admitted_bytes(), held, "metadata cancellation retains the Plan lease until its worker retires it");
+        assert_eq!(frame.png(), png);
+        assert!(Arc::ptr_eq(&s.doc, &document) && Arc::ptr_eq(&s.model.state(), &model));
+        std::thread::spawn(move || batch::retire_plan(plan)).join().unwrap();
+        assert_eq!(host.admitted_bytes(), held - plan_bytes);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_queue_status_and_next_claim_keep_eight_results_and_terminal_live_backing_until_explicit_collection() {
+        use crate::render_preparation::batch;
+        use solidcraft_render::job::CancelToken;
+        for cancelled in [false, true] {
+            let mut s = crate::Session::default();
+            let host = CpuHost::cooperative();
+            s.set_render_job_host(Some(host.clone())).unwrap();
+            let mut old_ids = Vec::new();
+            let mut oldest_frame = None;
+            for index in 0..8 {
+                let id = complete(&mut s, [index, 31, 63]);
+                s.render_retained_results().unwrap();
+                old_ids.push(id);
+                if index == 0 {
+                    oldest_frame = Some(Arc::downgrade(&s.render_job_handle(id).unwrap().frame().unwrap().unwrap()));
+                }
+            }
+            let oldest_frame = oldest_frame.unwrap();
+            assert_eq!(s.render_jobs.completed.len(), 8);
+            for name in ["A", "B"] {
+                s.execute("render.settings.set", &json!({"name":name,"set":{"width":2,"height":1,"job":{"method":"raster"}}})).unwrap();
+            }
+            let (plan, job) = first_native_plan(&mut s);
+            let handle = s.render_job_handle(job).unwrap();
+            if cancelled {
+                assert_eq!(handle.cancel().unwrap().progress.phase, Phase::Cancelled);
+            } else {
+                for _ in 0..10_000 {
+                    if !host.pump(4096).unwrap() {
+                        break;
+                    }
+                }
+                assert_eq!(handle.status().unwrap().progress.phase, Phase::Completed);
+            }
+            let actual = handle.status().unwrap();
+            let peek = s.render_jobs.peek_status(job).unwrap();
+            assert_eq!((peek.job, peek.progress.phase), (job, actual.progress.phase));
+            assert_eq!(peek.error.as_ref().map(|e| (e.code, e.message.as_str())), actual.error.as_ref().map(|e| (e.code, e.message.as_str())));
+            let foreign = JobId { session: job.session + 1, ..job };
+            let unknown = JobId { serial: u64::MAX, generation: u64::MAX, ..job };
+            assert_eq!(s.render_jobs.peek_status(foreign).unwrap_err().code, ErrorCode::WrongOwner);
+            assert_eq!(s.render_jobs.peek_status(unknown).unwrap_err().code, ErrorCode::UnknownJob);
+            let held = host.admitted_bytes();
+            let membership = |s: &crate::Session| {
+                (
+                    s.render_jobs.live.iter().map(|j| j.handle.id()).collect::<Vec<_>>(),
+                    s.render_jobs.completed.iter().map(|j| j.handle.id()).collect::<Vec<_>>(),
+                    s.render_jobs.history.iter().map(|j| j.job).collect::<Vec<_>>(),
+                )
+            };
+            let before = membership(&s);
+            assert_eq!(before.0, vec![job]);
+            assert_eq!(before.1, old_ids);
+            assert!(oldest_frame.upgrade().is_some());
+            s.advance_render_batch().unwrap();
+            assert_eq!(membership(&s), before, "native status polling cannot collect a terminal live job or evict result0");
+            assert_eq!(host.admitted_bytes(), held);
+            assert!(oldest_frame.upgrade().is_some());
+            let mut slot = Some(plan);
+            let claim = batch::claim_next(&mut s, &mut slot, CancelToken::default());
+            assert_eq!(membership(&s), before, "metadata-only next-front claim cannot drive ordinary result retention");
+            assert_eq!(host.admitted_bytes(), held);
+            assert!(oldest_frame.upgrade().is_some());
+            if cancelled {
+                assert!(claim.is_err());
+                assert!(slot.is_some());
+                assert_eq!((s.render_queue_state().waiting, s.render_queue_state().preparing), (0, false));
+                assert!(s.render_queue_state().job.is_none());
+                assert_eq!(s.render_queue_state().error.as_deref(), Some("native shot queue was cancelled"));
+                let bytes = slot.as_ref().unwrap().retained_bytes();
+                let retired = slot.take().unwrap();
+                std::thread::spawn(move || batch::retire_plan(retired)).join().unwrap();
+                assert_eq!(host.admitted_bytes(), held - bytes);
+                let rows = s.render_retained_results().unwrap();
+                assert_eq!(rows.iter().map(|r| r.frame.job).collect::<Vec<_>>(), old_ids);
+                assert!(s.render_jobs.live.is_empty());
+                assert!(oldest_frame.upgrade().is_some());
+            } else {
+                let claim = claim.unwrap().unwrap();
+                assert!(slot.is_none());
+                assert_eq!((s.render_queue_state().waiting, s.render_queue_state().preparing), (0, true));
+                assert_eq!(s.render_queue_state().job, Some(job), "keep the last real job while preparing the next camera");
+                // Ordinary explicit result collection still applies its existing8-row policy.
+                let rows = s.render_retained_results().unwrap();
+                let mut expected = old_ids[1..].to_vec();
+                expected.push(job);
+                assert_eq!(rows.iter().map(|r| r.frame.job).collect::<Vec<_>>(), expected);
+                assert!(s.render_jobs.live.is_empty());
+                assert!(oldest_frame.upgrade().is_none(), "only explicit ordinary collection evicts the oldest completed frame");
+                assert!(host.admitted_bytes() < held);
+                batch::cancel(&mut s).unwrap();
+                std::thread::spawn(move || batch::with_scope(claim, drop)).join().unwrap();
+            }
+        }
     }
 }

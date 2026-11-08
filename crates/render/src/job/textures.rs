@@ -3,6 +3,7 @@
 pub(crate) mod cpu_cache;
 #[cfg(feature = "raytrace-cpu")]
 pub mod cpu_preparation;
+
 use super::{CancelToken, ErrorCode, JobError, Result};
 use crate::{
     ProductScene,
@@ -271,7 +272,8 @@ impl RuntimeTextures {
     pub fn summary(&self) -> TextureSummary {
         TextureSummary { bodies: self.bindings.len(), encoded_bytes: self.source_bytes, linear_pixel_bytes: self.pixel_bytes }
     }
-    /// Captured source and control capacities, retained by the same host lease.
+    /// Actual/conservative captured source, binding, name and control-header
+    /// backing. Available before a CPU or registered executor consumes maps.
     pub fn captured_bytes(&self) -> Result<u64> {
         let slots: usize = self
             .bindings
@@ -284,6 +286,8 @@ impl RuntimeTextures {
             .checked_add(self.bindings.capacity() as u64 * size_of::<TextureBinding>() as u64)
             .and_then(|bytes| bytes.checked_add(self.bindings.iter().map(|b| b.body_name.capacity() as u64).sum::<u64>()))
             .and_then(|bytes| bytes.checked_add(self.source_bytes))
+            // Shared encoded allocations are counted once in source_bytes. The
+            // small control-header allowance conservatively counts every role.
             .and_then(|bytes| bytes.checked_add(slots as u64 * (size_of::<Vec<u8>>() + 2 * size_of::<usize>()) as u64))
             .ok_or_else(|| invalid("CPU texture source metadata overflow"))
     }
@@ -319,17 +323,18 @@ impl RuntimeTextures {
     }
 }
 
-/// CPU image maps use one mapped closure for every supported direct-light path.
-/// Unsupported optical continuations refuse before source preparation.
+/// Pure compatibility check before captured image-map bytes enter a CPU job.
+/// Opaque direct and path lighting share the same cached mapped closure. Other
+/// optical continuations are retained in the request and refused, never ignored.
 pub fn validate_cpu_options(options: &super::RaytraceOptions) -> Result<()> {
     options.validate()?;
-    if !options.dielectrics.is_empty()
+    if (!options.dielectrics.is_empty() && options.path.is_none())
         || options.anisotropic_faces.iter().any(Option::is_some)
         || options.reflections.as_ref().is_some_and(|r| !r.bodies.is_empty())
         || options.surface_effects.as_ref().is_some_and(|effects| !effects.is_empty())
     {
         return Err(invalid(
-            "CPU surface maps support opaque direct lighting; use GPU or explicitly remove incompatible Glass, selected reflections, anisotropy or procedural surface effects",
+            "CPU surface maps support opaque direct or indirect lighting; preserve the maps and use GPU, or explicitly remove incompatible Glass, selected reflections, anisotropy or procedural surface effects",
         ));
     }
     Ok(())
@@ -511,6 +516,7 @@ mod tests {
         assert_eq!(encoded, "replace");
         assert!(serde_json::from_str::<BaseColorMode>("\"unspecified\"").is_err());
     }
+
     // Independent source-structure cost: one header and each4096-byte CRC
     // block; EXIF adds its header, each IFD entry, and one final transition.
     #[cfg(feature = "raytrace-cpu")]

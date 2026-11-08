@@ -1,6 +1,6 @@
 //! Tokenised dense card library. Import elements through `crate::ui_kit`.
 //! `Panel` owns card composition; rows own aligned label/control columns and retain egui focus.
-//! Geometry, typography and colours come from `theme::Tokens`. See `docs/ui-kit.md`.
+//! Geometry, typography and colours come from `solidcraft_theme::Tokens`. See `docs/ui-kit.md`.
 mod actions;
 mod assistant;
 mod assistant_entry;
@@ -11,6 +11,7 @@ mod color;
 mod compare;
 mod confirm;
 pub mod container;
+mod dash;
 mod details;
 mod disclosure;
 mod drag;
@@ -18,6 +19,7 @@ mod fields;
 mod file_view;
 mod framing;
 mod history;
+mod history_group;
 mod layout;
 mod look_chain;
 mod menu;
@@ -41,9 +43,11 @@ mod preferences_layout;
 mod preferences_navigation;
 mod preferences_small;
 mod radial;
+pub(crate) mod recent_colors;
 mod reports;
 mod review;
 mod search;
+pub(crate) mod settings_search;
 mod shortcuts;
 mod sphere;
 mod stages;
@@ -55,6 +59,7 @@ mod theme_picker;
 mod tree;
 mod value_focus;
 mod viewport_status;
+mod wheel;
 
 pub(crate) use actions::*;
 pub use actions::{Button, button};
@@ -70,25 +75,30 @@ pub(crate) use choice::*;
 pub(crate) use color::*;
 pub(crate) use compare::*;
 pub(crate) use confirm::{Confirm, Tone};
-pub use container::{BackingTooltipExt, Container, DockEdges, Edge, Surface};
+pub use container::{BackingTooltipExt, Container, DockEdges, Edge, LayoutMode, Surface};
+pub(crate) use container::{SHELL_GAP, input_blocked, set_input_blocked};
+pub(crate) use dash::dashed_line;
 pub(crate) use details::*;
 pub(crate) use disclosure::*;
 pub(crate) use drag::*;
 pub(crate) use fields::*;
-pub use fields::{cell_editor, wide_cell_editor};
+pub use fields::{Expressions, cell_editor, install_expressions, wide_cell_editor};
 pub(crate) use file_view::{FileView, RecentRow, RecoveryMessage, SampleCard};
 pub(crate) use framing::*;
 pub(crate) use history::*;
+pub(crate) use history_group::*;
 pub(crate) use layout::*;
 pub use look_chain::{LookStep, look_chain};
+pub use menu::{Item, LIST_W};
 pub(crate) use menu::{Menu, MenuItem, rename_menu, workspace_menu};
 pub(crate) use metrics::{ContentWidth, header_height, row_height, table_row_height};
 pub use name_list::{NameList, NameRow, name_list};
 pub(crate) use navigation::*;
+pub use navigation::{NavigationEdge, NavigationIdle, NavigationSize};
 pub(crate) use navigation_menu::*;
 pub(crate) use navigation_settings::*;
 pub(crate) use panel::{
-    ComputeStatus, FeatureOptions, InspectorAction, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover,
+    ComputeStatus, FeatureOptions, InspectorAction, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover, within,
 };
 pub use panel::{DialogButtons, Window};
 #[cfg(test)]
@@ -114,7 +124,7 @@ pub(crate) use shortcuts::*;
 pub(crate) use sphere::sphere_preview;
 pub use sphere::{FinishKind, Sphere, sphere_thumbnail};
 pub(crate) use sphere::{SphereTile, sphere_cursor, sphere_grid, sphere_grid_drag, sphere_preview_with_source};
-pub(crate) use stages::{StageAction, StageBar};
+pub(crate) use stages::{Cards, StageAction, StageBar};
 pub(crate) use status::*;
 pub(crate) use table::*;
 #[cfg(test)]

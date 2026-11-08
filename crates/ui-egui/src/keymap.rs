@@ -12,6 +12,8 @@ use solidcraft_engine::{CommandSpec, command_specs};
 use crate::SolveApp;
 use crate::ui_kit;
 
+pub(crate) const DRAG_ZOOM: &str = "view.tool.zoom";
+
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] = &[
     "Escape",
@@ -32,6 +34,7 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+C",
     "Ctrl+X",
     "Ctrl+V",
+    "Ctrl+Shift+V",
     // View keys (`navigation::view_key`).
     "Left",
     "Right",
@@ -184,7 +187,8 @@ impl Keymap {
         Value::Object(self.custom.iter().map(|(id, keys)| (id.clone(), keys_value(keys))).collect())
     }
     pub fn load(&mut self, v: &Value) {
-        self.custom = v.as_object().map(|o| o.iter().take(2000).filter_map(|(k, v)| Some((k.clone(), saved_keys(v)?))).collect()).unwrap_or_default();
+        self.custom =
+            v.as_object().map(|o| o.iter().take(2000).filter_map(|(k, v)| Some((k.clone(), saved_keys(k, v)?))).collect()).unwrap_or_default();
     }
 }
 
@@ -198,7 +202,7 @@ pub(crate) fn keys_value(keys: &[String]) -> Value {
 }
 
 /// A command's saved keys: `""` (none), one key, or a list of them.
-pub(crate) fn saved_keys(v: &Value) -> Option<Vec<String>> {
+pub(crate) fn saved_keys(id: &str, v: &Value) -> Option<Vec<String>> {
     let raw: Vec<&str> = match v {
         Value::String(key) => vec![key.as_str()],
         Value::Array(keys) => keys.iter().filter_map(Value::as_str).filter(|k| !k.is_empty()).take(MAX_KEYS).collect(),
@@ -210,7 +214,7 @@ pub(crate) fn saved_keys(v: &Value) -> Option<Vec<String>> {
     }
     let mut keys = Vec::new();
     for key in raw.into_iter().filter(|key| !key.is_empty()) {
-        let Some(key) = canonical_key(key).filter(|key| !RESERVED.contains(&key.as_str())) else {
+        let Some(key) = canonical_key(key).filter(|key| !reserved_for(id, key)) else {
             log::warn!("invalid or reserved saved shortcut ignored");
             continue;
         };
@@ -221,10 +225,41 @@ pub(crate) fn saved_keys(v: &Value) -> Option<Vec<String>> {
     Some(keys)
 }
 
+/// Panel bindings own arrows only while shared chrome has actual keyboard focus.
+/// Every other application-reserved key remains protected for every command.
+fn reserved_for(id: &str, key: &str) -> bool {
+    RESERVED.contains(&key)
+        && !(solidcraft_engine::panels::ContextualPanelAction::from_command_id(id).is_some()
+            && key.rsplit('+').next().is_some_and(|name| matches!(name, "Left" | "Right" | "Up" | "Down")))
+}
+
+/// Effective registered chords for the host's deferred, focus-checked input path.
+pub(crate) fn panel_shortcuts(app: &SolveApp) -> Vec<(solidcraft_engine::panels::ContextualPanelAction, egui::KeyboardShortcut)> {
+    use solidcraft_engine::panels::ContextualPanelAction;
+    ContextualPanelAction::ALL
+        .into_iter()
+        .flat_map(|action| {
+            keys(app, action.command_id()).into_iter().take(MAX_KEYS).filter_map(move |key| {
+                let mut shortcut = chord(&key)?;
+                // Ctrl is the existing primary-modifier alias; explicit Ctrl+Cmd
+                // continues to require both physical modifiers.
+                if shortcut.modifiers.command && !shortcut.modifiers.mac_cmd {
+                    shortcut.modifiers.ctrl = false;
+                }
+                Some((action, shortcut))
+            })
+        })
+        .collect()
+}
+
 /// Read the same chord that recording a key produces, independent of case and modifier order.
 /// The last token is the key; the preceding tokens are modifiers. Keep the historical primary
 /// Ctrl/Cmd alias, explicit Control+Command chords and old physical modifier-key names.
 fn canonical_key(text: &str) -> Option<String> {
+    chord(text).map(|shortcut| key_name(shortcut.logical_key, shortcut.modifiers))
+}
+
+fn chord(text: &str) -> Option<egui::KeyboardShortcut> {
     if text.len() > 256 {
         return None;
     }
@@ -262,7 +297,7 @@ fn canonical_key(text: &str) -> Option<String> {
         "return" => egui::Key::Enter,
         _ => egui::Key::ALL.iter().copied().find(|key| key.name().eq_ignore_ascii_case(name)).or_else(|| egui::Key::from_name(name))?,
     };
-    Some(key_name(key, mods))
+    Some(egui::KeyboardShortcut::new(mods, key))
 }
 
 /// A key press as a shortcut name: `E`, `Shift+E`, `Ctrl+Alt+K`, `F5`, `Delete`.
@@ -340,6 +375,16 @@ pub fn keys(app: &SolveApp, id: &str) -> Vec<String> {
         Some(keys) => keys.clone(),
         None => solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty()).map(str::to_string).into_iter().collect(),
     }
+}
+
+/// Drag to Zoom has no default binding. Compare the keys and current modifiers using the
+/// same chord names as the shortcut recorder.
+pub(crate) fn drag_zoom_key(app: &SolveApp, key: egui::Key, modifiers: egui::Modifiers) -> bool {
+    app.keymap.custom.get(DRAG_ZOOM).is_some_and(|keys| !keys.is_empty() && keys.contains(&key_name(key, modifiers)))
+}
+
+pub(crate) fn drag_zoom_held(app: &SolveApp, input: &egui::InputState) -> bool {
+    input.focused && input.keys_down.iter().any(|key| drag_zoom_key(app, *key, input.modifiers))
 }
 
 /// Use the spec already available when walking the command list.
@@ -428,7 +473,9 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     let enabled: Vec<&'static str> = commands_for(app, key)
         .into_iter()
         .filter(|id| {
-            (scope(id) != Scope::Render || here == Scope::Render)
+            // Shared panel bindings run only in the host's late input path.
+            solidcraft_engine::panels::ContextualPanelAction::from_command_id(id).is_none()
+                && (scope(id) != Scope::Render || here == Scope::Render)
                 && (here != Scope::Render || scope(id) != Scope::Sketch)
                 && solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
         })
@@ -446,6 +493,10 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
 /// starts in the new sketch.
 pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
     if let Some(id) = command_for(app, key) {
+        if id == DRAG_ZOOM {
+            // The viewport reads the held chord. A key press must not latch Zoom.
+            return;
+        }
         // Pressed again while a tool of the same family is out, with Preferences › Sketch asking
         // for it (#2459): before its first point, the family's next mode (wrapping round); once a
         // point is placed, the tool keeps it. A held key's repeats change nothing.
@@ -503,7 +554,7 @@ pub fn bind_at(app: &mut SolveApp, id: &str, slot: Option<usize>, key: &str, rep
     let spec = solidcraft_engine::find_command(id).ok_or_else(|| format!("no command `{id}`"))?;
     let canonical = if key.is_empty() { String::new() } else { canonical_key(key).ok_or("unknown shortcut key")? };
     let key = canonical.as_str();
-    if RESERVED.contains(&key) {
+    if reserved_for(id, key) {
         return Err(format!("{key} is used by SolidCraft itself"));
     }
     let mut list = keys(app, id);
@@ -561,7 +612,7 @@ pub fn reset(app: &mut SolveApp, id: Option<&str>) {
 /// reset; a key another command uses is reported and taken over only on request.
 pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
-    let filtering = crate::prefs_search::querying(ui);
+    let filtering = crate::ui_kit::settings_search::querying(ui);
     // A Preferences search lists the matching shortcuts too, and one recorded from there takes
     // the key like one on this page (#10043). Only a search field that has the keyboard keeps
     // its keys: going back to it to type stops the recording.
@@ -614,7 +665,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut action: Option<(String, &str)> = None;
     ui_kit::scope(ui, |ui| {
         if !filtering {
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let edit_label = if app.keymap.read_only { app.tr_label("Edit shortcuts") } else { app.tr("install.done") };
             let actions_width = ui_kit::ContentWidth::button(ui, edit_label)
                 + ui_kit::icon_label_width(ui, app.tr("prefs.profile_export"), Some("export_tray"), false)
@@ -633,7 +684,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                             ui,
                             egui::Id::unique("sc_keymap_filter"),
                             &mut app.keymap.filter,
-                            crate::i18n::tr_label("Filter commands or keys"),
+                            solidcraft_ui_text::tr_label("Filter commands or keys"),
                         )
                     })
                     .inner;
@@ -691,8 +742,8 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let label = app.tr_label(c.label);
                 let group = shortcut_group(c);
                 let hit = if filtering {
-                    crate::prefs_search::shows_all(ui)
-                        || crate::prefs_search::matches_text(
+                    crate::ui_kit::settings_search::shows_all(ui)
+                        || crate::ui_kit::settings_search::matches_text(
                             &q,
                             &[c.label, c.id, label, &group]
                                 .into_iter()
@@ -744,8 +795,8 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::section_heading(ui, group);
                 let heading = crate::scenario::rect_of(&format!("dialog:heading:{group}"));
                 if let Some(rect) = heading {
-                    crate::prefs_search::remember(ui, group, rect);
-                    crate::prefs_search::follow(ui, group, rect);
+                    crate::ui_kit::settings_search::remember(ui, group, rect);
+                    crate::ui_kit::settings_search::follow(ui, group, rect);
                 }
                 for (command, keys, label) in rows {
                     if let Some(chosen) = shortcut_row(app, ui, command, keys, label, filtering) {
@@ -760,9 +811,9 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // Collapsed matches still participate in Up/Down and Enter. Enter lands on
                 // the real group or command, where follow() reveals its complete row.
                 for (group, rows) in &groups {
-                    crate::prefs_search::remember(ui, group, rect);
+                    crate::ui_kit::settings_search::remember(ui, group, rect);
                     for (command, keys, label) in rows {
-                        crate::prefs_search::remember(ui, &shortcut_search_label(command, label, keys), rect);
+                        crate::ui_kit::settings_search::remember(ui, &shortcut_search_label(command, label, keys), rect);
                     }
                 }
             }
@@ -846,7 +897,7 @@ fn shortcut_row(
     label: &str,
     filtering: bool,
 ) -> Option<(String, &'static str)> {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let editing = !app.keymap.read_only;
     let capturing = app.keymap.capturing.as_deref() == Some(command.id);
     let mut slots: Vec<(usize, String, bool)> = keys.iter().enumerate().map(|(slot, key)| (slot, display(key), true)).collect();
@@ -898,13 +949,13 @@ fn shortcut_row(
     let height = if beside { label_height.max(control_height) } else { label_height + control_height + t.space_4 } + t.space_8;
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let search_label = shortcut_search_label(command, label, keys);
-    crate::prefs_search::follow(ui, &search_label, rect);
+    crate::ui_kit::settings_search::follow(ui, &search_label, rect);
     if !filtering && !capturing && !ui.is_rect_visible(rect) {
         return None;
     }
     if filtering {
-        crate::prefs_search::reveal(ui);
-        crate::prefs_search::push_force(ui);
+        crate::ui_kit::settings_search::reveal(ui);
+        crate::ui_kit::settings_search::push_force(ui);
     }
     let mut action = None;
     ui.push_id(command.id, |ui| {
@@ -982,10 +1033,10 @@ fn shortcut_row(
             });
         }
     });
-    crate::prefs_search::remember(ui, &search_label, rect);
+    crate::ui_kit::settings_search::remember(ui, &search_label, rect);
     t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
     if filtering {
-        crate::prefs_search::pop_force(ui);
+        crate::ui_kit::settings_search::pop_force(ui);
     }
     action
 }
@@ -999,7 +1050,7 @@ fn outcome(app: &SolveApp, ui: &mut egui::Ui) -> Option<&'static str> {
     }
     if let Some((_, key, _, _)) = app.keymap.conflict.clone() {
         ui.horizontal_wrapped(|ui| {
-            let replace = ui_kit::button(ui, crate::i18n::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
+            let replace = ui_kit::button(ui, solidcraft_ui_text::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
             crate::scenario::publish_target("keymap:replace", replace.rect);
             if replace.clicked() {
                 chosen = Some("replace");
@@ -1032,6 +1083,45 @@ pub fn capturing(app: &SolveApp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn panel_bindings_preserve_contextual_arrows_and_rebind_clear_conflict_and_reset() {
+        use solidcraft_engine::panels::ContextualPanelAction;
+        let mut a = app();
+        let defaults = panel_shortcuts(&a);
+        assert_eq!(defaults.len(), 4);
+        for (action, shortcut) in defaults {
+            assert_eq!(shortcut.modifiers, egui::Modifiers::NONE);
+            assert!(keys(&a, action.command_id()).contains(&shortcut.logical_key.name().to_string()));
+            assert_eq!(command_for(&a, shortcut.logical_key.name()), None, "arrows stay out of global dispatch");
+        }
+        bind(&mut a, "panel.sash.left", "Ctrl+Shift+Left", false).unwrap();
+        assert!(bind(&mut a, "solid.box", "Ctrl+Left", true).is_err());
+        assert!(bind(&mut a, "panel.focus.next", "Escape", true).is_err());
+        assert!(bind(&mut a, "panel.focus.next", "Ctrl+Z", true).is_err());
+        assert!(bind(&mut a, "panel.focus.next", "Right", false).is_err(), "existing sash binding conflicts");
+        bind(&mut a, "panel.focus.next", "Right", true).unwrap();
+        assert!(keys(&a, "panel.sash.right").is_empty());
+        bind(&mut a, "panel.toggle", "Ctrl+Alt+F12", true).unwrap();
+        assert_eq!(command_for(&a, "Ctrl+Alt+F12"), None);
+        let saved = a.keymap.prefs();
+        let mut restored = app();
+        restored.keymap.load(&saved);
+        assert_eq!(restored.keymap.prefs(), saved);
+        assert_eq!(keys(&restored, "panel.sash.left"), ["Ctrl+Shift+Left"]);
+        bind(&mut restored, "panel.sash.left", "", false).unwrap();
+        assert!(!panel_shortcuts(&restored).iter().any(|(action, _)| *action == ContextualPanelAction::ResizeLeft));
+        reset(&mut restored, Some("panel.sash.left"));
+        assert_eq!(keys(&restored, "panel.sash.left"), ["Left"]);
+        reset(&mut restored, None);
+        assert_eq!(panel_shortcuts(&restored).len(), 4);
+        assert!(keys(&restored, "panel.focus.next").is_empty());
+        let saved = json!({"panel.sash.up":"Ctrl+Up", "solid.box":"Ctrl+Up", "panel.toggle":"Ctrl+S"});
+        restored.keymap.load(&saved);
+        assert_eq!(keys(&restored, "panel.sash.up"), ["Ctrl+Up"]);
+        assert!(keys(&restored, "solid.box").is_empty());
+        assert!(keys(&restored, "panel.toggle").is_empty());
+    }
 
     #[test]
     fn assistant_shortcut_can_be_rebound_cleared_saved_and_reset() {
@@ -1829,7 +1919,7 @@ mod card_tests {
                                 .job
                                 .sections
                                 .iter()
-                                .all(|section| section.format.font_id.size == crate::theme::Tokens::get().font_page_heading);
+                                .all(|section| section.format.font_id.size == solidcraft_theme::Tokens::get().font_page_heading);
                     }
                 });
             }

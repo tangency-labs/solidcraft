@@ -1,8 +1,9 @@
 use crate::ui_kit::test_support::*;
 use crate::ui_kit::*;
 
-use crate::{scenario, theme::Tokens};
+use crate::scenario;
 use egui::Ui;
+use solidcraft_theme::Tokens;
 
 #[test]
 fn theme_browser_has_equal_end_padding_and_screenful_arrows_without_selecting() {
@@ -66,9 +67,9 @@ fn theme_browser_has_equal_end_padding_and_screenful_arrows_without_selecting() 
 
 #[test]
 fn navigation_cards_keep_their_proportions_and_native_targets_at_narrow_widths() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for available in [140.0, 280.0, 646.0] {
             for (label, width, aspect, options) in [
                 (
@@ -86,7 +87,13 @@ fn navigation_cards_keep_their_proportions_and_native_targets_at_narrow_widths()
                     190.0,
                     178.0 / 115.0,
                     vec![
-                        PictureChoice { key: "axes", label: "Axes (signed)", figure: paint_navigation_axes },
+                        PictureChoice {
+                            key: "axes",
+                            label: "Axes (signed)",
+                            figure: |p, rect| {
+                                paint_navigation_axes(p, rect, &crate::viewport::navigator_axes(&solidcraft_engine::render::Camera::default()))
+                            },
+                        },
                         PictureChoice { key: "cube", label: "Cube (compact)", figure: paint_navigation_cube },
                     ],
                 ),
@@ -120,14 +127,14 @@ fn navigation_cards_keep_their_proportions_and_native_targets_at_narrow_widths()
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn axis_gain_invert_and_source_stay_inside_the_same_row_when_it_stacks() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for width in [180.0, 280.0, 646.0] {
             let ctx = crate::fonts::test_context();
             let mut reverse = false;
@@ -195,14 +202,14 @@ fn axis_gain_invert_and_source_stay_inside_the_same_row_when_it_stacks() {
             assert_eq!((reverse, gain, source), (false, 1.0, 0));
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn mouse_mapping_chords_and_actions_wrap_without_overpainting_each_other() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for width in [160.0, 280.0, 528.0] {
             let ctx = crate::fonts::test_context();
             let mut bounds = egui::Rect::NOTHING;
@@ -252,7 +259,7 @@ fn mouse_mapping_chords_and_actions_wrap_without_overpainting_each_other() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -262,7 +269,7 @@ fn mouse_mapping_search_keeps_main_gesture_chords_and_actions() {
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
             scope(ui, |ui| {
                 ui.set_width(280.0);
-                let _search = crate::prefs_search::begin(ui, query);
+                let _search = crate::ui_kit::settings_search::begin(ui, query);
                 settings_mouse_mapping(
                     ui,
                     &[(vec!["Ctrl/Cmd".into(), "Middle drag".into()], "Zoom toward the cursor".into()), (vec!["Alt/Option".into()], "Orbit".into())],
@@ -278,13 +285,13 @@ fn mouse_mapping_search_keeps_main_gesture_chords_and_actions() {
 
 #[test]
 fn status_lines_wrap_at_form_width_and_leave_room_for_the_next_row() {
-    let previous_dark = crate::theme::is_dark();
+    let previous_dark = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let base = Tokens::get();
         for width in [160.0, 280.0] {
             for font_label in [base.font_label, base.font_label * 1.8] {
-                let _theme = crate::theme::scoped_tokens(Tokens { font_label, ..base });
+                let _theme = solidcraft_theme::scoped_tokens(Tokens { font_label, ..base });
                 for (tone, ink) in [(StatusTone::Dim, base.text_dim), (StatusTone::Warning, base.warning), (StatusTone::Error, base.error)] {
                     let ctx = crate::fonts::test_context();
                     let message = "needs a joint that turns and one that slides";
@@ -329,7 +336,7 @@ fn status_lines_wrap_at_form_width_and_leave_room_for_the_next_row() {
             }
         }
     }
-    crate::theme::set_dark(previous_dark);
+    solidcraft_theme::set_dark(previous_dark);
 }
 
 #[test]
@@ -340,7 +347,7 @@ fn shared_picture_choices_wrap_inside_the_row_and_reserve_their_height() {
         PictureChoice { key: "third", label: "Third", figure: |_, _| {} },
     ];
     for dark in [false, true] {
-        let _theme = crate::theme::scoped_tokens(if dark { Tokens::dark() } else { Tokens::light() });
+        let _theme = solidcraft_theme::scoped_tokens(if dark { Tokens::dark() } else { Tokens::light() });
         for width in [120.0, 260.0, 600.0] {
             for sized in [false, true] {
                 let ctx = crate::fonts::test_context();
@@ -416,9 +423,9 @@ fn shared_picture_choices_return_clicks_and_respect_both_disabled_states() {
 /// #11434: an arrow moves by the cards that fit, not by one, and the last page ends on the last card.
 #[test]
 fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for width in [140.0, 280.0, 646.0] {
             let ctx = crate::fonts::test_context();
             let options = [
@@ -449,7 +456,7 @@ fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]

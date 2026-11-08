@@ -15,11 +15,13 @@ pub use solidcraft_gpu::view::{
 
 /// A frame of the viewport as an egui paint callback.
 pub struct ViewportCallback(pub Frame);
+/// A transparent, depth-correct selection/hover layer over live product pixels.
+pub(crate) struct ProductHighlightCallback(pub Frame);
 
 /// The viewport callback composites transparently onto this egui GPU mesh. Both its clear
 /// surface and gradient therefore use the same published/animated tokens as the panels; no
 /// background colour belongs to a cached model scene or GPU upload.
-pub(crate) fn paint_background(painter: &egui::Painter, rect: egui::Rect, tokens: &crate::theme::Tokens) {
+pub(crate) fn paint_background(painter: &egui::Painter, rect: egui::Rect, tokens: &solidcraft_theme::Tokens) {
     let mut mesh = egui::Mesh::default();
     mesh.colored_vertex(rect.left_top(), tokens.viewport_top);
     mesh.colored_vertex(rect.right_top(), tokens.viewport_top);
@@ -82,7 +84,7 @@ pub(crate) fn paint_background_picture(app: &mut crate::SolveApp, painter: &egui
             let options = egui::TextureOptions { mipmap_mode: Some(egui::TextureFilter::Linear), ..egui::TextureOptions::LINEAR };
             picture.texture = Some(ctx.load_texture("background-picture", image, options));
         }
-        Some(Err(error)) => app.set_status(format!("{}: {error}", crate::i18n::tr("prefs.background_unreadable")), true),
+        Some(Err(error)) => app.set_status(format!("{}: {error}", solidcraft_ui_text::tr("prefs.background_unreadable")), true),
         None => {}
     }
     if let Some(texture) = &picture.texture {
@@ -224,6 +226,166 @@ fn cpu_picture(
 
 #[cfg(test)]
 mod test_support {
+    /// Paint real egui textures and callbacks into a readable window target.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) struct EguiFixture {
+        device: super::wgpu::Device,
+        queue: super::wgpu::Queue,
+        renderer: std::sync::Arc<egui::epaint::mutex::RwLock<egui_wgpu::Renderer>>,
+        output: super::wgpu::Texture,
+        size: [u32; 2],
+        pub(crate) product_highlight_callbacks: usize,
+        pub(crate) viewport_callbacks: usize,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl EguiFixture {
+        pub(crate) fn new(app: &mut crate::SolveApp, size: [u32; 2]) -> Option<Self> {
+            use super::*;
+            let Some((_, device, queue)) = offscreen_device() else {
+                assert!(std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "GPU adapter required for egui fixture");
+                eprintln!("skipped egui fixture: no admitted adapter/device");
+                return None;
+            };
+            let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+            let renderer = Arc::new(egui::epaint::mutex::RwLock::new(egui_wgpu::Renderer::new(&device, format, Default::default())));
+            let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
+            let scene = GpuTarget { depth: Some(solidcraft_gpu::depth_format(&device, true)), ..window };
+            let view = Renderer::with_window_target(&device, scene, window, None);
+            let installed = view.target();
+            app.viewport.gpu = Some(installed);
+            app.viewport.draw_stats = Some(view.stats());
+            renderer.write().callback_resources.insert(view);
+            app.render_workspace.host = Some(
+                crate::render_workspace::host_executor(device.limits().max_texture_dimension_2d, installed.depth.is_some(), installed.samples.max(1))
+                    .unwrap(),
+            );
+            crate::render_workspace::sync_backend(app);
+            let output = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("full egui fixture"),
+                size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            Some(Self { device, queue, renderer, output, size, product_highlight_callbacks: 0, viewport_callbacks: 0 })
+        }
+
+        pub(crate) fn frame(&mut self, ctx: &egui::Context, events: Vec<egui::Event>, add: impl FnMut(&mut egui::Ui)) -> Vec<u8> {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.size[0] as f32, self.size[1] as f32))),
+                time: Some(1.0),
+                focused: true,
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(raw, add);
+            self.product_highlight_callbacks = 0;
+            self.viewport_callbacks = 0;
+            for clipped in &out.shapes {
+                crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                    if let egui::Shape::Callback(callback) = shape
+                        && let Some(callback) = callback.callback.downcast_ref::<egui_wgpu::Callback>()
+                    {
+                        self.product_highlight_callbacks += usize::from(callback.downcast_ref::<super::ProductHighlightCallback>().is_some());
+                        self.viewport_callbacks += usize::from(callback.downcast_ref::<super::ViewportCallback>().is_some());
+                    }
+                });
+            }
+            paint_egui_output(ctx, &mut out, &self.renderer, &self.device, &self.queue, &self.output);
+            read_egui_pixels(&self.device, &self.queue, &self.output)
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn paint_egui_output(
+        ctx: &egui::Context,
+        out: &mut egui::FullOutput,
+        renderer: &std::sync::Arc<egui::epaint::mutex::RwLock<egui_wgpu::Renderer>>,
+        device: &super::wgpu::Device,
+        queue: &super::wgpu::Queue,
+        output: &super::wgpu::Texture,
+    ) -> usize {
+        use super::*;
+        let jobs = ctx.tessellate(std::mem::take(&mut out.shapes), out.pixels_per_point);
+        let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: [output.width(), output.height()], pixels_per_point: out.pixels_per_point };
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let mut renderer = renderer.write();
+        for (id, deltas) in out.textures_delta.set.drain() {
+            for delta in deltas {
+                renderer.update_texture(device, queue, id, &delta);
+            }
+        }
+        if let Some(effect) = &renderer.frame_compositor {
+            effect.begin_viewport(egui::ViewportId::ROOT.0.value());
+        }
+        let extra = renderer.update_buffers(device, queue, &mut encoder, &jobs, &screen);
+        let target = output.create_view(&Default::default());
+        let composed = renderer
+            .frame_compositor
+            .as_ref()
+            .is_some_and(|effect| effect.render(&renderer, &mut encoder, &target, &jobs, &screen, [0.0, 0.0, 0.0, 1.0]));
+        if !composed {
+            let mut pass = encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("fixture ordinary UI"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &target,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                })
+                .forget_lifetime();
+            renderer.render(&mut pass, &jobs, &screen);
+        }
+        queue.submit(extra.into_iter().chain([encoder.finish()]));
+        if let Some(effect) = &renderer.frame_compositor {
+            effect.submitted();
+        }
+        for id in out.textures_delta.free.drain() {
+            renderer.free_texture(&id);
+        }
+        drop(renderer);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        jobs.len()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn read_egui_pixels(device: &super::wgpu::Device, queue: &super::wgpu::Queue, texture: &super::wgpu::Texture) -> Vec<u8> {
+        use super::*;
+        let size = texture.size();
+        let stride = (size.width * 4).div_ceil(256) * 256;
+        let read = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("full egui readback"),
+            size: u64::from(stride) * u64::from(size.height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &read,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(size.height) },
+            },
+            size,
+        );
+        queue.submit([encoder.finish()]);
+        let slice = read.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        let bytes = slice.get_mapped_range().unwrap();
+        bytes.chunks_exact(stride as usize).flat_map(|row| row[..size.width as usize * 4].iter().copied()).collect()
+    }
+
     /// For tests that look at pictures: install the headless GPU renderer (the CLI's). `false`, with
     /// the reason printed, on a machine without a GPU adapter, and the test skips.
     #[cfg(not(target_arch = "wasm32"))]
@@ -246,7 +408,7 @@ mod test_support {
     }
 }
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) use test_support::test_picture_renderer;
+pub(crate) use test_support::{EguiFixture, test_picture_renderer};
 
 impl egui_wgpu::CallbackTrait for ViewportCallback {
     fn prepare(
@@ -270,8 +432,33 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
     }
 }
 
+impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _screen: &egui_wgpu::ScreenDescriptor,
+        encoder: &mut wgpu::CommandEncoder,
+        resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        if let Some(renderer) = resources.get_mut::<Renderer>() {
+            renderer.prepare_product_highlights(device, queue, encoder, &self.0);
+        }
+        Vec::new()
+    }
+    fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
+        let Some(renderer) = resources.get::<Renderer>() else { return };
+        let viewport = info.viewport_in_pixels();
+        renderer.paint_product_highlights(
+            &self.0,
+            pass,
+            [viewport.left_px as f32, viewport.top_px as f32, viewport.width_px as f32, viewport.height_px as f32],
+        );
+    }
+}
+
 /// The shader's analysis colours and flags for the theme's colours.
-pub fn analysis_colors(c: &crate::theme::AnalysisColors) -> [f32; 36] {
+pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
     solidcraft_gpu::view::analysis_colors(c)
 }
 
@@ -383,6 +570,7 @@ pub(crate) fn render_offscreen(
         size,
         Offscreen {
             tess,
+            product_lights: None,
             product: false,
             srgb: false,
             analysis,
@@ -403,6 +591,7 @@ pub(crate) fn render_product_offscreen(
     eye: [f32; 4],
     size: u32,
     srgb: bool,
+    product_lights: Option<Vec<[f32; 16]>>,
 ) -> Option<Vec<u8>> {
     offscreen(
         scene,
@@ -413,6 +602,7 @@ pub(crate) fn render_product_offscreen(
         size,
         Offscreen {
             tess: None,
+            product_lights,
             product: true,
             srgb,
             analysis: [0.0; 8],
@@ -427,6 +617,9 @@ pub(crate) fn render_product_offscreen(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 struct Offscreen<'a> {
     tess: Option<&'a str>,
+    /// The Render workspace's analytic preview lights (`Frame::product_lights`); `None` draws the
+    /// product without them.
+    product_lights: Option<Vec<[f32; 16]>>,
     product: bool,
     srgb: bool,
     analysis: [f32; 8],
@@ -455,6 +648,7 @@ pub(crate) fn render_ao_offscreen(
         size,
         Offscreen {
             tess,
+            product_lights: None,
             product: false,
             srgb: false,
             analysis: [0.0; 8],
@@ -485,6 +679,7 @@ pub(crate) fn render_offscreen_ssaa(
         size,
         Offscreen {
             tess: None,
+            product_lights: None,
             product: false,
             srgb: false,
             analysis: [0.0; 8],
@@ -515,7 +710,17 @@ pub(crate) fn render_offscreen_ao(
         back,
         eye,
         size,
-        Offscreen { tess: None, product: false, srgb: false, analysis: [0.0; 8], analysis_colors: [0.0; 36], ssaa: 1.0, ao_radius, ao_samples },
+        Offscreen {
+            tess: None,
+            product_lights: None,
+            product: false,
+            srgb: false,
+            analysis: [0.0; 8],
+            analysis_colors: [0.0; 36],
+            ssaa: 1.0,
+            ao_radius,
+            ao_samples,
+        },
     )
 }
 
@@ -529,7 +734,7 @@ fn offscreen(
     size: u32,
     options: Offscreen<'_>,
 ) -> Option<Vec<u8>> {
-    let Offscreen { tess, product, srgb, analysis, analysis_colors, ssaa, ao_radius, ao_samples } = options;
+    let Offscreen { tess, product_lights, product, srgb, analysis, analysis_colors, ssaa, ao_radius, ao_samples } = options;
     let (adapter, device, queue) = offscreen_device()?;
     eprintln!("offscreen adapter: {:?}", adapter.get_info().backend);
     let format = if srgb { wgpu::TextureFormat::Rgba8UnormSrgb } else { wgpu::TextureFormat::Rgba8Unorm };
@@ -540,7 +745,7 @@ fn offscreen(
     resources.insert(Renderer::new(&device, target, compute));
     let none = || Arc::new(Mutex::new(None));
     let cb = ViewportCallback(Frame {
-        product_lights: None,
+        product_lights,
         product,
         upload_error: None,
         key: 1,
@@ -971,7 +1176,6 @@ mod tests {
         }
 
         fn frame(&mut self) -> f64 {
-            use super::*;
             let started = std::time::Instant::now();
             // Keep local layout/input stationary, then transform only after emission.
             if let Some(layer) = self.root_layer {
@@ -993,81 +1197,13 @@ mod tests {
                 ui.ctx().set_transform_layer(ui.layer_id(), transform);
             });
             self.root_layer = root_layer;
-            let jobs = self.ctx.tessellate(out.shapes, out.pixels_per_point);
-            self.jobs = jobs.len();
-            let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: self.size, pixels_per_point: out.pixels_per_point };
-            let mut encoder = self.device.create_command_encoder(&Default::default());
-            let mut renderer = self.renderer.write();
-            for (id, deltas) in out.textures_delta.set.drain() {
-                for delta in deltas {
-                    renderer.update_texture(&self.device, &self.queue, id, &delta);
-                }
-            }
-            if let Some(effect) = &renderer.frame_compositor {
-                effect.begin_viewport(egui::ViewportId::ROOT.0.value());
-            }
-            let extra = renderer.update_buffers(&self.device, &self.queue, &mut encoder, &jobs, &screen);
-            let target = self.output.create_view(&Default::default());
-            let composed = renderer
-                .frame_compositor
-                .as_ref()
-                .is_some_and(|effect| effect.render(&renderer, &mut encoder, &target, &jobs, &screen, [0.0, 0.0, 0.0, 1.0]));
-            if !composed {
-                let mut pass = encoder
-                    .begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("fixture ordinary UI"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &target,
-                            resolve_target: None,
-                            depth_slice: None,
-                            ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                        multiview_mask: None,
-                    })
-                    .forget_lifetime();
-                renderer.render(&mut pass, &jobs, &screen);
-            }
-            self.queue.submit(extra.into_iter().chain([encoder.finish()]));
-            if let Some(effect) = &renderer.frame_compositor {
-                effect.submitted();
-            }
-            for id in out.textures_delta.free.drain() {
-                renderer.free_texture(&id);
-            }
-            drop(renderer);
-            self.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            self.jobs = super::test_support::paint_egui_output(&self.ctx, &mut out, &self.renderer, &self.device, &self.queue, &self.output);
             started.elapsed().as_secs_f64() * 1000.0
         }
 
         fn pixels(&self, source: bool) -> Vec<u8> {
-            use super::*;
             let texture = if source { self.app.blur.source_texture().unwrap() } else { self.output.clone() };
-            let size = texture.size();
-            let stride = (size.width * 4).div_ceil(256) * 256;
-            let read = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("full egui readback"),
-                size: u64::from(stride) * u64::from(size.height),
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            });
-            let mut encoder = self.device.create_command_encoder(&Default::default());
-            encoder.copy_texture_to_buffer(
-                texture.as_image_copy(),
-                wgpu::TexelCopyBufferInfo {
-                    buffer: &read,
-                    layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(size.height) },
-                },
-                size,
-            );
-            self.queue.submit([encoder.finish()]);
-            let slice = read.slice(..);
-            slice.map_async(wgpu::MapMode::Read, |_| {});
-            self.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-            let bytes = slice.get_mapped_range().unwrap();
-            bytes.chunks_exact(stride as usize).flat_map(|row| row[..size.width as usize * 4].iter().copied()).collect()
+            super::test_support::read_egui_pixels(&self.device, &self.queue, &texture)
         }
 
         fn evidence(&self, name: &str) {
@@ -1473,7 +1609,7 @@ mod tests {
         let x = (local[2].right() - 4.0).clamp(0.0, (f.size[0] - 1) as f32) as usize;
         let y = local[2].center().y.clamp(0.0, (f.size[1] - 1) as f32) as usize;
         let offset = (y * f.size[0] as usize + x) * 4;
-        let outside = crate::theme::Tokens::get().app_bar.to_array();
+        let outside = solidcraft_theme::Tokens::get().app_bar.to_array();
         assert_ne!(&original[offset..offset + 4], &outside, "probe starts in the viewport background");
         // Same local geometry/camera; applied after app.ui has emitted the callback.
         let transform = egui::emath::TSTransform { translation: egui::vec2(-23.0, 17.0), scaling: 0.75 };

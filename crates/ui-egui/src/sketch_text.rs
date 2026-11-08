@@ -510,7 +510,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
     if ui.memory(|m| m.has_focus(id)) {
         enter |= ui.input_mut(|i| !i.modifiers.shift && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     }
-    let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).backing_on_hover_text(crate::i18n::tr("sketch_text.formula"));
+    let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).backing_on_hover_text(solidcraft_ui_text::tr("sketch_text.formula"));
     crate::scenario::publish_handle("dialog:Text", response.rect.center());
     if k.focus {
         response.request_focus();
@@ -532,7 +532,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
             TextAlign::Center => 1,
             TextAlign::Right => 2,
         };
-        let labels = ["sketch_text.align_left", "sketch_text.align_center", "sketch_text.align_right"].map(crate::i18n::tr);
+        let labels = ["sketch_text.align_left", "sketch_text.align_center", "sketch_text.align_right"].map(solidcraft_ui_text::tr);
         ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, ..Default::default() });
         k.style.align = match selected {
             1 => TextAlign::Center,
@@ -552,7 +552,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         let response = ui.add_enabled_ui(!on_path, |ui| ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], None));
         enter |= response.inner;
         if on_path {
-            response.response.backing_on_disabled_hover_text(crate::i18n::tr("sketch_text.on_path"));
+            response.response.backing_on_disabled_hover_text(solidcraft_ui_text::tr("sketch_text.on_path"));
         }
     }
     for (i, (label, value)) in LABELS.iter().skip(2).zip(rest).enumerate() {
@@ -560,7 +560,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         let response = ui.add_enabled_ui(!(on_path && index == ANGLE), |ui| ui_kit::row(ui, label, |ui| ui_kit::field(ui, value)));
         enter |= response.inner;
         if on_path && index == ANGLE {
-            response.response.backing_on_disabled_hover_text(crate::i18n::tr("sketch_text.on_path"));
+            response.response.backing_on_disabled_hover_text(solidcraft_ui_text::tr("sketch_text.on_path"));
         }
     }
     path_row(ui, k, inputs, active);
@@ -572,9 +572,10 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
 fn path_row(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut usize) {
     ui_kit::row(ui, "Path", |ui| {
         let on = k.style.path.is_some();
-        let text = if on { crate::i18n::format("dialog.selected_count", &[("count", "1")]) } else { crate::i18n::tr("dialog.select").into() };
+        let text =
+            if on { solidcraft_ui_text::format("dialog.selected_count", &[("count", "1")]) } else { solidcraft_ui_text::tr("dialog.select").into() };
         let chip = ui_kit::selection_field(ui, &text, ui_kit::Selection { active: k.picking, filled: on })
-            .backing_on_hover_text(crate::i18n::tr("sketch_text.path_hint"));
+            .backing_on_hover_text(solidcraft_ui_text::tr("sketch_text.path_hint"));
         let chip_rect = chip.rect;
         crate::scenario::publish_handle("dialog:Path", chip.rect.center());
         if chip.clicked() {
@@ -582,7 +583,7 @@ fn path_row(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut
             *active = 0;
         }
         if on {
-            let size = crate::theme::Tokens::get().space_24;
+            let size = solidcraft_theme::Tokens::get().space_24;
             let rect = egui::Rect::from_center_size(egui::pos2(chip_rect.right() - size / 2.0, chip_rect.center().y), egui::vec2(size, size));
             let clear = ui_kit::icon_button_at(ui, rect, "close", "sketch_text.path_clear");
             crate::scenario::publish_handle("dialog:Path clear", clear.rect.center());
@@ -597,7 +598,7 @@ fn path_row(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut
     });
     if k.style.path.is_some() {
         ui_kit::section(ui, "path_options", "Options", true, |ui| {
-            let reverse = ui_kit::checkbox(ui, crate::i18n::tr_label("Reverse"), &mut k.style.reverse);
+            let reverse = ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Reverse"), &mut k.style.reverse);
             crate::scenario::publish_handle("dialog:Reverse", reverse.rect.center());
         });
     }
@@ -637,14 +638,14 @@ fn is_font_file(s: &str) -> bool {
 
 /// The application supplies families/file recognition; the kit owns search and list widgets.
 fn font_row(ui: &mut egui::Ui, k: &mut Tx) {
-    let builtin = crate::i18n::format("sketch_text.builtin_font", &[("family", solidcraft_engine::sketch::DEFAULT_FONT_FAMILY)]);
+    let builtin = solidcraft_ui_text::format("sketch_text.builtin_font", &[("family", solidcraft_engine::sketch::DEFAULT_FONT_FAMILY)]);
     let current = if k.font.trim().is_empty() { builtin.clone() } else { k.font.clone() };
     let families = families(ui.ctx());
     let mut options = vec![ui_kit::SearchOption { value: "", label: &builtin, handle: Some("dialog:Font built-in") }];
     if let Some(list) = &families {
         options.extend(list.iter().map(|family| ui_kit::SearchOption { value: family, label: family, handle: None }));
     }
-    let custom = is_font_file(&k.font_filter).then(|| crate::i18n::format("sketch_text.use_font_file", &[("path", k.font_filter.trim())]));
+    let custom = is_font_file(&k.font_filter).then(|| solidcraft_ui_text::format("sketch_text.use_font_file", &[("path", k.font_filter.trim())]));
     if let Some(font) = ui_kit::searchable_dropdown(
         ui,
         "sketch_text_font",
@@ -652,7 +653,7 @@ fn font_row(ui: &mut egui::Ui, k: &mut Tx) {
         &mut k.font_filter,
         &options,
         custom.as_deref(),
-        families.is_none().then(|| crate::i18n::tr("sketch_text.loading_fonts")),
+        families.is_none().then(|| solidcraft_ui_text::tr("sketch_text.loading_fonts")),
     ) {
         k.font = font;
         k.font_filter.clear();

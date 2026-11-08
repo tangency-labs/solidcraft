@@ -34,6 +34,8 @@ solidcraft-engine = { workspace = true }
 # The D3D12 shader compiler the window starts with (#6756).
 solidcraft-gpu = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
+solidcraft-ui-text = { workspace = true }
+solidcraft-theme = { workspace = true }
 solidcraft-space-mouse = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
 egui = { workspace = true }

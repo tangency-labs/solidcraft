@@ -31,15 +31,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("open")
         .key("Ctrl+O")
         .noundo()
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
         .icon("import")
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", insert_mesh)
         .at("SOLID", "INSERT")
         .icon("import")
-        .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept); units?: mm|cm|m|in|ft for an STL or OBJ file, or a PLY file with faces (default mm): the unit its coordinates are in, scaled to millimetres as the file is read (a 3MF or glTF file states its own). The design keeps the millimetre mesh and not the unit, so insert the file again to try another"),
+        .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept); units?: mm|cm|m|in|ft for an STL or OBJ file, or a PLY file with faces (default mm): the unit its coordinates are in, scaled to millimetres as the file is read (a 3MF or glTF file states its own). The design keeps the millimetre mesh and not the unit, so insert the file again to try another; origin?: bool (default false: the mesh keeps its file's coordinates; true: once read, scaled and stood up, the import's occurrence is moved so the box around its bodies is centred on X and Y of the active component with its lowest point on Z = 0 → moved_to_origin: [x, y, z], the shift made)"),
     CommandSpec::new("file.save", "Save", save)
         .icon("save")
         .key("Ctrl+S")
@@ -139,6 +139,9 @@ struct StepOptions {
     /// (Y becomes Z), as the app's "Stand it up" offer does. `z` (the default) keeps the file's axes.
     y_up: bool,
     names: solidcraft_io::StepNames,
+    /// `folder: true`: an import that brings more than one item gets a `Group #N` history folder
+    /// (`import_folder`). `false` (the default) makes none, as before the option.
+    folder: bool,
 }
 
 fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
@@ -157,7 +160,17 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
             .and_then(solidcraft_io::StepNames::parse)
             .ok_or_else(|| bad(cmd, "`names` must be \"auto\", \"solid\", \"product\" or \"instance\""))?,
     };
-    Ok(StepOptions { y_up, names })
+    let folder = match p.get("folder") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(folder)) => *folder,
+        Some(_) => {
+            return Err(bad(
+                cmd,
+                "`folder` must be true (an import that brings more than one item goes into a `Group #N` history folder) or false (no folder)",
+            ));
+        }
+    };
+    Ok(StepOptions { y_up, names, folder })
 }
 
 /// Read a STEP file as an Import feature.
@@ -200,6 +213,7 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     // assembly's parts and instances turn together.
     let turned = if options.y_up { turn_up(s, &placed)? } else { None };
     let created = created_bodies(s, id);
+    let folder = if options.folder { import_folder(s, id, &placed)? } else { None };
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
     let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": created, "created_bodies": created, "warnings": sf.warnings, "system": sf.import.system});
     if let Some((up, exporter)) = exporter_up(&sf.import) {
@@ -210,11 +224,34 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     if let Some(turned) = turned {
         out["stand_up"] = json!(turned);
     }
+    if let Some(folder) = folder {
+        out["group"] = json!(folder);
+    }
     if let Some(mark) = profiled {
         let report = crate::schema::diagnostics::ProfileReport::new(&mark.report(), 20);
         out["profile"] = serde_json::to_value(report).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     }
     Ok(out)
+}
+
+/// An import that brings more than one item into the history (its Import feature and the rigid
+/// joints holding its parts together) goes into a history folder of its own, named `Group #N`,
+/// holding the feature and those joints, so it stands apart from the features before and after
+/// it and the History shows it as one chip. The folder sits in the folder the feature was put
+/// in, if any. Returns the folder.
+fn import_folder(s: &mut Session, feature: u64, placed: &import::Placed) -> Result<Option<u64>> {
+    if placed.joints.is_empty() {
+        return Ok(None);
+    }
+    let parent = s.doc.timeline_groups.iter().find(|folder| folder.features.contains(&feature)).map(|folder| folder.id);
+    let name = next_group_name(&s.doc);
+    super::edit::new_folder(s, &name, vec![feature], placed.joints.clone(), parent, "file.insert_step").map(Some)
+}
+
+/// The first `Group #N` no history folder is named yet.
+fn next_group_name(doc: &Document) -> String {
+    let taken = |name: &str| doc.timeline_groups.iter().any(|folder| folder.name == name);
+    (1..=doc.timeline_groups.len() + 1).map(|n| format!("Group #{n}")).find(|name| !taken(name)).unwrap_or_else(|| "Group".into())
 }
 
 /// The bodies an import feature built, by name.
@@ -225,7 +262,7 @@ fn created_bodies(s: &Session, feature: u64) -> Vec<String> {
 /// Add a MeshImport feature for a 3MF, STL, OBJ or glTF file, in a new component named after the
 /// file. A glTF file's nodes become components in it, and its materials the bodies' looks; it is
 /// in metres with Y up, so unless `y_up` is false its component is turned to Z up (#1505).
-fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>, unit: Option<(&'static str, f64)>) -> Result<Value> {
+fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>, unit: Option<(&'static str, f64)>, origin: bool) -> Result<Value> {
     let err = |e: solidcraft_io::IoError| EngineError::Other(format!("{path}: {e}"));
     let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_3MF_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let gltf = solidcraft_io::is_gltf_path(path);
@@ -259,9 +296,14 @@ fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>,
         s.refresh();
     }
     let turned = if gltf && y_up.unwrap_or(true) { turn_up(s, &placed)? } else { None };
+    // After the turn, so it is the stood-up mesh that sits on Z = 0.
+    let moved = if origin { import::move_to_origin(s, &placed)? } else { None };
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
     let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": bodies, "created_bodies": bodies, "warnings": mf.warnings});
     placed.report(&mut out);
+    if let Some(shift) = moved {
+        out["moved_to_origin"] = json!([shift.x, shift.y, shift.z]);
+    }
     if let Some((name, _)) = unit {
         out["units"] = json!(name);
     }
@@ -323,7 +365,20 @@ fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let up = mesh_up(p, path, cmd)?;
     let unit = mesh_units(p, path, cmd)?;
-    add_mesh(s, path, str_(p, "name"), up, unit)
+    add_mesh(s, path, str_(p, "name"), up, unit, mesh_origin(p, cmd)?)
+}
+
+/// `origin`: whether a mesh import is moved to the origin (#12543). Off unless asked, so a mesh
+/// keeps the coordinates its file gives it.
+fn mesh_origin(p: &Value, cmd: &str) -> Result<bool> {
+    match p.get("origin") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(origin)) => Ok(*origin),
+        Some(_) => Err(bad(
+            cmd,
+            "`origin` must be true (the mesh is moved so its box is centred on X and Y with its base on Z = 0) or false (the file's coordinates are kept)",
+        )),
+    }
 }
 
 fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
@@ -360,6 +415,9 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if !solidcraft_io::is_step_path(path) && !solidcraft_io::is_gltf_path(path) && p.get("up").is_some_and(|v| !v.is_null()) {
         return Err(bad("doc.open", "`up` applies to STEP, IGES and glTF files only"));
+    }
+    if !solidcraft_io::is_mesh_path(path) && p.get("origin").is_some_and(|v| !v.is_null()) {
+        return Err(bad("doc.open", "`origin` applies to 3MF, STL, OBJ and glTF files only"));
     }
     if let Some(command) = super::drawing_import_command(path) {
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
@@ -400,7 +458,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         let r = if solidcraft_io::is_step_path(path) {
             add_step(&mut fresh, path, None, &step_options(p, "doc.open")?)?
         } else {
-            add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?, mesh_units(p, path, "doc.open")?)?
+            add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?, mesh_units(p, path, "doc.open")?, mesh_origin(p, "doc.open")?)?
         };
         // The design is the file: its component is the one being worked in.
         if let Some(c) = r["component"].as_u64() {
@@ -411,7 +469,18 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         s.replace_design(fresh);
         let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
         let mut out = json!({"path": path, "features": s.doc.features.len(), "errors": errors, "bodies": r["bodies"], "warnings": r["warnings"]});
-        for k in ["component", "component_name", "occurrence", "subcomponents", "rigid_joints", "stand_up", "system", "exporter", "exporter_up"] {
+        for k in [
+            "component",
+            "component_name",
+            "occurrence",
+            "subcomponents",
+            "rigid_joints",
+            "stand_up",
+            "moved_to_origin",
+            "system",
+            "exporter",
+            "exporter_up",
+        ] {
             if let Some(v) = r.get(k) {
                 out[k] = v.clone();
             }
@@ -694,6 +763,21 @@ impl Session {
         self.read_only = done.read_only;
         self.saved = done.saved.clone();
         self.saved_visibility = done.saved_visibility.clone();
+    }
+
+    /// The design's file was renamed (browser OPFS rename, or an equivalent host move): keep the
+    /// open session on the new path, and when the design name was borrowed from the file, follow
+    /// it so the tab title matches the file list (#11375). A name the user chose is kept, as on
+    /// Save As.
+    pub fn follow_file_rename(&mut self, old_path: &str, new_path: &str) {
+        if self.path.as_deref() != Some(old_path) || old_path == new_path {
+            return;
+        }
+        if let Some(stem) = saved_name(&self.doc.name, Some(old_path), new_path, self.user_named) {
+            let from = self.doc.name.clone();
+            rename_design(self, &from, &stem);
+        }
+        self.path = Some(new_path.to_string());
     }
 
     /// Another program or computer wrote the design's file since it was opened or last saved:
@@ -1201,6 +1285,34 @@ mod tests {
         assert!(p["by_category"].as_array().is_some_and(|c| !c.is_empty()) && p["wall_ms"].as_f64().is_some_and(|w| w > 0.0), "{p}");
     }
 
+    /// Renaming the open design's file updates its path and, when the name came from the file,
+    /// the design name the tab shows (#11375).
+    #[test]
+    fn follow_file_rename_updates_path_and_borrowed_design_name() {
+        let mut s = Session::default();
+        s.doc_mut().name = "Plate".into();
+        s.path = Some("opfs://Plate.solidcraft".into());
+        s.user_named = false;
+        s.follow_file_rename("opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
+        assert_eq!(s.path.as_deref(), Some("opfs://Bracket.solidcraft"));
+        assert_eq!(s.doc.name, "Bracket");
+
+        let mut kept = Session::default();
+        kept.doc_mut().name = "My part".into();
+        kept.path = Some("opfs://Plate.solidcraft".into());
+        kept.user_named = true;
+        kept.follow_file_rename("opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
+        assert_eq!(kept.path.as_deref(), Some("opfs://Bracket.solidcraft"));
+        assert_eq!(kept.doc.name, "My part");
+
+        let mut other = Session::default();
+        other.doc_mut().name = "Other".into();
+        other.path = Some("opfs://Other.solidcraft".into());
+        other.follow_file_rename("opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
+        assert_eq!(other.path.as_deref(), Some("opfs://Other.solidcraft"));
+        assert_eq!(other.doc.name, "Other");
+    }
+
     /// #8139: with `objects: "component"` a 3MF has one object for each placement of a component
     /// with two or more bodies, its bodies the object's parts; the design's own bodies stay objects
     /// of their own. The default (and `objects: "body"`) is one object per body, as before. Read
@@ -1281,13 +1393,18 @@ mod tests {
             assert_eq!(r["bytes"].as_u64(), Some(bytes.len() as u64), "{cmd}");
             assert!(bytes.starts_with(signature), "{cmd}");
         }
-        // The triangles `file.export` writes (the 80-byte header holds the file's name): a box is
-        // 12 triangles, 84 + 50 bytes each.
+        // The triangles `file.export` writes (the 80-byte header holds the file's name), 84 + 50
+        // bytes each. The mesher lays each planar face out as a regular grid whose sides are at
+        // most a fifth of the body's diagonal (kernel test `a_box_is_a_regular_grid_on_every_face`):
+        // 22.9 / 5 = 4.58 mm, so 5 × 3 × 2 cells along 20 × 10 × 5, two triangles each.
         s.execute("file.export", &json!({"path": at("box.stl")})).unwrap();
         assert_eq!(std::fs::read(at("StlBinary.txt")).unwrap()[80..], std::fs::read(at("box.stl")).unwrap()[80..]);
-        assert_eq!(std::fs::metadata(at("box.stl")).unwrap().len(), 84 + 50 * 12);
+        let triangles = 2 * 2 * (5 * 3 + 5 * 2 + 3 * 2);
+        let stl = std::fs::read(at("box.stl")).unwrap();
+        assert_eq!(u32::from_le_bytes([stl[80], stl[81], stl[82], stl[83]]), u32::try_from(triangles).unwrap());
+        assert_eq!(stl.len(), 84 + 50 * triangles);
         let obj = std::fs::read_to_string(at("Obj.txt")).unwrap();
-        assert_eq!(obj.lines().filter(|l| l.starts_with("f ")).count(), 12, "{obj}");
+        assert_eq!(obj.lines().filter(|l| l.starts_with("f ")).count(), triangles, "{obj}");
         let r = s.execute("file.export_urdf", &json!({"path": at("robot.urdf")})).unwrap();
         assert_eq!(r["format"], "Urdf");
         assert!(std::fs::read_to_string(at("robot.urdf")).unwrap().contains("<robot"));

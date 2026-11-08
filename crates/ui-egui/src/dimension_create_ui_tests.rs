@@ -394,7 +394,7 @@ fn the_sketch_page_switches_dimension_values_to_a_window() {
     let mut h = Harness::new();
     h.call("ui.prefs", json!({"open": "Sketch"}));
     h.frames(4);
-    let handle = format!("dialog:{}:{}", crate::i18n::tr("prefs.dimension_values"), crate::i18n::tr("prefs.dimension_values_window"));
+    let handle = format!("dialog:{}:{}", solidcraft_ui_text::tr("prefs.dimension_values"), solidcraft_ui_text::tr("prefs.dimension_values_window"));
     crate::prefs::reveal_preference(&mut h, &handle);
     h.step(&json!({"click":{"handle": handle}})).unwrap();
     h.frames(2);
@@ -551,6 +551,31 @@ fn rectangle_side_and_fixed_origin_line_dimensions_preserve_other_constraints() 
         assert_eq!(h.app.session.undo.len(), undo + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), baseline);
+    }
+}
+
+/// With the Sketch preference off, the first dimension sizes only what it measures (#4109).
+#[test]
+fn the_first_dimension_scales_the_drawing_unless_the_preference_is_off() {
+    for (scales, side) in [true, false].into_iter().flat_map(|s| [2_f64, 30., 500.].map(|v| (s, v))) {
+        let mut h = Harness::new();
+        crate::dim_view::cancel();
+        assert!(h.app.preferences.first_dimension_scales, "on by default (#1365)");
+        h.app.preferences.first_dimension_scales = scales;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.;
+        h.app.cam.target = solidcore_record::Vec3::new(10., 5., 0.);
+        h.settle();
+        place(&mut h, &[[10., 0.]], [10., -5.]);
+        type_value(&mut h, &format!("{side} mm"));
+        h.step(&json!({"key":"Enter"})).unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let area = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().profiles[0].area;
+        // On: 20 × 10 scales to side × side / 2. Off: only the side changes, side × 10.
+        let want: f64 = if scales { side * side / 2. } else { side * 10. };
+        assert!((area - want).abs() < 1e-6 * want.max(1.), "scales: {scales}, side {side}, area {area}");
     }
 }
 
@@ -1242,7 +1267,7 @@ fn point_drawn(h: &mut Harness, world: [f64; 2]) -> bool {
 
 /// Is a sketch curve's hover highlight painted this frame?
 fn hover_painted(h: &Harness) -> bool {
-    let col = egui::epaint::ColorMode::Solid(crate::theme::Tokens::get().hover_profile_edge);
+    let col = egui::epaint::ColorMode::Solid(solidcraft_theme::Tokens::get().hover_profile_edge);
     h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Path(p) if p.stroke.width == 3.0 && p.stroke.color == col))
 }
 
@@ -1945,8 +1970,9 @@ fn editing_a_dimension_to_a_definition_names_its_parameter() {
 /// the parameter name kept as typed.
 #[test]
 fn the_status_after_a_dimension_is_in_the_interface_language() {
-    let pl = crate::i18n::Locale::for_language("pl");
-    let en = crate::i18n::Locale::for_language("en");
+    crate::i18n::install();
+    let pl = solidcraft_ui_text::Locale::for_language("pl");
+    let en = solidcraft_ui_text::Locale::for_language("en");
     let status = |h: &Harness| h.app.status.as_ref().map(|s| (s.0.clone(), s.2));
     let polish = |mut h: Harness| {
         h.app.preferences.language = "pl".into();
@@ -2036,7 +2062,7 @@ fn a_typed_value_hides_the_curvature_combs() {
     let id = solved(&h).curves[0].id.clone();
     h.app.run("inspect.curvature_comb", json!({"curves":[id]})).unwrap();
     h.step(&json!({"start":"sketch.dimension"})).unwrap();
-    let teeth = egui::epaint::Stroke::new(1.0, crate::theme::Tokens::get().comb_teeth);
+    let teeth = egui::epaint::Stroke::new(1.0, solidcraft_theme::Tokens::get().comb_teeth);
     let comb_drawn = |h: &Harness| h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if *stroke == teeth));
     h.frames(1);
     assert!(comb_drawn(&h), "the comb is drawn");
@@ -2046,4 +2072,68 @@ fn a_typed_value_hides_the_curvature_combs() {
     h.frames(1);
     assert!(!comb_drawn(&h), "no comb of the design while the value is typed");
     crate::dim_view::cancel();
+}
+
+/// #3137: the Dimension tool takes the origin axis along the sketch's x or y as its second
+/// pick: a circle's centre, or the circle itself, is then dimensioned from that axis.
+#[test]
+fn a_circle_centre_is_dimensioned_from_a_sketch_axis() {
+    for (picks, typed, centre) in [(vec![[30., 20.], [0., 3.]], "40 mm", [40., 20.]), (vec![[30., 20.], [3., 0.]], "12 mm", [30., 12.])] {
+        crate::dim_view::cancel();
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[30,20],"radius":5})).unwrap();
+        // Sized already, so the first dimension below measures instead of scaling the sketch (#1365).
+        h.app.run("sketch.dimension", json!({"entities":["c1"],"type":"radius","value":"5 mm"})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.0;
+        h.app.cam.target = solidcore_record::Vec3::new(15., 10., 0.);
+        h.settle();
+        h.step(&json!({"start":"sketch.dimension"})).unwrap();
+        for p in &picks {
+            h.step(&json!({"move":{"world":[p[0],p[1],0]}})).unwrap();
+            h.step(&json!({"click":{"world":[p[0],p[1],0]}})).unwrap();
+        }
+        type_value(&mut h, typed);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        let state = crate::open_meshing::session_world(&h.app.session);
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let o = sk.point(sk.resolve_point("c1.center").unwrap()).unwrap();
+        assert!((o.x - centre[0]).abs() < 1e-6 && (o.y - centre[1]).abs() < 1e-6, "{picks:?}: {o:?} {:?}", h.app.status);
+    }
+}
+
+/// #3320: after a line or a line's end, the X axis is the second pick: an angle from the axis,
+/// and a distance from it. The line is picked off its midpoint, which is a point pick (#4872).
+#[test]
+fn a_line_is_dimensioned_against_the_sketch_x_axis() {
+    for (picks, typed) in [(vec![[5., 5.], [3., 0.]], "30 deg"), (vec![[20., 20.], [3., 0.]], "12 mm")] {
+        crate::dim_view::cancel();
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[20,20]]})).unwrap();
+        // Sized already, so the first dimension below measures instead of scaling the sketch (#1365).
+        h.app.run("sketch.dimension", json!({"entities":["l1"],"type":"length","value":"28.284271247461902 mm"})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.0;
+        h.app.cam.target = solidcore_record::Vec3::new(10., 10., 0.);
+        h.settle();
+        h.step(&json!({"start":"sketch.dimension"})).unwrap();
+        for p in &picks {
+            h.step(&json!({"move":{"world":[p[0],p[1],0]}})).unwrap();
+            h.step(&json!({"click":{"world":[p[0],p[1],0]}})).unwrap();
+        }
+        assert_eq!(h.app.tool.as_ref().unwrap().picks.last().map(String::as_str), Some("x"), "the axis is the second pick");
+        type_value(&mut h, typed);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        let state = crate::open_meshing::session_world(&h.app.session);
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let (a, b) = (sk.point(sk.resolve_point("l1.start").unwrap()).unwrap(), sk.point(sk.resolve_point("l1.end").unwrap()).unwrap());
+        if typed.ends_with("deg") {
+            let angle = (b - a).angle().to_degrees();
+            assert!((angle - 30.0).abs() < 1e-6, "the line is at 30° to x: {angle}");
+        } else {
+            assert!((b.y - 12.0).abs() < 1e-6, "the end is 12 from x: {b:?}");
+        }
+    }
 }

@@ -7,9 +7,9 @@ use solidcore_record::Vec2;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::i18n::tr;
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::viewport::{Hit, Proj, pick_for_tool as pick, sketch_point_at};
+use solidcraft_ui_text::tr;
 
 const DRAW_SCOPES: &[Scope] = &[Scope::SketchDraw, Scope::SketchDrag];
 
@@ -340,7 +340,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             }
         }
         Kind::Pick(n) => {
-            let hits = pick(app, proj, pos);
+            let hits = curve_operands(tool.cmd, pick(app, proj, pos));
             // Symmetry's third pick may be an origin axis lying along the sketch's own x or y
             // (#1075); the command names those `x` / `y`.
             let axis_ok = tool.cmd == "sketch.constraint.symmetry" && tool.picks.len() == 2;
@@ -408,6 +408,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                         Hit::SketchCurve { sketch, id, straight, .. } if Some(*sketch) == app.session.active_sketch => {
                             Some((id.clone(), true, *straight))
                         }
+                        Hit::Axis { name } => sketch_axis_of(app, name).map(|a| (a.to_string(), true, true)),
                         _ => None,
                     })
                 })
@@ -731,7 +732,7 @@ pub(crate) fn constraint_preselection(
         (unique.len() == ids.len()).then_some(ids)
     };
     match (command, selection) {
-        ("sketch.constraint.fix", _) => selected_ids(false, 1).map(|ids| json!({"entities":ids})),
+        ("sketch.constraint.fix", _) => fix_preselection(selection).map(|ids| json!({"entities":ids})),
         ("sketch.constraint.polygon", _) => selected_ids(true, 3).map(|ids| json!({"lines":ids})),
         // Three or more curves: all of them equal, in pick order (#4985). Two keep the `a, b` form.
         ("sketch.constraint.equal", _) if selection.len() >= 3 => selected_ids(true, 3).map(|ids| json!({"curves":ids})),
@@ -769,6 +770,30 @@ pub(crate) fn constraint_preselection(
         }
         _ => None,
     }
+}
+
+/// The sketch points and curves Fix takes from a selection (#11663). A box drawn over a sketch
+/// also takes its dimensions and constraint icons; those cannot be fixed and are passed over, so
+/// the geometry boxed with them is still fixed at once. Anything else selected (a body, a
+/// midpoint, a curve of another sketch) leaves the choice to the pick tool. As many entities as the command takes.
+fn fix_preselection(selection: &[solidcraft_engine::Sel]) -> Option<Vec<&str>> {
+    use solidcraft_engine::Sel::{SketchConstraint, SketchCurve, SketchPoint};
+    const MAX_ENTITIES: usize = 10_000;
+    let mut ids = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for s in selection {
+        let id = match s {
+            SketchCurve { id, sketch: None } | SketchPoint { id } => id.as_str(),
+            // A curve of another sketch: its id alone would name a curve of this one (#3726).
+            SketchCurve { .. } => return None,
+            SketchConstraint { .. } => continue,
+            _ => return None,
+        };
+        if seen.insert(id) {
+            ids.push(id);
+        }
+    }
+    (1..=MAX_ENTITIES).contains(&ids.len()).then_some(ids)
 }
 
 pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> Option<Vec<Value>> {
@@ -868,6 +893,20 @@ fn run_pick(app: &mut SolveApp, t: &Tool) {
         _ => json!({"a": k[0], "b": k[1]}),
     };
     let _ = app.run(t.cmd, params);
+}
+
+/// Parallel, Perpendicular, Equal and Collinear constrain two curves, and their commands take no
+/// point. So a click on a curve's end point picks the curve under it, not the point, and a body's
+/// edge is taken rather than its vertex (#12092). Tangent also takes a curve's end point: that
+/// end then lies on the other curve. A body's vertex ends no sketch curve, so Tangent takes the
+/// edge there too.
+fn curve_operands(cmd: &str, hits: Vec<Hit>) -> Vec<Hit> {
+    let points = match cmd {
+        "sketch.constraint.collinear" | "sketch.constraint.equal" | "sketch.constraint.parallel" | "sketch.constraint.perpendicular" => false,
+        "sketch.constraint.tangent" => true,
+        _ => return hits,
+    };
+    hits.into_iter().filter(|h| !matches!(h, Hit::Vertex { .. }) && (points || !matches!(h, Hit::SketchPoint { .. }))).collect()
 }
 
 /// Take back a pending spline point before undo or Backspace reaches the sketch.
@@ -1169,7 +1208,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let Some(ss) = st.sketch(sid) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     // Drawn straight onto the view: its side's colours (#4146).
-    let tk = crate::theme::Tokens::view();
+    let tk = solidcraft_theme::Tokens::view();
     let stroke = Stroke::new(1.5, tk.sketch_accent);
     if let Some((hp, snap)) = &t.hover
         && let Some(sp) = to(*hp)
@@ -1184,7 +1223,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
                 crate::tool_cursor::readout_at(painter, proj.rect, sp),
                 egui::Align2::LEFT_TOP,
                 format!("{}, {}", crate::prefs::show_mm(app, hp.x, 1), crate::prefs::show_mm(app, hp.y, 1)),
-                egui::FontId::proportional(crate::theme::Tokens::get().font_small),
+                egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small),
                 tk.text_dim,
             );
             crate::scenario::publish_rect("viewport:readout", readout);
@@ -1243,7 +1282,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
                     m + g,
                     egui::Align2::CENTER_CENTER,
                     if horizontal { "H" } else { "V" },
-                    egui::FontId::proportional(crate::theme::Tokens::get().font_micro),
+                    egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro),
                     tk.sketch_accent,
                 );
             }

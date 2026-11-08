@@ -29,6 +29,7 @@ pub fn synthetic_registry() -> PanelResult<PanelRegistry> {
             surface: PanelSurface::FollowZone,
             features: PanelFeatures { multi_instance: multi, ..PanelFeatures::default() },
             side_height_policy: SideHeightPolicy::Content,
+            fixed_bottom_height: None,
             header_actions: Vec::new(),
             text_heavy: false,
         })?;

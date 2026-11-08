@@ -4,38 +4,54 @@ struct ShadowResult { transmittance: vec3<f32>, branch_pdf: f32, crossings: u32,
 fn blocked_shadow() -> ShadowResult {
     return ShadowResult(vec3<f32>(0.0),0.0,0u,false);
 }
-fn shadow_transmittance(origin: vec3<f32>, direction: vec3<f32>, limit: f32) -> ShadowResult {
+fn shadow_transmittance(origin: vec3<f32>, origin_low: vec3<f32>, direction: vec3<f32>, limit: f32, minimum: f32) -> ShadowResult {
     var result = ShadowResult(vec3<f32>(1.0),1.0,0u,false);
     var o = origin;
-    var o_low = vec3<f32>(0.0);
-    var ray_excluded = 0xffffffffu;
-    var ray_minimum = u.lighting.x;
-    var medium_id = 0.0;
-    var medium_ior = 1.0;
-    var sigma = vec3<f32>(0.0);
+    var o_low = origin_low;
+    let boundary_connection=GLASS_DELTA_LIGHTS && transport_boundary_connection;
+    var ray_excluded = select(0xffffffffu,transport_source_triangle,transport_medium_id!=0.0 || boundary_connection);
+    var ray_minimum = select(minimum,0.0,transport_medium_id!=0.0 || boundary_connection);
+    var medium_id = transport_medium_id;
+    var medium_ior = transport_medium_ior;
+    let initial_ior=medium_ior;
+    let geometric_normals=glass_geometric_normals();
+    // Smooth legacy connections keep the scale of the optional straight-solid
+    // approximation. A contained segment still cancels its equal endpoint IORs.
+    let physical_scale=GLASS_DELTA_LIGHTS || geometric_normals;
+    var sigma = transport_medium_sigma;
+    var scatter=transport_medium_scatter;
     var entry = origin;
-    var entry_low = vec3<f32>(0.0);
+    var entry_low = origin_low;
+    if medium_id!=0.0 {entry=transport_connection_origin;entry_low=transport_connection_origin_low;}
     // Up to 64 interfaces. If traversal cannot establish visibility, block it.
     for (var step=0u; step<=64u; step+=1u) {
-        let traversed = dot(precise_point_delta(o,o_low,origin,vec3<f32>(0.0)),direction);
+        let traversed = dot(precise_point_delta(o,o_low,origin,origin_low),direction);
         let remaining = limit-traversed;
         // Outside media nothing beyond the endpoint matters. Inside, the
         // endpoint branch below must still see the farther boundary.
         let hit = trace_precise_within(o,o_low,direction,false,ray_excluded,ray_minimum,medium_id!=0.0,select(FAR,remaining,medium_id==0.0),remaining);
         if hit.triangle == 0xffffffffu {
             if medium_id!=0.0 { return blocked_shadow(); }
+            if !result.solid || physical_scale {result.transmittance*=initial_ior*initial_ior;}
             return result;
         }
         if hit.distance>=remaining {
             // A finite emitter may be inside a certified medium. Attenuate only
             // to that emitter, never to the body's farther exit surface.
-            if medium_id!=0.0 { result.transmittance*=exp(-sigma*length(ray_segment_precise(o,o_low,entry,entry_low,direction,remaining)))/(medium_ior*medium_ior); }
+            if medium_id!=0.0 {
+                let distance=length(ray_segment_precise(o,o_low,entry,entry_low,direction,remaining));
+                let survival=exp(-scatter*distance);
+                result.transmittance*=exp(-sigma*distance)*survival/(medium_ior*medium_ior);
+                result.branch_pdf*=survival;
+            }
+            if !result.solid || physical_scale {result.transmittance*=initial_ior*initial_ior;}
             return result;
         }
         if step==64u { return blocked_shadow(); }
         if OPAQUE_SCENE {return blocked_shadow();}
         let t = triangle(hit.triangle);
         if t.base.w<=0.0 || t.coat.w<=0.0 { return blocked_shadow(); }
+        let optical_ior=glass_ior(t.parameters.z,t.glass.y,transport_wavelength);
         var position=surface_point(t,hit.bary);
         var position_low=vec3<f32>(0.0);
         if t.parameters.w<0.0 {
@@ -48,16 +64,17 @@ fn shadow_transmittance(origin: vec3<f32>, direction: vec3<f32>, limit: f32) -> 
         var n=unit(t.n0.xyz*hit.bary.x+t.n1.xyz*hit.bary.y+t.n2.xyz*hit.bary.z);
         if dot(n,geometric)<0.0 { n=-n; }
         if dot(n,-direction)<=0.0 { n=geometric; }
+        if geometric_normals {n=geometric;}
         if t.parameters.w>=0.0 {
             if medium_id!=0.0 { return blocked_shadow(); }
             // Match the primary path's shading-normal fallback before the sheet sum.
-            var f=dielectric(clamp(dot(n,-direction),0.0,1.0),1.0,t.parameters.z);
-            let refracted=refract(direction,n,1.0/t.parameters.z);
+            var f=dielectric(clamp(dot(n,-direction),0.0,1.0),1.0,optical_ior);
+            let refracted=refract(direction,n,1.0/optical_ior);
             if (f.z>=0.0 && dot(refracted,geometric)>=0.0) || dot(reflect(direction,n),geometric)<=0.0 {
                 n=geometric;
-                f=dielectric(clamp(dot(n,-direction),0.0,1.0),1.0,t.parameters.z);
+                f=dielectric(clamp(dot(n,-direction),0.0,1.0),1.0,optical_ior);
             }
-            let weights=sheet(t,f);
+            let weights=glass_sheet(t,f,clamp(dot(n,-direction),0.0,1.0),1.0,optical_ior,transport_wavelength);
             let r=dot(weights.reflection,vec3<f32>(1.0/3.0));
             let tr=dot(weights.transmission,vec3<f32>(1.0/3.0));
             if r+tr<=0.0 || tr<=0.0 { return blocked_shadow(); }
@@ -67,19 +84,22 @@ fn shadow_transmittance(origin: vec3<f32>, direction: vec3<f32>, limit: f32) -> 
             result.solid=true;
             // Reciprocal external-angle Fresnel at each surface. Applying an
             // inside critical angle to this unrefracted connection would invent TIR.
-            let f=dielectric(clamp(abs(dot(outward,direction)),0.0,1.0),1.0,t.parameters.z);
-            result.transmittance*=1.0-(f.x+f.y)*0.5;
+            let reflection=glass_reflection(t,clamp(abs(dot(outward,direction)),0.0,1.0),1.0,optical_ior,transport_wavelength);
+            result.transmittance*=vec3<f32>(1.0)-reflection;
             if entering {
                 if medium_id!=0.0 { return blocked_shadow(); }
-                medium_id=t.optics.w; medium_ior=t.parameters.z; entry=position; entry_low=position_low; sigma=t.optics.xyz;
+                medium_id=t.optics.w; medium_ior=optical_ior; entry=position; entry_low=position_low; sigma=t.optics.xyz;scatter=t.interior.x;
             } else {
                 // The first crossing from the shading point exits a closed body:
                 // the point touches or lies within it (see the path loop).
                 if medium_id==0.0 && step==0u {
-                    medium_id=t.optics.w; medium_ior=t.parameters.z; sigma=t.optics.xyz; entry=origin; entry_low=vec3<f32>(0.0);
+                    medium_id=t.optics.w; medium_ior=optical_ior; sigma=t.optics.xyz; entry=origin; entry_low=origin_low;scatter=t.interior.x;
                 }
                 if medium_id==0.0 || medium_id!=t.optics.w { return blocked_shadow(); }
-                result.transmittance*=exp(-sigma*length(precise_point_delta(position,position_low,entry,entry_low)));
+                let distance=length(precise_point_delta(position,position_low,entry,entry_low));
+                let survival=exp(-scatter*distance);
+                result.transmittance*=exp(-sigma*distance)*survival;
+                result.branch_pdf*=survival;
                 medium_id=0.0;
             }
         }
@@ -100,7 +120,7 @@ fn shadow_transmittance(origin: vec3<f32>, direction: vec3<f32>, limit: f32) -> 
 
 @compute @workgroup_size(1)
 fn shadow_reference() {
-    let shadow=shadow_transmittance(u.eye.xyz,u.back.xyz,u.back.w);
+    let shadow=shadow_transmittance(u.eye.xyz,vec3<f32>(0.0),u.back.xyz,u.back.w,u.lighting.x);
     accumulation[0]=vec4<f32>(shadow.transmittance,1.0);
     accumulation[1]=vec4<f32>(shadow.branch_pdf,f32(shadow.crossings),select(0.0,1.0,shadow.solid),1.0);
 }

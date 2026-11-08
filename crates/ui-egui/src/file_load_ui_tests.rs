@@ -255,6 +255,126 @@ fn update_links_names_the_design_it_reads_while_the_window_draws() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Reload from file reads beside the window, as an insert does: the design waits, Cancel changes
+/// nothing, and a file that is gone is said in the status line.
+#[test]
+fn reloading_a_point_cloud_runs_off_the_window_thread() {
+    let dir = scratch("reload-cloud");
+    let path = dir.join("scan.xyz");
+    std::fs::write(&path, "0 0 0\n1 0 0\n").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let id = h.app.run("pointcloud.insert", json!({"path": path})).unwrap()["cloud"].as_u64().unwrap();
+    h.app.tree.cloud_panel = Some(crate::browser::CloudPanel::new(&h.app, id));
+    h.frames(4);
+    std::fs::write(&path, "0 0 0\n1 0 0\n2 0 0\n").unwrap();
+    let points = |app: &SolveApp| app.session.doc.point_clouds[0].len();
+    let until_idle = |h: &mut crate::scenario::Harness| {
+        let began = std::time::Instant::now();
+        while !h.app.file_load.idle() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(120), "the reload went on");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(3);
+    };
+    let hold = |h: &mut crate::scenario::Harness| {
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        h.app.file_load.worker_gate = Some((started_tx, release_rx));
+        (started_rx, release_tx)
+    };
+
+    // The card's button: held on its worker, the window draws and the design waits.
+    let design = h.app.session.doc.clone();
+    let (started, release) = hold(&mut h);
+    // Frame by frame: a scenario step would wait for the file operation it starts.
+    let [x, y] = h.widget(solidcraft_ui_text::tr("ui.point_cloud_reload")).expect("the card offers a reload");
+    let at = pos2(x as f32, y as f32);
+    let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Default::default() };
+    for event in [Event::PointerMoved(at), button(true), button(false)] {
+        h.frame_with(vec![event]);
+    }
+    let worker = started.recv_timeout(std::time::Duration::from_secs(60)).expect("the worker started");
+    assert_ne!(worker, std::thread::current().id());
+    h.frames(3);
+    assert!(h.widget("Reloading point cloud").is_some(), "the overlay says what runs");
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design), "the design waits");
+    // Cancel keeps it as it was.
+    h.app.file_load.cancel();
+    drop(release);
+    until_idle(&mut h);
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design), "a cancelled reload changes nothing");
+
+    // Run through, it brings the new points in, and says it is done, in one undo step.
+    let r = crate::file_load::begin_request(&mut h.app, {
+        let mut request = crate::file_load::Request::new("", crate::file_load::Kind::ReloadCloud);
+        request.options.insert("cloud".into(), json!(id));
+        request
+    });
+    assert!(r.is_ok() && h.app.file_load.busy());
+    until_idle(&mut h);
+    assert_eq!(points(&h.app), 3);
+    assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some("Reload Point Cloud done"));
+    // The open card folds its edits from here on, so an edit does not take the reload with it.
+    assert_eq!(h.app.tree.cloud_panel.as_ref().map(|p| p.depth), Some(h.app.session.undo.len()));
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(points(&h.app), 2);
+
+    // A file that is gone: said, and the design is as it was.
+    std::fs::remove_file(&path).unwrap();
+    let design = h.app.session.doc.clone();
+    let mut request = crate::file_load::Request::new("", crate::file_load::Kind::ReloadCloud);
+    request.options.insert("cloud".into(), json!(id));
+    crate::file_load::begin_request(&mut h.app, request).unwrap();
+    until_idle(&mut h);
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design));
+    let status = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+    assert!(status.contains("scan.xyz"), "{status}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A request's own `param_check` (#9184) holds on a command the file loader runs, which never
+/// reaches `control::handle`: a word that is no level is refused, `strict` refuses a broken call
+/// before the file is read, `warn` reads it and says what it found, and every reply says the level.
+/// Any spelling the engine takes goes to the file loader too.
+#[test]
+fn a_file_load_is_checked_at_the_requests_own_level() {
+    let dir = scratch("reload-check");
+    let path = dir.join("scan.xyz");
+    std::fs::write(&path, "0 0 0\n1 0 0\n").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let id = h.app.run("pointcloud.insert", json!({"path": path})).unwrap()["cloud"].as_u64().unwrap();
+    std::fs::write(&path, "0 0 0\n1 0 0\n2 0 0\n").unwrap();
+    let points = |app: &SolveApp| app.session.doc.point_clouds[0].len();
+    let misspelt = |level: &str| json!({"command": "pointcloud.reload", "params": {"cloud": id, "clowd": 1}, "param_check": level});
+
+    let (v, _) = h.call_queued("engine.execute", misspelt("loud"));
+    assert!(v["ok"] == false && v["error"].as_str().is_some_and(|e| e.contains("`param_check` must be off, warn or strict")), "{v}");
+    let (v, _) = h.call_queued("engine.execute", misspelt("strict"));
+    assert_eq!((&v["ok"], &v["param_check"]), (&json!(false), &json!("strict")), "{v}");
+    assert!(v["error"].as_str().is_some_and(|e| e.contains("clowd")), "{v}");
+    assert_eq!(points(&h.app), 2, "refused unread");
+
+    let (v, _) = h.call_queued("engine.execute", misspelt("warn"));
+    assert_eq!((&v["ok"], &v["param_check"]), (&json!(true), &json!("warn")), "{v}");
+    assert!(v["result"]["param_warnings"][0].as_str().is_some_and(|w| w.contains("clowd")), "{v}");
+    assert_eq!(points(&h.app), 3);
+
+    // Asked nothing, told nothing; the worker's thread shows the file loader took this spelling.
+    std::fs::write(&path, "0 0 0\n1 0 0\n2 0 0\n3 0 0\n").unwrap();
+    let (started_tx, started) = std::sync::mpsc::channel();
+    let (release, release_rx) = std::sync::mpsc::channel();
+    release.send(()).unwrap();
+    h.app.file_load.worker_gate = Some((started_tx, release_rx));
+    let (v, _) = h.call_queued("engine.execute", json!({"command": "POINTCLOUD.RELOAD", "params": {"cloud": id}}));
+    assert_eq!((&v["ok"], v.get("param_check")), (&json!(true), None), "{v}");
+    assert_ne!(started.try_recv().expect("the file loader ran it"), std::thread::current().id());
+    assert_eq!(points(&h.app), 4);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A design may link to a file on another computer (`\\host\share\…`); on Windows reading it, or
 /// only asking whether it is there, connects to that computer and may send it the user's sign-in.
 /// Update Links and Open Linked Design ask first, naming the server: Cancel reads nothing, Allow
@@ -329,6 +449,58 @@ fn update_links_and_open_linked_design_ask_before_a_network_location() {
     until_idle(&mut h);
     h.app.preferences.network_hosts.clear();
     crate::prefs::apply_network(&h.app.preferences);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Reload from file on a cloud whose file a design names on another computer asks first, naming
+/// the server; Cancel reads nothing, and a local file does not ask.
+#[test]
+fn reloading_a_point_cloud_on_a_network_location_asks_first() {
+    use crate::network_prompt::{Answer, NetworkPrompt, Then, answer, reload_cloud};
+    let dir = scratch("reload-cloud-network");
+    let path = dir.join("scan.xyz");
+    std::fs::write(&path, "0 0 0\n1 0 0\n").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let id = h.app.run("pointcloud.insert", json!({"path": path})).unwrap()["cloud"].as_u64().unwrap();
+    let local = h.app.session.doc.point_clouds[0].source.clone();
+    let until_idle = |h: &mut crate::scenario::Harness| {
+        let began = std::time::Instant::now();
+        while !h.app.file_load.idle() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(120), "the reload went on");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(3);
+    };
+
+    let crafted = r"\\evil.example\share\scan.xyz";
+    h.app.session.doc_mut().point_clouds[0].source = crafted.into();
+    let design = h.app.session.doc.clone();
+    reload_cloud(&mut h.app, id, crafted);
+    assert_eq!(h.app.network_prompt, Some(NetworkPrompt { hosts: vec!["evil.example".into()], then: Then::ReloadCloud(id) }));
+    assert!(h.app.file_load.idle(), "nothing is read while it asks");
+    answer(&mut h.app, Answer::Cancel);
+    h.frames(2);
+    assert!(h.app.network_prompt.is_none() && h.app.file_load.idle());
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design), "Cancel changes nothing");
+
+    // Allow once holds for that reload alone, and the preferences keep nothing.
+    reload_cloud(&mut h.app, id, crafted);
+    answer(&mut h.app, Answer::Once);
+    assert!(!h.app.file_load.idle(), "the file operation runs");
+    until_idle(&mut h);
+    assert!(h.app.preferences.network_hosts.is_empty());
+    let refused = h.app.session.execute("pointcloud.reload", &json!({"cloud": id})).unwrap_err().to_string();
+    assert!(refused.contains("evil.example") && refused.contains("Reload from file"), "{refused}");
+
+    // A local file does not ask.
+    h.app.session.doc_mut().point_clouds[0].source = local.clone();
+    std::fs::write(&path, "0 0 0\n1 0 0\n2 0 0\n").unwrap();
+    reload_cloud(&mut h.app, id, &local);
+    assert!(h.app.network_prompt.is_none());
+    until_idle(&mut h);
+    assert_eq!(h.app.session.doc.point_clouds[0].len(), 3);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

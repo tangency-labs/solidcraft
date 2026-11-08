@@ -5,15 +5,15 @@
 //! with their paper, Brettel on white and its own anchors.
 //!
 //! When a token edit breaks a mode here, adjust its measured variant. Shared icon accents live
-//! in `assets/icons/ui/design/palette.toml`; `assets/styles/ui/palettes.rs` links those generated
-//! values to UI tokens and owns the remaining UI-only colour-vision adjustments.
+//! in `assets/icons/ui/design/palette.toml`; `crates/theme/src/palettes.rs` holds the primary
+//! strokes the UI tokens share with them (`icon_strokes`, held equal by an icon test) and owns the remaining UI-only colour-vision adjustments.
 
 use std::collections::BTreeSet;
 
 use egui::Color32;
 use serde_json::json;
 
-use crate::theme::{ColorVision, Tokens};
+use solidcraft_theme::{ColorVision, Tokens};
 
 type Rgb8 = [u8; 3];
 type V3 = [f64; 3];
@@ -320,7 +320,7 @@ fn groups(t: &Tokens) -> Vec<Group> {
             &[("figure_ground", t.figure_ground), ("figure_face_top", t.figure_face_top)],
         ),
         // Badge text and selected-card marks use these exact pairs; WCAG ratios are also
-        // guarded by theme::tests::preferences_foreground_pairs_hold_small_text_contrast.
+        // guarded by solidcraft_theme's preferences_foreground_pairs_hold_small_text_contrast.
         group("Preferences warning badge", &[("pref_note", t.pref_note)], &[("pref_note_fill", t.pref_note_fill)]),
         group("Preferences success badge", &[("pref_ok", t.pref_ok)], &[("pref_ok_fill", t.pref_ok_fill)]),
         group("Preferences selected marks", &[("pref_on_accent", t.pref_on_accent)], &[("figure_accent", t.figure_accent)]),
@@ -397,9 +397,9 @@ fn groups(t: &Tokens) -> Vec<Group> {
         group(
             "curvature map",
             &[
-                ("analysis.curvature[0]", crate::theme::srgb(a.curvature[0])),
-                ("analysis.curvature[1]", crate::theme::srgb(a.curvature[1])),
-                ("analysis.curvature[2]", crate::theme::srgb(a.curvature[2])),
+                ("analysis.curvature[0]", solidcraft_theme::srgb(a.curvature[0])),
+                ("analysis.curvature[1]", solidcraft_theme::srgb(a.curvature[1])),
+                ("analysis.curvature[2]", solidcraft_theme::srgb(a.curvature[2])),
             ],
             &[],
         ),
@@ -417,7 +417,7 @@ fn groups(t: &Tokens) -> Vec<Group> {
     ];
     // Tab fills and small-text inks have distinct jobs: compare each with its actual
     // grounds, rather than with the same-hue fill/ink. WCAG text ratios are also guarded
-    // in theme::tests::tab_accents_hold_wcag_small_text_contrast_in_both_themes.
+    // in solidcraft_theme's tab_accents_hold_wcag_small_text_contrast_in_both_themes.
     for (name, ink_name, ink, soft_name, soft) in [
         ("sketch tab text", "sketch_ink", t.sketch_ink, "sketch_soft", t.sketch_soft),
         ("surface tab text", "surface_ink", t.surface_ink, "surface_soft", t.surface_soft),
@@ -502,7 +502,6 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("borders.control", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.primary_inset", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.bevel", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
-    ("icon_palette", "optional SVG palette; actual roles and theme contrast are guarded in icon and theme tests"),
     ("file_dim", "File view secondary text, WCAG guarded in theme tests"),
     ("form_primary_fill", "ground under a filled primary field; form_primary carries the meaning, contrast guarded in theme tests"),
     ("file_recovery_well", "decorative recovery icon ground"),
@@ -983,7 +982,7 @@ fn validation_badges_are_distinct_and_readable_in_every_mode() {
             if distance < FLOOR {
                 failures.push(format!("{mode:?} dark={dark} validation fills: {distance:.2}"));
             }
-            let contrast = crate::theme::contrast_ratio(t.form_success, t.form_success_fill);
+            let contrast = solidcraft_theme::contrast_ratio(t.form_success, t.form_success_fill);
             if contrast < 4.5 {
                 failures.push(format!("{mode:?} dark={dark} success contrast: {contrast:.2}"));
             }
@@ -998,8 +997,8 @@ fn validation_badges_are_distinct_and_readable_in_every_mode() {
 /// two-colour themes (1-bit) tell them apart by shape alone.
 #[test]
 fn shipped_themes_draw_dimensions_in_their_own_readable_colour() {
-    use crate::theme::contrast_ratio;
     use crate::theme_files::{builtin, is_two_colour, resolve};
+    use solidcraft_theme::contrast_ratio;
     let themes = [("light", Tokens::light()), ("dark", Tokens::dark())]
         .into_iter()
         .map(|(id, t)| (id.to_string(), t))
@@ -1052,7 +1051,7 @@ fn onyx_keeps_gold_dimensions_distinct_from_grey_construction_lines() {
                 assert!(normal(rgb(dimension), rgb(construction)) >= FLOOR, "{foreground}: dimensions remain distinct");
             }
             for ground in [t.viewport_top, t.viewport_bottom] {
-                assert!(crate::theme::contrast_ratio(construction, ground) >= 3.0, "{foreground}: readable construction lines");
+                assert!(solidcraft_theme::contrast_ratio(construction, ground) >= 3.0, "{foreground}: readable construction lines");
             }
         }
     }
@@ -1226,11 +1225,11 @@ fn the_sample_previews_the_mode_being_chosen() {
             for (colour, y) in [(want.bend_up, 14), (want.bend_down, 30)] {
                 assert!((12..72).any(|x| near(images[3].get_pixel(x, y).0, colour)), "{base} {mode:?}: bend stroke {colour:?}");
             }
-            pixel(4, 18, 18, crate::theme::srgb(want.analysis.draft[0]));
-            pixel(4, 40, 18, crate::theme::srgb(want.analysis.draft[1]));
+            pixel(4, 18, 18, solidcraft_theme::srgb(want.analysis.draft[0]));
+            pixel(4, 40, 18, solidcraft_theme::srgb(want.analysis.draft[1]));
             pixel(4, 2, 2, want.figure_ground);
-            let negative = crate::theme::srgb(want.analysis.draft[2]);
-            let hatch = crate::theme::srgb(want.analysis.draft[2].map(|c| c * 0.6));
+            let negative = solidcraft_theme::srgb(want.analysis.draft[2]);
+            let hatch = solidcraft_theme::srgb(want.analysis.draft[2].map(|c| c * 0.6));
             let draft = &images[4];
             let band: Vec<_> = (54..74).flat_map(|x| (24..34).map(move |y| draft.get_pixel(x, y).0)).collect();
             assert!(band.iter().any(|p| near(*p, negative)), "{base} {mode:?}: Draft retains its negative analysis colour");

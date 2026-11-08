@@ -101,7 +101,7 @@ pub struct Offer {
 ///   enable switch (`app.space_mouse.device`, `app.preferences`); the readers present
 ///   (`space_mouse.drivers`); `ctx.input` focus, time and pointer position; `app.status`, `computing_since`,
 ///   `file_picker_busy`, `file_load.busy`, `prefs_window.open`, `space_mouse.calibrating`,
-///   `issue_report::cad_input_blocked`.
+///   `ui_kit::input_blocked`.
 /// - Writes, only its own: `space_mouse.offer_since`, `space_mouse.offer_hidden`;
 ///   `space_mouse_offered` and `space_mouse_offer_never` (preferences) when the user closes it (×),
 ///   or clicks Calibrate or Never.
@@ -183,7 +183,7 @@ fn input_blocked(app: &SolveApp, ctx: &egui::Context) -> bool {
     !ctx.input(|i| i.focused)
         || app.file_picker_busy()
         || app.file_load.busy()
-        || crate::issue_report::cad_input_blocked()
+        || crate::ui_kit::input_blocked()
         || app.prefs_window.open
         || app.space_mouse.calibrating.is_some()
         || app.home.open
@@ -463,10 +463,10 @@ mod preferences_tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.space_mouse.device = Some("hid 046d:c62b".into());
-        crate::issue_report::set_cad_input_blocked_for_test(true);
+        crate::ui_kit::set_input_blocked(true);
         h.frames(6);
         let hidden = h.app.space_mouse.offer_since.is_none() && crate::scenario::rect_of("toast:space_mouse_offer").is_none();
-        crate::issue_report::set_cad_input_blocked_for_test(false);
+        crate::ui_kit::set_input_blocked(false);
         assert!(hidden, "not drawn while input is blocked");
         assert!(h.app.space_mouse.calibrating.is_none() && h.app.preferences.space_mouse_offered.is_empty());
         // And it is there again once the report is gone.
@@ -557,7 +557,7 @@ mod preferences_tests {
         let button = |i: usize| crate::scenario::rect_of(&format!("toast:space_mouse_offer:button:{i}")).unwrap();
         let (calibrate, direct, never) = (button(0), button(1), button(2));
         assert!((calibrate.right() - (card.right() - 12.0)).abs() < 0.5, "flush right: {calibrate:?} in {card:?}");
-        let gap = crate::theme::Tokens::get().space_8;
+        let gap = solidcraft_theme::Tokens::get().space_8;
         assert!((calibrate.left() - direct.right() - gap).abs() < 0.5, "{direct:?} then {calibrate:?}");
         assert!((direct.left() - never.right() - gap).abs() < 0.5, "{never:?} then {direct:?}");
         assert!(never.left() >= card.left() + 28.0 - 0.5, "inside the row: {never:?} in {card:?}");
@@ -726,10 +726,10 @@ mod preferences_tests {
             // Where the button was: once the guard hides the card, a name finds nothing (or another
             // control), so a click by name would not test the click behind it.
             let at = h.widget(widget).unwrap();
-            crate::issue_report::set_cad_input_blocked_for_test(true);
+            crate::ui_kit::set_input_blocked(true);
             h.step(&serde_json::json!({"click": at})).unwrap();
             h.frames(3);
-            crate::issue_report::set_cad_input_blocked_for_test(false);
+            crate::ui_kit::set_input_blocked(false);
             assert!(h.app.space_mouse.calibrating.is_none() && !h.app.prefs_window.open, "{widget}: no wizard, no Preferences");
             assert_eq!(h.app.preferences, before, "{widget}: nothing recorded or changed");
             // And the card is back once the guard is gone, untouched.
@@ -768,7 +768,7 @@ mod preferences_tests {
             let cases: [Stale; 7] = [
                 ("the device changed", |h| h.app.space_mouse.device = Some("hid 256f:c63a".into())),
                 ("the device went", |h| h.app.space_mouse.device = None),
-                ("an issue report took the input", |_| crate::issue_report::set_cad_input_blocked_for_test(true)),
+                ("an issue report took the input", |_| crate::ui_kit::set_input_blocked(true)),
                 ("Preferences opened", |h| h.app.prefs_window.open = true),
                 ("a status toast is up", |h| h.app.status = Some(("Done".into(), crate::now_ms(), false))),
                 ("the device was dismissed elsewhere", |h| {
@@ -791,7 +791,7 @@ mod preferences_tests {
                     h.app.space_mouse.offer_hidden.clone(),
                 );
                 act(&mut h.app, &h.ctx, &offer, action);
-                crate::issue_report::set_cad_input_blocked_for_test(false);
+                crate::ui_kit::set_input_blocked(false);
                 assert_eq!(h.app.preferences, before, "{action:?}, {what}: nothing recorded or changed");
                 assert_eq!(h.app.space_mouse.calibrating.is_some(), calibrating, "{action:?}, {what}: no wizard");
                 assert_eq!(h.app.prefs_window.open, window, "{action:?}, {what}: Preferences untouched");
