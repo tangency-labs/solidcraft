@@ -26,6 +26,8 @@
 //! Deviations: no recursion: the pairs are kept on an explicit stack, each piece halved at
 //! most [`DEPTH`] times, at most [`PAIRS`] pairs per curve and piece list.
 
+use std::borrow::Cow;
+
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::Result;
 use crate::geom::vector3d::sqrt;
@@ -60,19 +62,30 @@ pub enum Clearance {
 
 /// The rational Bézier pieces of `curve` as homogeneous points, one piece per knot span: of
 /// the B-spline a line, a conic or a B-spline curve is built on (the whole of it, which holds
-/// an edge it is trimmed to). `None` for a curve of another kind, a planar (2D) one, or one
-/// whose weights are not all positive and finite: such a curve has no hull to bound it by.
+/// an edge it is trimmed to; a line's or an ellipse's made on a copy where it holds none
+/// yet). `None` for a curve of another kind, a planar (2D) one, one whose B-spline is not
+/// made, or one whose weights are not all positive and finite: such a curve has no hull to
+/// bound it by.
 ///
 /// # Errors
 ///
-/// Those of the B-spline's decomposition into its Bézier pieces.
-pub fn bezier_pieces(curve: &Curve) -> Result<Option<Vec<Vec<Hom>>>> {
-    let base: &BSplineCurve = match curve.kind() {
-        CurveKind::BSpline(c) => c,
-        CurveKind::Line(c) => c.base(),
-        CurveKind::Ellipse(c) => c.base(),
-        CurveKind::Hyperbola(c) => &c.base,
-        CurveKind::Parabola(c) => c.base(),
+/// Those of the B-spline's decomposition into its Bézier pieces; a cancellation while an
+/// ellipse's is made.
+pub fn bezier_pieces(k: &Kernel, curve: &Curve) -> Result<Option<Vec<Vec<Hom>>>> {
+    let base: Cow<'_, BSplineCurve> = match curve.kind() {
+        CurveKind::BSpline(c) => Cow::Borrowed(c),
+        CurveKind::Line(c) => c.base_with_nurb()?,
+        CurveKind::Ellipse(c) if c.base().nurb.is_none() => {
+            let mut copy = c.clone();
+            match copy.make_nurb(k) {
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => return Ok(None),
+                Ok(()) => Cow::Owned(copy.base().clone()),
+            }
+        }
+        CurveKind::Ellipse(c) => Cow::Borrowed(c.base()),
+        CurveKind::Hyperbola(c) => Cow::Borrowed(&c.base),
+        CurveKind::Parabola(c) => Cow::Borrowed(c.base()),
         _ => return Ok(None),
     };
     let Some(nurb) = base.nurb.as_ref() else {
@@ -113,7 +126,8 @@ impl Piece {
     /// A piece as given: its Euclidean points are within `rounding` of the exact ones after
     /// [`DEPTH`] halvings of `degree` averaging steps each and the division by the weight:
     /// `3 gamma(ops + 2)` of its largest homogeneous coordinate over its least weight (shrunk
-    /// by the weights' own rounding), `ops = 8 + DEPTH degree`. `None` where a weight is not
+    /// by the weights' own rounding), `ops = 8 + DEPTH degree` (the 8 for the knot insertions
+    /// that cut a B-spline into its pieces and the division). `None` where a weight is not
     /// positive or a coordinate not finite.
     fn new(points: &[Hom]) -> Option<Self> {
         let degree = points.len().checked_sub(1)?;
@@ -213,7 +227,7 @@ fn extent(points: &[Vec3]) -> (Vec3, Vec3) {
 /// rounding: the larger of the distance between their boxes and their gap along the line
 /// between their centroids (any unit direction `u` separates them by `min u . b - max u . a`;
 /// that one closes on the hulls' distance as near-parallel pieces shrink, where the boxes'
-/// does not). The boxes' gaps are rounded by `gamma(1)` of the largest coordinate `s`, their
+/// does not). The boxes' gaps are rounded by `2 gamma(1)` of the largest coordinate `s`, their
 /// sum of squares by `gamma(6)`; each projection by `gamma(3) sqrt 3 s |u|`, and the quotient
 /// by `|u|` by `gamma(4)`.
 fn apart(a: &[Vec3], b: &[Vec3]) -> f64 {
@@ -228,7 +242,7 @@ fn apart(a: &[Vec3], b: &[Vec3]) -> f64 {
         gap(blo.y, ahi.y).max(gap(alo.y, bhi.y)),
         gap(blo.z, ahi.z).max(gap(alo.z, bhi.z)),
     ] {
-        let d = (d - gamma(1) * size).max(0.0);
+        let d = (d - 2.0 * gamma(1) * size).max(0.0);
         squares += d * d;
     }
     let boxes = sqrt(squares * (1.0 - gamma(6))) * (1.0 - gamma(2));
