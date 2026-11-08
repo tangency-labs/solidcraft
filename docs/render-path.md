@@ -35,8 +35,24 @@ checking or starting an image. These controls are transient image-job
 intent that can also be retained in typed saved setups. Each new saved concept
 uses the pending-format mechanism, without manually changing a version number.
 The canvas switches between live product preview and a large completed-image result,
-with Fit and 100% framing. Jobs report sample progress and export the completed PNG;
-partial accumulation buffers are not displayed on the canvas.
+with Fit and 100% framing. Fixed-sampling jobs publish an immutable PNG after every
+complete nonfinal production pass, using the same transport, denoising and finishing
+as the completed image. Partially computed passes are not displayed. The host retains
+at most two prepaid snapshots; pinned external snapshots may skip a publication without
+stalling final rendering, and this is counted in `preview_retention_skips`. Screen repaints may coalesce fast complete-pass updates.
+Provisional PNGs never become exportable results or retained linear EXR masters.
+Adaptive jobs also publish each complete pilot pass and production iteration. Pilot
+images show the pilot mean; those samples remain excluded from the final master.
+Production images normalize unfinished sums by their completed iteration count and
+retain already finished pixel means. Neither readback nor the optional preview
+denoiser writes the production accumulation. Progress labels distinguish pilots
+from production iterations because production counts vary per pixel. The host
+target includes pilots plus the configured maximum production count.
+
+Adaptive readback reserves one additional float4 plane (16 bytes per pixel). When
+denoising is selected, another independently reserved float4 plane supplies a
+normalized display input to the same filter; final denoising keeps its original
+production input. Final PNG and raw EXR remain identical with preview work disabled.
 
 ```json
 {"command":"render.start","params":{"settings":{"width":800,"height":600,"exposure_ev":0},"progressive":true,"samples":64,"max_depth":8,"seed":0}}
@@ -86,9 +102,10 @@ transmission record is rejected by the path executor. Runtime
 [area lights](render-studio-lighting.md), [sun/HDR environment lighting](render-environment.md)
 and [opaque planar color/normal maps](render-runtime-textures.md) are available
 through explicit job inputs. They do not add saved document fields. An optional bounded edge-aware a-trous
-[denoiser](render-denoise.md) filters the final output while preserving raw accumulation.
-Texture LOD/mipmap selection, EXR and Final mode remain unimplemented by this
-executor; a path-traced preview does not declare those capabilities.
+[denoiser](render-denoise.md) filters progressive and final display images while preserving
+raw accumulation. Optional raw scene-linear EXR masters are retained only for completed
+images, before display filters. Texture LOD/mipmap selection and Final mode remain
+unimplemented by this executor; a path-traced preview does not declare those capabilities.
 
 Each job builds a BVH over its immutable captured meshes with a sixteen-bin
 surface-area heuristic on triangle centres; there is no cross-document cache to
@@ -157,10 +174,16 @@ optional `clamp_indirect` job option limits such paths:
   the first bounce, so it is clamped.
 - The limit is linear radiance before exposure, from 0.000001 to 1,000,000. Absent or
   null means off; zero is refused rather than meaning off.
-- The clamp is compiled only into a separate version of the path shader for each kind of
-  scene (opaque or glass, with or without maps), which the first job that sets it builds
-  once per device and later ones reuse. Jobs without it keep the ordinary shaders, so their images do not change by a single bit: even an untaken branch
-  at the integrator's adds changes how the shader compiler fuses them.
+- Light that rough, dispersive or thin-film glass connects to a light in a separate pass
+  after the path (the optical hard-light connections) is not clamped. Photon caustic
+  gathers and the direct light of a rough glass sheet are clamped like any other
+  contribution.
+- The clamp is compiled only into a separate version of each path program (opaque or
+  glass, with or without maps, the optical glass programs and the caustic camera
+  program), which the first job that sets it builds once per device and later ones
+  reuse. Jobs without it keep the ordinary programs, so their images do not change by a
+  single bit: even an untaken branch at the integrator's adds changes how the shader
+  compiler fuses them.
 - It is biased: it removes light, so it also dims real caustics, glints and bright
   reflections of lights in shiny surfaces. A limit a few times the brightest radiance
   a reflection should show keeps most real highlights; a lower one removes more speckle
@@ -196,3 +219,8 @@ fraction. This applies to the specular term and both diffuse transmission factor
 The existing actual-GPU BRDF oracle checks the limit at normal, oblique and grazing
 angles against the f64 surface, including mixed metallic values. Clear-coat and
 physical transmission contracts are unchanged by this base-lobe correction.
+
+The normal GPU Samples editor keeps the exact requested count, including values
+such as 17 or 31; every complete pass is published. Merely opening a saved setup
+does not round its count. **Use previous Render image defaults** retains the
+previous power-of-two rounding for an edited GPU Samples value.

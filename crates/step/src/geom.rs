@@ -169,6 +169,36 @@ pub enum Associated {
     Surface(Arc<Surface>),
 }
 
+/// CARTESIAN_TRANSFORMATION_OPERATOR_3D: `origin + scale·(x·X + y·Y + z·Z)`, where `X`, `Y`
+/// and `Z` are the operator's unit axes (orthogonal, `Y` = ±`Z` × `X`: a negative sign mirrors).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Transform {
+    pub origin: P3,
+    pub x: P3,
+    pub y: P3,
+    pub z: P3,
+    pub scale: f64,
+}
+
+impl Transform {
+    /// The point `p` moved.
+    pub fn point(&self, p: P3) -> P3 {
+        add(self.origin, self.vector(p))
+    }
+    /// The vector `v` turned and scaled, not translated.
+    pub fn vector(&self, v: P3) -> P3 {
+        scale(add(scale(self.x, v[0]), add(scale(self.y, v[1]), scale(self.z, v[2]))), self.scale)
+    }
+    /// The direction `d` turned (its length kept).
+    pub fn direction(&self, d: P3) -> P3 {
+        add(scale(self.x, d[0]), add(scale(self.y, d[1]), scale(self.z, d[2])))
+    }
+    /// Whether the operator keeps handedness (no mirror).
+    pub fn is_proper(&self) -> bool {
+        dot(cross(self.x, self.y), self.z) > 0.0
+    }
+}
+
 /// A STEP curve.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Curve {
@@ -220,6 +250,11 @@ pub enum Curve {
         distance: f64,
         self_intersect: Logical,
         ref_direction: P3,
+    },
+    /// CURVE_REPLICA: the parent curve moved by `transform`, with the parent's parameter.
+    Replica {
+        parent: Arc<Curve>,
+        transform: Transform,
     },
 }
 

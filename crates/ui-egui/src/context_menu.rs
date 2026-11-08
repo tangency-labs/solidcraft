@@ -11,7 +11,7 @@
 //! state; [`items`] lists them and [`run_item`] runs one, so the control channel (`ui.menu`,
 //! `ui.menuPick`) and tests reach everything a click does.
 
-use crate::ui_kit::{Container, Surface};
+use crate::ui_kit::{BackingTooltipExt as _, Container, Surface};
 use egui::{Color32, Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -68,6 +68,13 @@ pub enum Target {
     InsertDesign,
     /// Model › Edit Sketch: choose an existing sketch when none is uniquely selected.
     EditSketch,
+    /// Replace Sketch from a design file (#11125): the file's sketches, one of which takes the
+    /// place of sketch `sketch`'s contents.
+    ReplaceSketchFile {
+        sketch: u64,
+        path: String,
+        sketches: Vec<(u64, String)>,
+    },
     /// View › Visual style: the four styles, the current one marked (#8868).
     VisualStyle,
     /// View › Navigation tool: Orbit, Pan, Zoom; the latched one marked (#8868).
@@ -135,6 +142,9 @@ pub struct Item {
     pub children: Vec<Item>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub swatch: Option<[u8; 3]>,
+    /// Why the entry is off: shown on hover, and in the control channel's report.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
 }
 
 impl Item {
@@ -152,6 +162,7 @@ impl Item {
             params: None,
             children: Vec::new(),
             swatch: None,
+            tip: None,
         }
     }
     pub(crate) fn heading(label: &str) -> Item {
@@ -164,6 +175,7 @@ impl Item {
             params: None,
             children: Vec::new(),
             swatch: None,
+            tip: None,
         }
     }
     fn is_sep(&self) -> bool {
@@ -181,6 +193,14 @@ impl Item {
     }
     pub(crate) fn on(mut self, enabled: bool) -> Item {
         self.enabled &= enabled;
+        self
+    }
+    /// Off, saying why, when there is a reason.
+    pub(crate) fn off_because(mut self, why: Option<String>) -> Item {
+        if let Some(why) = why {
+            self.enabled = false;
+            self.tip = Some(why);
+        }
         self
     }
     pub fn key(mut self, k: &str) -> Item {
@@ -206,6 +226,7 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
         params: None,
         children: Vec::new(),
         swatch: None,
+        tip: None,
     }
 }
 
@@ -220,6 +241,7 @@ pub(crate) fn act(id: &str, label: &str, icon: &str) -> Item {
         params: None,
         children: Vec::new(),
         swatch: None,
+        tip: None,
     }
 }
 
@@ -451,6 +473,10 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             .collect(),
         Target::NamedView { name } => crate::browser::view_items(app, name),
         Target::InsertDesign => insert_design_items(app),
+        Target::ReplaceSketchFile { sketch, path, sketches } => sketches
+            .iter()
+            .map(|(from, name)| cmd(app, "sketch.replace", name).with(json!({ "sketch": sketch, "from": from, "file": path })))
+            .collect(),
         Target::EditSketch => {
             let items: Vec<Item> = app
                 .session
@@ -863,6 +889,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::sep(),
         act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing),
         act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id })),
+        replace_sketch_item(app, id).on(!editing),
         act("ui.exportDxf", "Export DXF…", "export").with(json!({ "sketch": id })),
         Item::sep(),
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)),
@@ -881,6 +908,41 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     ];
     items.retain(|item| parts || item.id != "component.move_sketches.to_parts");
     items
+}
+
+/// Replace Sketch (#11125): each other sketch of the design, whose contents can take the place
+/// of this one's, then a design file to take a sketch from.
+fn replace_sketch_item(app: &SolveApp, id: u64) -> Item {
+    let mut item = act("ui.replaceSketch", "Replace Sketch", "sketch");
+    let others = app.session.doc.features.iter().filter(|f| f.id != id && matches!(f.kind, FeatureKind::Sketch { .. }));
+    for f in others {
+        item.children.push(cmd(app, "sketch.replace", &f.name).with(json!({ "sketch": id, "from": f.id })));
+    }
+    if !item.children.is_empty() {
+        item.children.push(Item::sep());
+    }
+    item.children.push(act("ui.replaceSketchFromFile", app.tr("ui.replace_sketch.from_file"), "open").with(json!({ "sketch": id })));
+    item
+}
+
+/// Replace Sketch from a file: the design file's sketches to choose from, in a menu at `at`;
+/// a file with one sketch replaces at once.
+fn replace_sketch_from_file(app: &mut SolveApp, sketch: u64, at: Pos2) {
+    app.pick_open_for(&solidcraft_engine::io::DESIGN_EXTS, move |app, path| {
+        let Some(path) = path else { return };
+        let sketches: Vec<(u64, String)> = match solidcraft_engine::io::read_design_file(&path, None::<fn(solidcraft_engine::io::DesignPreview)>) {
+            Ok((doc, _)) => doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| (f.id, f.name.clone())).collect(),
+            Err(e) => {
+                app.set_status(format!("{path}: {e}"), true);
+                return;
+            }
+        };
+        match sketches.as_slice() {
+            [] => app.set_status(app.tr("ui.replace_sketch.no_sketches").to_string(), true),
+            [(from, _)] => drop(app.run("sketch.replace", json!({ "sketch": sketch, "from": from, "file": path }))),
+            _ => open_for(app, at, Target::ReplaceSketchFile { sketch, path, sketches }),
+        }
+    });
 }
 
 /// Construction geometry's row: edit, delete, rename, show or hide; sketch on planes.
@@ -1662,6 +1724,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::edit_clipboard::leave_text(app, text);
             }
         }
+        "ui.groupFeatures" => {
+            let ids: Vec<u64> = p.get("features").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
+            if !ids.is_empty() {
+                crate::timeline_folders::group(app, &ids, p.get("parent").and_then(Value::as_u64), at);
+            }
+        }
         "ui.deleteFeatures" | "ui.deleteAfterMarker" => {
             let ids: Vec<u64> = p.get("features").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
             if !ids.is_empty() {
@@ -1708,6 +1776,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.redefineSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
                 crate::browser::redefine_sketch(app, id);
+            }
+        }
+        // Its entries are in its submenu.
+        "ui.replaceSketch" => {}
+        "ui.replaceSketchFromFile" => {
+            if let Some(id) = id_of(&p, "sketch") {
+                replace_sketch_from_file(app, id, at);
             }
         }
         "ui.hideSketch" | "ui.showSketch" => {
@@ -1780,7 +1855,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.isolateOccurrence" => {
             let _ = app.run("browser.visibility", json!({"visible": true, "paths": [p["path"]], "isolate": true}));
         }
-        "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
+        "ui.canvasVisible" | "ui.canvasLocked" => drop(app.run("canvas.edit", p)),
         "ui.toolbarPin"
         | "ui.toolbarRemove"
         | "ui.toolbarReset"
@@ -2303,7 +2378,9 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         | Target::NamedViews
         | Target::ViewGizmo => true,
         Target::Body { name } => crate::open_meshing::session_world(&app.session).body(name).is_some(),
-        Target::Sketch { id } => doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })),
+        Target::Sketch { id } | Target::ReplaceSketchFile { sketch: id, .. } => {
+            doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
+        }
         // Construction geometry, as the browser's Construction folder lists it.
         Target::Plane { id } => doc.feature(*id).is_some_and(|f| {
             matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
@@ -2777,6 +2854,10 @@ fn level_rows(
             kit.id = &handle;
         }
         let row = kit.show(ui);
+        let row = match &item.tip {
+            Some(tip) => row.backing_on_hover_text(tip.as_str()),
+            None => row,
+        };
         if item.children.is_empty() {
             if row.clicked() && item.enabled {
                 *picked = Some(item.clone());
@@ -3095,6 +3176,7 @@ mod tests {
         assert!(h.app.viewport.context_menu.is_none());
     }
 
+    /// Direct Trim undoes back to the association; the explicit Break menu still makes the offset editable.
     #[test]
     fn line_offset_context_menu_breaks_association_and_allows_trim() {
         use solidcore_record::Vec2;

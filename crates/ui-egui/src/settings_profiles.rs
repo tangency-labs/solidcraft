@@ -5,6 +5,8 @@
 //! texture, arrows and Home, and its body (when one is chosen; a profile without one leaves the
 //! current body alone). Page moves preserve that stored key set; device-specific 3D mouse keys,
 //! graphics, recent files and Assistant settings stay out.
+//! An enabled panel runtime contributes the selected layout workspace and every
+//! workspace's current arrangement, without its named library or native window geometry.
 //!
 //! A profile is kept, exported and imported as one `solidcraft-profile/1` document. Every
 //! document is checked by [`sanitize`] first: unknown keys are dropped, sizes are capped, and a
@@ -54,6 +56,7 @@ const PROFILE_KEYS: &[&str] = &[
     "dialog_buttons",
     "dialog_place",
     "direct_interaction",
+    "escape_twice_finishes_sketch",
     "free_orbit",
     "free_orbit_upright",
     "hidden_toolbar_tabs",
@@ -118,7 +121,9 @@ const PROFILE_KEYS: &[&str] = &[
     "status_bar",
     "suppress_sketch_snap",
     "theme",
+    "theme_day",
     "theme_follow",
+    "theme_night",
     "theme_options",
     "timeline_collapsed",
     "timeline_left",
@@ -257,6 +262,9 @@ pub fn capture(app: &SolveApp, name: &str) -> Value {
     // profile key set above, which never changes.
     if let Some(o) = doc.as_object_mut() {
         o.insert("view_navigator".into(), crate::view_gizmo::profile_settings(app));
+        if let Some(layout) = crate::panel_runtime::profile_value(app) {
+            o.insert("panel_layout".into(), layout);
+        }
     }
     let gizmo = app.view_gizmo.stored();
     if let Some(o) = doc.as_object_mut().filter(|_| gizmo.is_object()) {
@@ -360,6 +368,12 @@ pub fn sanitize(v: &Value) -> Result<Value, String> {
             None => log::warn!("settings profile `{name}`: the view navigator's body can't be read; left out"),
         }
     }
+    if let Some(layout) = o.get("panel_layout") {
+        crate::panel_runtime::validate_profile_value(layout).map_err(solidcraft_engine::panels::commands::error_text)?;
+        if let Some(d) = doc.as_object_mut() {
+            d.insert("panel_layout".into(), layout.clone());
+        }
+    }
     if doc.to_string().len() > MAX_PROFILE_BYTES {
         return Err(format!("a settings profile is at most {} KiB", MAX_PROFILE_BYTES / 1024));
     }
@@ -450,6 +464,12 @@ fn apply(app: &mut SolveApp, doc: &Value) -> Vec<String> {
     }
     if let Some(v) = doc.get("view_gizmo") {
         app.view_gizmo.load(Some(v));
+    }
+    if let Some(layout) = doc.get("panel_layout")
+        && let Err(reason) = crate::panel_runtime::apply_profile_value(app, layout)
+    {
+        log::warn!("settings profile: panel layout keeps its current value: {}", solidcraft_engine::panels::commands::error_text(reason));
+        skipped.push("panel_layout".into());
     }
     skipped
 }

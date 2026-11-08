@@ -16198,7 +16198,7 @@ spirv 0.4.0+sdk-1.4.341.0: Apache-2.0 (https://github.com/gfx-rs/rspirv)
 Bundled fonts (SIL Open Font License, Version 1.1)
 ================================================================================
 
-- LiberationSans-Regular.ttf (assets/fonts/liberation-sans/LiberationSans-Regular.ttf)
+- LiberationSans-Regular.ttf (crates/sketch/assets/fonts/liberation-sans/LiberationSans-Regular.ttf)
   Copyright 2012 Red Hat, Inc. (Liberation Fonts 2.x; digitized data Google)
   Source: https://github.com/liberationfonts
 

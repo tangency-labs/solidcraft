@@ -1,5 +1,5 @@
 //! Table-driven layout/paint references in both themes. No window or GPU required.
-use super::preferences_figures::{ThemeSample, paint_theme_system, paint_theme_thumbnail};
+use super::preferences_figures::{ThemeSample, paint_theme_thumbnail};
 use super::*;
 use crate::ui_kit::{Container, Surface};
 use crate::{scenario, theme::Tokens};
@@ -57,6 +57,128 @@ fn navigation_sample(ui: &mut Ui, size: crate::navigation_bar::Size) {
 
 // One entry per element/variant: names, rendering and geometry expectations stay together.
 const ELEMENTS: &[Element] = &[
+    element!("theme_mode_segments", |ui, _| {
+        theme_segments(
+            ui,
+            "gallery_mode",
+            &[ThemeSegment::new("One theme", ThemeGlyph::Monitor, None), ThemeSegment::new("Follow system", ThemeGlyph::Contrast, None)],
+            Some(1),
+            false,
+        );
+    }),
+    element!("theme_imported_filter", |ui, _| {
+        theme_segments(ui, "gallery_imported", &[ThemeSegment::new("Imported", ThemeGlyph::None, Some(2))], Some(0), false);
+    }),
+    element!("theme_toolbar", |ui, _| {
+        theme_toolbar(
+            ui,
+            "gallery_toolbar",
+            68.0,
+            0.0,
+            |ui| {
+                theme_segments(
+                    ui,
+                    "gallery_tone",
+                    &[ThemeSegment::new("Light", ThemeGlyph::Sun, Some(9)), ThemeSegment::new("Dark", ThemeGlyph::Moon, Some(17))],
+                    Some(0),
+                    false,
+                );
+            },
+            |ui| {
+                theme_segments(
+                    ui,
+                    "gallery_view",
+                    &[ThemeSegment::new("Carousel", ThemeGlyph::Carousel, None), ThemeSegment::new("Grid", ThemeGlyph::Grid, None)],
+                    Some(0),
+                    true,
+                );
+            },
+        );
+    }),
+    element!("theme_browser_grid", |ui, _| {
+        theme_browser(ui, "gallery_grid", 14, true, None, |ui, _, width| {
+            theme_card(
+                ui,
+                &ThemeCard {
+                    name: "Light",
+                    note: "Built in",
+                    options: None,
+                    sample: ThemeSample::from_tokens(&Tokens::light()),
+                    selected: false,
+                    dark: false,
+                    high: false,
+                    day: false,
+                    night: false,
+                },
+                width,
+            );
+        });
+    }),
+    element!("theme_segments", |ui, _| {
+        theme_segments(
+            ui,
+            "gallery",
+            &[ThemeSegment::new("Light", ThemeGlyph::Sun, Some(10)), ThemeSegment::new("Dark", ThemeGlyph::Moon, Some(17))],
+            Some(0),
+            false,
+        );
+    }),
+    element!("theme_import_button", |ui, _| {
+        theme_import_button(ui, "Import theme file…");
+    }),
+    element!("theme_slot", |ui, _| {
+        theme_slot(
+            ui,
+            &ThemeSlot {
+                title: "Day theme",
+                name: "Light",
+                hint: "Pick from below",
+                aimed: true,
+                night: false,
+                width: ui.available_width(),
+                sample: ThemeSample::from_tokens(&Tokens::light()),
+            },
+        );
+    }),
+    element!("theme_card", |ui, _| {
+        theme_card(
+            ui,
+            &ThemeCard {
+                name: "Dark",
+                note: "Built in · High contrast",
+                options: Some("Has options"),
+                sample: ThemeSample::from_tokens(&Tokens::dark()),
+                selected: true,
+                dark: true,
+                high: true,
+                day: true,
+                night: true,
+            },
+            118.0,
+        );
+    }),
+    element!("theme_empty", |ui, _| {
+        theme_empty(ui, "No theme matches these filters.", "Clear filters", || {});
+    }),
+    element!("theme_browser", |ui, _| {
+        theme_browser(ui, "gallery_browser", 9, false, None, |ui, i, width| {
+            theme_card(
+                ui,
+                &ThemeCard {
+                    name: if i % 2 == 0 { "Light" } else { "Dark" },
+                    note: "Built in",
+                    options: None,
+                    sample: ThemeSample::from_tokens(&Tokens::get()),
+                    selected: i == 0,
+                    dark: i % 2 != 0,
+                    high: false,
+                    day: false,
+                    night: false,
+                },
+                width,
+            );
+        });
+    }),
     element!("viewport_status_item", "viewport_status:sample:item", Some("viewport_status:sample:close"), |ui, _| {
         let item = StatusItem {
             id: "sample".into(),
@@ -586,35 +708,6 @@ const ELEMENTS: &[Element] = &[
         );
         settings_pointer_preview(ui, true, "Normal", true);
     }),
-    element!("preference_theme_carousel", |ui, _| {
-        let light = ThemeSample::from_tokens(&Tokens::light());
-        let dark = ThemeSample::from_tokens(&Tokens::dark());
-        carousel(ui, "gallery_theme_carousel", 4, 88.0, 96.0, |ui, index| {
-            if index == 3 {
-                theme_import_tile(ui, "Import…", "theme file");
-            } else {
-                let label = ["Light", "Dark", "System"][index];
-                picture_card(
-                    ui,
-                    &Card {
-                        label,
-                        sub: Some(if index == 2 { "Follows the OS" } else { "Built in" }),
-                        selected: index == 0,
-                        enabled: true,
-                        options: None,
-                        check: false,
-                        aspect: 124.0 / 76.0,
-                        figure: &|p, rect| match index {
-                            0 => paint_theme_thumbnail(p, rect, &light),
-                            1 => paint_theme_thumbnail(p, rect, &dark),
-                            _ => paint_theme_system(p, rect, &light, &dark),
-                        },
-                    },
-                    88.0,
-                );
-            }
-        });
-    }),
     element!("picture_card", |ui, _| {
         use super::preferences_figure_data as figures;
         let gap = ui.spacing().item_spacing.x;
@@ -742,36 +835,15 @@ const ELEMENTS: &[Element] = &[
             help_icon(ui, "Applies when SolidCraft restarts.");
         });
     }),
-    element!("carousel", |ui, _| {
-        let sample = ThemeSample::from_tokens(&Tokens::get());
-        let width = Tokens::get().space_24 * 2.0 + Tokens::get().space_24;
-        carousel(ui, "gallery_carousel", 6, width, width * 0.8, |ui, index| {
-            let label = ["Light", "Dark", "System", "Gruvbox", "Studio", "Mono"][index % 6];
-            picture_card(
-                ui,
-                &Card {
-                    label,
-                    sub: Some("Built in"),
-                    selected: index == 1,
-                    enabled: true,
-                    options: None,
-                    check: false,
-                    aspect: 124.0 / 76.0,
-                    figure: &|p, r| paint_theme_thumbnail(p, r, &sample),
-                },
-                width,
-            );
-        });
-    }),
     element!("preference_theme_thumbnails", |ui, _| {
         let (light, dark) = (ThemeSample::from_tokens(&Tokens::light()), ThemeSample::from_tokens(&Tokens::dark()));
         ui.horizontal(|ui| {
-            for kind in 0..3 {
+            for kind in 0..2 {
                 let (rect, _) = ui.allocate_exact_size(vec2(88.0, 88.0 * 76.0 / 124.0), egui::Sense::hover());
                 match kind {
                     0 => paint_theme_thumbnail(ui.painter(), rect, &light),
                     1 => paint_theme_thumbnail(ui.painter(), rect, &dark),
-                    _ => paint_theme_system(ui.painter(), rect, &light, &dark),
+                    _ => {}
                 }
             }
         });
@@ -1385,6 +1457,9 @@ const ELEMENTS: &[Element] = &[
     element!("number_field", |ui, _| {
         number_field(ui, &mut 3_u32, 1..=200, 1.0, "");
     }),
+    element!("number_field_preserving", |ui, _| {
+        number_field_preserving(ui, &mut 256_u32, 1..=64, 1.0, "");
+    }),
     element!("number_fields", |ui, _| {
         row(ui, "Target", |ui| {
             number_fields(ui, &mut [-18.0, 125.5, -18.0], -1e9..=1e9, 0.1, "");
@@ -1397,6 +1472,25 @@ const ELEMENTS: &[Element] = &[
         dropdown_menu(ui, "gallery_menu", "Preset", |ui| {
             list_picker(ui, "preset", "Preset", true);
         });
+    }),
+    element!("bounded_dropdown_menu", |ui, state| {
+        let choices = [
+            "CPU lens acceptance with a long captured shot name for the retained image",
+            "GPU lens acceptance with a second long captured shot name for the result",
+        ];
+        let selected = state.selected.min(choices.len() - 1);
+        let width = ui.available_width().min(Tokens::get().form_card_width * 0.75);
+        let response = bounded_dropdown_menu(ui, "gallery_bounded_menu", choices[selected], width, |ui| {
+            for (index, label) in choices.iter().enumerate() {
+                let response = list_picker(ui, &format!("bounded:{index}"), label, selected == index);
+                if response.clicked() {
+                    state.selected = index;
+                    ui.close();
+                }
+                response.on_hover_text(*label);
+            }
+        });
+        response.on_hover_text(choices[selected]);
     }),
     element!("dropdown_menu_with_close_behavior", |ui, s| {
         dropdown_menu_with_close_behavior(ui, "gallery_editable_menu", "Preset", egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
@@ -1564,6 +1658,11 @@ const ELEMENTS: &[Element] = &[
             field(ui, &mut s.value);
         });
     }),
+    element!("sized_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        sized_row(ui, "Gallery", row_height() * 2.0, |ui| {
+            text_field(ui, &mut s.value, "Name");
+        });
+    }),
     element!("expr_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         expr_row(ui, "Gallery", &mut s.value);
     }),
@@ -1672,6 +1771,21 @@ const ELEMENTS: &[Element] = &[
     element!("text_field", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
             text_field(ui, &mut s.value, "Name");
+        });
+    }),
+    element!("text_field_reserving", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        row(ui, "Gallery", |ui| {
+            let t = Tokens::get();
+            let reserve = t.space_24 * 2.0;
+            let (_, response) = text_field_reserving(ui, &mut s.value, "Name", reserve);
+            let counter = egui::Rect::from_min_max(egui::pos2(response.rect.right() - reserve, response.rect.top()), response.rect.max);
+            ui.painter().text(
+                counter.center(),
+                egui::Align2::CENTER_CENTER,
+                format!("{}/64", s.value.chars().count()),
+                egui::FontId::proportional(t.font_small),
+                t.form_dim,
+            );
         });
     }),
     element!("focused_text_field", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
@@ -1821,6 +1935,11 @@ const ELEMENTS: &[Element] = &[
     element!("button", "dialog:row:Gallery", Some("dialog:button:Gallery:Add"), |ui, _| {
         row(ui, "Gallery", |ui| {
             button(ui, "Add", Button::Normal);
+        });
+    }),
+    element!("button_danger_outlined", "dialog:row:Gallery", Some("dialog:button:Gallery:Replace"), |ui, _| {
+        row(ui, "Gallery", |ui| {
+            button(ui, "Replace", Button::DangerOutlined);
         });
     }),
     element!("button_at", |ui, _| {
@@ -2026,7 +2145,8 @@ fn every_element_has_geometry_and_stays_in_its_allocation_in_both_themes() {
                     );
                 }
                 if published.0.starts_with("dialog:row:") {
-                    assert_eq!(rect.height(), Tokens::get().control_height, "{name}");
+                    let expected_height = if name == "sized_row" { row_height() * 2.0 } else { Tokens::get().control_height };
+                    assert_eq!(rect.height(), expected_height, "{name}");
                 }
                 for shape in output.shapes {
                     // Native icon-only buttons keep an empty text shape. It has no vertices;
@@ -2361,6 +2481,7 @@ fn gallery_covers_every_inline_element() {
         "sphere.rs",
         "status.rs",
         "table.rs",
+        "theme_picker.rs",
         "tree.rs",
     ] {
         let source = std::fs::read_to_string(root.join(file)).unwrap();
@@ -2986,19 +3107,14 @@ fn card_looks_follow_selected_hover_disabled_and_focus() {
 
 #[test]
 fn cards_size_to_their_container_and_survive_hostile_sizes() {
-    use super::preferences_cards::{card_width, carousel_window};
+    use super::preferences_cards::card_width;
     assert_eq!(card_width(320.0, 4, 10.0), 72.5);
     assert_eq!(card_width(320.0, 0, 10.0), 320.0);
     for bad in [0.0, -5.0, f32::NAN, f32::INFINITY, f32::MAX] {
         let w = card_width(bad, 3, 10.0);
         assert!(w.is_finite() && w >= 0.0, "{bad}: {w}");
-        let (first, visible) = carousel_window(5, 9, bad, 88.0, 8.0, 26.0);
-        assert!(first + visible <= 5 && visible >= 1, "{bad}: {first} {visible}");
     }
-    assert_eq!(carousel_window(0, 3, 400.0, 88.0, 8.0, 26.0), (0, 0));
     // 400 wide: two arrows and their gaps leave 332, which fits three 88-wide items with gaps.
-    assert_eq!(carousel_window(6, 0, 400.0, 88.0, 8.0, 26.0), (0, 3));
-    assert_eq!(carousel_window(6, 5, 400.0, 88.0, 8.0, 26.0), (3, 3), "the offset stops at the last full window");
 }
 
 fn sample_card<'a>(label: &'a str, selected: bool, enabled: bool) -> super::preferences_cards::Card<'a> {
@@ -3053,8 +3169,8 @@ fn picture_cards_and_tiles_click_only_when_enabled_and_never_panic() {
 }
 
 #[test]
-fn preset_card_help_icon_and_carousel_behave() {
-    use super::preferences_cards::{carousel, help_icon, preset_card};
+fn preset_card_and_help_icon_behave() {
+    use super::preferences_cards::{help_icon, preset_card};
     let ctx = crate::fonts::test_context();
     let icon = |p: &egui::Painter, r: egui::Rect, ink: egui::Color32| crate::icons::paint_ink(p, r, "settings", ink);
     super::test_support::frame(&ctx, vec![], |ui| {
@@ -3065,29 +3181,6 @@ fn preset_card_help_icon_and_carousel_behave() {
         let help = help_icon(ui, "Help text");
         assert!(help.rect.width() > 8.0 && help.rect.width() < 20.0);
     });
-    // The next arrow moves the window by a page and stays inert at the end.
-    let mut first = vec![];
-    let mut at = None;
-    for pass in 0..6 {
-        let events = match (pass, at) {
-            (2, Some(p)) => super::test_support::pointer(p, true),
-            (3, Some(p)) => super::test_support::pointer(p, false),
-            _ => vec![],
-        };
-        super::test_support::frame(&ctx, events, |ui| {
-            let (f, visible) = carousel(ui, "carousel_test", 5, 60.0, 40.0, |ui, _| {
-                ui.allocate_exact_size(egui::vec2(60.0, 40.0), egui::Sense::hover());
-            });
-            first.push((f, visible));
-            if let Some(rect) = scenario::rect_of("prefs:carousel:Next") {
-                at = Some(rect.center());
-            }
-        });
-    }
-    let (f0, visible) = first[0];
-    assert_eq!(f0, 0);
-    assert!((1..5).contains(&visible), "{visible}");
-    assert!(first.last().unwrap().0 >= 1, "the next arrow advanced the window: {first:?}");
 }
 
 /// Light and dark boards of the shared Preferences widgets and of every figure, rendered on the CPU.
@@ -3100,7 +3193,7 @@ fn preference_widgets_and_figures_board_in_both_themes() {
     for dark in [false, true] {
         crate::theme::set_dark(dark);
         for (board, names) in [
-            ("widgets", &["picture_card", "toggle_tile", "preset_card", "help_icon", "carousel", "preference_theme_thumbnails"][..]),
+            ("widgets", &["picture_card", "toggle_tile", "preset_card", "help_icon", "theme_browser", "preference_theme_thumbnails"][..]),
             ("figures", &["preference_figures"][..]),
         ] {
             for scale in [1.0_f32, 2.0] {

@@ -534,11 +534,12 @@ mod tests {
         let ctx = crate::fonts::test_context();
         let drawn = |choice: Choice| {
             let mut size = egui::Vec2::ZERO;
-            let output = ctx.run_ui(Default::default(), |ui| {
+            let mut output = ctx.run_ui(Default::default(), |ui| {
                 let before = ui.min_rect();
                 preview(ui, &form, false, choice, &|_, _| Some(10.0));
                 size = ui.min_rect().size() - before.size();
             });
+            output.textures_delta.clear();
             assert!(size.x > 0.0 && size.y > 0.0, "{choice:?} drew nothing");
             output.shapes.into_iter().map(|c| c.shape).collect::<Vec<_>>()
         };

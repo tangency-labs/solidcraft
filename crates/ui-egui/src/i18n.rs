@@ -702,12 +702,10 @@ mod tests {
         ENGLISH.messages().values().map(String::as_str).collect()
     }
 
-    /// Catalogs delivered complete. English is the source catalog; Arabic, Czech, Italian, Japanese and Chinese
-    /// are complete. German, Korean, Malay, Russian, French and Ukrainian
-    /// are partial (German and Korean predate the coverage guards; Russian, French and Ukrainian
-    /// are kept partial so a new label doesn't need more translations), so their gaps fall back
-    /// to English and are reported by `cargo xtask i18n` without failing the build, while
-    /// nothing in the complete catalogs may regress.
+    /// English is the source catalog. Arabic, Hebrew, Japanese, Vietnamese and Chinese
+    /// are complete; every English key must be present. Other catalogs are partial:
+    /// gaps fall back to English and `cargo xtask i18n` reports them without failing.
+    /// New labels still require German and Korean under the contributor policy.
     const COMPLETE: &[&str] = &["ar", "he", "ja", "vi", "zh"];
 
     /// `text()` falls back to English silently, so a message a complete locale never received is
@@ -785,7 +783,7 @@ mod tests {
     #[test]
     fn newly_catalogued_command_labels_translate() {
         let cases = [
-            ("cs", "Příruba", "Zebra analýza", "Studie pohybu"),
+            ("cs", "Obruba", "Zebra analýza", "Pohybová studie"),
             ("da", "Flange", "Zebraanalyse", "Bevægelsesanalyse"),
             ("nb", "Flens", "Zebraanalyse", "Bevegelsesanalyse"),
             ("zh", "法兰", "斑马纹分析", "运动研究"),
@@ -1464,7 +1462,7 @@ mod tests {
             ("nl", "Nederlands", "Voorkeuren", "Extruderen", "Schets1", "Wijzigingen in My {design} opslaan?"),
             ("ro", "Română", "Preferințe", "Extrudare", "Schița1", "Salvați modificările în My {design}?"),
             ("sv", "Svenska", "Inställningar", "Extrudera", "Skiss1", "Spara ändringar i My {design}?"),
-            ("zh-TW", "繁體中文", "偏好設定", "擠出", "草圖1", "儲存對 My {design} 的變更？"),
+            ("zh-TW", "繁體中文", "首選項", "拉伸", "草圖1", "儲存對 My {design} 的更改？"),
         ] {
             let locale = Locale::for_language(id);
             assert_eq!(locale.name(), name);

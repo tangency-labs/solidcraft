@@ -1122,4 +1122,31 @@ mod tests {
         // The square stop leaves about half a pitch's worth of groove uncut: well over a mm³.
         assert!(square > trimmed + 1.0, "{square} vs {trimmed}");
     }
+
+    /// A modelled thread on one hole leaves the other hole's wall a cylinder to thread: the
+    /// second hole still takes its thread (#11367).
+    ///
+    /// The modelled thread cuts the body, and the cut must not take the body's other cylinders
+    /// with it: the second hole's wall is still a cylinder, so it still takes a thread, modelled
+    /// or cosmetic.
+    #[test]
+    fn a_modelled_thread_leaves_the_next_hole_a_cylinder_to_thread() {
+        // An 80 x 80 x 20 mm block with two 5 mm holes.
+        let block = kernel::box_solid(Vec3::new(-40.0, -40.0, 0.0), Vec3::new(40.0, 40.0, 20.0)).unwrap();
+        let hole = |x: f64| kernel::cylinder(Vec3::new(x, 0.0, -1.0), Vec3::new(0.0, 0.0, 1.0), 2.5, 22.0).unwrap();
+        let mut body = kernel::boolean(&block, &hole(-20.0), BoolOp::Cut).unwrap().unwrap();
+        body = kernel::boolean(&body, &hole(20.0), BoolOp::Cut).unwrap().unwrap();
+        let mut st = ModelState::default();
+        st.bodies.push(ModelBody::new("Part".into(), body, 1));
+        let ask = ThreadAsk { designation: Some("M6"), ..ask() };
+        // The first hole takes a modelled M6 thread.
+        let on = thread_on(&st, 1, Vec3::new(-17.5, 0.0, 10.0), &ask).unwrap();
+        cut(&mut st, on, (ThreadTip::None, None, None)).unwrap();
+        // The second hole's wall is still a cylinder: it takes a thread too.
+        let on = thread_on(&st, 1, Vec3::new(22.5, 0.0, 10.0), &ask);
+        assert!(on.is_ok(), "the second hole still has a cylinder to thread: {:?}", on.err());
+        // And a modelled one cuts there as well.
+        let on = thread_on(&st, 1, Vec3::new(22.5, 0.0, 10.0), &ask).unwrap();
+        assert!(cut(&mut st, on, (ThreadTip::None, None, None)).is_ok());
+    }
 }
