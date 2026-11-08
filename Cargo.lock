@@ -4279,6 +4279,14 @@ dependencies = [
  "serde_json",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-mcp-server",
+]
+
+[[package]]
+name = "solidcraft-mcp-server"
+version = "0.40.0-rc.3"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
