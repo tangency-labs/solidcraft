@@ -1005,6 +1005,61 @@ fn a_cylinder_in_iso_has_bounded_rims_and_exact_sides() {
     assert_eq!((&v["status"]["lines"], &v["status"]["provenance"]), (&json!("exact"), &json!("hidden_lines")));
 }
 
+/// A cylinder's sides meet its rims, seen from each upper corner, so its rims' seams fall at either
+/// tangent point in one view or another: each side ends where a visible piece of its bottom rim ends
+/// (to 1e-6), and both its ends lie on a rim (within `chord_mm`). With hidden lines, the bottom rim's
+/// hidden half starts at a side's end too. Every view is checked before the test fails, so its
+/// message lists each side that misses. Listed in tests/KNOWN_FAILING_TESTS until `hlr` splits a rim
+/// where a side line touches it (#2455).
+#[test]
+fn a_cylinders_sides_meet_its_rims_from_every_corner() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 15, "height": 50, "base": [80, 20, 0], "axis": "Z", "body_name": "Cylinder"}));
+    // The ends of each piece of a rim, and its segments, at `visibility`.
+    let rims = |v: &Value, visibility: &str| {
+        let pieces = v["lines"].as_array().unwrap().iter().filter(|l| l["source"]["kind"] == "edge").flat_map(|l| l["pieces"].as_array().unwrap());
+        let paths: Vec<Vec<(Vec2, Vec2)>> = pieces
+            .filter(|p| p["visibility"] == visibility)
+            .map(|p| p["path"].as_array().unwrap().iter().map(|seg| (point(&seg["a"]), point(&seg["b"]))).collect())
+            .collect();
+        let ends: Vec<Vec2> = paths.iter().flat_map(|path| [path.first().unwrap().0, path.last().unwrap().1]).collect();
+        (ends, paths.concat())
+    };
+    let off = |p: Vec2, (a, b): (Vec2, Vec2)| {
+        let t = ((p - a).dot(b - a) / (b - a).len2()).clamp(0.0, 1.0);
+        p.dist(a + (b - a) * t)
+    };
+    // The distance from a side's nearer end to the nearest of `at`.
+    let gap = |(a, b): (Vec2, Vec2), at: &[Vec2]| [a, b].iter().flat_map(|e| at.iter().map(|q| q.dist(*e))).fold(f64::INFINITY, f64::min);
+    let mut wrong = Vec::new();
+    for (x, y) in [(-1, 1), (1, 1), (1, -1), (-1, -1)] {
+        let looking = json!({"direction": [x, y, -1], "up": [0, 0, 1]});
+        for style in ["visible", "visible_hidden"] {
+            let v = snap(&mut s, json!({"view": looking, "scale": "1:2", "visual_style": style}));
+            let sides: Vec<(Vec2, Vec2)> = v["lines"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|l| l["source"]["kind"] == "silhouette")
+                .flat_map(|l| l["pieces"].as_array().unwrap().iter().flat_map(|p| p["path"].as_array().unwrap()))
+                .map(|seg| (point(&seg["a"]), point(&seg["b"])))
+                .collect();
+            assert_eq!(sides.len(), 2, "({x}, {y}) {style}: {v}");
+            let (ends, segs) = rims(&v, "visible");
+            let (hidden_ends, _) = rims(&v, "hidden");
+            for side in sides {
+                let visible_gap = gap(side, &ends);
+                let hidden_gap = if style == "visible" { 0.0 } else { gap(side, &hidden_ends) };
+                let off_rims = [side.0, side.1].map(|e| segs.iter().map(|seg| off(e, *seg)).fold(f64::INFINITY, f64::min));
+                if visible_gap >= 1e-6 || hidden_gap >= 1e-6 || off_rims.iter().any(|d| *d > 0.01 + 1e-9) {
+                    wrong.push(format!("({x}, {y}) {style}, side at x {:.3}: rim end {visible_gap:.3e} mm away, hidden {hidden_gap:.3e}, off the rims {off_rims:.3?}", side.0.x));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// `s` with a 20 mm cube inserted as a mesh body (from an STL), its corner at `corner`.
 fn with_mesh_cube(s: &mut Session, corner: [f64; 3], tag: &str) {
     let dir = std::env::temp_dir().join(format!("solidcraft-view-mesh-{tag}-{}", std::process::id()));
