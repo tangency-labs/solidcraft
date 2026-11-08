@@ -1,8 +1,8 @@
-//! A cylinder wall of a short arc far from the origin, extended 1500 mm along its rulings and
-//! round its axis. The iso that certifies the turn is interpolated between rulings 3 m long.
-//! At 500 mm the certificate took its rounding at the iso's own size and refused; at 1500 mm a
-//! weight ratio per row, differing by the continuation's rounding, took the iso out of its
-//! plane by 1.8e-10. Every point of the result stays on the cylinder, radius 80 about its axis.
+//! A cylinder wall of a short arc far from the origin, extended 500 and 1500 mm along its
+//! rulings and round its axis. The iso that certifies the turn is interpolated between rulings
+//! up to 3 m long: a weight ratio per row, differing by the continuation's rounding, took it out
+//! of its plane by 1.8e-10, and the certificate refused the extension as not exact. Every point
+//! of the result stays on the cylinder, radius 80 about its axis.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

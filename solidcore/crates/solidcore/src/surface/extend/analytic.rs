@@ -614,12 +614,6 @@ fn certify_iso(
         (middle.x, Direction::V)
     };
     let curve = extract_iso_crv(net, t, dir)?;
-    // the iso is interpolated between the net's rows, so its points are known to the rounding
-    // at the size of those rows, not at their own: a short arc's middle iso between rulings
-    // extended 500 mm each way
-    let rows = net.cpts().iter().flatten().fold(0.0_f64, |m, p| {
-        m.max(p.x.abs()).max(p.y.abs()).max(p.z.abs())
-    });
     let points: Vec<(Vec3, f64, f64)> = curve
         .cpts()
         .iter()
@@ -627,7 +621,7 @@ fn certify_iso(
             let w = if p.w == NOW { 1.0 } else { p.w };
             let h = Vec3::new(p.x, p.y, p.z);
             // X W from the origin, and the size of its terms
-            let mag = rows + f.size * w.abs();
+            let mag = p.x.abs().max(p.y.abs()).max(p.z.abs()) + f.size * w.abs();
             (h - f.origin * w, w, mag)
         })
         .collect();
