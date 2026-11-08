@@ -60,15 +60,15 @@ three views use `--wireframe --view -35,30 --size 1200x900 --edges-above 0.001`.
 The small `gen0040` split is barely resolved in the whole-part view; its numeric
 vertex and edge checks above, not visual similarity, establish the split.
 
-![Original pyramid, whose four sides meet at one apex.](figures/pr3056-pyramid-input.png)
+![Original pyramid, whose four sides meet at one apex.](https://raw.githubusercontent.com/altvnk/solidcraft/954fe0d45690a6b456793d27371f661c9a229bde/solidcore/plan/findings/figures/pr3056-pyramid-input.png)
 
 Original input: four sides meet at one apex.
 
-![gen0040 after the face edit, with the short split at its apex.](figures/pr3056-pyramid-gen0040.png)
+![gen0040 after the face edit, with the short split at its apex.](https://raw.githubusercontent.com/altvnk/solidcraft/954fe0d45690a6b456793d27371f661c9a229bde/solidcore/plan/findings/figures/pr3056-pyramid-gen0040.png)
 
 `gen0040`: the short split is measured as six vertices and nine edges.
 
-![gen0068 after the tilted plane edits, with two separated top vertices.](figures/pr3056-pyramid-gen0068.png)
+![gen0068 after the tilted plane edits, with two separated top vertices.](https://raw.githubusercontent.com/altvnk/solidcraft/954fe0d45690a6b456793d27371f661c9a229bde/solidcore/plan/findings/figures/pr3056-pyramid-gen0068.png)
 
 `gen0068`: the two top intersections and the edge between them are visible.
 

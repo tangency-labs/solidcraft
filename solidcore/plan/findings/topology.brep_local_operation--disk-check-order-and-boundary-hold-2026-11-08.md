@@ -102,9 +102,9 @@ original input, the second the exact generated result, not a hand-authored
 schematic or an invented before-result. Looking down z, the expected z-only
 translation keeps the input outline.
 
-![Original semicircle and diameter.](figures/pr3056-disk-input.png)
+![Original semicircle and diameter.](https://raw.githubusercontent.com/altvnk/solidcraft/954fe0d45690a6b456793d27371f661c9a229bde/solidcore/plan/findings/figures/pr3056-disk-input.png)
 
-![gen0001 result: the boundary is no longer the original semicircle and diameter.](figures/pr3056-disk-gen0001.png)
+![gen0001 result: the boundary is no longer the original semicircle and diameter.](https://raw.githubusercontent.com/altvnk/solidcraft/954fe0d45690a6b456793d27371f661c9a229bde/solidcore/plan/findings/figures/pr3056-disk-gen0001.png)
 
 ## Evidence and scope
 

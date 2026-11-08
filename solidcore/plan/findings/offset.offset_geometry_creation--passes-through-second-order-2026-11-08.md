@@ -73,12 +73,12 @@ because a face has no exact record. No intermediate meshing success is claimed.
 
 | Before caller correction, native edges only | After caller correction, native edges only |
 |---|---|
-| ![Before](figures/pr3056-caller-offset-before.png) | ![After](figures/pr3056-caller-offset-after.png) |
+| ![Before](https://raw.githubusercontent.com/altvnk/solidcraft/954fe0d45690a6b456793d27371f661c9a229bde/solidcore/plan/findings/figures/pr3056-caller-offset-before.png) | ![After](https://raw.githubusercontent.com/altvnk/solidcraft/954fe0d45690a6b456793d27371f661c9a229bde/solidcore/plan/findings/figures/pr3056-caller-offset-after.png) |
 
 The corrected shell is 11 / 24 / 16 and manifold on both default and mated paths.
 Its native shaded render succeeds with 2,368 triangles and no refused face:
 
-![Corrected shell, native shaded render](figures/pr3056-caller-shell-after.png)
+![Corrected shell, native shaded render](https://raw.githubusercontent.com/altvnk/solidcraft/954fe0d45690a6b456793d27371f661c9a229bde/solidcore/plan/findings/figures/pr3056-caller-shell-after.png)
 
 These images come from the diagnostic snapshot plus the single caller correction;
 the direct, uninstrumented primary-worktree tests supply the validity and volume
