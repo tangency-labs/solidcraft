@@ -1,7 +1,9 @@
 use solidcore_record::Vec3;
 
 use super::*;
+use crate::drawing::dimension::{DimensionKind, ModelEdge, ModelFace, ModelPoint, Silhouette};
 use crate::{FeatureKind, Operation, point_expr};
+use solidcraft_geom::drawing_measure::{LinearDirection, SilhouetteSide};
 
 /// A design of four boxes, F1 to F4, with F4 moved before F3 in the timeline.
 fn design() -> Document {
@@ -20,17 +22,37 @@ fn design() -> Document {
     doc
 }
 
+fn edge(name: &str) -> ModelEdge {
+    ModelEdge { body: "Body1".into(), origin_feature: 1, name: name.into(), path: Vec::new() }
+}
+
+fn face(name: &str) -> ModelFace {
+    ModelFace { body: "Body1".into(), origin_feature: 1, name: name.into(), path: Vec::new() }
+}
+
+fn corner(edges: &[&str]) -> ModelPoint {
+    ModelPoint { body: "Body1".into(), origin_feature: 1, edges: edges.iter().map(|e| e.to_string()).collect(), centre: false, path: Vec::new() }
+}
+
+/// The feature an edge, a face or a corner by these names covers.
+fn covers_edge(t: &Timeline, name: &str) -> Option<u64> {
+    t.covers(Reference::Edge(&edge(name)))
+}
+
+fn covers_face(t: &Timeline, name: &str) -> Option<u64> {
+    t.covers(Reference::Face(&face(name)))
+}
+
 /// An edge covers the latest feature in the timeline among its faces, not the highest id; a
 /// corner the latest among all its edges' faces; a face its own feature.
 #[test]
 fn a_reference_covers_the_latest_feature_that_made_its_faces() {
     let t = Timeline::of(&design());
-    assert_eq!(t.covers(&Reference::Edge("F1:+z|F2:top")), Some(2));
-    assert_eq!(t.covers(&Reference::Edge("F3:side|F4:top")), Some(3), "F3 comes after F4");
-    assert_eq!(t.covers(&Reference::Edge("F1:+x|F1:-y")), Some(1));
-    let corner = ["F1:+x|F1:-y".to_string(), "F1:-y|F4:top".to_string()];
-    assert_eq!(t.covers(&Reference::Corner(&corner)), Some(4));
-    assert_eq!(t.covers(&Reference::Face("F2:top")), Some(2));
+    assert_eq!(covers_edge(&t, "F1:+z|F2:top"), Some(2));
+    assert_eq!(covers_edge(&t, "F3:side|F4:top"), Some(3), "F3 comes after F4");
+    assert_eq!(covers_edge(&t, "F1:+x|F1:-y"), Some(1));
+    assert_eq!(t.covers(Reference::Point(&corner(&["F1:+x|F1:-y", "F1:-y|F4:top"]))), Some(4));
+    assert_eq!(covers_face(&t, "F2:top"), Some(2));
 }
 
 /// A pattern copy's face is the pattern's, a split piece's neighbours don't count, and a face of
@@ -38,11 +60,11 @@ fn a_reference_covers_the_latest_feature_that_made_its_faces() {
 #[test]
 fn copies_pieces_and_faces_of_no_feature() {
     let t = Timeline::of(&design());
-    assert_eq!(t.covers(&Reference::Face("F1:side:l1@F2.1")), Some(2));
-    assert_eq!(t.covers(&Reference::Face("F1:top#[F3:side:l2,F4:side:l2]")), Some(1));
-    assert_eq!(t.covers(&Reference::Edge("Body1:face:3|F2:top")), Some(2));
-    assert_eq!(t.covers(&Reference::Edge("Body1:face:3|Body1:face:4")), None);
-    assert_eq!(t.covers(&Reference::Face("Plate:rim.end")), None);
+    assert_eq!(covers_face(&t, "F1:side:l1@F2.1"), Some(2));
+    assert_eq!(covers_face(&t, "F1:top#[F3:side:l2,F4:side:l2]"), Some(1));
+    assert_eq!(covers_edge(&t, "Body1:face:3|F2:top"), Some(2));
+    assert_eq!(covers_edge(&t, "Body1:face:3|Body1:face:4"), None);
+    assert_eq!(covers_face(&t, "Plate:rim.end"), None);
 }
 
 /// A reference that names a feature the timeline doesn't have covers nothing, and names that
@@ -50,10 +72,21 @@ fn copies_pieces_and_faces_of_no_feature() {
 #[test]
 fn a_gone_feature_or_a_bad_name_covers_nothing() {
     let t = Timeline::of(&design());
-    assert_eq!(t.covers(&Reference::Edge("F1:+x|F9:top")), None);
+    assert_eq!(covers_edge(&t, "F1:+x|F9:top"), None);
     for bad in ["", "|", "F1:blend:", "F1:top#[", &"F1:inner:".repeat(64), &"x".repeat(1 << 21)] {
-        assert_eq!(t.covers(&Reference::Edge(bad)), None, "{}", bad.len());
-        assert_eq!(t.covers(&Reference::Face(bad)), None, "{}", bad.len());
+        assert_eq!(covers_edge(&t, bad), None, "{}", bad.len());
+        assert_eq!(covers_face(&t, bad), None, "{}", bad.len());
     }
-    assert_eq!(t.covers(&Reference::Corner(&[])), None);
+    assert_eq!(t.covers(Reference::Point(&corner(&[]))), None);
+}
+
+/// A dimension's references are one list: its paths and what it covers are both read from it, each
+/// reference's path and names from the same record.
+#[test]
+fn a_dimensions_paths_and_coverage_read_one_list() {
+    let t = Timeline::of(&design());
+    let on = |name: &str, path: &[u64]| Silhouette { face: ModelFace { path: path.to_vec(), ..face(name) }, side: SilhouetteSide::Near };
+    let kind = DimensionKind::Silhouettes { a: on("F2:top", &[7]), b: on("F3:side", &[8, 9]), direction: LinearDirection::Aligned };
+    assert_eq!(kind.paths(), [&[7][..], &[8, 9][..]]);
+    assert_eq!(kind.references().into_iter().map(|r| t.covers(r)).collect::<Vec<_>>(), [Some(2), Some(3)]);
 }

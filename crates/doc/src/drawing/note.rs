@@ -31,7 +31,7 @@ use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::MAX_SIDE_MM;
 
 use super::by_id::Record;
-use super::dimension::{Lookup, ModelEdge, ModelPoint, Status, check_edge, check_point};
+use super::dimension::{Lookup, ModelEdge, ModelPoint, Reference, Status, check_edge, check_point};
 use super::{Drawing, require};
 use crate::{DocError, Document, Model, Result, ids};
 
@@ -73,13 +73,18 @@ impl Anchor {
         }
     }
 
-    /// The occurrence path of the model reference its leader points at, if it points at one.
-    pub fn path(&self) -> Option<&[u64]> {
+    /// The model reference its leader points at, if it points at one.
+    pub fn reference(&self) -> Option<Reference<'_>> {
         match self {
             Anchor::Sheet(_) | Anchor::View(_) => None,
-            Anchor::Edge { edge, .. } => Some(&edge.path),
-            Anchor::Corner { point, .. } => Some(&point.path),
+            Anchor::Edge { edge, .. } => Some(Reference::Edge(edge)),
+            Anchor::Corner { point, .. } => Some(Reference::Point(point)),
         }
+    }
+
+    /// The occurrence path of the model reference its leader points at, if it points at one.
+    pub fn path(&self) -> Option<&[u64]> {
+        self.reference().map(Reference::path)
     }
 
     /// The same anchor on view `view`, when it is on one.

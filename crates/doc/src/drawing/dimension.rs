@@ -219,17 +219,23 @@ pub enum DimensionKind {
 }
 
 impl DimensionKind {
+    /// Each model reference it measures, in its order: the one list of them that what reads a
+    /// dimension's references goes through.
+    pub fn references(&self) -> Vec<Reference<'_>> {
+        match self {
+            DimensionKind::Linear { a, b, .. } => vec![Reference::Point(a), Reference::Point(b)],
+            DimensionKind::Length { edge, .. } | DimensionKind::Radial { edge, .. } => vec![Reference::Edge(edge)],
+            DimensionKind::Angle { a, b, .. } => vec![Reference::Edge(a), Reference::Edge(b)],
+            DimensionKind::Chain { points, .. } => points.iter().map(Reference::Point).collect(),
+            DimensionKind::Cylinder { face } | DimensionKind::Sphere { face } | DimensionKind::Cone { face } => vec![Reference::Face(face)],
+            DimensionKind::Silhouettes { a, b, .. } => vec![Reference::Face(&a.face), Reference::Face(&b.face)],
+            DimensionKind::Faces { a, b, .. } => vec![Reference::Face(a), Reference::Face(b)],
+        }
+    }
+
     /// The occurrence path of each model reference it measures, in its order.
     pub fn paths(&self) -> Vec<&[u64]> {
-        match self {
-            DimensionKind::Linear { a, b, .. } => vec![&a.path, &b.path],
-            DimensionKind::Length { edge, .. } | DimensionKind::Radial { edge, .. } => vec![&edge.path],
-            DimensionKind::Angle { a, b, .. } => vec![&a.path, &b.path],
-            DimensionKind::Chain { points, .. } => points.iter().map(|point| point.path.as_slice()).collect(),
-            DimensionKind::Cylinder { face } | DimensionKind::Sphere { face } | DimensionKind::Cone { face } => vec![&face.path],
-            DimensionKind::Silhouettes { a, b, .. } => vec![&a.face.path, &b.face.path],
-            DimensionKind::Faces { a, b, .. } => vec![&a.path, &b.path],
-        }
+        self.references().into_iter().map(Reference::path).collect()
     }
 
     /// Whether it reads an angle, as its label says: between two edges, or a cone's.
@@ -537,12 +543,24 @@ pub enum Candidate {
     Face { body: String, index: usize },
 }
 
-/// One reference a record keeps, for [`Document::finds_one`].
-#[derive(Clone, Copy, Debug)]
+/// One model reference a record keeps ([`DimensionKind::references`], a note's anchor's), for
+/// [`Document::finds_one`], its path and what it covers.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Reference<'a> {
     Edge(&'a ModelEdge),
     Point(&'a ModelPoint),
     Face(&'a ModelFace),
+}
+
+impl<'a> Reference<'a> {
+    /// The occurrences its body is placed through, as [`ModelEdge::path`].
+    pub fn path(self) -> &'a [u64] {
+        match self {
+            Reference::Edge(edge) => &edge.path,
+            Reference::Point(point) => &point.path,
+            Reference::Face(face) => &face.path,
+        }
+    }
 }
 
 /// How a command names an edge (or a face) to measure, before it is saved by name

@@ -224,7 +224,7 @@ fn coverage(s: &Session, d: &Drawing, sheets: &[u64], drawn: &Drawn) -> Vec<Cove
     let notes = notes.map(|n| (object(CheckedKind::Note, n.id), n.anchor.reference().into_iter().collect::<Vec<_>>()));
     let mut by: HashMap<u64, Vec<CheckedObject>> = HashMap::new();
     for (object, references) in dimensions.chain(notes) {
-        let mut features: Vec<u64> = references.iter().filter_map(|r| timeline.covers(r)).collect();
+        let mut features: Vec<u64> = references.iter().filter_map(|r| timeline.covers(*r)).collect();
         features.sort_unstable();
         features.dedup();
         for feature in features {
