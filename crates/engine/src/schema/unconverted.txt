@@ -20,14 +20,6 @@ file.save
 file.save_as
 file.save_mesh
 file.slicers
-joint.cam
-joint.gear
-joint.motion_link
-joint.origin
-joint.rack_pinion
-joint.reach
-joint.rigid_group
-joint.screw
 joint.sweep
 mesh.convert
 motion.export_animation
