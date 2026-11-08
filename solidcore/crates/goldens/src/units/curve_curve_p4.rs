@@ -877,6 +877,7 @@ fn rust(k: &Kernel, op: &OpIn) -> Result<Output, HarnessError> {
                 [cont(k1[0])?, cont(k1[1])?],
                 [cont(k2[0])?, cont(k2[1])?],
                 *adj,
+                0.0,
                 &sol,
             );
             let keep = tri!(o, r);

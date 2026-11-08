@@ -101,10 +101,13 @@ fn union_volume(tool: &[u8], mirrors: usize, fixes: UpstreamFixes) -> Result<f64
     Ok(volume(&k, &mut u))
 }
 
+/// `got` is a solid of volume `want`: to 1e-6 relative, the volume integration's error on
+/// the same body with B-spline in place of line edges (about 2e-8); the misclassified union
+/// was 1.2% off.
 fn assert_same(what: &str, got: Result<f64, String>, want: f64) {
     match got {
         Ok(v) => assert!(
-            (v - want).abs() <= 1e-9 * want,
+            (v - want).abs() <= 1e-6 * want,
             "{what}: {v}, expected {want}"
         ),
         Err(e) => panic!("{what}: {e}, expected a solid of {want}"),
