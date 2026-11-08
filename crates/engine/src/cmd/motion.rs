@@ -35,6 +35,7 @@ const EDIT_TRACE_CONTRACT: TypedContract<EditTraceParams> = TypedContract::new()
 
 #[path = "motion_analysis.rs"]
 mod analysis;
+pub(crate) use analysis::part_place;
 #[path = "motion_animation.rs"]
 mod animation;
 #[path = "motion_trace.rs"]
@@ -499,6 +500,18 @@ fn closest(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 /// `given` values (joint, index) are driven; in a closed loop the others follow. Returns the
 /// answer and the last solve.
 fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
+    drive_with_contact_within(s, want, given, false)
+}
+
+/// [`drive_with_contact`], which with `stop_at_budget` stops at the last placement checked clear
+/// where a contact check runs out of samples or work, rather than failing (#5963):
+/// `stopped_by_budget` {budget, fraction}.
+fn drive_with_contact_within(
+    s: &mut Session,
+    want: &[(u64, Vec<f64>)],
+    given: &BTreeSet<(u64, usize)>,
+    stop_at_budget: bool,
+) -> Result<(Value, joints::Solution)> {
     let baseline = s.doc.clone();
     let start: Vec<(u64, Vec<f64>)> =
         want.iter().map(|(id, _)| (*id, s.doc.assembly.joints.iter().find(|j| j.id == *id).map(|j| j.values.clone()).unwrap_or_default())).collect();
@@ -531,26 +544,51 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
     let cache = if s.doc.assembly.contact_enabled { Some(contact_sweep::ContactGeometry::new(s)?) } else { None };
     let mut sol;
     let mut stopped = None;
+    let mut ran: Option<&'static str> = None;
+    let mut budget_lo: Option<f64> = None;
     if let Some(cache) = cache.filter(|cache| cache.has_pairs()) {
         let mut end = s.scratch();
         set(&mut end, 1.0);
-        let samples = cache.samples(s, &end)?;
+        // With `stop_at_budget`, the samples the budgets allow are taken (at the spacing the
+        // motion needs), and a check that runs out stops the drive at the last clear one.
+        let (samples, allowed) = if stop_at_budget {
+            let (required, allowed) = cache.samples_within(s, &end)?;
+            (required, allowed.min(required))
+        } else {
+            let n = cache.samples(s, &end)?;
+            (n, n)
+        };
+        let samples = samples.max(1);
         let mut intersections = 0;
         set(s, 0.0);
+        let overlaps = |s: &Session, intersections: &mut usize, all: bool, ran: &mut Option<&'static str>| match cache.overlaps(s, intersections, all) {
+            Err(e) if stop_at_budget && contact_sweep::ran_out(&e).is_some() => {
+                *ran = contact_sweep::ran_out(&e);
+                Ok(None)
+            }
+            r => r.map(Some),
+        };
         // Keep the existing recovery behaviour: an initially overlapping assembly may move
         // out of its invalid placement. Sweeps constrain motions that start collision-free.
-        if cache.overlaps(s, &mut intersections, false)?.is_empty() {
+        if overlaps(s, &mut intersections, false, &mut ran)?.is_some_and(|o| o.is_empty()) {
             let mut lo = 0.0;
             let mut bracket = None;
             for sample in 1..=samples {
                 let hi = sample as f64 / samples as f64;
+                if sample > allowed {
+                    ran = Some(if samples > allowed && allowed < contact_sweep::MAX_SAMPLES { "work" } else { "samples" });
+                    break;
+                }
                 set(s, hi);
-                let hits = cache.overlaps(s, &mut intersections, true)?;
+                let Some(hits) = overlaps(s, &mut intersections, true, &mut ran)? else { break };
                 if !hits.is_empty() {
                     bracket = Some((lo, hi, hits));
                     break;
                 }
                 lo = hi;
+            }
+            if ran.is_some() {
+                budget_lo = Some(lo);
             }
             // Where the bodies found passing into each other first touch, closed in on from the
             // clear side (conservative advancement): from a clear placement, a move in which no
@@ -591,9 +629,15 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
                 sol = set(s, lo);
                 let (a, b) = hits.first().map(|h| (h.a.clone(), h.b.clone())).unwrap_or_default();
                 stopped = Some(json!({"a": a, "b": b, "fraction": lo}));
+            } else if let Some(lo) = budget_lo {
+                sol = set(s, lo);
             } else {
                 sol = set(s, 1.0);
             }
+        } else if ran.is_some() {
+            // The check at the start ran out: nothing past it is known clear.
+            budget_lo = Some(0.0);
+            sol = set(s, 0.0);
         } else {
             sol = set(s, 1.0);
         }
@@ -604,7 +648,7 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
     if let Some(mut name) = opened(&sol) {
         // The furthest the loops still close, short of where contact stopped; the joint named is
         // the one whose loop opens first.
-        let (mut lo, mut hi) = (0.0, stopped.as_ref().and_then(|v| v["fraction"].as_f64()).unwrap_or(1.0));
+        let (mut lo, mut hi) = (0.0, stopped.as_ref().and_then(|v| v["fraction"].as_f64()).or(budget_lo).unwrap_or(1.0));
         for _ in 0..14 {
             let mid = (lo + hi) / 2.0;
             match opened(&set(s, mid)) {
@@ -614,10 +658,14 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
         }
         sol = set(s, lo);
         stopped = None;
+        budget_lo = None;
         stopped_by_loop = Some(json!({"joint": name, "fraction": lo}));
     }
     let values: Vec<Value> = want.iter().map(|(id, _)| json!({"joint": id, "values": effective_values(s, *id)})).collect();
-    let out = json!({"values": values, "stopped_by_contact": stopped, "stopped_by_loop": stopped_by_loop, "conflicts": sol.conflicts.len()});
+    let mut out = json!({"values": values, "stopped_by_contact": stopped, "stopped_by_loop": stopped_by_loop, "conflicts": sol.conflicts.len()});
+    if let (Some(fraction), Some(budget)) = (budget_lo, ran) {
+        out["stopped_by_budget"] = json!({"budget": budget, "fraction": fraction});
+    }
     Ok((out, sol))
 }
 
@@ -626,14 +674,14 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
 const MAX_ADVANCES: usize = 200;
 
 /// Drive one joint (joint.drive), honouring contact sets.
-pub fn drive_joint(s: &mut Session, id: u64, q: Vec<f64>, given: usize) -> Result<Value> {
+pub fn drive_joint(s: &mut Session, id: u64, q: Vec<f64>, given: usize, stop_at_budget: bool) -> Result<Value> {
     let given = (0..given.min(q.len())).map(|i| (id, i)).collect();
-    Ok(drive_with_contact(s, &[(id, q)], &given)?.0)
+    Ok(drive_with_contact_within(s, &[(id, q)], &given, stop_at_budget)?.0)
 }
 
 /// Drive exactly one coordinate, letting the other values follow loops and preserving expressions.
-pub fn drive_joint_index(s: &mut Session, id: u64, q: Vec<f64>, index: usize) -> Result<Value> {
-    Ok(drive_with_contact(s, &[(id, q)], &[(id, index)].into_iter().collect())?.0)
+pub fn drive_joint_index(s: &mut Session, id: u64, q: Vec<f64>, index: usize, stop_at_budget: bool) -> Result<Value> {
+    Ok(drive_with_contact_within(s, &[(id, q)], &[(id, index)].into_iter().collect(), stop_at_budget)?.0)
 }
 
 /// A command's reply as JSON: the contact and motion study commands build their replies from the
