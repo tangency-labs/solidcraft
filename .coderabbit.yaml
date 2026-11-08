@@ -1,6 +1,17 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 reviews:
+  profile: chill
+  poem: false
+  sequence_diagrams: false
+  related_issues: false
+  related_prs: false
+  suggested_labels: false
+  suggested_reviewers: false
+  in_progress_fortune: false
   auto_review:
+    # Review when a PR is opened or marked ready, or on `@coderabbitai review`; not on every push.
+    drafts: false
+    auto_incremental_review: false
     # Dependabot bumps are checked by CI; skip CodeRabbit reviews on them.
     ignore_usernames:
       - "dependabot[bot]"
