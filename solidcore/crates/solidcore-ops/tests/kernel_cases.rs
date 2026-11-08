@@ -32,7 +32,9 @@
 //! - `KERNEL_CASES_TIMEOUT_S`: a case's time limit, 180 s by default; one past it is a hang, and
 //!   the cases after it are not run (it holds the process kernel);
 //! - `KERNEL_CASES_REPORT`: a file to write the per-area table and the lists to;
-//! - `KERNEL_CASES_REPORT_ONLY`: set, the test reports without failing.
+//! - `KERNEL_CASES_REPORT_ONLY`: set, the test reports without failing;
+//! - `KERNEL_CASES_SMB`: a directory to write each run case's bodies to as `<case>.smb`, for
+//!   its render (`solidcore-diag`): the final bodies, or the inputs of the refusal that ends it.
 
 #![allow(
     clippy::unwrap_used,
@@ -1197,6 +1199,21 @@ fn grade_seams(result: &[Slot], expected: &Value) -> Result<(), Stop> {
     Ok(())
 }
 
+/// With `KERNEL_CASES_SMB` set, writes `bodies` there as `<case>.smb`, `<case>-1.smb`, ...
+fn write_smb(e: &Value, bodies: &[Slot]) {
+    let Some(dir) = std::env::var_os("KERNEL_CASES_SMB") else {
+        return;
+    };
+    let case = e["case"].as_str().unwrap();
+    for (i, s) in bodies.iter().enumerate() {
+        let name = match i {
+            0 => format!("{case}.smb"),
+            _ => format!("{case}-{i}.smb"),
+        };
+        std::fs::write(Path::new(&dir).join(name), s.body.to_smb(true).unwrap()).unwrap();
+    }
+}
+
 /// Runs a case's calls and grades the result against `rig` (or, for a hand-written case
 /// without one, `expected`): `Ok(deviation)` for a match.
 fn run_case(entry: &Path, e: &Value) -> Result<Option<f64>, Stop> {
@@ -1298,7 +1315,10 @@ fn run_case_with_records(
             // A handled refusal is an attempt, not the case's outcome. Keep checking the
             // later operations and final geometry; an unmarked refusal still ends the case.
             (Err(_), Some(_)) if continued => {}
-            (Err(_), Some(_)) => return Ok(None),
+            (Err(_), Some(_)) => {
+                write_smb(e, &ins);
+                return Ok(None);
+            }
             (Err(x), None) => return Err(Stop::Fail(format!("call {i} ({op}) refused: {x}"))),
             (Ok(_), Some(want)) => {
                 return Err(Stop::Fail(format!(
@@ -1321,6 +1341,7 @@ fn run_case_with_records(
                 .ok_or_else(|| Stop::Fail(format!("no final body {n}")))?,
         );
     }
+    write_smb(e, &result);
     let got = measure(&result).map_err(Stop::Fail)?;
     if let Some(seams) = e["expected"].get("seams") {
         grade_seams(&result, seams)?;
