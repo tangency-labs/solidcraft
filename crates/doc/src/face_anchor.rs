@@ -174,7 +174,7 @@ impl Document {
             return None;
         }
         let note = format!("the face this sketch sits on was found again by its name `{name}`: its extrude-cap certificate no longer marks it");
-        Some((saved.clone(), Some(note)))
+        Some((*saved, Some(note)))
     }
 
     /// [`Document::resolve_attached_plane`] with the note of an attachment found by fallback
