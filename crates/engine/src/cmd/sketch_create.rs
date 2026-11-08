@@ -13,7 +13,7 @@ macro_rules! text_style_doc {
     };
 }
 
-use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_parg, slot_parts};
+use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, point_ids, req_parg, slot_parts};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
@@ -217,7 +217,12 @@ fn reply<T: serde::Serialize>(value: T) -> Result<Value> {
 
 /// What a drawing command returns: the curves and constraints it made, and the sketch's solve.
 fn drawn_result(out: (Vec<String>, Vec<String>), info: Value) -> DrawResult {
-    DrawResult { curves: out.0, constraints: out.1, sketch: info, created: None, param_warnings: Vec::new() }
+    drawn_result_with_figure(out, info, None)
+}
+
+/// [`drawn_result`], naming the figure the command recorded.
+fn drawn_result_with_figure(out: (Vec<String>, Vec<String>), info: Value, figure: Option<String>) -> DrawResult {
+    DrawResult { curves: out.0, constraints: out.1, sketch: info, created: None, figure, param_warnings: Vec::new() }
 }
 
 fn drawn(out: (Vec<String>, Vec<String>), info: Value) -> Result<Value> {
@@ -1181,6 +1186,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
     let at = |t: f64, rr: f64| o + Vec2::from_angle(t) * rr;
     let mut centre_arc = None;
     let mut middle = None;
+    let mut figure = None;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let oc = sk.add_point(o, None)?;
         let ps = sk.add_point(at(t0, r), None)?;
@@ -1216,9 +1222,16 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
         }
         cons.push(add_c(sk, ConstraintKind::Equal { a: to_s, b: to_e })?);
         middle = sk.points.get(mid).map(|q| q.id.clone());
-        Ok((ids_of(sk, &[outer, cap_e, inner, cap_s]), cons))
+        let curves = ids_of(sk, &[outer, cap_e, inner, cap_s]);
+        let mut figure_curves = curves.clone();
+        if let Some(c) = sk.curves.get(centre) {
+            figure_curves.push(c.id.clone());
+        }
+        let points = point_ids(sk, &[oc, ps, pe, os, is, oe, ie]);
+        figure = Some(sk.add_figure("slot.arc", cmd, &figure_curves, &points, &[], &[])?);
+        Ok((curves, cons))
     })?;
-    reply(ArcSlotResult { drawn: drawn_result(out, info), centre_arc, middle })
+    reply(ArcSlotResult { drawn: drawn_result_with_figure(out, info, figure), centre_arc, middle })
 }
 
 fn arc_slot_three(s: &mut Session, p: &Value) -> Result<Value> {

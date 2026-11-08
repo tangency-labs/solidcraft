@@ -633,6 +633,9 @@ pub struct Created {
     /// The ids of 3D curves, when the command made any.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wires: Vec<String>,
+    /// The ids of figures, when the command made any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub figures: Vec<String>,
 }
 
 /// What a drawing command returns for a line, a circle, an arc or a slot.
@@ -650,6 +653,9 @@ pub struct DrawResult {
     /// `wires` when there are any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<Created>,
+    /// The figure the command drew, when it records one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub figure: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -957,6 +963,9 @@ pub struct RectResult {
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<Created>,
+    /// The figure the command drew, when it records one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub figure: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -985,6 +994,9 @@ pub struct RoundedRectResult {
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<Created>,
+    /// The figure the command drew, when it records one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub figure: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1007,6 +1019,9 @@ pub struct PolygonResult {
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<Created>,
+    /// The figure the command drew, when it records one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub figure: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

@@ -118,3 +118,61 @@ fn center_rectangle_draws_both_diagonals_like_fusion() {
         assert_eq!(si["curves"].as_array().map(Vec::len), Some(4), "{k}: {si}");
     }
 }
+
+#[test]
+fn a_rectangle_records_one_figure_and_returns_its_id() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let out = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 6]}));
+    assert_eq!(out["figure"], "fig1", "{out}");
+    assert_eq!(out["created"]["figures"], json!(["fig1"]), "{out}");
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    let figures = si["figures"].as_array().cloned().unwrap_or_default();
+    assert_eq!(figures.len(), 1, "{si}");
+    assert_eq!(figures[0]["kind"], "rectangle");
+    assert_eq!(figures[0]["command"], "sketch.rectangle.two_point");
+    assert_eq!(ids(&figures[0]["curves"]), ids(&out["curves"]));
+    assert_eq!(ids(&figures[0]["points"]).len(), 4);
+}
+
+#[test]
+fn a_rounded_rectangle_records_its_sides_arcs_and_corners() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let out = run(&mut s, "sketch.rectangle.rounded", json!({"p0": [0, 0], "p1": [20, 12], "radius": 2}));
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    let figure = &si["figures"][0];
+    assert_eq!(figure["kind"], "rectangle.rounded", "{si}");
+    let curves = ids(&figure["curves"]);
+    assert_eq!(curves.len(), 8, "four sides and four arcs: {figure}");
+    for arc in ids(&out["arcs"]) {
+        assert!(curves.contains(&arc), "{arc} missing from {figure}");
+    }
+    assert!(ids(&figure["points"]).len() >= 8, "the arc ends and centres too: {figure}");
+}
+
+#[test]
+fn a_polygon_and_a_slot_record_their_figures() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let polygon = run(&mut s, "sketch.polygon.inscribed", json!({"center": [0, 0], "radius": 10, "sides": 6}));
+    let slot = run(&mut s, "sketch.slot.center_to_center", json!({"p0": [0, 20], "p1": [20, 20], "width": 6}));
+    assert_eq!(polygon["figure"], "fig1", "{polygon}");
+    assert_eq!(slot["figure"], "fig2", "{slot}");
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    let figures = si["figures"].as_array().cloned().unwrap_or_default();
+    assert_eq!(figures.len(), 2, "{si}");
+    assert_eq!(figures[0]["kind"], "polygon");
+    assert_eq!(ids(&figures[0]["curves"]).len(), 7, "six sides and the support circle: {}", figures[0]);
+    assert_eq!(figures[1]["kind"], "slot");
+    assert_eq!(ids(&figures[1]["curves"]).len(), 4, "two sides and two arcs: {}", figures[1]);
+}
+
+#[test]
+fn deleting_a_figure_member_drops_the_figure_and_keeps_the_other_sides() {
+    let (mut s, sides) = rect("two");
+    run(&mut s, "sketch.delete", json!({"entities": [sides[0]]}));
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert!(si["figures"].as_array().is_none_or(Vec::is_empty), "{si}");
+    assert_eq!(si["curves"].as_array().map(Vec::len), Some(3), "{si}");
+}
