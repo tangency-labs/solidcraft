@@ -586,18 +586,11 @@ fn face_input(kernel: &Kernel, body: &Body, face: &sm::Face) -> Result<FaceInput
         curves: Vec::new(),
         orients: Vec::new(),
     };
-    for bound in &face.loops {
-        let Bound::Edges(edges) = &bound.bound else {
+    for bound in constructor::normalized_face_loops(kernel, body, face)
+        .map_err(|message| BuildError { message })?
+    {
+        let constructor::NormalizedLoop::Edges(oriented) = bound else {
             continue;
-        };
-        let oriented: Vec<(usize, bool)> = if bound.orientation {
-            edges.iter().map(|edge| (edge.edge, edge.forward)).collect()
-        } else {
-            edges
-                .iter()
-                .rev()
-                .map(|edge| (edge.edge, !edge.forward))
-                .collect()
         };
         out.loops.push(oriented.len());
         for (index, forward) in oriented {

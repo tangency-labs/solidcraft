@@ -1,0 +1,80 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b3",
+        "b4"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "2927-flanged-spool-cut-through-axis",
+  "expected": {
+    "body_count": 1,
+    "method": "The 92-face flanged spool is symmetric across y = 0, so subtracting the half-space box y >= 0 leaves half of the exact spool volume V_full / 2. On z in [0, 128] the outer revolved profile consists of four 45-deg frusta r = 64 <-> 65 of height 1 (4 * pi/3 * (64^2 + 64*65 + 65^2)), two flange cylinders r = 65 of height 3 (2 * pi * 65^2 * 3), one barrel cylinder r = 35 of height 83 (pi * 35^2 * 83), three concave quarter-tori (R0 = 45, rho = 10, each pi * (45^2 * 10 - pi/2 * 45 * 10^2 + 2000/3)) and one neck concave quarter-torus (R0 = 40, rho = 5, pi * (40^2 * 5 - pi/2 * 40 * 25 + 250/3)), less the bore r = 31 of height 128 and 24 bolt holes r = 4 of height 5. On z in [128, 140] the 6-lobe scalloped flange (6 convex arcs R1 = 10 - delta at R = 45 and 6 tangent concave arcs R2 = 40 + delta, exact quadratic in delta integrated over [128, 129], [129, 139], [139, 140]) less the stepped bore (r = 31 on [128, 130], r = 35 on [130, 140]) and 6 countersunk holes (r = 5 on [128, 139], frustum 5 -> 6 on [139, 140]) gives V_full = 248052.0320278483 mm^3, hence V_full / 2 = 124026.01601392415 mm^3.",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcore#2927"
+    ],
+    "volume_mm3": 124026.01601392415,
+    "what": "half-space box y >= 0 subtracted from the 92-face flanged spool (planes, cylinders, cones, four concave fillet tori and 30 flange holes) along its axis: previously returned an empty 8-face shell of volume 0"
+  },
+  "expressible": true,
+  "gallery_note": "Axial y = 0 cut across all four concave fillet tori, chamfered bolt-circle flanges, stepped inner bore and scalloped top flange.",
+  "operation_expressible": true,
+  "records": "2927-flanged-spool-cut-through-axis.bodies.json.gz",
+  "result": [
+    {
+      "body": "spool",
+      "made": "b5"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcore#2927"
+  ],
+  "ungraded": [],
+  "what": "half-space box y >= 0 subtracted from the 92-face flanged spool (planes, cylinders, cones, four concave fillet tori and 30 flange holes) along its axis: previously returned an empty 8-face shell of volume 0",
+  "why_not": []
+}
