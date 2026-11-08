@@ -120,25 +120,54 @@ pub(super) fn read(given: &[(Role, Source)], set: Option<&solidcraft_io::GerberS
     Ok(out)
 }
 
-/// Most sketch points one layer sketch holds; a layer with more is split over several sketches.
+/// Most sketch points one layer sketch holds (below `solidcraft_sketch::MAX_POINTS`); a layer
+/// with more is split over several sketches.
 const POINTS_PER_SKETCH: usize = 15_000;
 
+/// The most sketch points an entity can add (shared ends make it fewer): its ends, and an arc's
+/// centre.
+fn point_cost(g: &Geom2) -> usize {
+    match g {
+        Geom2::Point(_) => 1,
+        Geom2::Circle(..) | Geom2::Line(..) => 2,
+        _ => 3,
+    }
+}
+
 /// The layers' hidden sketches, top layers on the top face and bottom ones on the bottom face,
-/// made in the active component (the board's). Returns their ids.
-pub(super) fn sketches(s: &mut Session, layers: &[Layer], offset: Vec2, thickness: f64) -> Result<Vec<u64>> {
+/// made in the active component (the board's). Their ids go in `ids` as they are made, so a
+/// failure part way still names those made.
+pub(super) fn sketches(
+    s: &mut Session,
+    layers: &[Layer],
+    offset: Vec2,
+    thickness: f64,
+    ids: &mut Vec<u64>,
+    warnings: &mut Vec<String>,
+) -> Result<()> {
     let shift = move |q: Vec2| Vec2::new(q.x + offset.x, q.y + offset.y);
-    let mut ids = Vec::new();
     for layer in layers {
-        // Loops in sketches of a size the sketch can take.
+        // Loops in sketches of a size the sketch can take, counting the points each may add.
         let mut chunks: Vec<Vec<Geom2>> = vec![Vec::new()];
+        let mut used = 0usize;
+        let mut too_large = 0usize;
         for l in &layer.loops {
-            let full = chunks.last().is_some_and(|c| c.len() + l.len() > POINTS_PER_SKETCH);
-            if full {
-                chunks.push(Vec::new());
+            let cost: usize = l.iter().map(point_cost).sum();
+            if cost > POINTS_PER_SKETCH {
+                too_large += 1;
+                continue;
             }
+            if used > 0 && used + cost > POINTS_PER_SKETCH {
+                chunks.push(Vec::new());
+                used = 0;
+            }
+            used += cost;
             if let Some(c) = chunks.last_mut() {
                 c.extend(l.iter().cloned());
             }
+        }
+        if too_large > 0 {
+            warnings.push(format!("{}: {too_large} shape(s) too large for a sketch were left out of its sketch", layer.role.name));
         }
         chunks.retain(|c| !c.is_empty());
         let many = chunks.len() > 1;
@@ -158,7 +187,7 @@ pub(super) fn sketches(s: &mut Session, layers: &[Layer], offset: Vec2, thicknes
             ids.push(sketch);
         }
     }
-    Ok(ids)
+    Ok(())
 }
 
 /// The vias' hidden sketch, `Vias`, on the top face, made in the active component.

@@ -375,9 +375,8 @@ pub(super) fn build_board(s: &mut Session, board: &Board, mut warnings: Vec<Stri
         }
     }
     if built.is_ok() && !board.layers.is_empty() {
-        match board_layers::sketches(s, board.layers, offset, board.thickness) {
-            Ok(ids) => layer_sketches.extend(ids),
-            Err(e) => warnings.push(format!("The layers could not be kept as sketches: {e}")),
+        if let Err(e) = board_layers::sketches(s, board.layers, offset, board.thickness, &mut layer_sketches, &mut warnings) {
+            warnings.push(format!("The layers could not be kept as sketches: {e}"));
         }
         let mut board_loops: Vec<Vec<Geom2>> =
             outline.loops().iter().map(|(edges, _)| edges.iter().filter_map(|i| outline.edges.get(*i)).map(Edge::geom).collect()).collect();

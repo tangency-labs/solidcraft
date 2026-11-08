@@ -181,11 +181,12 @@ enum Content {
 
 fn content_kind(text: &str) -> Option<Content> {
     let head: String = text.chars().take(8192).collect();
-    if let Some(f) = head.lines().find_map(|l| l.split_once("TF.FileFunction,").map(|(_, r)| r)) {
-        return Some(Content::Gerber(Some(function_role(f.trim_end_matches(['*', '%'])))));
-    }
+    // First: an Excellon header carries X2 attributes as comments too (`; #@! TF.FileFunction,Plated,1,2,PTH`).
     if head.lines().any(|l| l.trim() == "M48") {
         return Some(Content::Excellon);
+    }
+    if let Some(f) = head.lines().find_map(|l| l.split_once("TF.FileFunction,").map(|(_, r)| r)) {
+        return Some(Content::Gerber(Some(function_role(f.trim_end_matches(['*', '%'])))));
     }
     if head.contains("%FS") || head.contains("%MO") || head.contains("%ADD") {
         return Some(Content::Gerber(None));
@@ -285,16 +286,34 @@ fn ext_of(name: &str) -> String {
     base_name(name).rsplit_once('.').map(|(_, e)| e.to_string()).unwrap_or_default()
 }
 
-/// The files in a folder, each at most [`MAX_DRAWING_BYTES`] (larger ones are left out).
+/// Most files a folder may hold for its board's set to be looked for in it.
+const MAX_FOLDER_FILES: usize = 10_000;
+
+/// Extensions that are never a board's fabrication file, left unread in a folder (a board's
+/// files picked in Downloads sit among all sorts).
+const NOT_FABRICATION: [&str; 30] = [
+    "7z", "avi", "bmp", "dll", "doc", "docx", "exe", "gif", "gz", "heic", "html", "iso", "jpeg", "jpg", "mkv", "mov", "mp3", "mp4", "msi", "pdf",
+    "png", "ppt", "pptx", "rar", "step", "stl", "stp", "webp", "xls", "xlsx",
+];
+
+/// The files in a folder that may be a board's, each at most [`MAX_DRAWING_BYTES`] (larger ones
+/// are left out): at most [`MAX_SET_FILES`] of them and [`MAX_SET_BYTES`] in all, the rest left
+/// unread, so that a board's files among many others are still found.
 fn folder_files(dir: &str) -> std::io::Result<Vec<(String, Vec<u8>)>> {
     let mut out = Vec::new();
     let mut total = 0usize;
-    for path in vfs::files_in(dir, MAX_SET_FILES)? {
-        let Ok(bytes) = vfs::read(&path, MAX_DRAWING_BYTES) else { continue };
-        total = total.saturating_add(bytes.len());
-        if total > MAX_SET_BYTES {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "the folder's files are too large"));
+    for path in vfs::files_in(dir, MAX_FOLDER_FILES)? {
+        if out.len() >= MAX_SET_FILES {
+            break;
         }
+        if NOT_FABRICATION.contains(&ext_of(&path).as_str()) {
+            continue;
+        }
+        let Ok(bytes) = vfs::read(&path, MAX_DRAWING_BYTES) else { continue };
+        if total.saturating_add(bytes.len()) > MAX_SET_BYTES {
+            continue;
+        }
+        total = total.saturating_add(bytes.len());
         let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(path);
         out.push((name, bytes));
     }

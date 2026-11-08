@@ -42,6 +42,31 @@ fn what_a_file_says_wins_over_its_name() {
     let profile = format!("G04 #@! TF.FileFunction,Profile,NP*\n{GERBER}");
     let s = set(&[("a-B_Cu.gbr", &top), ("odd.gbr", &profile), ("holes.txt", DRILL), ("readme.txt", "hello"), ("x.pdf", "%PDF\0")]);
     assert_eq!(roles(&s), [("a-B_Cu.gbr", SetRole::TopCopper), ("odd.gbr", SetRole::Outline), ("holes.txt", SetRole::Drill)]);
+    // KiCad's drill files carry X2 attributes in their Excellon header: still drills.
+    let kicad = format!(
+        "M48
+; #@! TF.FileFunction,Plated,1,2,PTH
+{}",
+        &DRILL[4..]
+    );
+    assert_eq!(roles(&set(&[("board-PTH.drl", &kicad)])), [("board-PTH.drl", SetRole::Drill)]);
+}
+
+/// A board's files picked among many others (a Downloads folder) are still found: pictures and
+/// documents are left unread, and a folder with more files than a set has is not refused.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_boards_files_among_many_others_are_found() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-gerber-set-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    for i in 0..MAX_SET_FILES + 20 {
+        std::fs::write(dir.join(format!("photo{i:03}.jpg")), "jpeg").unwrap();
+    }
+    std::fs::write(dir.join("board.GKO"), GERBER).unwrap();
+    std::fs::write(dir.join("board.DRL"), DRILL).unwrap();
+    let s = read_gerber_set(&dir.join("board.GKO").to_string_lossy()).unwrap();
+    assert_eq!(roles(&s), [("board.DRL", SetRole::Drill), ("board.GKO", SetRole::Outline)]);
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// The job file names the layers of files that don't say, and gives thickness and finish.

@@ -427,6 +427,31 @@ fn layers_become_hidden_sketches_and_a_printed_look() {
     assert_eq!(canvas.component, component.id);
 }
 
+/// A dense copper layer is split over sketches by the points its shapes add, not by how many
+/// shapes it has: 3,500 separate traces (6 points each, more than one sketch holds) are all kept.
+#[test]
+fn a_dense_layer_is_split_over_sketches_by_its_points() {
+    let mut s = Session::default();
+    let mut copper = String::from("%FSLAX46Y46*%%MOMM*%%ADD11C,0.1*%D11*");
+    for i in 0..70 {
+        for j in 0..50 {
+            let (x, y) = (101_000_000 + i * 400_000, 50_500_000 + j * 380_000);
+            copper.push_str(&format!("X{x}Y{y}D02*X{}Y{y}D01*", x + 150_000));
+        }
+    }
+    copper.push_str("M02*");
+    let r = s
+        .execute("file.insert_gerber", &json!({"outline_text": RECTANGLE_GERBER, "layers_text": {"top_copper": copper}}))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let warnings = r["warnings"].to_string();
+    assert!(!warnings.contains("could not be kept") && !warnings.contains("left out"), "{warnings}");
+    let ids: Vec<u64> = r["layer_sketches"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+    assert!(ids.len() >= 2, "{r}");
+    let state = s.model.state();
+    let curves: usize = ids.iter().filter_map(|id| state.sketch(*id)).map(|k| k.sketch.curves.len()).sum();
+    assert_eq!(curves, 3500 * 4, "every trace is kept, two lines and two arcs each");
+}
+
 /// Vias are kept in a hidden sketch and drawn, not cut: a hole the drill file marks as a via,
 /// whatever its size, and an unmarked plated one of 0.5 mm or less. A marked component hole and
 /// an unplated one are cut however small.
