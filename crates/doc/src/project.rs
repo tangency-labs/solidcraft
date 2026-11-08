@@ -152,7 +152,7 @@ fn resolve_uncached(
                     // A mesh body is one face with no edges: the flat patch of triangles picked,
                     // traced (#13464).
                     if target.body.is_mesh() {
-                        crate::project3d::flat_outline(&mesh, q).iter().flat_map(|outline| fit_world(plane, outline)).collect()
+                        crate::project3d::flat_outline(&mesh, q).iter().flat_map(|outline| fit_mesh_outline(plane, outline)).collect()
                     } else {
                         let g = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, f, plane)?);
                         if certified_planar_construction(target, f as usize) { merge_family_lines(g)? } else { g }
@@ -1314,8 +1314,8 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Vec
 }
 
 /// A circle in space (centre, unit normal, radius) through the polyline's points, and whether
-/// the polyline closes.
-fn circle3(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64, bool)> {
+/// the polyline closes. Its points lie on it within `within`, by default 1e-7 of the radius.
+fn circle3(pts: &[Vec3], within: Option<f64>) -> Option<(Vec3, Vec3, f64, bool)> {
     let n = pts.len();
     if n < 4 {
         return None;
@@ -1332,15 +1332,15 @@ fn circle3(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64, bool)> {
     let centre = a + (nrm.cross(ab) * ac.len2() + ac.cross(nrm) * ab.len2()) / (2.0 * l2);
     let r = centre.dist(a);
     let un = nrm.normalized()?;
-    let tol = 1e-7 * r.max(1.0);
+    let tol = within.unwrap_or(1e-7 * r.max(1.0));
     pts.iter().all(|p| (p.dist(centre) - r).abs() < tol && (*p - centre).dot(un).abs() < tol).then_some((centre, un, r, closed))
 }
 
 /// A circle seen at a slant is an ellipse, exactly: a full circle becomes an ellipse; an arc
 /// becomes conics (rational quadratic Béziers of at most 90 degrees each — parallel projection
 /// keeps their weights).
-fn tilted_circle(plane: &Plane, pts: &[Vec3]) -> Option<Vec<LinkGeom>> {
-    let (c, n, r, closed) = circle3(pts)?;
+fn tilted_circle(plane: &Plane, pts: &[Vec3], within: Option<f64>) -> Option<Vec<LinkGeom>> {
+    let (c, n, r, closed) = circle3(pts, within)?;
     let sn = plane.normal();
     let cosang = n.dot(sn).abs();
     if !(1e-9..=1.0 - 1e-12).contains(&cosang) {
@@ -1435,9 +1435,31 @@ fn plane_trace(sk: &Plane, other: &Plane) -> Option<LinkGeom> {
     Some(LinkGeom::Line(p0 - u * AXIS_HALF, p0 + u * AXIS_HALF))
 }
 
+/// Most corners a mesh face's outline has and is still taken for a polygon.
+const MESH_POLYGON_CORNERS: usize = 12;
+
+/// The outline of a mesh body's flat patch (a closed loop of its corners) as lines and arcs. Any
+/// triangle's corners and any rectangle's lie on one circle, so only a loop of more corners than
+/// [`MESH_POLYGON_CORNERS`], all on one circle, is a tessellated circle, an ellipse on a slanted
+/// plane; and the sides of a polygon stay lines, never one fitted spline (#13464). A mesh file
+/// keeps its corners in single precision, so they lie on the circle within about 1e-7 of their
+/// size, not of the circle's.
+fn fit_mesh_outline(plane: &Plane, pts: &[Vec3]) -> Vec<LinkGeom> {
+    let within = pts.iter().map(|p| p.len()).fold(1.0, f64::max) * 1e-6;
+    if pts.len() > MESH_POLYGON_CORNERS + 1
+        && let Some(e) = tilted_circle(plane, pts, Some(within))
+    {
+        return e;
+    }
+    let p2: Vec<Vec2> = pts.iter().map(|p| plane.to_local(*p)).collect();
+    let mut out = Vec::new();
+    fit_chain(&p2, None, &mut out);
+    out
+}
+
 /// Project a world polyline and fit lines and arcs to it.
 fn fit_world(plane: &Plane, pts: &[Vec3]) -> Vec<LinkGeom> {
-    if let Some(e) = tilted_circle(plane, pts) {
+    if let Some(e) = tilted_circle(plane, pts, None) {
         return e;
     }
     let p2: Vec<Vec2> = pts.iter().map(|p| plane.to_local(*p)).collect();

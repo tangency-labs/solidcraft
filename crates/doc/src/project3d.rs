@@ -379,11 +379,31 @@ pub(crate) fn flat_outline(m: &Mesh, at: Vec3) -> Vec<Vec<Vec3>> {
                 steps += 1;
             }
             if v == start && pts.len() >= 4 {
-                loops.push(pts);
+                loops.extend(turning_corners(&pts, size * 1e-9));
             }
         }
     }
     loops
+}
+
+/// A closed loop (its first point again at its end) without the corners where it runs straight
+/// on: a mesh's outline often has a corner part way along a side, where a triangle of the patch
+/// meets it. None when fewer than three corners turn.
+fn turning_corners(pts: &[Vec3], tol: f64) -> Option<Vec<Vec3>> {
+    let ring = pts.get(..pts.len().saturating_sub(1))?;
+    let n = ring.len();
+    let turns = |i: usize| {
+        let (prev, here, next) = (ring.get((i + n - 1) % n), ring.get(i), ring.get((i + 1) % n));
+        let (Some(prev), Some(here), Some(next)) = (prev, here, next) else { return false };
+        let (a, b) = (*here - *prev, *next - *here);
+        a.cross(b).len() > tol * a.len().max(b.len()).max(1.0)
+    };
+    let mut out: Vec<Vec3> = (0..n).filter(|i| turns(*i)).filter_map(|i| ring.get(i).copied()).collect();
+    if out.len() < 3 {
+        return None;
+    }
+    out.extend(out.first().copied());
+    Some(out)
 }
 
 /// Project a world polyline onto face `f` along `dir` (either way, nearest hit). Points that
