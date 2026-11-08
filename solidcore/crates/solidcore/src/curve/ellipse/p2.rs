@@ -92,7 +92,9 @@
 //!   `SmCurve::GlobalCoincidenceChecker` of the ellipse are
 //!   [`curve_base::Curve::global_point_solve`] and
 //!   [`curve_base::Curve::global_coincidence_checker`] on copies of the ellipses as
-//!   curve kinds (taking the [`Kernel`]). The
+//!   curve kinds (taking the [`Kernel`]). These query copies, including a local
+//!   solve's line, preserve knots exactly: copy-constructor cleanup can collapse a
+//!   nonzero parameter interval. The
 //!   line's `GlobalPointSolve(SM_SO_INTERSECT)` of `IntersectWithLine` is the line's
 //!   `DropPointFast`, which handles every intersection. `SmCurve::LocalCurveSolve` (unit
 //!   `curve.curve_p3`) evaluates the ellipse through its B-spline base and the line
@@ -192,7 +194,7 @@ fn ellipse_global_point_solve<O: Copy>(
     point: Point3,
     tol: f64,
 ) -> Result<Vec<Solution<O>>> {
-    let c = curve_base::Curve::from(curve.clone());
+    let c = curve_base::Curve::from(curve.clone_exact_bounded());
     let opts = GlobalPointSolveOptions {
         handle: Some(ParamHandle(curve.base.natural_interval())),
         ..GlobalPointSolveOptions::default()
@@ -291,7 +293,7 @@ fn local_curve_solve_line<O: Copy>(
     guesses: [f64; 2],
 ) -> Result<(bool, Solution<O>)> {
     // (the line evaluates through the curve dispatch, as its virtual Evaluate)
-    let other = curve_base::Curve::from(other.clone());
+    let other = curve_base::Curve::from(other.clone_exact_bounded());
     local_curve_solve(
         k,
         &curve.base,
@@ -320,8 +322,8 @@ fn global_coincidence_checker<O: Copy>(
     tol: f64,
     objects: [Option<O>; 2],
 ) -> Result<(bool, Vec<Solution<O>>)> {
-    let a = curve_base::Curve::from(curve.clone());
-    let b = curve_base::Curve::from(other.clone());
+    let a = curve_base::Curve::from(curve.clone_exact_bounded());
+    let b = curve_base::Curve::from(other.clone_exact_bounded());
     let handles = [
         Some(IndexHandle(0, curve.base.natural_interval())),
         Some(IndexHandle(1, other.base.natural_interval())),
@@ -2506,6 +2508,32 @@ mod tests {
                 None,
             )
             .is_err());
+    }
+
+    #[test]
+    fn point_solve_keeps_a_nonzero_arc_parameter_domain() {
+        let k = kernel();
+        let interval = Extent1d::from_min_max(0.999_999_999_998_075_2, 1.0);
+        let mut arc = circle(&k, 0.0, 90.0, 2.0, false);
+        // The same quarter circle on a short parameter interval is still a
+        // quarter circle. Query wrappers must not clean up its knots on copying.
+        arc.base.edit_parameterization(&interval).unwrap();
+        arc.set_up_polar_conversion(&k).unwrap();
+        let original = arc.base.gw_nurb().unwrap().clone();
+        let point = arc.base.evaluate_point(interval.mid()).unwrap();
+        let solutions = ellipse_global_point_solve::<()>(&k, &arc, &interval, point, 1e-8)
+            .expect("a known point on the quarter circle is found");
+        assert!(!solutions.is_empty());
+        assert!(solutions.iter().any(|s| {
+            interval.contains_value(s.start.parameters[0], 0.0)
+                && arc
+                    .base
+                    .evaluate_point(s.start.parameters[0])
+                    .unwrap()
+                    .distance(point)
+                    <= 1e-8
+        }));
+        assert_eq!(arc.base.gw_nurb(), Some(&original));
     }
 
     #[test]

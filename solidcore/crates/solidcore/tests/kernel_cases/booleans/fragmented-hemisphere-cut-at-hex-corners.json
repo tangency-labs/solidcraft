@@ -1,0 +1,264 @@
+{
+  "area": "booleans",
+  "case": "fragmented-hemisphere-cut-at-hex-corners",
+  "sources": [
+    "SolidCraft user report: resized hemisphere cut"
+  ],
+  "what": "A circumradius-50 regular hexagonal prism (z=0..50) is cut by a lower hemisphere of radius 68 centred at z = 71. The quarter-disc profile is split at radial distances 25 and 50. The radial-50 band meets the prism only at hex corners; no small circular tail is a distinct boundary. Expected roof z(r)=71-sqrt(68^2-r^2). The volume is the exact polar integral over six hexagonal wedges: V=(R+3)A-2*pi*R^3/3+4F, A=3*sqrt(3)*s^2/2, d=sqrt(3)*s/2, a=sqrt(R^2-d^2), b=sqrt(R^2-s^2), phi=asin(s/(2a)), F=R^3*atan(R/(sqrt(3)*b))-(3*a^2*d/2+d^3)*phi-d^2*b/(2*sqrt(3)), with s = 50 and R = 68. The hemisphere axis is shifted +5e-11 mm in X to exercise a distinct clipping event at an almost coincident corner. This changes the exact volume from the centred formula by at most A*delta*(50+delta)/sqrt(R^2-(50+delta)^2)<4e-7 mm^3, using the maximum derivative of the spherical roof. This bound is far below the grading tolerance; the positive shift is part of the input, not a boolean retry.",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "profile": [
+          {
+            "line": {
+              "start": [
+                50.0,
+                0.0,
+                0.0
+              ],
+              "end": [
+                25.0,
+                43.30127018922193,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "start": [
+                25.0,
+                43.30127018922193,
+                0.0
+              ],
+              "end": [
+                -25.0,
+                43.30127018922193,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "start": [
+                -25.0,
+                43.30127018922193,
+                0.0
+              ],
+              "end": [
+                -50.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "start": [
+                -50.0,
+                0.0,
+                0.0
+              ],
+              "end": [
+                -25.0,
+                -43.30127018922193,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "start": [
+                -25.0,
+                -43.30127018922193,
+                0.0
+              ],
+              "end": [
+                25.0,
+                -43.30127018922193,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "start": [
+                25.0,
+                -43.30127018922193,
+                0.0
+              ],
+              "end": [
+                50.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "distance": 50,
+        "draft": 0,
+        "corner": "curvature",
+        "cap": true
+      }
+    },
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "profile": [
+          {
+            "line": {
+              "start": [
+                5e-11,
+                0.0,
+                71.0
+              ],
+              "end": [
+                34.00000000005,
+                58.88972745734183,
+                71.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "center": [
+                5e-11,
+                0.0,
+                71.0
+              ],
+              "axis": [
+                -0.8660254037844386,
+                0.5,
+                0.0
+              ],
+              "reference": [
+                -0.5,
+                -0.8660254037844386,
+                0.0
+              ],
+              "radius": 68.0,
+              "start": 3.141592653589793,
+              "end": 3.886288438457613
+            }
+          },
+          {
+            "arc": {
+              "center": [
+                5e-11,
+                0.0,
+                71.0
+              ],
+              "axis": [
+                -0.8660254037844386,
+                0.5,
+                0.0
+              ],
+              "reference": [
+                -0.5,
+                -0.8660254037844386,
+                0.0
+              ],
+              "radius": 68.0,
+              "start": 3.886288438457613,
+              "end": 4.33591136746237
+            }
+          },
+          {
+            "arc": {
+              "center": [
+                5e-11,
+                0.0,
+                71.0
+              ],
+              "axis": [
+                -0.8660254037844386,
+                0.5,
+                0.0
+              ],
+              "reference": [
+                -0.5,
+                -0.8660254037844386,
+                0.0
+              ],
+              "radius": 68.0,
+              "start": 4.33591136746237,
+              "end": 4.71238898038469
+            }
+          },
+          {
+            "line": {
+              "start": [
+                5e-11,
+                0.0,
+                3.0
+              ],
+              "end": [
+                5e-11,
+                0.0,
+                71.0
+              ]
+            }
+          }
+        ],
+        "origin": [
+          5e-11,
+          0.0,
+          0.0
+        ],
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "angle": 6.283185307179586,
+        "cap": true
+      }
+    },
+    {
+      "inputs": [
+        "b1",
+        "b2"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "result": [
+    {
+      "body": "Bowl",
+      "made": "b3"
+    }
+  ],
+  "expected": {
+    "source": "analytic",
+    "method": "Closed-form polar integral of the spherical roof over the regular hexagon; derivation in what. The +5e-11 mm X shift changes the exact volume by <4e-7 mm^3 (roof derivative bound in what), below the grading tolerance.",
+    "body_count": 1,
+    "volume_mm3": 73854.71109795274,
+    "tolerance": {
+      "rel": 1e-06
+    }
+  },
+  "operation_expressible": true,
+  "expressible": true,
+  "why_not": [],
+  "ungraded": []
+}
