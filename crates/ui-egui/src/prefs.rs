@@ -1298,6 +1298,8 @@ preference_settings! {
     language: String = "system".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.
     layout: crate::shell::LayoutMode = Default::default(), PAGE_LAYOUT;
+    /// Mount existing docked content in the shared layout; Classic stays available.
+    shared_panel_layout: bool = false, PAGE_LAYOUT;
     /// Ordered view controls and their appearance.
     #[serde(default)]
     navigation_bar: crate::navigation_bar::NavigationBar = Default::default(), PAGE_LAYOUT;
@@ -1378,6 +1380,9 @@ preference_settings! {
     /// A Play History button in the History controls, between Previous and Next (#3688). Off
     /// gives the four controls History had before; right-clicking the controls toggles it too.
     history_play_button: bool = true, PAGE_LAYOUT;
+    /// A History folder whose features are all of one kind (Holes, say) shows their icon instead of
+    /// the folder icon, in both Histories. Off by default: every folder shows the folder icon.
+    history_folder_kind_icon: bool = false, PAGE_LAYOUT;
     /// On, two or more joints show as one button with their count in the History, and a click
     /// shows each one (#8884). Off, the default, shows each joint as the History always has.
     history_group_joints: bool = false, PAGE_LAYOUT;
@@ -1423,6 +1428,9 @@ preference_settings! {
     /// Every component placement in the browser starts open, as before #9274, instead of closed
     /// until the user opens it. Off by default.
     browser_components_open: bool = false, PAGE_LAYOUT;
+    /// Each body row in the Browser folds open on the timeline features that built it, in
+    /// timeline order (#11945). Off by default: body rows have no fold arrow, as before.
+    browser_body_features: bool = false, PAGE_LAYOUT;
     /// Folders in the Browser start closed, and placements too whatever "Components start open"
     /// says, and they open only on request (#8768): with their arrow, Expand All or Find in
     /// Browser, which opens just the rows down to its body and closes again the ones the last find
@@ -1486,6 +1494,13 @@ preference_settings! {
     /// hole moves the hole there (`hole_place`). Off by default: a second pick on its face takes
     /// the hole out, and a hole is moved by taking it out and picking again.
     hole_moves: bool = false, PAGE_TOOLS => check("Move holes by clicking or dragging");
+    /// A face takes several Single holes: a pick elsewhere on a face that has a hole adds another,
+    /// and a pick on a hole takes it out (`hole_place`). Off by default: a face takes one Single
+    /// hole, and a second pick on it takes the hole out (or moves it, with `hole_moves`).
+    hole_several: bool = false, PAGE_TOOLS => check_id("prefs.design_tools.hole_several");
+    /// The holes one Hole command makes (two or more) go into a feature folder in History, closed
+    /// at first (`hole_place`). Off by default: each hole is its own entry in History, as before.
+    hole_group: bool = false, PAGE_TOOLS => check_id("prefs.design_tools.hole_group");
     /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
     hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
     /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit): a marker that
@@ -2790,7 +2805,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     match button {
         Some("defaults") => defaults(app, app.prefs_window.section),
-        Some("apply") if app.prefs_window.panel_restore_error.is_none() => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") if app.prefs_window.panel_restore_error.is_none() => match crate::panel_runtime::sync_production_setting(app) {
+            Ok(()) => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+            Err(reason) => app.prefs_window.panel_restore_error = Some(solidcraft_engine::panels::commands::error_text(reason)),
+        },
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
         _ if closed => close(app, true),
@@ -3304,7 +3322,10 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     match button.as_ref().and_then(|b| b.as_str()) {
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
-        Some("apply") if app.prefs_window.panel_restore_error.is_none() => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") if app.prefs_window.panel_restore_error.is_none() => {
+            crate::panel_runtime::sync_production_setting(app).map_err(solidcraft_engine::panels::commands::error_text)?;
+            app.prefs_window.snapshot = Some(Snapshot::take(app));
+        }
         Some("apply") => {}
         Some("defaults") => defaults(app, app.prefs_window.section),
         Some(b) => return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults)")),
@@ -4277,6 +4298,33 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn invalid_legacy_panel_preferences_recover_before_shared_host_setup() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.load_prefs(
+            &json!({"preferences":{"browser_width":0.0,"timeline_left_width":-1.0,
+                "agent_chat_width":1e9,"render_browser_width":0.0,"browser_share":2.0}})
+            .to_string(),
+        );
+        let defaults = Prefs::default();
+        assert_eq!(app.preferences.browser_width, 0.0);
+        assert_eq!(crate::browser::browser_width(app.preferences.browser_width), 170.0, "Classic keeps its existing saved-width behavior");
+        app.preferences.shared_panel_layout = true;
+        crate::panel_runtime::sync_production_setting(&mut app).unwrap();
+        assert!(app.panel_runtime().is_some(), "malformed legacy sizes must not leave setup retrying each frame");
+        let imported = crate::panel_runtime::preferences_value(&app).unwrap();
+        for (name, expected) in [
+            ("browser_width", defaults.browser_width),
+            ("history_width", defaults.timeline_left_width),
+            ("assistant_width", defaults.agent_chat_width),
+            ("render_width", defaults.render_browser_width),
+            ("browser_share", defaults.browser_share),
+        ] {
+            assert_eq!(imported["legacy"][name], json!(expected));
+        }
+        assert_eq!((app.preferences.browser_width, app.preferences.browser_share), (0.0, 2.0), "shared import never rewrites Classic preferences");
+    }
+
     #[test]
     fn theme_traits_use_resolved_background_and_maximal_contrast() {
         use theme_picker::{Classification, theme_traits};
@@ -6381,6 +6429,7 @@ mod tests {
             ("timeline_under_browser", json!(true), PAGE_LAYOUT),
             ("history_sketches", json!("under_feature"), PAGE_LAYOUT),
             ("history_play_button", json!(false), PAGE_LAYOUT),
+            ("history_folder_kind_icon", json!(true), PAGE_LAYOUT),
             ("history_group_joints", json!(true), PAGE_LAYOUT),
             ("history_bar_groups", json!(true), PAGE_LAYOUT),
             ("browser_float", json!(true), PAGE_LAYOUT),
@@ -6400,6 +6449,8 @@ mod tests {
             ("direct_interaction", json!(true), PAGE_TOOLS),
             ("hole_snaps", json!(true), PAGE_TOOLS),
             ("hole_moves", json!(true), PAGE_TOOLS),
+            ("hole_several", json!(true), PAGE_TOOLS),
+            ("hole_group", json!(true), PAGE_TOOLS),
             ("extrude_arrow_face_stops", json!(false), PAGE_TOOLS),
             ("extrude_auto_to_object", json!(false), PAGE_TOOLS),
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),

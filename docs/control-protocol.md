@@ -48,6 +48,10 @@ Query replies contain no new host effects.
 | `panel.float` | Same as move, requiring a `new_section` with `floating` location. |
 | `panel.popout` | Same as move, requiring a `new_section` with `window` location and return destination. Desktop/headless without native capability refuse; web explicitly lowers to `floating`. |
 | `panel.focus` | `{target:instance,expected_revision?}`. Reopens retained closed state, activates, expands and requests focus. |
+| `panel.focus.next`, `panel.focus.previous` | `{expected_revision?}`. Resolve the next or previous eligible panel from the live host's keyboard context. |
+| `panel.toggle` | `{expected_revision?}`. Collapse or expand the focused panel's section. |
+| `panel.move.next_zone` | `{expected_revision?}`. Move the focused panel to its next permitted zone. |
+| `panel.sash.left`, `panel.sash.right`, `panel.sash.up`, `panel.sash.down`, `panel.sash.reset` | `{expected_revision?}`. Resize or reset the focused sash through the same constrained candidate path as pointer resizing. |
 | `panel.activate` | `{target:instance,expected_revision?}`. Activates an open tab without expanding or requesting focus. |
 | `panel.action` | `{target:instance,action:ControlId,expected_revision?}`. Validates registration, active/open state, availability and owning controller binding, then invokes the real bound action. Returns `LayoutReply`; missing/disabled bindings refuse. |
 | `panel.peek` | `{target:instance,expected_revision?}`. Temporary presentation of a collapsed tab, without persistence changes to size/collapse. |
@@ -60,6 +64,19 @@ Query replies contain no new host effects.
 | `layout.reset` | `{expected_revision?}`. Applies the selected workspace's registered immutable default. User presets and other workspace histories remain. Missing defaults return a capability error. |
 | `layout.get` | `{}` → `{state,workspaces:[{id,title_key,default_preset,has_remembered_layout}]}`. Selection is only `state.layout.workspace`. |
 | `layout.workspace.select` | `{workspace:WorkspaceId,expected_revision?}` → `{previous_workspace,source:"remembered"\|"default_preset"\|"unchanged",state}`. Registered descriptors only; no implicit creation. |
+
+The nine contextual commands above return `LayoutReply`. Their strict input accepts
+only the optional revision, checked before resolving the host context. A headless
+sink without a live context refuses rather than guessing a focused panel or sash.
+Command metadata reports the live availability and a localized disabled reason.
+An atomic batch may contain one contextual command alone; a mixed atomic batch
+refuses before applying any action.
+
+Shortcuts use the existing rebindable keymap. The four sash arrow bindings retain
+their existing defaults; the other contextual commands start unbound. Automatic
+host shortcuts defer to a focused text editor. Explicit contextual command calls
+may target its actually owned panel, but cannot infer a sash from an editor.
+Modal, document, viewport and stale-presentation guards still apply.
 
 Destinations are distinct foundation operations, not aliases:
 
@@ -263,7 +280,7 @@ actual current Session without another service tick. Runtime inspection remains
 read-only. The shared host adds no production command registration beyond the
 application-layout commands above.
 
-For native host evidence, `ui.panel_fixture {enabled?, preset?, remember?, translucency_percent?}` installs bounded
+For native host evidence, `ui.panel_fixture {enabled?, preset?, remember?, translucency_percent?, reduced_motion?}` installs bounded
 synthetic content in the real `SolveApp` workspace host. The normal connection
 authentication applies. It is off by default and ephemeral unless explicitly
 enabled with `remember:true`. It adds no design change, production content
@@ -277,6 +294,7 @@ registration or native panel window.
 | `{"preset":"tabs","remember":true}` | Enable the specimen and its application preference catalogue. Restore a saved record after valid host dimensions are available. |
 | `{"preset":"surfaces","translucency_percent":50}` | Enable declared surface-policy specimens with a runtime-only translucency request (finite 0–100 percent). Readability may raise effective opacity. |
 | `{"translucency_percent":100}` | Change the enabled specimen's request without replacing controllers, drafts or layout. Refuse if no specimen owns the host. |
+| `{"reduced_motion":true}` | Disable specimen host animation without replacing controllers or changing saved preferences or layout. False restores theme-controlled motion. Refuse if no specimen owns the host. |
 | `{"enabled":false}` | Preflight and tear down only the specimen runtime; refusal leaves it intact. |
 
 Presets are `docks` (Left/Right/Bottom, with two Left sections), `tabs` (two groups
@@ -595,7 +613,7 @@ reply without `param_check` as unchecked. The bridged MCP server asks once per c
 | Method | Params | Result |
 |---|---|---|
 | `engine.execute` | `command`: command id, `params`: JSON object | the command's result |
-| `engine.script` | `commands`: `[{command, params}, …]` | results, stops at the first error |
+| `engine.script` | `commands`: `[{command, params}, …]` | results. Each step runs as `engine.execute` runs it, so the window follows it as it does a batch step. The first error stops the script, and the steps before it stay |
 | `engine.batch` | `commands`: `[{command, params}, …]` (at most 10 000), `rollback?`: bool (default true), `timings?`, `profile?`, `coalesce_parameters?`: bool (default false) | `{completed, results, undone}`, plus `failed: {index, command, error}` when a step fails, and with `timings` `timings: [{index, command, ms}]` (the failing step included) and `total_ms`; `profile` adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`. Runs the steps in one request, so within one frame, each as `engine.execute` runs it. The first failure stops the batch, and with `rollback` the design goes back to how it was before it (`undone`: the steps taken back, `rolled_back`: whether the design is back as it was, `false` only when the checkpoint could not restore it). Refused before anything runs, with an error starting `engine.batch unavailable`, when a step loads a file (`doc.open`, `file.insert_step`, `file.insert_mesh`, `pointcloud.insert`, `pointcloud.reload`) or when it goes to another design's tab (`component.edit_in_place`, `component.finish_edit`, which `engine.script` refuses too). Send such steps one by one. A step the batch would certainly refuse at its turn is found before the first step runs (#5853): a step without a command, an unknown command id (with the closest ids) or, with strict parameter checking, a call that breaks its command's contract. The reply is then that step's failure with `completed: 0`, `undone: 0`, `not_run` listing every step and a `note`; nothing has run. With `coalesce_parameters`, each run of consecutive plain parameter edits (`parameters.change` with only a name and an expression, or with `changes`) is set as one `parameters.change {changes}`, so the design rebuilds once for the run. Every step still gets its own result (with `coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits: an edit that would be refused on its own, but not once the run's later edits are in, goes through. A run whose combined edit is refused (a new parameter, a bad expression) runs step by step, so the refused step is named. Answered when done, for up to 3600 s |
 | `engine.commands` | — | every command: id, label, tab, panel, icon, shortcut (the user's current first key, or null when cleared), params doc, enabled |
 | `document.revision` | — | `{document_id, revision}`: the active design's id and a number that moves whenever the design changes, for programs that follow it ([Following the design](#following-the-design)) |
@@ -805,6 +823,7 @@ no box selection.
 | `ui.at` | `world: [x,y,z]` \| `sketch: [x,y]` \| `plane: "XY"` \| `axis: "Z"` \| `dimension: "d1"` (its value text) \| `handle: "arrow"` (a manipulator handle, see `scenario::publish_handle`) | the screen point (a scenario step's target; see `crates/ui-egui/src/scenario.rs`) |
 | `ui.pick` | `pixels?: [[x,y]…]`, `rays?: [{origin, dir}…]`, `frame?: "window"\|"model"`, `width?`, `height?`, `edges?` (default true), `edge_px?` (default 6), `all?`, `include_ghosted?` | read-only geometry under each pixel or ray (#6304): one entry per input, `null` where nothing is hit — body, face index, exact world `point` and outward `normal`, `depth`, `occurrence`/`component` for placed parts, `edge`/`vertex` within `edge_px` of a pixel, `section_cap: true` on a cut face. `window` pixels are physical pixels of a window screenshot; `model` pixels are pixels of a `ui.render` of `width`×`height` (default 960×600), so it works headless. As `view.pick` through `engine.execute`/`engine.batch`. See `crates/ui-egui/src/view_pick.rs` |
 | `ui.handles` | `prefix?` | the handles drawn last frame, `[{name, x, y}]`: toolbar buttons and drop-down items `toolbar:<command id>` (the button alone: `button:<command id>`; a drop-down row: `dropdown:<command id>`, highlighted `dropdown_hot:<command id>`, its pin `dropdown_pin:<command id>`; Customize Toolbar's check boxes `customize:<command id>`), ribbon tabs `tab:<name>` (MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW, SHEET METAL, WELDMENTS; contextual SKETCH; workspace RENDER), the toolbar menu button `ribbon:add_tab`, the hint when every tab is hidden `ribbon:tabs_hidden`, Preferences tab check boxes `prefs:toolbar_tab:<NAME>`, panel labels `panel:<tab>:<panel>` (also `ribbon:section:<TAB>:<SECTION>`), document overflow list `tab:overflow`, workspace column `ribbon:workspace`, command-search launcher `ribbon:search`, browser rows `row:<label>`, where each row's depth puts it `indent:<label>`, and fold arrows `fold:<label>`, manipulator handles; signed-axis tips `axis_view:z`, `axis_view:-y`; optional cube facets `navigation_cube:top`, `navigation_cube:top_front_right`, controls `navigation_cube:control:home` (and other actions), plus signed-axis aliases for visible cube faces; Preferences navigator picker `prefs:navigator`, options `prefs:navigator:Signed axes` and `prefs:navigator:Cube`; in the Motion Study dialog, where the chart puts its first and last step `motion:chart_start` and `motion:chart_end`, the Check collisions button `motion:check` and each collision found `motion:collision:<n>` |
+| `ui.editFolder` | `folder` (id or name) | Edit Holes on a History folder that holds holes only: one Hole dialog, filled in from its first hole, whose OK gives every hole in the folder the fields changed there. Replies as `ui.start` does |
 | `ui.editFeature` | `feature` (id or name) | what double-clicking a timeline item does: rolls back to it and opens its dialog filled in (sketches open in sketch mode). Replies as `ui.start` does, with the history `marker` |
 | `ui.scroll` | `x`, `y`, `delta?`, `ctrl?`, `unit?`: `point` \| `line` | wheel zoom at the cursor. `ctrl: true` replays a Ctrl+wheel pinch (Ctrl held and the wheel in points); `unit` selects the wheel unit and defaults to points with `ctrl` and lines without it. `delta` is in points either way. Invalid units or coordinates outside the finite screen-coordinate range are rejected before queuing input |
 | `ui.key` | `key` (egui key name, `Enter`, `Escape`…), `cmd?`, `ctrl?`, `shift?`, `alt?`, `pressed?` | By default, press and release, then release modifiers. With `pressed: true` or `false`, send only that edge; modifiers remain as given. `cmd` retains the legacy primary-modifier alias unless `ctrl` is explicit: `cmd:true, ctrl:false` sends physical Command, and both true sends Control+Command. `ui.move` can change modifiers between edges. |
@@ -894,7 +913,9 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `ground_shadow_follows_model` (Graphics, default false): raised models cast their ground shadow on the origin ground plane; true restores the shadow below the lowest visible body. Both modes keep the shadow below bodies extending beneath the origin, and follow the selected up axis.
 - `hidden_toolbar_tabs` (default `[]`: all existing tabs, including Sheet Metal and Weldments, stay visible; lists tabs to hide, each once, e.g. `["SURFACE", "SHEET METAL"]`; hidden tabs stay hidden regardless of the design's features; [ribbon layout](ribbon-layout.md))
 - `history_sketches` (`in_order` (default), `under_feature`: the History at the left lists a sketch under the first feature built from it, #6489; the timeline at the bottom keeps the creation order)
+- `hole_group` (default false: the holes one Hole command makes, two or more, go into a feature folder in History, closed at first)
 - `hole_moves` (default false: a placed Single hole has a drag handle (`hole:<n>`), and a pick on a face that has a hole moves it there)
+- `hole_several` (default false: a face takes several Single holes; a pick elsewhere on a face that has a hole adds another, and a pick on a hole takes it out)
 - `hole_snaps` (default false: a Single hole snaps to its face's middle and round edges' centres)
 - `home_fit_size` (0.1…1, default 1: how much of the view the model fills when Home, Fit, an opened design or a navigator view change frames it, with `navigator_fit` on or off; 1 fills the room between the panels, the compass and the navigation bar, as before; #10091)
 - `joint_rotation_coarse` (default 10°): coarse Assembly Move rotation step, in 0.001…180°.

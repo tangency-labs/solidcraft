@@ -3483,6 +3483,11 @@ pub(crate) fn environment_overlay(app: &mut SolveApp, ui: &mut egui::Ui, viewpor
 
 pub(crate) fn interactive_command_info(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> solidcraft_engine::CommandInfo {
     let mut info = ribbon::command_info(app, command);
+    if let Some(action) = solidcraft_engine::panels::ContextualPanelAction::from_command_id(command.id) {
+        info.disabled_reason = app.panel_contextual_disabled_reason(action);
+        info.enabled = info.disabled_reason.is_none();
+        return info;
+    }
     // A drawing tool on the SKETCH tab kept shown outside a sketch starts one (#7904).
     if crate::workspace::starts_a_sketch(app, command.id) {
         info.enabled = true;

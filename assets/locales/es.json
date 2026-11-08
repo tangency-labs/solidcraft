@@ -5652,6 +5652,8 @@
   "ui.mesh_format_3mf": "3MF",
   "ui.mesh_format_3mf_tagged": "3MF con etiquetas de cara",
   "ui.mesh_format_stl": "STL",
+  "ui.mesh_import_origin": "Mover al origen",
+  "ui.mesh_import_origin_tip": "Centra la malla en X e Y con su base en Z = 0. Si está desactivado, la malla conserva las coordenadas guardadas en el archivo.",
   "ui.minor_radius": "Radio menor",
   "ui.mirror": "Simetría",
   "ui.mirror_line": "Línea de simetría",
