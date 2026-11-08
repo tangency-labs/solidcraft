@@ -5505,6 +5505,17 @@ fn feature_tools_with_constructor(
             // To a curved (or slanted) face: run right through the target body, then keep what
             // lies before its surface (the tool less the body, the piece at the start).
             let curved = curved_face(&tst, to_face, Some(n));
+            // The tool is cut back to that surface below, which removes the part a To offset adds
+            // past it: the offset would change nothing, so say so instead of cutting nothing (#12617).
+            if curved.is_some()
+                && matches!(operation, Operation::Join | Operation::Cut)
+                && let Some(e) = &extent.to_offset
+                && val(vals, e, Kind::Length)? > 1e-9
+            {
+                return Err(DocError::Invalid(
+                    "not supported yet: To Object with an offset past a curved or slanted face (the tool is cut back to that face, so the offset would do nothing); use a Distance, or an offset of 0 or less".into(),
+                ));
+            }
             if let Some(bi) = curved
                 && let Some(tb) = tst.bodies.get(bi)
             {
