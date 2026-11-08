@@ -582,6 +582,8 @@ const ARABIC_FONT_CANDIDATES: &[&str] = &[
     // Linux: Noto Sans Arabic, Noto Naskh Arabic, KACST One, DejaVu Sans
     "/usr/share/fonts/noto/NotoSansArabic-Regular.ttf",
     "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+    // openSUSE installs google-noto-sans-arabic-fonts directly under truetype (#12670).
+    "/usr/share/fonts/truetype/NotoSansArabic-Regular.ttf",
     "/usr/share/fonts/google-noto/NotoSansArabic-Regular.ttf",
     "/usr/share/fonts/google-noto-vf/NotoSansArabic[wght].ttf",
     "/usr/share/fonts/opentype/noto/NotoSansArabic-Regular.ttf",
@@ -975,14 +977,51 @@ fn find_chinese_font_in(dirs: &[std::path::PathBuf]) -> Option<Vec<u8>> {
     dirs.iter().find_map(|dir| scan_dir_for_font_where(dir, 3, is_chinese_font_name, draws_simplified_chinese))
 }
 
-/// The first Arabic font in `CRAFT_FONTS_DIR` (`NotoSansArabic-Regular.ttf`) or the candidate
-/// paths that draws Arabic.
+/// A character the Arabic interface needs: ب, boxed when no Arabic face is installed (#12670).
+#[cfg(not(target_arch = "wasm32"))]
+const ARABIC_PROBE: char = 'ب';
+
+/// Whether the font's first face draws Arabic (see [`ARABIC_PROBE`]).
+#[cfg(not(target_arch = "wasm32"))]
+fn draws_arabic(bytes: &[u8]) -> bool {
+    covers(bytes, ARABIC_PROBE)
+}
+
+/// Whether a font file name looks like an Arabic face (Noto Sans Arabic, Naskh, Kufi).
+#[cfg(not(target_arch = "wasm32"))]
+fn is_arabic_font_name(file_name: &str) -> bool {
+    let name = file_name.to_ascii_lowercase();
+    ["arabic", "naskh", "kufi"].iter().any(|keyword| name.contains(keyword))
+}
+
+/// The first font in `dirs` (three folders deep, which reaches
+/// `/usr/share/fonts/truetype/NotoSansArabic-Regular.ttf`) whose name looks Arabic and that
+/// draws Arabic. The drawing check keeps out a file that only borrowed the name.
+#[cfg(not(target_arch = "wasm32"))]
+fn find_arabic_font_in(dirs: &[std::path::PathBuf]) -> Option<Vec<u8>> {
+    dirs.iter().find_map(|dir| scan_dir_for_font_where(dir, 3, is_arabic_font_name, draws_arabic))
+}
+
+/// The first Arabic font that draws Arabic: a folder named by `SOLIDCRAFT_FONT_DIRS` or
+/// `CRAFT_FONTS_DIR`, then the candidate paths, then the same system font folders the Chinese
+/// lookup scans (#12670).
 #[cfg(not(target_arch = "wasm32"))]
 fn arabic_font() -> Option<Vec<u8>> {
-    let pack = std::env::var("CRAFT_FONTS_DIR").ok().map(|dir| std::path::PathBuf::from(dir).join("NotoSansArabic-Regular.ttf"));
-    pack.into_iter()
-        .chain(ARABIC_FONT_CANDIDATES.iter().map(std::path::PathBuf::from))
-        .find_map(|path| try_read_font(&path).filter(|bytes| covers(bytes, 'ب')))
+    let overrides = font_override_dirs(std::env::var_os("SOLIDCRAFT_FONT_DIRS"), std::env::var_os("CRAFT_FONTS_DIR"));
+    for dir in &overrides {
+        if let Some(bytes) = try_read_font(&dir.join("NotoSansArabic-Regular.ttf")).filter(|bytes| draws_arabic(bytes)) {
+            return Some(bytes);
+        }
+    }
+    if let Some(bytes) = find_arabic_font_in(&overrides) {
+        return Some(bytes);
+    }
+    for path in ARABIC_FONT_CANDIDATES {
+        if let Some(bytes) = try_read_font(std::path::Path::new(path)).filter(|bytes| draws_arabic(bytes)) {
+            return Some(bytes);
+        }
+    }
+    find_arabic_font_in(&chinese_font_dirs())
 }
 
 /// Web installs the bundled faces synchronously; Japanese and Chinese are fetched by the shell
@@ -1564,6 +1603,31 @@ mod tests {
         // …but it doesn't draw simplified Chinese, so it isn't taken as the Chinese fallback.
         assert_eq!(find_chinese_font_in(std::slice::from_ref(&folder.0)), None);
         assert_eq!(find_chinese_font_in(&[folder.0.join("missing")]), None);
+    }
+
+    #[test]
+    fn arabic_font_names_match_noto_naskh_and_kufi() {
+        for arabic in ["NotoSansArabic-Regular.ttf", "NotoNaskhArabic-Regular.ttf", "NotoKufiArabic-Regular.ttf", "NotoSansArabic[wght].ttf"] {
+            assert!(is_arabic_font_name(arabic), "{arabic} is an Arabic font");
+        }
+        for other in ["NotoSans-Regular.ttf", "DejaVuSans.ttf", "segoeui.ttf", "KacstOne.ttf"] {
+            assert!(!is_arabic_font_name(other), "{other} is not an Arabic font");
+        }
+    }
+
+    #[test]
+    fn the_arabic_font_search_scans_font_folders_and_checks_what_the_font_draws() {
+        // #12670: openSUSE puts Noto Sans Arabic at /usr/share/fonts/truetype/NotoSansArabic-Regular.ttf,
+        // which none of the fixed paths named. The folder scan reaches it, three folders deep.
+        let folder = FontFolder::new("arabic-scan");
+        let truetype = folder.0.join("truetype");
+        std::fs::create_dir_all(&truetype).unwrap();
+        let japanese = japanese_font_bytes();
+        std::fs::write(truetype.join("NotoSansArabic-Regular.ttf"), &japanese).unwrap();
+        std::fs::write(truetype.join("DejaVuSans.ttf"), &japanese).unwrap();
+        assert_eq!(scan_dir_for_font_where(&folder.0, 3, is_arabic_font_name, |_| true), Some(japanese));
+        assert_eq!(find_arabic_font_in(std::slice::from_ref(&folder.0)), None, "a font that does not draw Arabic is skipped");
+        assert_eq!(find_arabic_font_in(&[folder.0.join("missing")]), None);
     }
 
     #[test]
