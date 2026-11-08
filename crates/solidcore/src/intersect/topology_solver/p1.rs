@@ -27,6 +27,10 @@
 //! | `GlobalSolve::identical_solutions` for [`TopologySolver`], `TopologyDomains` (private) | `SmGlobalSolver::IdenticalSolutions` (not overridden upstream: the solutions' `SmObject*` resolve through [`TopologyObjects`]) |
 //!
 //! Deviations:
+//! - **Projected tree bounds.** Outward-rounded projected boxes use the queries'
+//!   double-cross metric, including its non-unit-normal scale, and retain answers
+//!   within the query tolerance. Upstream compared an unscaled sphere distance
+//!   with scaled answers and no tolerance (WR-766).
 //! - **Objects.** Tree objects and solution objects are a caller-chosen handle `O`
 //!   (upstream `SmObject*`; a null pointer is `None`). Everything the solvers read
 //!   through those pointers (the curve behind a tree object, a vertex's point and
@@ -84,6 +88,7 @@
 //!   and `sign = 1.0`, matching `SmTLSPointCurve::SolveIt` and
 //!   `SmTLSPointFace::SolveIt`.
 
+use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p8::CurveIntersectOptions;
@@ -589,27 +594,19 @@ impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
             }
 
             SolverOperation::ProjectedMinimize | SolverOperation::ProjectedMaximize => {
-                let s1 = box1.sphere_bound();
-                let s2 = box2.sphere_bound();
-                let proj_pnt = point_project_to_plane(s2.center, s1.center, opt_vector(s, 0)?);
-                if s.operation == SolverOperation::ProjectedMinimize {
-                    let min_proj_dist = proj_pnt.distance(s1.center) - s1.radius - s2.radius;
-                    if min_proj_dist > 0.0
-                        && min_proj_dist * min_proj_dist > s.best_answer_so_far_sq
-                    {
-                        return Ok(false);
-                    }
-                }
-                if s.operation == SolverOperation::ProjectedMaximize {
-                    let max_proj_dist = proj_pnt.distance(s1.center) + s1.radius + s2.radius;
-                    if max_proj_dist * max_proj_dist < s.best_answer_so_far_sq {
-                        return Ok(false);
-                    }
-                }
-
-                // If we were unable to elimiate using above sphere tests then
-                // we just skip out here with a TRUE.
-                Ok(true)
+                // Bound every pair of box points in the queries' own double-cross
+                // metric, and retain answers within the query tolerance as the
+                // Minimize and Maximize arms above do.
+                let distance =
+                    super::projected_metric::projected_box_distance(box1, box2, opt_vector(s, 0)?);
+                let best = Ivl::from(s.best_answer_so_far_sq).sqrt();
+                let budget = Ivl::from(tol);
+                let excluded = if s.operation == SolverOperation::ProjectedMinimize {
+                    distance.lo > (best + budget).hi
+                } else {
+                    distance.hi < (best - budget).lo
+                };
+                Ok(!excluded)
             }
 
             // If we are doing a directed minimization we can use the bounding
@@ -2572,6 +2569,33 @@ pub(crate) mod tests {
         let c = Extent3d::from_bounds(1.2, 0.0, 0.0, 2.0, 1.0, 1.0);
         assert!(ts.may_contain_answer(&a, &b).unwrap());
         assert!(!ts.may_contain_answer(&a, &c).unwrap());
+    }
+
+    #[test]
+    fn projected_box_culling_retains_answers_within_query_tolerance() {
+        let k = Kernel::default();
+        let sc = scene();
+        let origin = Extent3d::from_bounds(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        for (operation, sign) in [
+            (SolverOperation::ProjectedMinimize, 1.0),
+            (SolverOperation::ProjectedMaximize, -1.0),
+        ] {
+            let ts: TopologySolver<'_, '_, Obj> = TopologySolver::new(
+                &k,
+                &sc,
+                operation,
+                SolutionRequested::All,
+                1e-5,
+                1.0,
+                &[Vec3::new(0.0, 0.0, 2.0)],
+            );
+            // The double-cross metric scales a transverse distance by four.
+            for (offset, retained) in [(5e-6, true), (2e-5, false)] {
+                let x = (1.0 + sign * offset) / 4.0;
+                let point = Extent3d::from_bounds(x, 0.0, 0.0, x, 0.0, 0.0);
+                assert_eq!(ts.may_contain_answer(&origin, &point).unwrap(), retained);
+            }
+        }
     }
 
     #[test]
