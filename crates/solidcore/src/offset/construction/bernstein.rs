@@ -544,4 +544,32 @@ mod tests {
         assert!(p.mul(&poly(1, 0, |_, _| 1.0), &b).is_err());
         assert!(Bernstein2::new(1, 1, vec![0.0; 3]).is_err());
     }
+
+    /// The row width `dv + 1` is never zero and cannot overflow: `new` refuses a
+    /// degree past [`MAX_DEGREE`] before it counts coefficients, and splitting,
+    /// restricting and transposing keep the degrees.
+    #[test]
+    fn extreme_degrees_neither_panic_nor_change_values() {
+        assert!(Bernstein2::new(usize::MAX, usize::MAX, Vec::new()).is_err());
+        assert!(Bernstein2::new(0, MAX_DEGREE + 1, vec![0.0; MAX_DEGREE + 2]).is_err());
+        let k = Bernstein2::constant(2.5);
+        let wide = poly(0, MAX_DEGREE, |_, j| 1.0 + (j as f64) * 0.01);
+        let tall = poly(MAX_DEGREE, 0, |i, _| 1.0 - (i as f64) * 0.01);
+        for p in [&k, &wide, &tall] {
+            let (lu, ru) = p.split_u(0.4);
+            let (lv, rv) = p.split_v(0.4);
+            let s = p.restrict(0.1, 0.9, 0.2, 0.8);
+            for &u in &SAMPLES {
+                for &v in &SAMPLES {
+                    assert!((lu.eval(u, v) - p.eval(0.4 * u, v)).abs() < 1e-9);
+                    assert!((ru.eval(u, v) - p.eval(0.4 + 0.6 * u, v)).abs() < 1e-9);
+                    assert!((lv.eval(u, v) - p.eval(u, 0.4 * v)).abs() < 1e-9);
+                    assert!((rv.eval(u, v) - p.eval(u, 0.4 + 0.6 * v)).abs() < 1e-9);
+                    assert!((s.eval(u, v) - p.eval(0.1 + 0.8 * u, 0.2 + 0.6 * v)).abs() < 1e-9);
+                }
+            }
+            assert_eq!(lu.degrees(), p.degrees());
+            assert_eq!(rv.degrees(), p.degrees());
+        }
+    }
 }

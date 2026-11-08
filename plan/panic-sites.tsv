@@ -718,17 +718,17 @@ crates/solidcore/src/nurbs/srf_tool/p3.rs	RemoveAll::step	int-div	3	proven	(2 * 
 crates/solidcore/src/nurbs/srf_tool/p3.rs	RemoveAll::step	int-rem	1	proven	(deg + sd) % 2	constant non-zero divisor
 crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::deriv_u	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::deriv_v	windows	1	proven	windows(2)	constant non-zero size
-crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::mul	chunks	1	open	chunks_mut(dv + 1)	
-crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::rows	chunks	1	open	chunks(self.dv + 1)	
-crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::split_v	with_capacity	1	open	Vec::with_capacity(self.c.len())	
-crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::split_v	with_capacity	2	open	Vec::with_capacity(self.c.len())	
-crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::transpose	step_by	1	open	step_by(self.dv + 1)	
-crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::transpose	with_capacity	1	open	Vec::with_capacity(self.c.len())	
+crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::mul	chunks	1	proven	chunks_mut(dv + 1)	dv <= MAX_DEGREE (96), checked in new() and kept by every constructor, so dv + 1 is 1..=97
+crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::rows	chunks	1	proven	chunks(self.dv + 1)	dv <= MAX_DEGREE (96), checked in new() and kept by every constructor, so dv + 1 is 1..=97
+crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::split_v	with_capacity	1	proven	Vec::with_capacity(self.c.len())	the length of a Vec already in memory
+crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::split_v	with_capacity	2	proven	Vec::with_capacity(self.c.len())	the length of a Vec already in memory
+crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::transpose	step_by	1	proven	step_by(self.dv + 1)	dv <= MAX_DEGREE (96), checked in new() and kept by every constructor, so dv + 1 is 1..=97
+crates/solidcore/src/offset/construction/bernstein.rs	Bernstein2::transpose	with_capacity	1	proven	Vec::with_capacity(self.c.len())	the length of a Vec already in memory
 crates/solidcore/src/offset/construction/bernstein.rs	Binomials::new	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/offset/construction/bernstein.rs	eval_1d	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/offset/construction/bernstein.rs	split_1d	windows	1	proven	windows(2)	constant non-zero size
-crates/solidcore/src/offset/construction/bernstein.rs	split_1d	with_capacity	1	open	Vec::with_capacity(c.len())	
-crates/solidcore/src/offset/construction/bernstein.rs	split_1d	with_capacity	2	open	Vec::with_capacity(c.len())	
+crates/solidcore/src/offset/construction/bernstein.rs	split_1d	with_capacity	1	proven	Vec::with_capacity(c.len())	the length of a Vec already in memory
+crates/solidcore/src/offset/construction/bernstein.rs	split_1d	with_capacity	2	proven	Vec::with_capacity(c.len())	the length of a Vec already in memory
 crates/solidcore/src/offset/construction/sheets.rs	greville	windows	1	proven	windows(DEGREE + 2)	constant non-zero size (DEGREE is a const)
 crates/solidcore/src/offset/construction/sheets.rs	least_radius	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
 crates/solidcore/src/offset/construction/sheets.rs	least_radius	f64::clamp	2	proven	clamp(0.0, 1.0)	constant bounds, min <= max
@@ -739,7 +739,7 @@ crates/solidcore/src/offset/offset_executive/p1.rs	sort_edgeuses	swap	1	open	swa
 crates/solidcore/src/offset/offset_executive/p2.rs	api_shell_brep_full	with_capacity	1	open	Vec::with_capacity(faces.len())	
 crates/solidcore/src/offset/offset_executive/step_gaps.rs	OffsetExecutive::close_loop_gaps_in	int-rem	1	open	(kk + 1) % num	
 crates/solidcore/src/offset/offset_executive/step_gaps.rs	OffsetExecutive::split_corner_vertices	int-rem	1	open	(kk + 1) % num	
-crates/solidcore/src/offset/offset_faces.rs	OffsetFacesExecutive::join_across_closed_walls	Vec::remove	1	open	remove(at)	
+crates/solidcore/src/offset/offset_faces.rs	OffsetFacesExecutive::join_across_closed_walls	Vec::remove	1	proven	remove(at)	at comes from position() over the same Vec just above
 crates/solidcore/src/offset/offset_geometry_creation.rs	OffsetGeometryCreation::create_step_wall	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/offset/offset_geometry_creation.rs	OffsetGeometryCreation::vertex_offset_with_backend	int-rem	1	open	(j + 1) % curves.len()	
 crates/solidcore/src/offset/offset_geometry_creation.rs	OffsetGeometryCreation::vertex_offset_with_backend	int-rem	2	proven	(kk + 1) % 3	constant non-zero divisor
