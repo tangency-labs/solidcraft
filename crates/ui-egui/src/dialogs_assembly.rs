@@ -2959,8 +2959,7 @@ pub(crate) fn ring_shapes(
             }
             let (p, q) = match name {
                 "angle" => ((v.cos() * r * 0.7, v.sin() * r * 0.7, 0.0), (v.cos() * r * 1.3, v.sin() * r * 1.3, 0.0)),
-                // Along the axis, where the joint slides; a pin-slot's slot runs along x.
-                "distance" | "slide" if kind != JointKind::PinSlot && v.abs() < 1e6 => ((-r * 0.3, 0.0, v), (r * 0.3, 0.0, v)),
+                "distance" if v.abs() < 1e6 => ((-r * 0.3, 0.0, v), (r * 0.3, 0.0, v)),
                 "slide" if v.abs() < 1e6 => ((v, -r * 0.3, 0.0), (v, r * 0.3, 0.0)),
                 _ => continue,
             };
@@ -2978,9 +2977,9 @@ pub(crate) fn ring_shapes(
 
 /// A ring of radius `r` about a joint's axis.
 fn motion_ring(screen: &impl Fn(f64, f64, f64) -> Option<Pos2>, r: f64, stroke: Stroke) -> Option<egui::Shape> {
-    let ring: Vec<Pos2> = (0..=48)
+    let ring: Vec<Pos2> = (0..=32)
         .filter_map(|k| {
-            let a = k as f64 / 48.0 * std::f64::consts::TAU;
+            let a = k as f64 / 32.0 * std::f64::consts::TAU;
             screen(r * a.cos(), r * a.sin(), 0.0)
         })
         .collect();

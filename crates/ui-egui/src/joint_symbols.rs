@@ -8,10 +8,11 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use egui::{Color32, Pos2, Shape, Stroke, Vec2, vec2};
 use solidcraft_engine::Session;
+use solidcraft_engine::doc::ModelState;
 use solidcraft_engine::doc::joints::{self, Joint, JointKind};
 
 use solidcraft_theme::Tokens;
@@ -25,22 +26,30 @@ const ARC: usize = 24;
 const POINT: f32 = 0.24;
 
 thread_local! {
-    /// The bright joints, for the design state they were found in.
+    /// The bright joints, for the design state they were found in, and the solve they came from.
     static BRIGHT: RefCell<Option<Bright>> = const { RefCell::new(None) };
 }
 
-/// A solve's answer, with what it holds for.
+/// The bright joints of one design state, and the solve they were picked from, with what that
+/// solve holds for.
 struct Bright {
     /// The design, by id and revision.
     state: (u64, u64),
+    joints: Arc<BTreeSet<u64>>,
     /// What the freedom depends on ([`construction`]). `None`: the solve found errors, so it may
     /// have run on a model still being built, and the next design state solves again.
     construction: Option<u64>,
-    joints: Arc<BTreeSet<u64>>,
+    /// The model geometry the joints' frames were found on. Moving parts keeps it; editing a
+    /// feature makes a new one.
+    geometry: Weak<ModelState>,
+    /// How free each part is in the world, and each joined pair against each other.
+    dof: Arc<BTreeMap<u64, usize>>,
+    pairs: Arc<BTreeMap<(u64, u64), usize>>,
 }
 
-/// A hash of what decides how free the parts are: everything about the joints but their values,
-/// so dragging a part doesn't solve again for every frame.
+/// A hash of what decides how free the parts are: everything about the joints but their values
+/// and limits, so dragging a part doesn't solve again for every frame. Limits don't change the
+/// freedom; [`bright_joints`] reads them from the design each time.
 fn construction(s: &Session) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -54,22 +63,31 @@ fn construction(s: &Session) -> u64 {
     h.finish()
 }
 
-/// The joints [`bright_joints`] picks in this design, solved once for each construction.
+/// The joints [`bright_joints`] picks in this design, from a solve made once for each
+/// construction and model geometry.
 pub(crate) fn bright(s: &Session) -> Arc<BTreeSet<u64>> {
     let state = (s.uid, s.revision);
     if let Some(joints) = BRIGHT.with(|b| b.borrow().as_ref().filter(|b| b.state == state).map(|b| b.joints.clone())) {
         return joints;
     }
     let built = construction(s);
-    let same = BRIGHT.with(|b| b.borrow().as_ref().filter(|b| b.state.0 == state.0 && b.construction == Some(built)).map(|b| b.joints.clone()));
-    let (joints, construction) = same.map_or_else(
+    let model = s.model.state();
+    let same = BRIGHT.with(|b| {
+        b.borrow()
+            .as_ref()
+            .filter(|b| b.state.0 == state.0 && b.construction == Some(built) && b.geometry.upgrade().is_some_and(|g| Arc::ptr_eq(&g, &model)))
+            .map(|b| (b.dof.clone(), b.pairs.clone()))
+    });
+    let (dof, pairs, construction) = same.map_or_else(
         || {
-            let solved = joints::solve_holding_with_analysis(&s.doc, &s.model.state(), &joints::Held::new(), joints::Analysis::PairFreedom);
-            (Arc::new(bright_joints(&s.doc.assembly.joints, &solved.dof, &solved.pair_dof)), solved.errors.is_empty().then_some(built))
+            let solved = joints::solve_holding_with_analysis(&s.doc, &model, &joints::Held::new(), joints::Analysis::PairFreedom);
+            (Arc::new(solved.dof), Arc::new(solved.pair_dof), solved.errors.is_empty().then_some(built))
         },
-        |joints| (joints, Some(built)),
+        |(dof, pairs)| (dof, pairs, Some(built)),
     );
-    BRIGHT.with(|b| *b.borrow_mut() = Some(Bright { state, construction, joints: joints.clone() }));
+    let joints = Arc::new(bright_joints(&s.doc.assembly.joints, &dof, &pairs));
+    let geometry = Arc::downgrade(&model);
+    BRIGHT.with(|b| *b.borrow_mut() = Some(Bright { state, joints: joints.clone(), construction, geometry, dof, pairs }));
     joints
 }
 

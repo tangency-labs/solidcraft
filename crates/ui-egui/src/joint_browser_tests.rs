@@ -146,6 +146,31 @@ fn the_bright_joints_follow_the_design() {
     assert!(crate::joint_symbols::bright(&h.app.session).get(&glue).is_none());
 }
 
+/// A limit picks which of a pair's joints draw bright, so setting one changes the bright joints
+/// though the construction, and so the solve, stays. Moving the parts keeps the model geometry
+/// the solve was made on.
+#[test]
+fn a_new_limit_changes_the_bright_joints_without_a_new_construction() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30)], |id, p| h.app.run(id, p).unwrap());
+    h.app.run("joint.as_built", json!({"type": "slider", "name": "Rail", "a": "A:1", "b": "B:1", "at": {"point": [30, 10, 5]}})).unwrap();
+    h.app.run("joint.as_built", json!({"type": "cylindrical", "name": "Rod", "a": "A:1", "b": "B:1", "at": {"point": [30, 10, 5]}})).unwrap();
+    h.frames(2);
+    let [rail, rod] = ["Rail", "Rod"].map(|name| id(&h, name));
+    let bright = |h: &Harness| crate::joint_symbols::bright(&h.app.session).iter().copied().collect::<Vec<_>>();
+    assert_eq!(bright(&h), [rail, rod], "B slides on both, and nothing stops it");
+
+    let geometry = h.app.session.model.state();
+    h.app.run("joint.drive", json!({"joint": "Rail", "value": 5})).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&geometry, &h.app.session.model.state()), "moving a part keeps the model geometry");
+
+    h.app.run("joint.limits", json!({"joint": "Rail", "min": -10, "max": 10})).unwrap();
+    assert_eq!(bright(&h), [rail], "the rail's limit now shapes the slide, and the rod goes quiet");
+    h.app.run("joint.limits", json!({"joint": "Rail"})).unwrap();
+    assert_eq!(bright(&h), [rail, rod], "cleared, both are bright again");
+}
+
 /// Components A (grounded) and B joined by a revolute "Hinge", and C held by a rigid "Glue".
 fn harness() -> Harness {
     let mut h = Harness::new();
