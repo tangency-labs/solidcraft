@@ -2889,6 +2889,7 @@ fn kit_item(item: &Item, lit: bool) -> crate::ui_kit::MenuItem<'_> {
         checked: (item.shortcut == "current").then_some(true),
         swatch: item.swatch.map(|c| Color32::from_rgb(c[0], c[1], c[2])),
         submenu: !item.children.is_empty(),
+        on_tab: false,
     }
 }
 

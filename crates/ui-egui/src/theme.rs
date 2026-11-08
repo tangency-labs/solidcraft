@@ -798,6 +798,27 @@ impl TabAccent {
         ctx.data(|d| d.get_temp::<Self>(egui::Id::unique("sc_tab_accent"))).unwrap_or_else(|| Self::for_tab(&Tokens::get(), "MODEL"))
     }
 
+    /// The active tab's icon ramp and the palette to draw its icons with, while icons follow
+    /// their tab's colour (Preferences › Appearance); `None` otherwise (`icons::paint_on_tab`).
+    pub fn tab_icons(ctx: &egui::Context) -> Option<(Option<&'static str>, crate::icon_svg::Palette)> {
+        ctx.data(|d| d.get_temp::<Option<(Option<&'static str>, crate::icon_svg::Palette)>>(egui::Id::unique("sc_tab_icons"))).flatten()
+    }
+
+    /// The palette a tab's icons follow its colour with: the theme's, with the tab's ramp (or the
+    /// shared one, for a tab without its own) made from the tab's colour, pale, medium and strong.
+    fn tab_icon_palette(tab: &str) -> (Option<&'static str>, crate::icon_svg::Palette) {
+        let t = Tokens::get();
+        let own = icon_accent_for_tab(tab);
+        let color = Self::for_tab(&t, tab).color;
+        let mut palette = t.icon_palette.unwrap_or_default();
+        let slot = own.and_then(crate::icon_svg::accent_index).map_or(0, |i| i + 1);
+        let rgb = |c: Color32| [c.r(), c.g(), c.b()];
+        if let Some(ramp) = palette.accents.get_mut(slot) {
+            *ramp = Some([rgb(color.lerp_to_gamma(Color32::WHITE, 0.78)), rgb(color.lerp_to_gamma(Color32::WHITE, 0.3)), rgb(color)]);
+        }
+        (own, palette)
+    }
+
     pub fn current_icon_accent(ctx: &egui::Context) -> Option<&'static str> {
         ctx.data(|d| d.get_temp::<Option<&'static str>>(egui::Id::unique("sc_tab_icon_accent"))).flatten()
     }
@@ -830,6 +851,7 @@ impl TabAccent {
         ctx.data_mut(|d| {
             d.insert_temp(egui::Id::unique("sc_tab_accent"), accent);
             d.insert_temp(egui::Id::unique("sc_tab_icon_accent"), icon_accent_for_tab(&app.ui.tab));
+            d.insert_temp(egui::Id::unique("sc_tab_icons"), app.preferences.tab_colored_icons.then(|| Self::tab_icon_palette(&app.ui.tab)));
             d.insert_temp(egui::Id::unique("sc_sketch_open"), app.session.active_sketch.is_some());
             d.insert_temp(egui::Id::unique("sc_tool_accent"), app.tool.is_some() || app.dialog.is_some());
         });

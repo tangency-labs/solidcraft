@@ -689,6 +689,12 @@ pub fn resolve(name: &str) -> Resolved {
     resolved
 }
 
+/// Whether an icon's own colour carries a meaning (a constraint's red, construction's orange), so
+/// it keeps that colour where icons otherwise follow their tab's (`icons::paint_on_tab`).
+pub(crate) fn keeps_its_colour(name: &str) -> bool {
+    resolve_master(name).accent.and_then(|i| ACCENT_NAMES.get(i)).is_some_and(|accent| matches!(*accent, "constraint" | "construction"))
+}
+
 fn resolve_master(name: &str) -> Resolved {
     let (big, _) = table();
     let placeholder = Resolved { master: PLACEHOLDER, accent: None, placeholder: true };
