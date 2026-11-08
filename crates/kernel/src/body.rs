@@ -1303,21 +1303,89 @@ impl Body {
 
     /// Edges `indices` (record edge indices) in `plane`'s coordinates, exactly: lines, circular
     /// arcs, single free-form segments, and a free-form curve of several spans as the one
-    /// B-spline it is, for a sketch to project them. `None` for an edge that doesn't lie in a
-    /// plane parallel to `plane`, isn't read exactly or isn't there, and for every edge of a mesh
-    /// body.
+    /// B-spline it is, for a sketch to project them. An edge out of the plane that lies on a
+    /// cylinder whose axis is `plane`'s normal (a hole's rim on a curved wall) projects onto that
+    /// cylinder's circle: the arc of it ([`Body::projected_on_cylinder`]). `None` for any other
+    /// edge that doesn't lie in a plane parallel to `plane`, one that isn't read exactly or isn't
+    /// there, and for every edge of a mesh body.
     pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
             return vec![None; indices.len()];
         }
         let tol = self.planar_edges_tolerance();
+        let mut faces = None;
         indices
             .iter()
             .map(|i| {
                 let mut work = 262_144usize;
-                crate::prism_curve::Run::of(&self.record, *i, true).and_then(|run| crate::prism_curve::projected_curves(&run, plane, tol, &mut work))
+                let run = crate::prism_curve::Run::of(&self.record, *i, true)?;
+                crate::prism_curve::projected_curves(&run, plane, tol, &mut work).or_else(|| {
+                    let faces = faces.get_or_insert_with(|| crate::history::edge_faces(&self.record));
+                    let segs = self.projected_on_cylinder(plane, *i, faces.get(*i)?, tol)?;
+                    Some(segs.into_iter().map(crate::PlanarPiece::Seg).collect())
+                })
             })
             .collect()
+    }
+
+    /// Edge `edge` projected on `plane` as the arc it covers of the circle of a cylinder it
+    /// bounds (one of `faces`) whose axis is `plane`'s normal: everything on that cylinder
+    /// projects onto its circle, so the arc is exact where the edge itself is held only
+    /// approximately (a hole's rim on a round wall is an intersection curve). The arc runs from
+    /// the projection of the edge's start vertex as far round as the edge goes; a closed edge
+    /// is one arc right round, which a sketch takes as the circle, as it took the rim fitted.
+    /// `None` when no such cylinder holds the edge within `tol`, or the edge turns back round
+    /// the axis.
+    fn projected_on_cylinder(&self, plane: &solidcore_record::Plane, edge: usize, faces: &[usize], tol: f64) -> Option<Vec<solidcore_record::Seg2>> {
+        use solidcraft_geom::brep::eval::CurveEval;
+        const SAMPLES: u16 = 32;
+        let e = self.record.edges.get(edge)?;
+        let curve = CurveEval::new(e.parameters()).ok()?;
+        let [t0, t1] = e.interval;
+        let pts: Vec<Vec3> = (0..=SAMPLES).map(|k| curve.point(t0 + (t1 - t0) * f64::from(k) / f64::from(SAMPLES))).collect::<Option<_>>()?;
+        let n = plane.normal();
+        let size = self.size().max(1.0);
+        faces.iter().find_map(|&f| {
+            let Some(crate::FaceSurface::Cylinder { origin, axis, radius }) = crate::surface_kind::surface_of(&self.record, f) else { return None };
+            let axis = Vec3::from(axis);
+            // The axis off the normal by an angle moves the edge's projection by that angle
+            // times its distance along the axis, at most the body's size.
+            if !(radius > tol) || axis.cross(n).len() * size > tol * 0.1 {
+                return None;
+            }
+            let off_axis = |p: Vec3| {
+                let d = p - origin;
+                (d - axis * d.dot(axis)).len()
+            };
+            if pts.iter().any(|p| (off_axis(*p) - radius).abs() > tol) {
+                return None;
+            }
+            let first = *pts.first()?;
+            let center = plane.to_local(origin + axis * (first - origin).dot(axis));
+            let angles: Vec<f64> = pts.iter().map(|p| (plane.to_local(*p) - center).angle()).collect();
+            let mut sweep = 0.0;
+            let mut sign = 0.0;
+            for w in angles.windows(2) {
+                let [a, b] = w else { continue };
+                let d = (b - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+                if d.abs() * radius <= tol * 1e-3 {
+                    continue;
+                }
+                if sign * d < 0.0 {
+                    return None;
+                }
+                sign = d.signum();
+                sweep += d;
+            }
+            let start = *angles.first()?;
+            let angular_tol = tol / radius;
+            if sweep.abs() < angular_tol || sweep.abs() > std::f64::consts::TAU + angular_tol {
+                return None;
+            }
+            let closed = e.vertices[0] == e.vertices[1] || (sweep.abs() - std::f64::consts::TAU).abs() <= angular_tol;
+            let sweep = if closed { sweep.signum() * std::f64::consts::TAU } else { sweep };
+            Some(vec![solidcore_record::Seg2::Arc { center, radius, start, sweep }])
+        })
     }
 
     /// Faces with area and centroid.
