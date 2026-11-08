@@ -461,8 +461,8 @@ fn navigation_bar_tool_radio_group_and_overflow_execute_in_list_order() {
     h.settle();
     let bar = crate::scenario::rect_of("nav:outer").unwrap();
     assert_eq!(bar, h.app.viewport.layout.as_ref().unwrap().navigation);
-    let metrics = crate::ui_kit::NavigationMetrics::for_size(crate::navigation_bar::Size::Regular);
-    assert_eq!(h.app.preferences.navigation_bar.size, crate::navigation_bar::Size::Regular);
+    let metrics = crate::ui_kit::NavigationMetrics::for_size(crate::ui_kit::NavigationSize::Regular);
+    assert_eq!(h.app.preferences.navigation_bar.size, crate::ui_kit::NavigationSize::Regular);
     assert_eq!(bar.height(), metrics.height());
     let more = crate::scenario::rect_of("nav:more").unwrap();
     assert_eq!(more.size(), egui::vec2(metrics.button, metrics.button));

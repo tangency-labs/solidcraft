@@ -485,7 +485,7 @@ pub(crate) fn theme_browser(ui: &mut Ui, id: &str, count: usize, grid: bool, rev
         offset = out.state.clamped_offset().x;
         let r = out.inner_rect;
         let hovered = ui.rect_contains_pointer(r);
-        let wheel = if hovered { crate::navigation::take_horizontal_wheel(ui, offset, max) } else { 0.0 };
+        let wheel = if hovered { super::wheel::take_horizontal_wheel(ui, offset, max) } else { 0.0 };
         let horizontal_wheel = wheel != 0.0;
         if horizontal_wheel {
             offset = (offset - wheel).clamp(0.0, max);
