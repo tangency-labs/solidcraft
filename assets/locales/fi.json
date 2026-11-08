@@ -1984,6 +1984,7 @@
   "material.editor.preserved_appearance": "Säilytetty ulkoasu",
   "material.editor.public_reference": "Julkinen lähde",
   "material.editor.reference": "Viite",
+  "material.editor.remove": "Poista",
   "material.editor.save_or_discard": "Tallenna tai hylkää materiaaliluonnos ennen materiaalin määrittämistä.",
   "material.editor.saved": "Materiaali tallennettu. Kappaleiden määritykset eivät muuttuneet.",
   "material.editor.scope": "Tallennus tallentaa tämän materiaalin määrittämättä sitä kappaleille. Tyhjät ominaisuudet ja olosuhteet jäävät tuntemattomiksi. Kortin tiheys ei muuta määritettyä tiheyttä tai massaa.",

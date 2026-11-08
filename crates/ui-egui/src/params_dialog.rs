@@ -235,7 +235,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let moved = crate::frame::dock_offset(ctx, "PARAMETERS");
     let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
-    let title = crate::i18n::tr_label("Parameters");
+    let title = solidcraft_ui_text::tr_label("Parameters");
     let panel = ui_kit::Panel::new(
         title,
         egui::Id::unique("sc_params_dialog"),
@@ -249,7 +249,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     .reset_scroll(d.reset_scroll);
     let panel = if side == crate::frame::Side::Left {
         let available = crate::sketch_palette::room_left_of(app, ctx, viewport);
-        panel.width((crate::theme::Tokens::get().form_card_width * 3.0).min(available))
+        panel.width((solidcraft_theme::Tokens::get().form_card_width * 3.0).min(available))
     } else {
         panel
     };
@@ -286,7 +286,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 ui.horizontal_wrapped(|ui| {
                     if ui_kit::icon_label_button(ui, "Import…", "import_tray", true, false)
-                        .backing_on_hover_text(crate::i18n::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
+                        .backing_on_hover_text(solidcraft_ui_text::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
                         .clicked()
                     {
                         app.pick_open_command("parameters.import", json!({}), IMPORT_TYPES);
@@ -307,8 +307,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 let name_floor = visible
                     .iter()
                     .map(|r| ui_kit::ContentWidth::name(ui, &r.name))
-                    .fold(crate::theme::Tokens::get().form_label_width, f32::max)
-                    .min(crate::theme::Tokens::get().form_card_width);
+                    .fold(solidcraft_theme::Tokens::get().form_label_width, f32::max)
+                    .min(solidcraft_theme::Tokens::get().form_card_width);
                 let Sections { favorites, users, groups } = sections(&visible, d.sort);
                 if !favorites.is_empty() {
                     ui_kit::section_count(ui, "favorites", "Favorites", true, Some(favorites.len()), |ui| {
@@ -320,7 +320,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 ui_kit::section(ui, "models", "Model Parameters", true, |ui| {
                     ui.scope(|ui| {
-                        ui.spacing_mut().indent = crate::theme::Tokens::get().space_14;
+                        ui.spacing_mut().indent = solidcraft_theme::Tokens::get().space_14;
                         ui.indent("model_groups", |ui| {
                             let layout = GroupLayout {
                                 revision: app.session.revision,
@@ -330,7 +330,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 style: ui.style().clone(),
                                 font: app.applied_ui_font.clone(),
                                 system_fonts: app.applied_system_fonts,
-                                language: crate::i18n::language(),
+                                language: solidcraft_ui_text::language(),
                             };
                             if d.group_layout.as_ref() != Some(&layout) {
                                 d.group_sizes.clear();
@@ -474,10 +474,10 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
     // Name keeps a larger share and a shared content floor so long identifiers stay readable
     // and every section's columns line up (#8533, #8551 review). Full window/column resize is #5097.
     let columns = [
-        Column::new("", 0.0).min_content_width(crate::theme::Tokens::get().space_24 * 3.0),
+        Column::new("", 0.0).min_content_width(solidcraft_theme::Tokens::get().space_24 * 3.0),
         Column::new("Name", 2.0).flex().min_content_width(name_floor),
         Column::new("Unit", 0.65).min_content_width(
-            ui_kit::ContentWidth::dropdown(ui, &units).max(crate::theme::Tokens::get().space_24 * 3.0 + crate::theme::Tokens::get().space_6),
+            ui_kit::ContentWidth::dropdown(ui, &units).max(solidcraft_theme::Tokens::get().space_24 * 3.0 + solidcraft_theme::Tokens::get().space_6),
         ),
         Column::new("Expression", 1.5).flex(),
         Column::new("Value", 1.1).flex(),
@@ -486,7 +486,7 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
     ];
     // An expression being edited may open over the cells to its right, up to the table's edge.
     let right = ui.max_rect().right().min(ui.clip_rect().right());
-    ui_kit::table_custom(ui, salt, &columns, crate::i18n::tr("manage.empty"), |ui, table| {
+    ui_kit::table_custom(ui, salt, &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
         // The Name heading sorts every section at once, each inside itself (#8563).
         table.headers(ui, |ui, index| {
             if index != 1 {
@@ -546,7 +546,7 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                         }
                     }
                     _ => {
-                        let rename = crate::i18n::tr_label("Double-click to rename");
+                        let rename = solidcraft_ui_text::tr_label("Double-click to rename");
                         // Keep long identifiers readable (#8533) without stacking the cell's own tooltip.
                         let response = ui_kit::name_cell_with_hint(ui, &r.name, false, rename);
                         crate::scenario::publish_handle(&format!("param:name:{}", r.name), response.rect.center());
@@ -652,7 +652,7 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
 }
 
 fn unit_label(u: &str) -> &str {
-    if u.is_empty() { crate::i18n::tr_label("none") } else { u }
+    if u.is_empty() { solidcraft_ui_text::tr_label("none") } else { u }
 }
 
 /// Only a fresh Enter in this field submits; held keys and unrelated focus do not.
@@ -677,15 +677,15 @@ fn held(d: &ParamsDialog, rows: &[Row]) -> serde_json::Map<String, Value> {
 
 /// The hint at the top of the dialog: when edits apply, as the check box under it says.
 fn hint(live: bool) -> &'static str {
-    crate::i18n::tr(if live { "manage.parameters_hint" } else { "parameters.held_hint" })
+    solidcraft_ui_text::tr(if live { "manage.parameters_hint" } else { "parameters.held_hint" })
 }
 
 /// The footer's note of the edits waiting for Apply, if any.
 fn held_status(count: usize) -> Option<String> {
     match count {
         0 => None,
-        1 => Some(crate::i18n::tr("parameters.held_one").to_string()),
-        n => Some(crate::i18n::format("parameters.held", &[("count", &n.to_string())])),
+        1 => Some(solidcraft_ui_text::tr("parameters.held_one").to_string()),
+        n => Some(solidcraft_ui_text::format("parameters.held", &[("count", &n.to_string())])),
     }
 }
 
@@ -712,8 +712,8 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
 /// "Apply each change as you leave its field", remembered across sessions (#9279). Turning it
 /// back on applies what was waiting.
 fn apply_live_checkbox(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[Row]) {
-    let response = ui_kit::checkbox(ui, crate::i18n::tr("parameters.apply_live"), &mut app.preferences.parameters_apply_live)
-        .backing_on_hover_text(crate::i18n::tr("parameters.apply_live_tip"));
+    let response = ui_kit::checkbox(ui, solidcraft_ui_text::tr("parameters.apply_live"), &mut app.preferences.parameters_apply_live)
+        .backing_on_hover_text(solidcraft_ui_text::tr("parameters.apply_live_tip"));
     crate::scenario::publish_handle("params:apply_live", response.rect.center());
     if response.changed() && app.preferences.parameters_apply_live {
         apply_held(app, d, rows);
@@ -1024,6 +1024,44 @@ pub fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut String) -> 
     crate::expression_complete::complete(ui, resp, text) || crate::value_step::step(ui, resp, text)
 }
 
+/// SolidCraft's expression language for the kit's value fields: literals and units as
+/// `doc::expr` reads them, completion and stepping by [`complete`].
+pub(crate) struct DocExpressions;
+
+impl ui_kit::Expressions for DocExpressions {
+    fn is_literal(&self, text: &str) -> bool {
+        solidcraft_engine::doc::expr::is_literal(text)
+    }
+
+    fn is_unit(&self, unit: &str) -> bool {
+        solidcraft_engine::doc::expr::unit_info(unit).is_some()
+    }
+
+    fn complete(&self, ui: &mut egui::Ui, response: &egui::Response, text: &mut String) -> bool {
+        complete(ui, response, text)
+    }
+
+    fn unit_scale(&self, units: &str) -> (f64, &'static str) {
+        crate::prefs::unit_scale(units)
+    }
+
+    fn length_number(&self, mm: f64, unit: &str, decimals: u8) -> String {
+        crate::prefs::length_number(mm, unit, decimals)
+    }
+
+    fn parse_length_mm(&self, text: &str, scale: f64) -> Option<f64> {
+        crate::prefs::parse_length_mm(text, scale)
+    }
+}
+
+/// Give the kit's value fields in `ctx` SolidCraft's expressions, unless they have them already.
+/// The app calls this at the start of each frame entry point, so every context it draws into has them.
+pub(crate) fn install_expressions(ctx: &egui::Context) {
+    if ui_kit::expressions(ctx).is_none() {
+        ui_kit::install_expressions(ctx, Arc::new(DocExpressions));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1067,7 +1105,7 @@ mod tests {
                 for shape in &h.shapes {
                     text_in(&shape.shape, tooltips[0], &mut texts);
                 }
-                let hint = crate::i18n::tr_label("Double-click to rename");
+                let hint = solidcraft_ui_text::tr_label("Double-click to rename");
                 let expected = if name == "rip_length" { hint.to_owned() } else { format!("{name}\n{hint}") };
                 assert_eq!(texts, [expected], "only a clipped name needs repeating");
                 h.step(&json!({"click":{"handle":format!("param:name:{name}")},"double":true})).unwrap();
@@ -1350,9 +1388,10 @@ mod tests {
 
     #[test]
     fn the_apply_live_choice_is_remembered_and_turning_it_on_applies_what_waits() {
+        crate::i18n::install();
         assert!(crate::prefs::Prefs::default().parameters_apply_live, "live updates stay the default");
         // The hint above the check box says when edits apply, whichever way it is set.
-        assert_eq!(hint(true), crate::i18n::tr("manage.parameters_hint"));
+        assert_eq!(hint(true), solidcraft_ui_text::tr("manage.parameters_hint"));
         assert_ne!(hint(false), hint(true));
         assert!(hint(false).contains("Apply") && !hint(false).contains("leaving"), "{}", hint(false));
         let mut h = held_dialog();

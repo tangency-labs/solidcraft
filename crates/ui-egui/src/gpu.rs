@@ -21,7 +21,7 @@ pub(crate) struct ProductHighlightCallback(pub Frame);
 /// The viewport callback composites transparently onto this egui GPU mesh. Both its clear
 /// surface and gradient therefore use the same published/animated tokens as the panels; no
 /// background colour belongs to a cached model scene or GPU upload.
-pub(crate) fn paint_background(painter: &egui::Painter, rect: egui::Rect, tokens: &crate::theme::Tokens) {
+pub(crate) fn paint_background(painter: &egui::Painter, rect: egui::Rect, tokens: &solidcraft_theme::Tokens) {
     let mut mesh = egui::Mesh::default();
     mesh.colored_vertex(rect.left_top(), tokens.viewport_top);
     mesh.colored_vertex(rect.right_top(), tokens.viewport_top);
@@ -84,7 +84,7 @@ pub(crate) fn paint_background_picture(app: &mut crate::SolveApp, painter: &egui
             let options = egui::TextureOptions { mipmap_mode: Some(egui::TextureFilter::Linear), ..egui::TextureOptions::LINEAR };
             picture.texture = Some(ctx.load_texture("background-picture", image, options));
         }
-        Some(Err(error)) => app.set_status(format!("{}: {error}", crate::i18n::tr("prefs.background_unreadable")), true),
+        Some(Err(error)) => app.set_status(format!("{}: {error}", solidcraft_ui_text::tr("prefs.background_unreadable")), true),
         None => {}
     }
     if let Some(texture) = &picture.texture {
@@ -458,7 +458,7 @@ impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
 }
 
 /// The shader's analysis colours and flags for the theme's colours.
-pub fn analysis_colors(c: &crate::theme::AnalysisColors) -> [f32; 36] {
+pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
     solidcraft_gpu::view::analysis_colors(c)
 }
 
@@ -1609,7 +1609,7 @@ mod tests {
         let x = (local[2].right() - 4.0).clamp(0.0, (f.size[0] - 1) as f32) as usize;
         let y = local[2].center().y.clamp(0.0, (f.size[1] - 1) as f32) as usize;
         let offset = (y * f.size[0] as usize + x) * 4;
-        let outside = crate::theme::Tokens::get().app_bar.to_array();
+        let outside = solidcraft_theme::Tokens::get().app_bar.to_array();
         assert_ne!(&original[offset..offset + 4], &outside, "probe starts in the viewport background");
         // Same local geometry/camera; applied after app.ui has emitted the callback.
         let transform = egui::emath::TSTransform { translation: egui::vec2(-23.0, 17.0), scaling: 0.75 };

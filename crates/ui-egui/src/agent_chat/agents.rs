@@ -32,7 +32,7 @@ impl Mode {
         Mode::ALL.into_iter().find(|m| m.id() == s)
     }
     pub fn label(self) -> &'static str {
-        crate::i18n::tr(match self {
+        solidcraft_ui_text::tr(match self {
             Mode::Ask => "ui.ai_mode_ask",
             Mode::Edits => "ui.ai_mode_edits",
             Mode::All => "ui.ai_mode_all",
@@ -217,7 +217,7 @@ impl Entry {
         match self.kind {
             Kind::Api | Kind::Anthropic => format!("{} · {}", self.model, self.base_url),
             Kind::Acp => match (&self.problem, &self.version) {
-                (Some(p), _) => crate::i18n::format("ui.agent_chat_cannot_start", &[("error", p)]),
+                (Some(p), _) => solidcraft_ui_text::format("ui.agent_chat_cannot_start", &[("error", p)]),
                 (None, Some(v)) => v.clone(),
                 (None, None) => super::panel::short_command(&self.argv.join(" ")),
             },
@@ -228,7 +228,7 @@ impl Entry {
     pub fn problem_hint(&self) -> Option<String> {
         let problem = self.problem.as_deref()?;
         let program = self.argv.first().map(String::as_str).unwrap_or_default();
-        Some(crate::i18n::format(
+        Some(solidcraft_ui_text::format(
             "ui.agent_chat_reinstall",
             &[("agent", &self.name), ("program", program), ("error", problem), ("install", self.install)],
         ))
@@ -381,7 +381,7 @@ pub fn normalize_url(url: &str) -> Result<String, String> {
     let u = url.trim().trim_end_matches('/').to_string();
     let lower = u.to_ascii_lowercase();
     if !(lower.starts_with("http://") || lower.starts_with("https://")) || u.len() < 10 || u.contains(char::is_whitespace) {
-        return Err(crate::i18n::tr("ui.ai_bad_url").to_string());
+        return Err(solidcraft_ui_text::tr("ui.ai_bad_url").to_string());
     }
     Ok(u)
 }

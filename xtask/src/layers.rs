@@ -19,6 +19,11 @@ pub enum Class {
     Testkit,
     /// Binaries and build tooling: exempt from the rules.
     Exempt,
+    /// Crates other front ends use too, kept extractable while they live here: they may depend
+    /// on other shared crates and on external crates (UI toolkits included) only. solidcore and
+    /// solidcore-record are git dependencies, not workspace members, so they count as external.
+    /// Any crate may depend on a shared crate; `cargo xtask shared` builds each on its own.
+    Shared,
 }
 
 impl Class {
@@ -27,7 +32,8 @@ impl Class {
             Class::Layer(l) => Some(l),
             Class::Standalone => Some(0),
             Class::Testkit => Some(6),
-            Class::Exempt => None,
+            // Shared crates sit outside the layer order; `check` handles them before it asks.
+            Class::Exempt | Class::Shared => None,
         }
     }
 }
@@ -60,6 +66,20 @@ pub const TABLE: &[(&str, Class)] = &[
     ("gpu", Class::Layer(5)),
     ("mcp", Class::Layer(5)),
     ("testkit", Class::Testkit),
+    // the sRGB transfer rule and the surface-analysis palette, read by the renderer and the theme (#13291)
+    ("color", Class::Shared),
+    // the widget handle and rect registry UI components publish into and scenarios/the control channel read (#12936)
+    ("ui-registry", Class::Shared),
+    // message catalogs' machinery and bidirectional text: lookup, formatting, language choice (#13290)
+    ("ui-text", Class::Shared),
+    // the MCP server machinery: JSON-RPC over stdio, lifecycle, tool schemas and argument checks; apps register their tools (#12947)
+    ("mcp-server", Class::Shared),
+    // the token contract UI components draw with: light and dark tokens, colour vision, tab accents, theme state (#13304)
+    ("theme", Class::Shared),
+    // the control channel: the per-launch token and its files, what a request still running does (#12946)
+    ("control", Class::Shared),
+    // the window's own control requests over egui: ui.screenshot and ui.resize (#12946)
+    ("control-egui", Class::Shared),
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),
@@ -131,6 +151,7 @@ pub enum Violation {
     StandaloneHasWorkspaceDep { krate: String, dep: String },
     TestkitAsNormalDep { krate: String },
     UiBelowL5 { krate: String, dep: String, layer: u8 },
+    SharedDependsOnApp { krate: String, dep: String },
 }
 
 impl std::fmt::Display for Violation {
@@ -151,12 +172,20 @@ impl std::fmt::Display for Violation {
             Violation::UiBelowL5 { krate, dep, layer } => {
                 write!(f, "{krate} (L{layer}) depends on UI crate `{dep}`; UI toolkits are only allowed in L5+")
             }
+            Violation::SharedDependsOnApp { krate, dep } => {
+                write!(f, "{krate}: shared crate must depend only on other shared crates, solidcore and external crates, not workspace crate {dep}")
+            }
         }
     }
 }
 
 /// Check all rules. Returns violations sorted for stable output.
 pub fn check(crates: &[Crate]) -> Vec<Violation> {
+    check_with(crates, classify)
+}
+
+/// `check` against any classification (the tests use one with crates TABLE does not have).
+fn check_with(crates: &[Crate], classify: impl Fn(&str) -> Option<Class>) -> Vec<Violation> {
     let mut out = Vec::new();
     for c in crates {
         let Some(class) = classify(&c.name) else {
@@ -177,9 +206,19 @@ pub fn check(crates: &[Crate]) -> Vec<Violation> {
                     out.push(Violation::StandaloneHasWorkspaceDep { krate: c.name.clone(), dep: d.name.clone() });
                     continue;
                 }
+                if class == Class::Shared {
+                    // Every kind counts, dev included: its tests must build after extraction,
+                    // so not even testkit.
+                    match classify(&d.name) {
+                        // Unregistered deps are reported on their own entry.
+                        None | Some(Class::Shared) => {}
+                        Some(_) => out.push(Violation::SharedDependsOnApp { krate: c.name.clone(), dep: d.name.clone() }),
+                    }
+                    continue;
+                }
                 match classify(&d.name) {
-                    // Unregistered deps are reported on their own entry.
-                    None => {}
+                    // Unregistered deps are reported on their own entry; any crate may use a shared one.
+                    None | Some(Class::Shared) => {}
                     Some(Class::Testkit) if d.kind != DepKind::Dev => {
                         out.push(Violation::TestkitAsNormalDep { krate: c.name.clone() });
                     }
@@ -197,7 +236,7 @@ pub fn check(crates: &[Crate]) -> Vec<Violation> {
                         }
                     }
                 }
-            } else if layer < UI_MIN_LAYER && is_ui_crate(&d.name) {
+            } else if class != Class::Shared && layer < UI_MIN_LAYER && is_ui_crate(&d.name) {
                 out.push(Violation::UiBelowL5 { krate: c.name.clone(), dep: d.name.clone(), layer });
             }
         }
@@ -237,6 +276,7 @@ pub fn describe(class: Option<Class>) -> String {
         Some(Class::Standalone) => "L0 standalone".into(),
         Some(Class::Testkit) => "testkit".into(),
         Some(Class::Exempt) => "exempt".into(),
+        Some(Class::Shared) => "shared".into(),
         None => "UNREGISTERED".into(),
     }
 }
@@ -315,6 +355,44 @@ mod tests {
         for app in ["solidcraft", "solidcraft-cli", "xtask"] {
             assert!(check(&[c(app, &[("egui", Normal, false), ("solidcraft-ui-egui", Normal, true)])]).is_empty());
         }
+    }
+
+    #[test]
+    fn shared_crate_must_not_depend_on_layered_crates() {
+        let v = check(&[c("solidcraft-ui-registry", &[("solidcraft-engine", Normal, true)])]);
+        assert!(matches!(&v[..], [Violation::SharedDependsOnApp { krate, dep }] if krate == "solidcraft-ui-registry" && dep == "solidcraft-engine"));
+        assert!(v[0].to_string().contains("shared crate must depend only on"));
+        let v = check(&[c("solidcraft-ui-registry", &[("solidcraft-geom", Build, true)])]);
+        assert!(matches!(v[..], [Violation::SharedDependsOnApp { .. }]));
+    }
+
+    #[test]
+    fn any_crate_may_use_a_shared_crate() {
+        for user in ["solidcraft-geom", "solidcraft-engine", "solidcraft-ui-egui", "solidcraft-testkit"] {
+            assert!(check(&[c(user, &[("solidcraft-ui-registry", Normal, true)])]).is_empty(), "{user}");
+        }
+    }
+
+    #[test]
+    fn shared_crate_may_use_shared_and_external_crates() {
+        let classes = |pkg: &str| if short_name(pkg) == "ui-text" { Some(Class::Shared) } else { classify(pkg) };
+        for kind in [Normal, Dev, Build] {
+            let g = [c("solidcraft-ui-registry", &[("solidcraft-ui-text", kind, true), ("serde", Normal, false), ("solidcore", Normal, false)])];
+            assert!(check_with(&g, classes).is_empty(), "{kind:?}: {:?}", check_with(&g, classes));
+        }
+    }
+
+    #[test]
+    fn shared_crate_may_use_ui_crates() {
+        for dep in ["egui", "eframe", "winit", "wgpu"] {
+            assert!(check(&[c("solidcraft-ui-registry", &[(dep, Normal, false)])]).is_empty(), "{dep}");
+        }
+    }
+
+    #[test]
+    fn shared_crate_must_not_use_testkit_even_in_tests() {
+        let v = check(&[c("solidcraft-ui-registry", &[("solidcraft-testkit", Dev, true)])]);
+        assert!(matches!(v[..], [Violation::SharedDependsOnApp { .. }]));
     }
 
     #[test]
