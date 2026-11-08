@@ -192,6 +192,7 @@ mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
 pub mod mouse_gesture;
+mod nav_bar;
 pub(crate) mod navigation;
 pub mod navigation_bar;
 mod navigation_bar_view;
@@ -318,6 +319,7 @@ mod ui_kit_guard_tests;
 pub mod update;
 mod value_step;
 pub(crate) mod view_angles;
+pub mod view_compass;
 mod view_confirm;
 pub mod view_gizmo;
 pub mod view_pick;
