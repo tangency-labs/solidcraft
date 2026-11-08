@@ -809,18 +809,35 @@ fn a_tangent_chain_is_one_chamfer_measured_where_no_station_folds() {
         ),
     ];
     assert_ne!(rim[0], rim[1]);
-    let [a, c] = edge_faces_along(&b, rim[0], up).unwrap();
-    let top = if a.1 > c.1 { a.0 } else { c.0 };
+    // each arc's faces at its middle: one is the top, whose normal is up
+    let mut top = 0;
+    for e in rim {
+        let [a, c] = edge_faces_along(&b, e, up).unwrap();
+        let t = if a.1 > c.1 { a } else { c };
+        assert!(rel(t.1, 1.0) < 1e-12);
+        top = t.0;
+    }
     let (_k, before) = kernel_copy(&b);
     let tolerance = rim
         .iter()
         .map(|&e| edge::tolerance(&before, before.edge_list()[e]).unwrap())
         .fold(0.0, f64::max);
-    // at the widest wedge cos w = -1 / sqrt 5, sin w = 2 / sqrt 5; `unfolded_wedge`'s bound
-    let (cos_w, sin_w) = (-1.0 / SQRT_5, 2.0 / SQRT_5);
-    let c = (1.0 + 2.0 * cos_w - 1000.0 * tolerance * sin_w) / (2.0 + cos_w);
-    let s = c.acos().sin();
-    let (r_top, r_wall) = ((2.0 - c) / s, (1.0 - 2.0 * c) / s);
+    // At the widest wedge cos w = -1 / sqrt 5, sin w = 2 / sqrt 5. The kernel encloses it from
+    // above, its normals' cosine within a gap of `tolerance / (1 + 2)`, so the cos w it uses lies
+    // in [cos w - gap, cos w]; `unfolded_wedge`'s bound at each end of that range gives the rail's
+    // ellipse at each end, and the built one lies between.
+    let gap = tolerance / 3.0;
+    let ellipse = |cos_w: f64| {
+        let sin_w = (1.0 - cos_w * cos_w).sqrt();
+        let c = (1.0 + 2.0 * cos_w - 1000.0 * tolerance * sin_w) / (2.0 + cos_w);
+        let s = c.acos().sin();
+        let (r_top, r_wall) = ((2.0 - c) / s, (1.0 - 2.0 * c) / s);
+        let radius = 5.0 - r_wall;
+        let half_x = radius * SQRT_5 / 2.0;
+        let middle = 10.0 - r_top / 2.0;
+        [radius, middle + half_x, middle - half_x]
+    };
+    let ends = [ellipse(-1.0 / SQRT_5), ellipse(-1.0 / SQRT_5 - gap)];
     chamfer_sides(&b, &rim, &[top, top], 1.0, ChamferSecond::Distance(2.0)).unwrap();
     let report = b.check(CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{report:?}");
@@ -833,13 +850,15 @@ fn a_tangent_chain_is_one_chamfer_measured_where_no_station_folds() {
             ((bx.min().z - 10.0).abs() < 1e-9 && (bx.max().z - 10.0).abs() < 1e-9).then_some(bx)
         })
         .unwrap();
-    let radius = 5.0 - r_wall;
-    let half_x = radius * SQRT_5 / 2.0;
-    assert!(rel(bx.max().y, radius) < 1e-7, "{}", bx.max().y);
-    assert!(rel(bx.min().y, -radius) < 1e-7, "{}", bx.min().y);
-    let middle = 10.0 - r_top / 2.0;
-    assert!(rel(bx.max().x, middle + half_x) < 1e-7, "{}", bx.max().x);
-    assert!(rel(bx.min().x, middle - half_x) < 1e-7, "{}", bx.min().x);
+    // each measure between its values at the two ends, to 1e-8 of it
+    let between = |got: f64, i: usize| {
+        let (a, b) = (ends[0][i], ends[1][i]);
+        got >= a.min(b) - 1e-8 * a.abs() && got <= a.max(b) + 1e-8 * a.abs()
+    };
+    assert!(between(bx.max().y, 0), "{} {ends:?}", bx.max().y);
+    assert!(between(-bx.min().y, 0), "{} {ends:?}", bx.min().y);
+    assert!(between(bx.max().x, 1), "{} {ends:?}", bx.max().x);
+    assert!(between(bx.min().x, 2), "{} {ends:?}", bx.min().x);
 }
 
 #[test]

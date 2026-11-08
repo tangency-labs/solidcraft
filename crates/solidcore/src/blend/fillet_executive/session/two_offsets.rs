@@ -16,6 +16,7 @@
 
 use super::{FilletBody, FilletObject, FilletSession, FilletSurfaceGenerator};
 use crate::blend::blend_refusal::{chains_among, BlendRefusal};
+use crate::blend::chamfer_side::widest_wedge_bound;
 use crate::blend::fillet_executive::p2::FilletParametersAccess;
 use crate::blend::fillet_solver::p5::is_knife_edge;
 use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
@@ -35,12 +36,6 @@ fn invalid() -> SolidError {
 
 /// The tangency of a solver these prepare, radians: 10 degrees.
 const TANGENCY: f64 = 10.0 * (crate::math::PI / 180.0);
-
-/// The spans of an edge [`widest_wedge`] first reads its wedge across.
-const WEDGE_STATIONS: u32 = 16;
-
-/// The golden sections of [`widest_wedge`]: a span shrinks by 0.618 each, to `1e-9` of it at 43.
-const WEDGE_SECTIONS: u32 = 43;
 
 /// How many of a chain's edge tolerances the smallest setback keeps at its widest station: a
 /// bound that is open, as a refusal's fit size is (`docs/generic-blend.md`, §3.5).
@@ -163,53 +158,6 @@ fn wedge_at(k: &Kernel, b: &mut crate::Brep, u0: EdgeuseId, u1: EdgeuseId, t: f6
         .unitize()?;
     // clamp: constant bounds, the lower below the upper (cannot panic)
     Ok(b0.dot(b1).clamp(-1.0, 1.0).acos())
-}
-
-/// The widest wedge along the edge of `u0`, `u1` from `start`, its middle's: the best of
-/// [`WEDGE_STATIONS`] stations, its ends among them, then golden sections about it, for a
-/// wedge whose peak lies inside the edge (a rim's, at the far side of an ellipse). Evaluated,
-/// not enclosed: a second peak narrower than the stations' spacing goes unseen, and the fold
-/// it hides is then the construction's refusal. A station with no binormal has no wedge.
-fn widest_wedge(
-    k: &Kernel,
-    b: &mut crate::Brep,
-    [u0, u1]: [EdgeuseId; 2],
-    interval: crate::geom::extent1d::Extent1d,
-    start: f64,
-) -> f64 {
-    const GOLDEN: f64 = 0.618_033_988_749_894_8;
-    let mut at = |s: f64| wedge_at(k, b, u0, u1, interval.evaluate(s)).ok();
-    let mut best = (0.5, start);
-    for i in 0..=WEDGE_STATIONS {
-        let s = f64::from(i) / f64::from(WEDGE_STATIONS);
-        if let Some(w) = at(s) {
-            if w > best.1 {
-                best = (s, w);
-            }
-        }
-    }
-    let step = 1.0 / f64::from(WEDGE_STATIONS);
-    let (mut lo, mut hi) = ((best.0 - step).max(0.0), (best.0 + step).min(1.0));
-    for _ in 0..WEDGE_SECTIONS {
-        let (x, y) = (hi - GOLDEN * (hi - lo), lo + GOLDEN * (hi - lo));
-        match (at(x), at(y)) {
-            (Some(wx), Some(wy)) => {
-                if wx > best.1 {
-                    best.1 = wx;
-                }
-                if wy > best.1 {
-                    best.1 = wy;
-                }
-                if wx > wy {
-                    hi = y;
-                } else {
-                    lo = x;
-                }
-            }
-            _ => break,
-        }
-    }
-    best.1
 }
 
 impl FilletSession<'_> {
@@ -354,14 +302,12 @@ impl FilletSession<'_> {
         }
         let mut wedges = Vec::new();
         let mut between_planes = Vec::new();
-        let mut uses = Vec::new();
         let mut knife = Vec::new();
         let knife_tol = k.tolerances.ang_tol_deg * (crate::math::PI / 180.0);
         for &id in edges {
             let u0 = self.blendable_edgeuse(k, id)?;
             let target: &mut crate::Brep = &mut *self.objects.target;
             let u1 = eu1::radial(target, u0)?.ok_or_else(invalid)?;
-            uses.push([u0, u1]);
             // a knife edge has no wedge: none to measure, and none its chain could take
             let is_knife = is_knife_edge(k, target, id, knife_tol)?;
             knife.push(is_knife);
@@ -405,23 +351,26 @@ impl FilletSession<'_> {
             let setbacks = ChamferDefinition::new(size, wedge).map(|c| c.setbacks());
             if let (false, Ok([d1, d2])) = (on_chain.iter().any(planes), setbacks) {
                 if d1 != d2 {
-                    let (mut opens, mut tolerance) = (wedge, 0.0_f64);
+                    let mut tolerance = 0.0_f64;
                     for &other in &on_chain {
-                        let (Some(&id), Some(&pair), Some(&from)) =
-                            (edges.get(other), uses.get(other), wedges.get(other))
-                        else {
-                            return Err(invalid());
-                        };
-                        let interval = target.edge(id).map_err(|_| invalid())?.interval;
+                        let id = edges.get(other).copied().ok_or_else(invalid)?;
+                        tolerance = tolerance.max(edge::tolerance(target, id)?);
+                    }
+                    // the bound's gap moves the fold test's numerator by at most `|d_2 - d_1
+                    // cos a| <= d_1 + d_2` times it: by one tolerance at most, a thousandth of
+                    // the margin
+                    let gap = tolerance / (d1 + d2);
+                    let mut opens = wedge;
+                    for &other in &on_chain {
+                        let id = edges.get(other).copied().ok_or_else(invalid)?;
                         let w = match widest.get(other).copied().flatten() {
                             Some(w) => w,
-                            None => widest_wedge(k, target, pair, interval, from),
+                            None => widest_wedge_bound(k, target, id, gap)?.wedge,
                         };
                         if let Some(slot) = widest.get_mut(other) {
                             *slot = Some(w);
                         }
                         opens = opens.max(w);
-                        tolerance = tolerance.max(edge::tolerance(target, id)?);
                     }
                     let margin = FOLD_MARGIN * tolerance;
                     wedge = unfolded_wedge(wedge, [d1, d2], opens, margin);
