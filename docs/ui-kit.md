@@ -561,6 +561,17 @@ Board regression checks live in the existing test modules:
   the relocated setting's snapshot and page defaults.
   Runtime icon discovery visits More at narrow width, retaining Preferences page coverage.
 
+## Type
+
+The kit sets type through `ui_kit::type_face`: the weights (`medium`, `semibold`, `bold`,
+`RichTextExt`), the family and fallback names a host installs its faces under, the script checks
+and the on-demand CJK font state. It holds no font data. Host contract: before the kit draws, the
+context's fonts bind the weight families. A host with faces of its own binds them in its
+definitions (SolidCraft's `fonts.rs` installs IBM Plex at four weights; `with_weight_families`
+binds any it leaves out); a host with none calls `type_face::install(ctx)` once and the kit draws
+every weight with egui's default faces. Without either, egui finds no face for the weight families
+and draws no glyphs for weighted text.
+
 ## Extending and checking the kit
 
 Add one implementation, document its tokens/options here, re-export it through

@@ -1,7 +1,10 @@
 //! The kit's type API: interface weights, the family and fallback names a host installs its faces
 //! under, the script checks and the on-demand CJK font state. It holds no font data and loads
-//! nothing: the host embeds and installs the faces. A host that installs none binds the weight
-//! families with [`with_weight_families`] and the kit draws with egui's default faces.
+//! nothing: the host embeds and installs the faces.
+//!
+//! Host contract: before the kit draws, the context's fonts bind the weight families. A host with
+//! faces of its own binds them in its definitions (see [`with_weight_families`]); a host with none
+//! calls [`install`] once, and the kit draws every weight with egui's default faces.
 
 use egui::{FontDefinitions, FontFamily, FontId, RichText};
 
@@ -39,6 +42,15 @@ pub fn with_weight_families(mut fonts: FontDefinitions) -> FontDefinitions {
         fonts.families.entry(family).or_insert_with(|| regular.clone());
     }
     fonts
+}
+
+/// Make `ctx` ready for the kit's type with egui's default faces: the one call a host that installs
+/// no faces of its own makes before the kit draws. A host that installs faces passes its
+/// definitions through [`with_weight_families`] (or binds the weight families itself) instead.
+/// Without either, egui finds no face for a weight family (it logs the family as not bound) and
+/// draws no glyphs for the kit's weighted text.
+pub fn install(ctx: &egui::Context) {
+    ctx.set_fonts(with_weight_families(FontDefinitions::default()));
 }
 
 /// Medium (500) interface text, retaining the language fallbacks and user override.
@@ -291,6 +303,41 @@ mod tests {
         let width = |font: egui::FontId| ctx.fonts_mut(|f| f.layout_no_wrap("Chamfer".into(), font, ink).size().x);
         assert_eq!(width(semibold(16.0)), width(egui::FontId::proportional(16.0)), "no host face: every weight is egui's regular face");
         assert!(ctx.fonts_mut(|f| f.has_glyphs(&bold(14.0), "Chamfer")));
+    }
+
+    /// A kit widget that sets its name in semibold draws it on a bare context after only [`install`]:
+    /// without that call the weight family is unbound and egui has no face to draw the name with.
+    #[test]
+    fn a_kit_widget_draws_on_a_bare_context_after_install() {
+        let ctx = egui::Context::default();
+        install(&ctx);
+        let mut name = None;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let status = crate::ui_kit::StatusHeader { icon: "", text: "Fully constrained", complete: true, fraction: 1.0 };
+            crate::ui_kit::status_header(ui, "type_face", "Bracket", status);
+            name = painted_text(&ctx).into_iter().find(|(text, _)| text == "Bracket").map(|(_, font)| font);
+        });
+        output.textures_delta.clear();
+        let Some(font) = name else { panic!("the name is painted") };
+        assert_eq!(font.family, semibold(1.0).family, "the name is set in semibold");
+        assert!(ctx.fonts_mut(|f| f.has_glyphs(&font, "Bracket")), "a face draws the semibold name");
+    }
+
+    fn painted_text(ctx: &egui::Context) -> Vec<(String, FontId)> {
+        let layers: Vec<egui::LayerId> = ctx.memory(|m| m.layer_ids().collect());
+        let mut found = Vec::new();
+        ctx.graphics(|g| {
+            for list in layers.iter().filter_map(|l| g.get(*l)) {
+                for clipped in list.all_entries() {
+                    if let egui::Shape::Text(t) = &clipped.shape
+                        && let Some(section) = t.galley.job.sections.first()
+                    {
+                        found.push((t.galley.job.text.clone(), section.format.font_id.clone()));
+                    }
+                }
+            }
+        });
+        found
     }
 
     /// A family the host already bound keeps its own list.
