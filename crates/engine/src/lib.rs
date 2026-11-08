@@ -1413,6 +1413,13 @@ impl Session {
             reserve.extend(
                 made.iter().filter(|n| solidcraft_doc::is_counted_body_name(n) && !self.doc.reserved_body_names.contains(**n)).map(|n| n.to_string()),
             );
+            // A pattern of several bodies stores its names source by source, so after its count
+            // changes they are stored again as the copies have them now (#12114). Filled in
+            // slot by slot, a name of the old count would stay in a later source's place.
+            if f.pins_every_body_name() && made.len() != f.body_names.len() {
+                pins.push((f.id, made.iter().map(|n| n.to_string()).collect()));
+                continue;
+            }
             // Nothing to pin when every slot the bodies take already holds a name.
             if made.len() <= f.body_names.len() && f.body_names.iter().take(made.len()).all(|slot| !slot.trim().is_empty()) {
                 continue;

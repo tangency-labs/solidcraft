@@ -1390,6 +1390,10 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
         super::features::stable_profiles(s, &mut nf.kind, false)?;
     }
+    // A body Pattern's copy names move with the bodies they copy (#12114).
+    if let FeatureKind::Pattern { bodies: old, .. } = &f.kind {
+        nf.keep_pattern_names_with_sources(old);
+    }
     // New face points: their faces' names now.
     if nf.kind.face_points() != f.kind.face_points() {
         nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component)?;
