@@ -8117,6 +8117,11 @@ fn eval_feature(
                         {
                             append_warning(warning, format!("`{t}` is part of `{base}` now"));
                         }
+                        // A tool whose feature is suppressed is left out, as a suppressed feature is
+                        // everywhere else: the Combine builds from the tools that are there (#13474).
+                        _ if doc.features.iter().any(|g| g.suppressed && g.body_names.iter().any(|n| n.trim() == t.0.as_str())) => {
+                            append_warning(warning, format!("`{t}` is left out: the feature that makes it is suppressed"));
+                        }
                         _ => return Err(DocError::Unknown(format!("body `{t}`"))),
                     },
                 }

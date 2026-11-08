@@ -871,6 +871,39 @@ fn a_join_keeps_blocks_apart_in_one_body() {
     assert_eq!(kept, None);
 }
 
+/// A Combine whose tool is made by a suppressed feature builds from the other tools and says the
+/// tool is left out, instead of failing with "unknown body" (#13474).
+#[test]
+fn a_combine_leaves_out_a_tool_whose_feature_is_suppressed() {
+    let mut doc = Document::new("suppressed tool");
+    cube(&mut doc, Vec3::ZERO, [10.0; 3], Operation::NewBody);
+    cube(&mut doc, Vec3::new(20.0, 0.0, 0.0), [10.0; 3], Operation::NewBody);
+    let third = cube(&mut doc, Vec3::new(40.0, 0.0, 0.0), [10.0; 3], Operation::NewBody);
+    let join = doc
+        .add_feature(
+            FeatureKind::Combine { target: "Body1".into(), tools: vec!["Body2".into(), "Body3".into()], operation: Operation::Join, keep_tools: false },
+            None,
+        )
+        .unwrap();
+    // The name is stored on the feature as soon as its body has it (`Session::pin_body_names`).
+    let f = doc.feature_mut(third).unwrap();
+    f.body_names = vec!["Body3".into()];
+    f.suppressed = true;
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    let r = m.result(join).unwrap();
+    assert!(r.error.is_none(), "{:?}", r.error);
+    assert!(r.warning.as_deref().is_some_and(|w| w.contains("`Body3`") && w.contains("suppressed")), "{:?}", r.warning);
+    let bodies: Vec<(String, f64)> = m.state().bodies.iter().map(|b| (b.name.clone(), measure(&b.body).unwrap().volume)).collect();
+    assert_eq!(bodies.len(), 1, "{bodies:?}");
+    assert!(rel(bodies[0].1, 2000.0) < 1e-6, "{bodies:?}");
+    // A tool that no feature makes is still an error.
+    doc.feature_mut(third).unwrap().body_names.clear();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    assert!(m.result(join).unwrap().error.as_deref().is_some_and(|e| e.contains("unknown body")), "{:?}", m.result(join).unwrap().error);
+}
+
 /// A body of two pieces joined apart, split by a plane through both pieces: the split gives the
 /// halves of every piece, not the halves of one of them (#6738).
 #[test]
