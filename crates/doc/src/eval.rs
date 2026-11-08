@@ -3150,10 +3150,53 @@ fn apply_op(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<Body
     apply_traced(doc, state, f, tools.into_iter().map(Traced::unnamed).collect(), op, targets)
 }
 
+/// The most cut tools [`clear_tools_as_one`] joins into one tool. The kernel's boolean takes
+/// far longer for a tool of many pieces than for several of fewer: one cut of 20 apart pieces
+/// into a ring took 0.34 s, of 40 1.75 s, of 60 6.4 s, of about 105 (a pattern of a pattern,
+/// #8765) 23 s. So more tools are joined in groups of at most this many, each cut in turn. This
+/// works around the boolean's cost; it does not change what is cut.
+const MAX_JOINED_TOOLS: usize = 32;
+
+#[cfg(test)]
+thread_local! {
+    /// [`MAX_JOINED_TOOLS`] for this thread's tests: a test cuts the same tools in one go.
+    static JOINED_TOOLS_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(MAX_JOINED_TOOLS) };
+}
+
+#[cfg(test)]
+fn joined_tools_limit() -> usize {
+    JOINED_TOOLS_LIMIT.with(std::cell::Cell::get)
+}
+
+#[cfg(not(test))]
+fn joined_tools_limit() -> usize {
+    MAX_JOINED_TOOLS
+}
+
 /// Many cut tools clear of each other (a pattern's copies, the circles of a vent field in one
 /// sketch) as one tool of many pieces, so the target is cut once instead of rebuilding an ever
 /// more complex body for every tool (#261, #368). Tools that may meet are left as they are.
+/// More than [`MAX_JOINED_TOOLS`] tools are joined in even groups, one tool for each (#8765).
 fn clear_tools_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
+    let limit = joined_tools_limit().max(1);
+    if tools.len() <= limit {
+        return clear_group_as_one(tools);
+    }
+    let groups = tools.len().div_ceil(limit);
+    let size = tools.len().div_ceil(groups);
+    let mut rest = tools.into_iter();
+    let mut out = Vec::new();
+    loop {
+        let group: Vec<Traced> = rest.by_ref().take(size).collect();
+        if group.is_empty() {
+            return Ok(out);
+        }
+        out.extend(clear_group_as_one(group)?);
+    }
+}
+
+/// [`clear_tools_as_one`] for one group of tools.
+fn clear_group_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
     if tools.len() < 8 {
         return Ok(tools);
     }
