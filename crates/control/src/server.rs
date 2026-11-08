@@ -120,7 +120,9 @@ impl Hub {
             // Dropped when this thread ends, after `accept` has dropped the listener: `Stop::stop`
             // waits for that.
             let _closed = closed_tx;
-            accept(listener, open, MAX_CONNECTIONS, max_line, &shared, move |stream| hub.serve(stream, &token, requests.clone(), patient));
+            accept(listener, open, MAX_CONNECTIONS, max_line, REFUSAL_DRAIN, &shared, move |stream| {
+                hub.serve(stream, &token, requests.clone(), patient)
+            });
         });
         Ok(stop)
     }
@@ -174,14 +176,15 @@ impl Stop {
 /// counts them). One past that is refused here, on the accepting thread, as [`refuse`] does, so the
 /// client reads why instead of a reset (#10967): it has usually sent its request already. A thread
 /// for each refusal is what the limit is there to prevent; a refusal holds up the next connection
-/// for at most [`refuse`]'s half second.
-/// A [`Stop`] ends it through `shared`: the connections it accepted are listed there so stopping
-/// closes them too, and the listener is dropped before it returns.
+/// for at most `drain` ([`REFUSAL_DRAIN`] when serving). A [`Stop`] ends it through `shared`: the
+/// connections it accepted are listed there so stopping closes them too, and the listener is
+/// dropped before it returns.
 fn accept(
     listener: TcpListener,
     open: Arc<AtomicUsize>,
     max: usize,
     max_line: usize,
+    drain: Duration,
     shared: &Arc<Accepted>,
     handle: impl Fn(TcpStream) + Clone + Send + 'static,
 ) {
@@ -194,7 +197,7 @@ fn accept(
             if let Ok(socket) = stream.try_clone() {
                 let mut out = stream;
                 let mut reader = BufReader::new(ClientInput { socket, deadline: None });
-                refuse(&mut out, &mut reader, &json!({"ok": false, "error": TOO_MANY_CONNECTIONS}), max_line);
+                refuse(&mut out, &mut reader, &json!({"ok": false, "error": TOO_MANY_CONNECTIONS}), max_line, drain);
             }
             continue;
         }
@@ -219,6 +222,8 @@ fn accept(
 
 /// Connections served at once, so a flood must not be able to spawn threads without end.
 pub const MAX_CONNECTIONS: usize = 16;
+/// How long a refused connection's request is read before it is closed (see [`refuse`]).
+const REFUSAL_DRAIN: Duration = Duration::from_millis(500);
 /// Lines that are not JSON before the connection is closed, so garbage cannot loop forever.
 const MAX_BAD_LINES: usize = 8;
 /// How long a subscribed connection waits after a `design.changed` line before the next: what
@@ -313,14 +318,15 @@ fn unauthorized(docs: &str) -> Value {
 }
 
 /// Refuse the connection: the reply, then the end of what we send, then what the client had
-/// already sent read and dropped (briefly, and at most a request's length, `max_line`, which a
-/// connection refused before reading anything may have on its way). Closing a socket with unread
-/// input resets the connection, and a reset can reach the client before it has read the refusal.
-fn refuse(out: &mut TcpStream, reader: &mut BufReader<ClientInput>, reply: &Value, max_line: usize) {
+/// already sent read and dropped (for `drain` at most, and at most a request's length, `max_line`,
+/// which a connection refused before reading anything may have on its way). Closing a socket with
+/// unread input resets the connection, and a reset can reach the client before it has read the
+/// refusal.
+fn refuse(out: &mut TcpStream, reader: &mut BufReader<ClientInput>, reply: &Value, max_line: usize, drain: Duration) {
     use std::io::Read;
     let _ = send(out, reply);
     let _ = out.shutdown(std::net::Shutdown::Write);
-    reader.get_mut().deadline = Some(Instant::now() + Duration::from_millis(500));
+    reader.get_mut().deadline = Some(Instant::now() + drain);
     let _ = std::io::copy(&mut reader.by_ref().take((max_line as u64).saturating_add(1)), &mut std::io::sink());
 }
 
@@ -730,7 +736,7 @@ impl Hub {
                         authenticated = true;
                     }
                     _ => {
-                        refuse(&mut out, &mut reader, &unauthorized(self.protocol.docs()), self.max_line);
+                        refuse(&mut out, &mut reader, &unauthorized(self.protocol.docs()), self.max_line, REFUSAL_DRAIN);
                         break;
                     }
                 }
@@ -903,9 +909,19 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         std::thread::spawn(move || {
-            accept(listener, Arc::new(AtomicUsize::new(0)), 1, MAX_LINE, &Arc::new(Accepted::default()), |mut s: TcpStream| {
-                let _ = std::io::copy(&mut s, &mut std::io::sink());
-            })
+            // A drain far longer than a busy runner stalls, so the client's delays cannot decide the
+            // outcome: the app reads until the client is done.
+            accept(
+                listener,
+                Arc::new(AtomicUsize::new(0)),
+                1,
+                MAX_LINE,
+                Duration::from_secs(30),
+                &Arc::new(Accepted::default()),
+                |mut s: TcpStream| {
+                    let _ = std::io::copy(&mut s, &mut std::io::sink());
+                },
+            )
         });
         // Accepted first, so it holds the one seat while the next one connects.
         let _first = TcpStream::connect(addr).unwrap();
@@ -916,7 +932,8 @@ mod tests {
         let steps = vec![json!({"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}); 4000];
         let request = json!({"id": 1, "method": "engine.batch", "params": {"commands": steps}, "token": "0123456789abcdef0123456789abcdef"});
         late.write_all(format!("{request}\n").as_bytes()).unwrap();
-        // Arrived before the app is done with the connection, and read by nobody else.
+        // Read late, as a busy client reads: a reset (closing with the request unread, as before)
+        // would arrive first and, on Windows, drop the reply.
         std::thread::sleep(Duration::from_millis(200));
         let mut line = String::new();
         BufReader::new(late.try_clone().unwrap()).read_line(&mut line).unwrap();

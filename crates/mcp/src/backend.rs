@@ -175,6 +175,10 @@ pub struct Remote {
 /// `batch` uses it to tell "never sent" from "sent, reply lost".
 pub(crate) const NOT_RUNNING: &str = "no SolidCraft app is listening at";
 
+/// What a call refused at the app's connection limit says (#10967): the app ran nothing, so
+/// `batch` says that, not that the steps may have run.
+pub(crate) const REFUSED_UNRUN: &str = "refused this call without running it";
+
 impl Remote {
     /// Connect to the app at `addr`, with its control token found the usual way
     /// (`SOLIDCRAFT_CONTROL_TOKEN`, else the app's token file for that port).
@@ -523,7 +527,7 @@ impl Remote {
         if v.get("error").and_then(Value::as_str) == Some(solidcraft_control::auth::TOO_MANY_CONNECTIONS) {
             self.drop_conn();
             return Err(format!(
-                "the SolidCraft app at {} refused this call without running it: it is serving as many connections as it takes (each \
+                "the SolidCraft app at {} {REFUSED_UNRUN}: it is serving as many connections as it takes (each \
                  MCP server, CLI run or script connected to it holds one). Close one of them, or send the call again once one has ended",
                 self.addr
             ));
