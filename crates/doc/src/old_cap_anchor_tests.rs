@@ -5,9 +5,13 @@ use solidcraft_geom::prelude::*;
 /// then Sketch3 on the same cap, as 0.30.1 saved them (#13323): the attachments carry an
 /// `extrude_cap` certificate, which the SMLib kernel's join no longer marks the cap with.
 fn old_design(edit: impl FnOnce(&mut serde_json::Value)) -> crate::Model {
-    let mut features: serde_json::Value = serde_json::from_str(include_str!("old_cap_anchor_fixture.json")).unwrap();
-    edit(&mut features);
-    let doc = Document { features: serde_json::from_value(features).unwrap(), ..Document::default() };
+    let mut fixture: serde_json::Value = serde_json::from_str(include_str!("old_cap_anchor_fixture.json")).unwrap();
+    edit(&mut fixture["features"]);
+    let doc = Document {
+        features: serde_json::from_value(fixture["features"].take()).unwrap(),
+        params: serde_json::from_value(fixture["params"].take()).unwrap(),
+        ..Document::default()
+    };
     let doc = crate::format::read(&doc.to_json()).unwrap();
     let mut model = crate::Model::new();
     model.evaluate(&doc);
