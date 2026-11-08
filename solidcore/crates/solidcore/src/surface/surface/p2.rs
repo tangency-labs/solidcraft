@@ -796,7 +796,8 @@ pub(crate) fn check_geometry_nesting(
                             // Ball holds a sphere and B-spline boundary curves, nothing nested.
                             CornerDefinition::Setback(_) | CornerDefinition::Ball(_) => {}
                         },
-                        KeptDefinition::Sweep(_) => {}
+                        // a section blend's definition holds frames, no geometry
+                        KeptDefinition::Sweep(_) | KeptDefinition::SectionBlend(_) => {}
                         KeptDefinition::Draft(draft) => push(Geometry::Surface(&draft.source)),
                     }
                 }
@@ -1238,6 +1239,9 @@ impl Surface {
             Some(KeptDefinition::Draft(draft)) => {
                 return Some(BlendRef::Draft { draft, net: self })
             }
+            Some(KeptDefinition::SectionBlend(blend)) => {
+                return Some(BlendRef::SectionBlend { blend, net: self })
+            }
             Some(KeptDefinition::Sweep(_)) | None => {}
         }
         match self.kind() {
@@ -1297,6 +1301,15 @@ impl Surface {
     /// ([`crate::offset::draft`]).
     pub(crate) fn set_draft_definition(&mut self, draft: crate::offset::draft::DraftDefinition) {
         self.definition = Some(Box::new(KeptDefinition::Draft(draft)));
+    }
+
+    /// Keeps `blend` as the definition of this surface, a multi-section blend's net
+    /// ([`crate::sweep::section_blend`], #3140).
+    pub(crate) fn set_section_blend_definition(
+        &mut self,
+        blend: crate::sweep::section_blend::SectionBlendDefinition,
+    ) {
+        self.definition = Some(Box::new(KeptDefinition::SectionBlend(blend)));
     }
 
     /// Drops any definition this surface keeps.
