@@ -58,8 +58,6 @@ sheet.export_bend_table
 sheet.export_dxf
 sheet.flat_pattern
 sheet.path_flange
-sketch.auto_project
-sketch.break_link
 sketch.chain
 sketch.construction
 sketch.create
@@ -70,20 +68,13 @@ sketch.drag
 sketch.drag_end
 sketch.draw.dimensioned
 sketch.export_dxf
-sketch.fit_curves_to_section
-sketch.include_3d
 sketch.insert_dxf
 sketch.insert_svg
-sketch.intersect
-sketch.intersection_curve
-sketch.isoparametric_curve
 sketch.move_point
 sketch.options
 sketch.polygon.circumscribed
 sketch.polygon.edge
 sketch.polygon.inscribed
-sketch.project
-sketch.project_to_surface
 sketch.rectangle.center
 sketch.rectangle.rounded
 sketch.rectangle.three_point
@@ -91,7 +82,6 @@ sketch.rectangle.two_point
 sketch.slot.center_to_center
 sketch.slot.overall
 sketch.solve
-sketch.spun_profile
 solid.align
 solid.chamfer
 solid.coil
