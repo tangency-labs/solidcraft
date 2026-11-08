@@ -25,7 +25,7 @@
 //! The rules, beside the record's: a view is on one of the drawing's sheets; a base view draws one
 //! of its sources, has a scale and looks from a direction that makes a view; every parent is a view
 //! of the drawing, no chain of parents loops, and a chain is at most [`MAX_VIEW_DEPTH`] views; no
-//! view is made from a pictorial view yet ([`Drawing::can_project_from`]); a pictorial or auxiliary
+//! view is made from a pictorial or flat pattern view yet ([`Drawing::can_project_from`]); a pictorial or auxiliary
 //! view is placed at a point; an auxiliary view's side is a direction of about unit length; a view
 //! lined up with its parent is on the parent's sheet; a section view is placed at a point, and its
 //! cutting line keeps [`CuttingLine::new`]'s rules; a view's place is on paper
@@ -36,7 +36,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Plane, Vec2};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::cell::{Projection, check_label};
 use solidcraft_geom::drawing_sheet::view_letter;
 use solidcraft_geom::drawing_view::{ProjectedSide, Scale, is_paper_coordinate, projected_basis};
@@ -226,10 +226,17 @@ pub enum ViewKind {
         parent: u64,
         toward: [f64; 2],
     },
+    /// The flat pattern of sheet-metal body `body` of the design of `source` (#13030), turned `turn`.
+    Flat {
+        #[serde(with = "crate::ids")]
+        source: u64,
+        body: String,
+        turn: QuarterTurn,
+    },
 }
 
 impl ViewKind {
-    /// Its name in replies: `base`, `projected`, `section`, `pictorial` or `auxiliary`.
+    /// Its name in replies: `base`, `projected`, `section`, `pictorial`, `auxiliary` or `flat`.
     pub fn name(&self) -> &'static str {
         match self {
             ViewKind::Base { .. } => "base",
@@ -237,14 +244,16 @@ impl ViewKind {
             ViewKind::Section { .. } => "section",
             ViewKind::Pictorial { .. } => "pictorial",
             ViewKind::Auxiliary { .. } => "auxiliary",
+            ViewKind::Flat { .. } => "flat",
         }
     }
 
-    /// The view it comes from: none for a base view. The one place a view's parent is read, so every
-    /// rule about parents (the chain, deleting, copying, listing) holds for each kind with one.
+    /// The view it comes from: none for a base or flat pattern view. The one place a view's parent is
+    /// read, so every rule about parents (the chain, deleting, copying, listing) holds for each kind
+    /// with one.
     pub fn parent(&self) -> Option<u64> {
         match self {
-            ViewKind::Base { .. } => None,
+            ViewKind::Base { .. } | ViewKind::Flat { .. } => None,
             ViewKind::Projected { parent, .. }
             | ViewKind::Section { parent, .. }
             | ViewKind::Pictorial { parent, .. }
@@ -253,12 +262,22 @@ impl ViewKind {
     }
 
     /// Where it sits by its parent, of the eight names `drawing.view.projected` takes: none for a base
-    /// view, and none for a section or an auxiliary view, which is placed wherever its command puts it.
+    /// or flat pattern view, and none for a section or an auxiliary view, which is placed wherever its
+    /// command puts it.
     pub fn beside(&self) -> Option<Beside> {
         match self {
-            ViewKind::Base { .. } | ViewKind::Section { .. } | ViewKind::Auxiliary { .. } => None,
+            ViewKind::Base { .. } | ViewKind::Flat { .. } | ViewKind::Section { .. } | ViewKind::Auxiliary { .. } => None,
             ViewKind::Projected { side, .. } => Some(Beside::Side(*side)),
             ViewKind::Pictorial { diagonal, .. } => Some(Beside::Diagonal(*diagonal)),
+        }
+    }
+
+    /// What a view of this kind is called in messages, when it has no parent.
+    pub fn unparented(&self) -> Option<&'static str> {
+        match self {
+            ViewKind::Base { .. } => Some("a base view"),
+            ViewKind::Flat { .. } => Some("a flat pattern view"),
+            ViewKind::Projected { .. } | ViewKind::Section { .. } | ViewKind::Pictorial { .. } | ViewKind::Auxiliary { .. } => None,
         }
     }
 }
@@ -334,6 +353,70 @@ impl Beside {
     }
 }
 
+/// The longest body name a flat pattern view saves, in bytes.
+pub const MAX_BODY_BYTES: usize = 255;
+
+/// A flat pattern view's body and turn, as it draws ([`ResolvedView::flat`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlatOf {
+    pub body: String,
+    pub turn: QuarterTurn,
+}
+
+/// How far a flat pattern view turns its flat on paper, anticlockwise: a quarter turn at a time, so
+/// its points map exactly. Saved as its degrees, 0, 90, 180 or 270.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "u16", into = "u16")]
+pub enum QuarterTurn {
+    #[default]
+    None,
+    Quarter,
+    Half,
+    ThreeQuarters,
+}
+
+impl QuarterTurn {
+    pub const ALL: [QuarterTurn; 4] = [QuarterTurn::None, QuarterTurn::Quarter, QuarterTurn::Half, QuarterTurn::ThreeQuarters];
+
+    /// The basis that draws a flat lying on its own plane's x and y (z = 0) turned so: its axes are
+    /// signed unit axes, so each point's paper coordinates are its own, swapped or negated.
+    pub fn basis(self) -> Plane {
+        let (x, y) = match self {
+            QuarterTurn::None => (Vec3::X, Vec3::Y),
+            QuarterTurn::Quarter => (Vec3::new(0.0, -1.0, 0.0), Vec3::X),
+            QuarterTurn::Half => (Vec3::new(-1.0, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)),
+            QuarterTurn::ThreeQuarters => (Vec3::Y, Vec3::new(-1.0, 0.0, 0.0)),
+        };
+        Plane { origin: Vec3::ZERO, x, y }
+    }
+}
+
+impl From<QuarterTurn> for u16 {
+    fn from(turn: QuarterTurn) -> u16 {
+        match turn {
+            QuarterTurn::None => 0,
+            QuarterTurn::Quarter => 90,
+            QuarterTurn::Half => 180,
+            QuarterTurn::ThreeQuarters => 270,
+        }
+    }
+}
+
+impl TryFrom<u16> for QuarterTurn {
+    type Error = &'static str;
+
+    fn try_from(degrees: u16) -> std::result::Result<QuarterTurn, &'static str> {
+        QuarterTurn::ALL.into_iter().find(|turn| u16::from(*turn) == degrees).ok_or("a turn is 0, 90, 180 or 270 degrees")
+    }
+}
+
+/// What body name a flat pattern view may draw, saved or asked for: 1 to [`MAX_BODY_BYTES`] bytes,
+/// with no control characters.
+pub fn check_flat_body(body: &str) -> Result<()> {
+    require((1..=MAX_BODY_BYTES).contains(&body.len()), || format!("its body is 1 to {MAX_BODY_BYTES} bytes"))?;
+    require(!body.chars().any(char::is_control), || "its body has no control characters".into())
+}
+
 /// Where a view's centre sits on its sheet, in paper millimetres.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -399,6 +482,8 @@ pub struct ResolvedView {
     pub pose: Setting<Pose>,
     /// The configuration of the design it draws: the active one, or a row of its table.
     pub configuration: Setting<ViewConfiguration>,
+    /// A flat pattern view's body and turn; none for a view of the model.
+    pub flat: Option<FlatOf>,
 }
 
 fn is_zero(v: &f64) -> bool {
@@ -565,11 +650,12 @@ impl Drawing {
         }
         match &view.kind {
             ViewKind::Base { source, view: direction } => {
-                let drawn = || format!("it draws source {}, which the drawing doesn't have", ids::encode(*source));
-                require(self.sources.iter().any(|s| s.id == *source), drawn)?;
-                require(view.settings.scale.is_some(), || "a base view has a scale".into())?;
-                require(matches!(view.place, ViewPlace::At(_)), || "a base view is placed at a point: it has no parent to line up with".into())?;
+                self.check_unparented(view, *source)?;
                 direction.basis().map(|_| ()).map_err(|e| DocError::Invalid(e.to_string()))
+            }
+            ViewKind::Flat { source, body, .. } => {
+                self.check_unparented(view, *source)?;
+                check_flat_body(body)
             }
             ViewKind::Projected { parent, .. } => {
                 self.chain_of(view.id)?;
@@ -603,12 +689,25 @@ impl Drawing {
 
     /// Whether a view can be made from view `parent`, the one rule a new view, a saved one and a
     /// preview of one keep: `parent` is one of the drawing's views, its chain of parents has room for
-    /// one more view ([`MAX_VIEW_DEPTH`]), and it isn't a pictorial view (not supported yet).
+    /// one more view ([`MAX_VIEW_DEPTH`]), and it isn't a pictorial view or made from a flat pattern
+    /// view (neither supported yet; a flat pattern's plane isn't a model view, #13030).
     pub fn can_project_from(&self, parent: u64) -> Result<()> {
         let chain = self.chain_of(parent)?;
         require(chain.len() < MAX_VIEW_DEPTH, || format!("a chain of views is at most {MAX_VIEW_DEPTH} views"))?;
         let pictorial = matches!(chain.first().map(|view| &view.kind), Some(ViewKind::Pictorial { .. }));
-        require(!pictorial, || "not supported yet: a view projected from a pictorial view".into())
+        require(!pictorial, || "not supported yet: a view projected from a pictorial view".into())?;
+        let flat = matches!(chain.last().map(|end| &end.kind), Some(ViewKind::Flat { .. }));
+        require(!flat, || "not supported yet: a view made from a flat pattern view".into())
+    }
+
+    /// The rules of a view that ends a chain, a base or flat pattern view: it draws one of the
+    /// drawing's sources, has a scale and is placed at a point.
+    fn check_unparented(&self, view: &View, source: u64) -> Result<()> {
+        let what = view.kind.unparented().unwrap_or("a view");
+        let drawn = || format!("it draws source {}, which the drawing doesn't have", ids::encode(source));
+        require(self.sources.iter().any(|s| s.id == source), drawn)?;
+        require(view.settings.scale.is_some(), || format!("{what} has a scale"))?;
+        require(matches!(view.place, ViewPlace::At(_)), || format!("{what} is placed at a point: it has no parent to line up with"))
     }
 
     /// View `id` as it draws: its base view's source, its basis turned down its chain of parents
@@ -617,15 +716,16 @@ impl Drawing {
     /// default. A section view also gives its cut. One rule for every reader of a view.
     pub fn resolve_view(&self, id: u64) -> Result<ResolvedView> {
         let chain = self.chain_of(id)?;
-        let Some(ViewKind::Base { source, view: direction }) = chain.last().map(|base| &base.kind) else {
-            return Err(DocError::Invalid(format!("view {} has no base view", ids::encode(id))));
+        let (source, mut basis, flat) = match chain.last().map(|end| &end.kind) {
+            Some(ViewKind::Base { source, view: direction }) => (*source, direction.basis().map_err(|e| DocError::Invalid(e.to_string()))?, None),
+            // A flat lies on its own plane, so the turn alone says which way it looks.
+            Some(ViewKind::Flat { source, body, turn }) => (*source, turn.basis(), Some(FlatOf { body: body.clone(), turn: *turn })),
+            _ => return Err(DocError::Invalid(format!("view {} has no base view", ids::encode(id)))),
         };
-        let source = *source;
-        let mut basis = direction.basis().map_err(|e| DocError::Invalid(e.to_string()))?;
         let mut cut = None;
         for view in chain.iter().rev() {
             match &view.kind {
-                ViewKind::Base { .. } => {}
+                ViewKind::Base { .. } | ViewKind::Flat { .. } => {}
                 ViewKind::Projected { side, .. } => basis = Beside::Side(*side).basis(&basis, self.projection)?,
                 ViewKind::Pictorial { diagonal, .. } => basis = Beside::Diagonal(*diagonal).basis(&basis, self.projection)?,
                 ViewKind::Section { line, .. } => {
@@ -660,6 +760,7 @@ impl Drawing {
             exploded: or_default(&chain, |s| s.exploded, Exploded::Assembled),
             pose: or_default(&chain, |s| s.pose.clone(), Pose::Designed),
             configuration: or_default(&chain, |s| s.configuration, ViewConfiguration::Active),
+            flat,
         })
     }
 
@@ -676,7 +777,11 @@ impl Drawing {
                 (ViewPlace::Aligned(along), ViewKind::Projected { side, .. }) => side.on_free_axis(centre, along),
                 (
                     ViewPlace::Aligned(_),
-                    ViewKind::Base { .. } | ViewKind::Section { .. } | ViewKind::Pictorial { .. } | ViewKind::Auxiliary { .. },
+                    ViewKind::Base { .. }
+                    | ViewKind::Flat { .. }
+                    | ViewKind::Section { .. }
+                    | ViewKind::Pictorial { .. }
+                    | ViewKind::Auxiliary { .. },
                 ) => {
                     return Err(DocError::Invalid(format!("{} view {} isn't placed at a point", view.kind.name(), ids::encode(view.id))));
                 }

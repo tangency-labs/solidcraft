@@ -330,6 +330,11 @@ fn view_label(d: &Drawing, view: &View) -> String {
     let mut at = view;
     for _ in 0..MAX_VIEW_DEPTH {
         match &at.kind {
+            ViewKind::Flat { body, .. } => {
+                label.push_str("Flat pattern of ");
+                label.push_str(body);
+                break;
+            }
             ViewKind::Base { view: ViewDirection::Named(named), .. } => {
                 let name = super::drawing_view::snake_name(*named).replace('_', " ");
                 let mut letters = name.chars();

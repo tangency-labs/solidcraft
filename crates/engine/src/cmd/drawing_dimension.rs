@@ -145,7 +145,11 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
 fn added(s: &mut Session, request: AddParams) -> Result<Value> {
     let mut record = Drawing::clone(s.drawing(ADD)?);
     let view = request.view.0;
-    record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
+    let on = record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
+    // A flat's edges aren't the model's, so no edge reference finds them (#13030 FV3).
+    if matches!(on.kind, solidcraft_doc::drawing::view::ViewKind::Flat { .. }) {
+        return Err(bad(ADD, "not supported yet: dimensions on a flat pattern view"));
+    }
     let (doc, model) = (&s.doc, &s.model);
     let edge = |e: &EdgeParam| doc.edge_reference(model, &e.pick, &e.path).map_err(|why| bad(ADD, why.to_string()));
     let corner = |c: &CornerParam| doc.corner_reference(model, &c.pick, &c.path).map_err(|why| bad(ADD, why.to_string()));
