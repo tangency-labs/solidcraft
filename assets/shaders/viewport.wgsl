@@ -79,12 +79,6 @@ fn to_linear(c: vec3<f32>) -> vec3<f32> {
     return select(c, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
 }
 
-/// The piecewise sRGB decode the CPU image uses (`c / 12.92` at or below 0.04045). `to_linear`
-/// keeps its flat dark branch for the Design viewport's legacy transfer.
-fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
-    return select(c / vec3<f32>(12.92), pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
-}
-
 fn out_color(c: vec4<f32>) -> vec4<f32> {
     if (u.back.w > 0.5) {
         return vec4<f32>(to_linear(c.rgb), c.a);
@@ -722,7 +716,7 @@ fn lit_color(i: TOut, visibility: f32, base: vec4<f32>) -> vec4<f32> {
     if (dot(n, v) < 0.0) { n = -n; }
     if u.product_lights_meta.x>0.0 {
         var radiance=vec3<f32>(0.0);
-        let albedo=srgb_to_linear(base.rgb);
+        let albedo=srgb_decode(base.rgb);
         for (var k=0u;k<min(u32(u.product_lights_meta.y),21u);k+=1u) {
             if u.product_lights[k*4u].w == 4.0 {radiance+=albedo*u.product_lights[k*4u+1u].xyz/3.141592653589793;continue;}
             let sample=product_light_sample(k,i.wp);
