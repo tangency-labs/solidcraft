@@ -728,4 +728,86 @@ mod drafts {
         draft(&c, &o, &[curved(&c, &o)], [0.0; 3], Z, Z, 0.1).unwrap();
         assert!(marks(&c).is_empty());
     }
+
+    /// 3 degrees, radians.
+    const THREE: f64 = 0.052_359_877_559_829_89;
+    /// tan 3 degrees.
+    const TAN_THREE: f64 = 0.052_407_779_283_041_21;
+
+    /// A boss r 10 about (20, 20), z 10 to 20, drawn as two faces: a circle extruded as two
+    /// half arcs, so its wall is split along the rulings through (10, 20) and (30, 20) and its
+    /// top has a vertex on each, where the two wall faces and the top meet.
+    fn split_boss(on_block: bool) -> crate::Body {
+        use crate::prism::extrude_planar_regions;
+        use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+        let half = |start: f64| Seg2::Arc {
+            center: Vec2::new(20.0, 20.0),
+            radius: 10.0,
+            start,
+            sweep: PI,
+        };
+        let disc = Region2 {
+            outer: Loop2 {
+                segs: vec![half(0.0), half(PI)],
+            },
+            holes: vec![],
+        };
+        let boss = extrude_planar_regions(&Plane::XY, &[disc], 10.0, 20.0).unwrap();
+        if !on_block {
+            return boss;
+        }
+        let block = make_box([0.0; 3], [40.0, 40.0, 10.0]).unwrap();
+        crate::boolean::boolean(block, boss, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap()
+    }
+
+    /// The top of a split boss (alone, and standing on a 40 x 40 x 10 block) drafted 3 degrees
+    /// about the line x = 25 on it, pulled along x, leaning in going along x: the top turns
+    /// to z = 20 - (x - 25) tan 3 degrees, 5 tan 3 degrees above z = 20 at the axis, so the boss
+    /// gains pi r^2 5 tan 3 degrees; leaning out it loses as much. The top's vertices on the
+    /// split rulings meet the turned top where the rulings cross it (#3005 refused them: two
+    /// faces of one cylinder at a vertex where a plane moves). Valid at every check level.
+    ///
+    /// The split wall's halves are extended past their rulings, so the top's new edges are
+    /// fitted, within the B-rep's tolerance (2e-5) of the ellipse: the volume is held to that
+    /// tolerance over the top's area (under 315). The same boss drawn as one face with a seam
+    /// keeps an exact ellipse and lands on the closed form to rounding.
+    #[test]
+    fn the_top_of_a_boss_split_along_its_rulings() {
+        all_fixes();
+        let x = [1.0, 0.0, 0.0];
+        let band = 2e-5 * 315.0;
+        for (split, on_block) in [(true, false), (true, true), (false, false)] {
+            for (angle, sign) in [(THREE, 1.0), (-THREE, -1.0)] {
+                let b = if split {
+                    split_boss(on_block)
+                } else {
+                    make_cylinder([20.0, 20.0, 10.0], 10.0, 10.0).unwrap()
+                };
+                let before = volume(&b);
+                let o = order(&b);
+                let top = face(&b, &o, |bx| {
+                    (bx.min().z - 20.0).abs() < 1e-9 && (bx.max().z - 20.0).abs() < 1e-9
+                });
+                draft(&b, &o, &[top], [25.0, 0.0, 0.0], x, x, angle).unwrap();
+                let want = before + sign * PI * 10.0 * 10.0 * 5.0 * TAN_THREE;
+                let got = volume(&b);
+                if split {
+                    assert!(
+                        (got - want).abs() < band,
+                        "{on_block} {angle}: {got} {want}"
+                    );
+                } else {
+                    assert!(rel(got, want) < 1e-9, "seam {angle}: {got} {want}");
+                }
+                let report = b.check(crate::CheckLevel::All).unwrap();
+                assert_eq!(
+                    report.failures, 0,
+                    "{split} {on_block} {angle}: {}",
+                    report.text
+                );
+            }
+        }
+    }
 }
