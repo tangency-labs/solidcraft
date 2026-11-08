@@ -1,7 +1,7 @@
 //! Read-only report and library containers, sharing the form's typography and actions.
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{scenario, theme::Tokens};
 use egui::{Ui, vec2};
+use solidcraft_theme::Tokens;
 
 /// Bordered list with a bounded scroll viewport. Tokens: dialog_rule, radius_md, space_10.
 pub(crate) fn report_list<R>(ui: &mut Ui, key: &str, height: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -13,8 +13,8 @@ pub(crate) fn report_list<R>(ui: &mut Ui, key: &str, height: f32, add: impl FnOn
             .auto_shrink([false, true])
             .max_height(height)
             .show(ui, add);
-        scenario::publish_rect(&format!("dialog:list:{key}:viewport"), output.inner_rect);
-        scenario::publish_count(&format!("dialog:list:{key}:content_width"), f64::from(output.content_size.x));
+        solidcraft_ui_registry::publish_rect(&format!("dialog:list:{key}:viewport"), output.inner_rect);
+        solidcraft_ui_registry::publish_count(&format!("dialog:list:{key}:content_width"), f64::from(output.content_size.x));
         output.inner
     })
 }
@@ -26,7 +26,7 @@ pub(crate) fn report_divider(ui: &mut Ui, key: &str) {
     let rect = rect.expand2(vec2(t.space_10, 0.0));
     let clip = ui.clip_rect().expand2(vec2(t.space_10, 0.0));
     ui.painter().with_clip_rect(clip).hline(rect.x_range(), rect.top(), t.tertiary_border(t.dialog_rule));
-    scenario::publish_rect(&format!("dialog:divider:{key}"), rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:divider:{key}"), rect);
 }
 
 /// List border around a caller-owned virtualised viewport. Tokens: dialog_rule, control_radius, space_10.
@@ -49,7 +49,7 @@ pub(super) fn list_frame_filled<R>(ui: &mut Ui, key: &str, fill: egui::Color32, 
             add(ui)
         },
     );
-    scenario::publish_rect(&format!("dialog:list:{key}"), response.response.rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:list:{key}"), response.response.rect);
     response.inner
 }
 
@@ -70,18 +70,18 @@ pub(crate) fn path_chip(ui: &mut Ui, path: &str, add: impl FnOnce(&mut Ui)) {
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), path));
             response.backing_on_hover_text(path);
             let key = format!("dialog:cell:{path}");
-            scenario::publish_handle(&key, rect.center());
-            scenario::publish_rect(&key, rect);
+            solidcraft_ui_registry::publish_handle(&key, rect.center());
+            solidcraft_ui_registry::publish_rect(&key, rect);
         });
     });
 }
 
 /// Empty-list dashed outline and centred caption. Retains the note rectangle.
 pub(crate) fn empty_box(ui: &mut Ui, key: &str, message: &str) {
-    if crate::prefs_search::querying(ui) {
-        if crate::prefs_search::texts_hit(ui, &[message]) {
-            crate::prefs_search::reveal(ui);
-        } else if !ui.is_visible() || crate::prefs_search::suppress_chrome(ui) {
+    if super::settings_search::querying(ui) {
+        if super::settings_search::texts_hit(ui, &[message]) {
+            super::settings_search::reveal(ui);
+        } else if !ui.is_visible() || super::settings_search::suppress_chrome(ui) {
             return;
         }
     }
@@ -94,7 +94,7 @@ pub(crate) fn empty_box(ui: &mut Ui, key: &str, message: &str) {
     }
     ui.painter().extend(egui::Shape::dashed_line(&points, t.control_border_stroke(t.control_border), t.space_4, t.space_3));
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, message, egui::FontId::proportional(t.font_label), t.form_dim);
-    scenario::publish_rect(&format!("dialog:note:{key}"), rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:note:{key}"), rect);
 }
 
 /// Kind/count above UTC time, alongside actions. The legacy combined-title cell remains an alias.
@@ -138,8 +138,8 @@ pub(crate) fn report_header(ui: &mut Ui, kind: &str, count: u64, time: &str, ali
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), alias));
             response.backing_on_hover_text(alias);
             let key = format!("dialog:cell:{alias}");
-            scenario::publish_rect(&key, rect);
-            scenario::publish_handle(&key, rect.center());
+            solidcraft_ui_registry::publish_rect(&key, rect);
+            solidcraft_ui_registry::publish_handle(&key, rect.center());
         });
     });
 }

@@ -1241,7 +1241,7 @@ pub(crate) fn keyboard_resize_action(
             _ => Err(error(Rule::Availability, "focused control has no neighbour split")),
         };
     }
-    let step = crate::theme::Tokens::get().space_8.max(HOST_DRAG_THRESHOLD);
+    let step = solidcraft_theme::Tokens::get().space_8.max(HOST_DRAG_THRESHOLD);
     let (dx, dy) = match action {
         ResizeLeft => (-step, 0.0),
         ResizeRight => (step, 0.0),

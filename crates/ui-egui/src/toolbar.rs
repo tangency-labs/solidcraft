@@ -7,15 +7,15 @@ use crate::ui_kit::{self, Container, Edge, Surface};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
 
-use crate::theme::Tokens;
 use crate::{SolveApp, icons};
+use solidcraft_theme::Tokens;
 
 pub use crate::workspace::TABS;
 
 /// Legacy paint arguments and non-SVG affordances follow the same semantic palette as the icon.
 /// The requested icon id determines its meaning on ribbons, menus and drag previews alike.
 fn command_accent(icon: &str) -> Color32 {
-    crate::icon_svg::primary(icon, crate::theme::is_dark(), crate::theme::vision())
+    crate::icon_svg::primary(icon, solidcraft_theme::is_dark(), solidcraft_theme::vision())
 }
 
 /// Accent for a tab or a panel with a more specific semantic role.
@@ -23,7 +23,7 @@ fn panel_accent(t: &Tokens, tab: &str, panel: &str) -> Color32 {
     if panel == "CONSTRAIN" {
         return t.glyph_text;
     }
-    crate::theme::TabAccent::for_tab(t, tab).color
+    solidcraft_theme::TabAccent::for_tab(t, tab).color
 }
 
 /// Panels shown on each tab (in order). Commands come from the registry by (tab, panel).
@@ -489,7 +489,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let shown = design_shown(app) && idle;
         let tip = |id: &str, key: &str| {
             let label = app.tr(id);
-            if shown { format!("{label} ({key})") } else { crate::i18n::format("ui.needs_design", &[("command", label)]) }
+            if shown { format!("{label} ({key})") } else { solidcraft_ui_text::format("ui.needs_design", &[("command", label)]) }
         };
         let (save_tip, undo_tip, redo_tip) = (tip("ui.save", "Ctrl+S"), tip("ui.undo", "Ctrl+Z"), tip("ui.redo", "Ctrl+Y"));
         if click(ui, x, "save", &save_tip, shown) {
@@ -525,7 +525,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let separator_x = x - step + if compact_actions { 19.0 } else { 24.0 };
         app_bar_separator(ui, r, separator_x, "documents");
         let tabs_start = separator_x + 10.0;
-        let report_text = crate::i18n::tr("ui.report_a_bug");
+        let report_text = solidcraft_ui_text::tr("ui.report_a_bug");
         let report_font = FontId::proportional(t.font_button);
         let label_width = ui.painter().layout_no_wrap(report_text.to_string(), report_font.clone(), t.app_bar_text).size().x;
         // The version links to its release notes; measured here so Report a bug leaves it room.
@@ -591,7 +591,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     t.app_bar_text,
                 );
             }
-            crate::i18n::tr_label("Report a bug — review a screenshot and open a GitHub draft")
+            solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft")
         };
         if response.backing_on_hover_text(tip).clicked() {
             crate::help::run(app, &ui.ctx().clone(), "report");
@@ -759,7 +759,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
                 ui.visuals_mut().widgets.hovered.weak_bg_fill = Tokens::get().hover;
                 let item_if = |ui: &mut egui::Ui, label: &str, key: &str, icon: &str, enabled: bool| {
-                    crate::context_menu::list_row(ui, &crate::context_menu::Item::action(label, label, icon).key(key).on_if(enabled)).is_some()
+                    crate::context_menu::list_row(ui, &crate::ui_kit::Item::action(label, label, icon).key(key).on_if(enabled)).is_some()
                 };
                 let item = |ui: &mut egui::Ui, label: &str, key: &str, icon: &str| item_if(ui, label, key, icon, true);
                 // Insert, Save and Export act on the design, which Home hides.
@@ -875,8 +875,8 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.separator();
                 // The browser can install SolidCraft as an app (`install`): only while it offers to.
                 if let Some(offer) = crate::install::offered(app)
-                    && crate::context_menu::button(ui, crate::i18n::tr("install.menu"), "new")
-                        .backing_on_hover_text(crate::i18n::tr("install.button_tip"))
+                    && crate::context_menu::button(ui, solidcraft_ui_text::tr("install.menu"), "new")
+                        .backing_on_hover_text(solidcraft_ui_text::tr("install.button_tip"))
                         .clicked()
                 {
                     crate::install::start(app, offer);
@@ -929,7 +929,7 @@ pub(crate) fn save_as(app: &mut SolveApp) {
 
 /// Save As offering a copy's name ("Bracket copy"), so the file it is a copy of is kept.
 pub(crate) fn save_copy(app: &mut SolveApp) {
-    let name = crate::i18n::format("document.copy_name", &[("name", &app.session.save_as_name())]);
+    let name = solidcraft_ui_text::format("document.copy_name", &[("name", &app.session.save_as_name())]);
     save_as_named(app, &name, solidcraft_engine::io::DESIGN_EXT);
 }
 
@@ -1026,7 +1026,7 @@ fn ribbon_button_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<
     let mut lines = ribbon_label_lines(painter, label, width);
     // Right-to-left labels come in display order (see `bidi`): a line reads from its right end,
     // so a shortened line loses characters on the left, where the ellipsis then goes.
-    let rtl = crate::bidi::has_rtl(label);
+    let rtl = solidcraft_ui_text::bidi::has_rtl(label);
     for line in &mut lines {
         if ribbon_label_width(painter, line) > width {
             while !line.is_empty() {
@@ -1047,8 +1047,12 @@ fn ribbon_button_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<
 }
 
 fn ribbon_label_width(painter: &egui::Painter, text: &str) -> f32 {
-    let mut job =
-        egui::text::LayoutJob::simple(text.to_owned(), FontId::proportional(crate::theme::Tokens::get().font_body), Color32::WHITE, f32::INFINITY);
+    let mut job = egui::text::LayoutJob::simple(
+        text.to_owned(),
+        FontId::proportional(solidcraft_theme::Tokens::get().font_body),
+        Color32::WHITE,
+        f32::INFINITY,
+    );
     job.halign = egui::Align::Center;
     painter.layout_job(job).size().x
 }
@@ -1110,7 +1114,7 @@ fn ribbon_label_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<S
     let measure = |text: &str| ribbon_label_width(painter, text);
     let normalized = label.split_whitespace().collect::<Vec<_>>().join(" ");
     let label = normalized.as_str();
-    if crate::bidi::has_rtl(label) {
+    if solidcraft_ui_text::bidi::has_rtl(label) {
         // Display-order right-to-left text reads from its end: the first line takes the words
         // at the end of the string, the second line the words before them.
         let breaks = label.char_indices().filter(|(_, c)| c.is_whitespace() || *c == '/').map(|(at, c)| at + c.len_utf8());
@@ -1194,7 +1198,7 @@ pub(crate) fn persistent_button_name(app: &SolveApp, command: &solidcraft_engine
 fn persistent_hint(app: &SolveApp, command: &solidcraft_engine::CommandSpec, enabled: bool) -> Option<String> {
     (enabled && command.id != COMPONENT_COLORS && persistent_pressed(app, command.id)).then(|| {
         let name = persistent_button_name(app, command);
-        crate::i18n::Locale::for_language(&app.preferences.language).format("ui.viewport_status_clear_hint", &[("name", &name)])
+        solidcraft_ui_text::Locale::for_language(&app.preferences.language).format("ui.viewport_status_clear_hint", &[("name", &name)])
     })
 }
 
@@ -1229,7 +1233,7 @@ fn paint_persistent_ribbon(app: &SolveApp, ui: &egui::Ui, paints: Vec<Persistent
         // Resolve the genuine live tool after dispatch too: a click may have ended it.
         // The compatibility presentation keeps its original transient recipe.
         let neutral = if app.preferences.persistent_ribbon_pressed && app.tool.as_ref().is_some_and(|tool| tool.cmd == paint.command.id) {
-            let accent = crate::theme::TabAccent::for_tab(&t, tab);
+            let accent = solidcraft_theme::TabAccent::for_tab(&t, tab);
             egui::Shape::Rect(egui::epaint::RectShape::new(
                 paint.rect,
                 t.radius_sm,
@@ -1279,7 +1283,7 @@ fn ribbon_button_galley(painter: &egui::Painter, label: &str, width: f32, color:
 fn ribbon_button_galley_weight(painter: &egui::Painter, label: &str, width: f32, color: Color32, selected: bool) -> std::sync::Arc<egui::Galley> {
     let lines = ribbon_button_lines(painter, label, width);
     // Explicit newlines only: egui must never split an oversized word.
-    let size = crate::theme::Tokens::get().font_body;
+    let size = solidcraft_theme::Tokens::get().font_body;
     let mut job = egui::text::LayoutJob::simple(
         lines.join("\n"),
         if selected { crate::fonts::semibold(size) } else { FontId::proportional(size) },
@@ -1346,7 +1350,7 @@ struct RibbonTabStyle {
 /// selected tab. Ordinary tabs use the soft accent when selected and the hover colour when
 /// hovered.
 fn ribbon_tab_style(t: &Tokens, tab: &str, contextual: bool, active: bool, hovered: bool) -> RibbonTabStyle {
-    let accent = crate::theme::TabAccent::for_tab(t, tab);
+    let accent = solidcraft_theme::TabAccent::for_tab(t, tab);
     let idle = if hovered { t.hover } else { Color32::TRANSPARENT };
     let (fill, ink, outline) = match (contextual, active) {
         (true, true) => (accent.color, accent.on_fill(t), Color32::TRANSPARENT),
@@ -1364,7 +1368,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
     let widths: Vec<_> = tabs
         .iter()
         .map(|tab| {
-            ui.painter().layout_no_wrap(ribbon_label(app, tab), crate::fonts::semibold(crate::theme::Tokens::get().font_button), t.text).size().x
+            ui.painter().layout_no_wrap(ribbon_label(app, tab), crate::fonts::semibold(solidcraft_theme::Tokens::get().font_button), t.text).size().x
                 + 24.0
         })
         .collect();
@@ -1520,15 +1524,15 @@ fn dropdown_arrow(painter: &egui::Painter, at: egui::Pos2, ink: Color32) {
     crate::ui_kit::dropdown_indicator(painter, Rect::from_center_size(at, vec2(10.0, 10.0)), ink);
 }
 
-pub(crate) fn shell_layout(app: &SolveApp) -> crate::shell::LayoutMode {
-    if crate::render_workspace::active(app) { crate::shell::LayoutMode::Floating } else { app.ui.layout }
+pub(crate) fn shell_layout(app: &SolveApp) -> crate::ui_kit::LayoutMode {
+    if crate::render_workspace::active(app) { crate::ui_kit::LayoutMode::Floating } else { app.ui.layout }
 }
 
-pub(crate) fn shell_cards(app: &SolveApp, available: Rect) -> crate::shell::Cards {
+pub(crate) fn shell_cards(app: &SolveApp, available: Rect) -> crate::ui_kit::Cards {
     if crate::render_workspace::active(app) {
         crate::ui_kit::StageBar::cards(available)
     } else {
-        crate::shell::Cards::new(available, shell_layout(app), reserved_height(app))
+        crate::ui_kit::Cards::new(available, shell_layout(app), reserved_height(app), WORKSPACE_WIDTH)
     }
 }
 
@@ -1549,7 +1553,7 @@ pub(crate) fn reserved_height(app: &SolveApp) -> f32 {
 #[derive(Clone, Copy)]
 struct RibbonShape {
     floating: bool,
-    cards: crate::shell::Cards,
+    cards: crate::ui_kit::Cards,
     r: Rect,
     ws: Rect,
     folded: bool,
@@ -1599,7 +1603,7 @@ fn open_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, available: Rect, folded: R
     let layout = shell_layout(app);
     let floating = Container::for_layout(layout, Surface::Panel).floating();
     let full = ribbon_height(app.preferences.ribbon_labels);
-    let cards = crate::shell::Cards::new(available, layout, full);
+    let cards = crate::ui_kit::Cards::new(available, layout, full, WORKSPACE_WIDTH);
     let r = if floating {
         Rect::from_min_max(cards.workspace.min, cards.ribbon.max)
     } else {
@@ -1656,7 +1660,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         if floating {
             for card in [ws, cards.ribbon] {
                 let fill =
-                    if crate::render_workspace::active(app) && card == ws { crate::theme::TabAccent::current(ui.ctx()).soft } else { t.toolbar };
+                    if crate::render_workspace::active(app) && card == ws { solidcraft_theme::TabAccent::current(ui.ctx()).soft } else { t.toolbar };
                 let frame = host.frame(ui.ctx(), fill, crate::frame::Side::Left);
                 host.paint_background(ui.painter(), frame, card);
                 // Blank card space owns clicks as well as its buttons.
@@ -1691,7 +1695,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         painter.rect_filled(
             Rect::from_min_size(ws.left_top() + vec2(accent_inset, 0.0), vec2((ws.width() - 2.0 * accent_inset).max(0.0), t.space_3)),
             egui::CornerRadius { nw: 0, ne: 0, sw: if floating { t.radius_sm / 2 } else { 0 }, se: if floating { t.radius_sm / 2 } else { 0 } },
-            if crate::render_workspace::active(app) { crate::theme::TabAccent::current(ui.ctx()).color } else { t.accent },
+            if crate::render_workspace::active(app) { solidcraft_theme::TabAccent::current(ui.ctx()).color } else { t.accent },
         );
         if !floating {
             t.secondary_line(&painter, [ws.right_top(), ws.right_bottom()], t.border);
@@ -1972,7 +1976,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
                 let persistent = persistent_available(app, selected.id);
                 let background_slot = painter.add(egui::Shape::Noop);
-                let accent = crate::theme::TabAccent::for_tab(&t, &tab);
+                let accent = solidcraft_theme::TabAccent::for_tab(&t, &tab);
                 let family_open = family.is_some_and(|f| egui::Popup::is_id_open(ui.ctx(), ui.scope_id().with(("family", f.label)).with("popup")));
                 // The buttons that leave the sketch or the edit (Finish, Finish with AutoConstrain,
                 // Cancel, Finish Edit) never show pressed; a tool pinned into their group does.
@@ -2099,7 +2103,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     let info = crate::render_workspace::interactive_command_info(app, c);
                     let resp = ui.interact(cell, ui.scope_id().with(("cmd", c.id)), Sense::click_and_drag());
                     let active = ribbon_shows_pressed(app, c.id);
-                    let accent = crate::theme::TabAccent::for_tab(&t, &tab);
+                    let accent = solidcraft_theme::TabAccent::for_tab(&t, &tab);
                     painter.rect(
                         cell,
                         t.radius_sm,
@@ -2171,7 +2175,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             let hidden_running = app.preferences.ribbon_reveal && running.as_deref().is_some_and(hidden);
             let hidden_reveal = reveal.as_ref().filter(|r| hidden(r.id));
             let panel_open = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open"))) == Some(popup_id);
-            let accent = crate::theme::TabAccent::for_tab(&t, &tab);
+            let accent = solidcraft_theme::TabAccent::for_tab(&t, &tab);
             let hot = lresp.hovered() && enabled_panel;
             if follow_panel_hover && enabled_panel && !finish && (hot || collapsed_hovered) {
                 hovered_panel_menu = Some(popup_id);
@@ -2190,9 +2194,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             let label = if finish { app.tr("ui.ribbon_exit").to_string() } else { ribbon_label(app, panel) };
             let panel_open = panel_open || hidden_running;
             let font = if panel_open || hot {
-                crate::fonts::semibold(crate::theme::Tokens::get().font_caption)
+                crate::fonts::semibold(solidcraft_theme::Tokens::get().font_caption)
             } else {
-                FontId::proportional(crate::theme::Tokens::get().font_caption)
+                FontId::proportional(solidcraft_theme::Tokens::get().font_caption)
             };
             let label_width = painter.layout_no_wrap(label.clone(), font, t.text_dim).size().x;
             let ink = if panel_open { accent.ink } else { t.text_dim };
@@ -2247,7 +2251,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             if *panel == "SELECT" {
                                 selection_filter(app, ui);
                             } else if cmds.is_empty() {
-                                ui.label(egui::RichText::new(crate::i18n::tr_label("Not available yet")).color(t.text_dim));
+                                ui.label(egui::RichText::new(solidcraft_ui_text::tr_label("Not available yet")).color(t.text_dim));
                             }
                             if sketch_create && app.preferences.ribbon_icon_grid && !cmds.is_empty() {
                                 let mut paints = Vec::new();
@@ -2380,7 +2384,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     }
                 });
                 crate::scenario::publish_target("toolbar:overflow", response.response.rect);
-                response.response.backing_on_hover_text(crate::i18n::tr_label("More toolbar panels"));
+                response.response.backing_on_hover_text(solidcraft_ui_text::tr_label("More toolbar panels"));
             });
         }
 
@@ -2486,7 +2490,7 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
             Some(key) if !key.is_empty() => format!("{label} ({key})"),
             _ => label.clone(),
         };
-        let tip = if shown { tip } else { crate::i18n::format("ui.needs_design", &[("command", &label)]) };
+        let tip = if shown { tip } else { solidcraft_ui_text::format("ui.needs_design", &[("command", &label)]) };
         if resp.on_hover_text(tip).clicked() && enabled {
             start = Some((c.id, br));
         }
@@ -2574,10 +2578,10 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
         let t = Tokens::get();
         let name = app.tr_label(crate::render_workspace::interactive_command_info(app, command).label);
         let name_width =
-            ui.painter().layout_no_wrap(name.to_string(), crate::fonts::semibold(crate::theme::Tokens::get().font_heading), t.text).size().x;
+            ui.painter().layout_no_wrap(name.to_string(), crate::fonts::semibold(solidcraft_theme::Tokens::get().font_heading), t.text).size().x;
         let key_width = crate::keymap::display_for(app, command.id)
             .map(|key| {
-                ui.painter().layout_no_wrap(key.to_string(), FontId::monospace(crate::theme::Tokens::get().font_body), t.text_dim).size().x + 24.0
+                ui.painter().layout_no_wrap(key.to_string(), FontId::monospace(solidcraft_theme::Tokens::get().font_body), t.text_dim).size().x + 24.0
             })
             .unwrap_or(0.0);
         ui.set_width(280.0_f32.max(name_width + key_width + 12.0));
@@ -2628,7 +2632,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
 
 /// The pulse around a command the search points out (#7287); `strength` 0 draws nothing.
 /// `fill` tints the inside too, for a button painted before its icon and label.
-fn paint_reveal(painter: &egui::Painter, rect: Rect, accent: &crate::theme::TabAccent, strength: f32, fill: bool) {
+fn paint_reveal(painter: &egui::Painter, rect: Rect, accent: &solidcraft_theme::TabAccent, strength: f32, fill: bool) {
     if strength <= 0.0 {
         return;
     }
@@ -2676,7 +2680,7 @@ fn group_heading_font() -> FontId {
 
 /// A group heading's text: its name in the interface language, as written.
 fn group_heading_text(label: &str) -> String {
-    crate::i18n::tr_label(label).to_string()
+    solidcraft_ui_text::tr_label(label).to_string()
 }
 
 fn section_heading(ui: &mut egui::Ui, label: &str, width: f32) {
@@ -2690,8 +2694,10 @@ fn section_footer(ui: &mut egui::Ui, message: &str) {
     ui.separator();
     ui.add_space(4.0);
     ui.add(
-        egui::Label::new(egui::RichText::new(crate::i18n::tr(message)).size(crate::theme::Tokens::get().font_small).color(Tokens::get().text_dim))
-            .wrap(),
+        egui::Label::new(
+            egui::RichText::new(solidcraft_ui_text::tr(message)).size(solidcraft_theme::Tokens::get().font_small).color(Tokens::get().text_dim),
+        )
+        .wrap(),
     );
     ui.add_space(4.0);
 }
@@ -2889,7 +2895,7 @@ fn dropdown_row(
     row.shortcut = &shortcut;
     row.paint(ui, rect, &resp, 26.0);
     if let Some(strength) = revealed {
-        paint_reveal(ui.painter(), rect, &crate::theme::TabAccent::for_tab(&t, &app.ui.tab), strength, false);
+        paint_reveal(ui.painter(), rect, &solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab), strength, false);
         crate::scenario::publish_rect("ribbon:reveal", rect);
         if !ui.clip_rect().contains_rect(rect) {
             ui.scroll_to_rect(rect, None);
@@ -2914,7 +2920,7 @@ fn dropdown_row(
         return RowAction::TogglePin;
     }
     dropdown_tip(ui, menu, &pin, |ui| {
-        ui.label(crate::i18n::tr_label(tip));
+        ui.label(solidcraft_ui_text::tr_label(tip));
     });
     // A disabled row says why; a documented command also shows its help (#2758).
     let reason = info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason));
@@ -3312,7 +3318,7 @@ fn dropdown_cell(
     if let Some(pin) = pin {
         crate::scenario::publish_handle(&format!("dropdown_pin:{}", c.id), pr.center());
         let tip = if pinned { "Remove from Toolbar" } else { "Pin to Toolbar" };
-        if pin.backing_on_hover_text(crate::i18n::tr_label(tip)).clicked() {
+        if pin.backing_on_hover_text(solidcraft_ui_text::tr_label(tip)).clicked() {
             return RowAction::TogglePin;
         }
     }
@@ -3442,7 +3448,7 @@ fn drag_ghost(app: &SolveApp, ctx: &egui::Context, id: &str, at: egui::Pos2, rem
 /// The SELECT panel: what a click in the view picks.
 pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    ui.label(egui::RichText::new(crate::i18n::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
+    ui.label(egui::RichText::new(solidcraft_ui_text::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
     for (mode, label) in [("body", app.tr_label("Select bodies (a face picks its body)")), ("component", app.tr("ui.select_components_by_face"))] {
         let mut on = app.ui.pick_mode() == mode;
         if ui_kit::checkbox(ui, label, &mut on).changed() {
@@ -3463,7 +3469,7 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
         ("constraints", "Sketch constraints"),
     ] {
         let mut on = !app.ui.pick_off.iter().any(|x| x == k);
-        if crate::ui_kit::checkbox(ui, crate::i18n::tr_label(label), &mut on).changed() {
+        if crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label(label), &mut on).changed() {
             app.ui.pick_off.retain(|x| x != k);
             if !on {
                 app.ui.pick_off.push(k.to_string());
@@ -4313,10 +4319,10 @@ mod header_report_tests {
     #[test]
     fn panel_accents_share_the_tab_mapping_but_constraints_keep_their_role() {
         for dark in [false, true] {
-            for vision in crate::theme::ColorVision::ALL {
+            for vision in solidcraft_theme::ColorVision::ALL {
                 let t = Tokens::themed(dark, vision);
                 for tab in TABS.iter().copied().chain(["SKETCH", "FORM", "RENDER"]) {
-                    assert_eq!(panel_accent(&t, tab, "CREATE"), crate::theme::TabAccent::for_tab(&t, tab).color);
+                    assert_eq!(panel_accent(&t, tab, "CREATE"), solidcraft_theme::TabAccent::for_tab(&t, tab).color);
                     assert_eq!(panel_accent(&t, tab, "CONSTRAIN"), t.glyph_text);
                 }
             }
@@ -4481,7 +4487,7 @@ mod header_report_tests {
         assert!(crate::scenario::handle_at("titlebar:version").is_some(), "the version is in the bar");
         h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
         assert!(h.app.help.menu);
-        let version = crate::i18n::format("help.version", &[("version", crate::update::current_version())]);
+        let version = solidcraft_ui_text::format("help.version", &[("version", crate::update::current_version())]);
         assert!(h.widget("About SolidCraft").is_some());
         assert!(h.widget(&version).is_none(), "the Help menu has no version row");
     }
@@ -4520,7 +4526,7 @@ mod header_report_tests {
         // The version is a Help menu row, right after About.
         h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
         assert!(h.app.help.menu);
-        let version = crate::i18n::format("help.version", &[("version", crate::update::current_version())]);
+        let version = solidcraft_ui_text::format("help.version", &[("version", crate::update::current_version())]);
         let [_, about] = h.widget("About SolidCraft").unwrap();
         let [_, row] = h.widget(&version).expect("the Help menu lists the version");
         let [_, shortcuts] = h.widget("Keyboard Shortcuts").unwrap();
@@ -4770,10 +4776,11 @@ mod home_tests {
     /// The disabled buttons' tooltip is translated in every catalog (not English fallback).
     #[test]
     fn needs_design_tooltip_is_translated() {
-        let english = crate::i18n::Locale::for_language("en").text("ui.needs_design");
+        crate::i18n::install();
+        let english = solidcraft_ui_text::Locale::for_language("en").text("ui.needs_design");
         assert!(english.contains("{command}"));
         for catalog in crate::i18n::LOCALES.iter().filter(|c| !matches!(c.id, "en" | "en-GB")) {
-            let text = crate::i18n::Locale::for_language(catalog.id).text("ui.needs_design");
+            let text = solidcraft_ui_text::Locale::for_language(catalog.id).text("ui.needs_design");
             assert!(text != english && text.contains("{command}"), "{} must translate ui.needs_design", catalog.id);
         }
     }
@@ -4841,7 +4848,7 @@ mod dropdown_tests {
     /// reached with the arrow keys and comes into view.
     #[test]
     fn a_tall_drop_down_scrolls_inside_a_short_window() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.call("ui.set", json!({"layout":mode}));
@@ -5125,12 +5132,12 @@ mod dropdown_tests {
     /// button's own right-click menu takes it off again, with both options on.
     #[test]
     fn a_pinned_button_is_removed_from_its_own_menu() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             a_pinned_button_is_removed_in(mode);
         }
     }
 
-    fn a_pinned_button_is_removed_in(mode: crate::shell::LayoutMode) {
+    fn a_pinned_button_is_removed_in(mode: crate::ui_kit::LayoutMode) {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.set", json!({"layout":mode}));
@@ -5397,7 +5404,7 @@ mod dropdown_toggle_tests {
         h.step(&json!({"click": {"handle": "button:sketch.ellipse"}})).unwrap();
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.ellipse"), "the click starts the tool");
         h.frames(3);
-        let soft = crate::theme::TabAccent::for_tab(&crate::theme::Tokens::get(), "SKETCH").soft;
+        let soft = solidcraft_theme::TabAccent::for_tab(&solidcraft_theme::Tokens::get(), "SKETCH").soft;
         let pressed = |h: &Harness, id: &str| {
             let r = rect_of(&format!("button:{id}")).unwrap();
             let mut all = Vec::new();
@@ -5452,7 +5459,7 @@ mod dropdown_toggle_tests {
             assert_eq!(h.app.ui.tab, "SURFACE");
             assert!(h.app.ui.ribbon_open, "{layout}: the tab's panels open");
             let open = rect_of("ribbon:open").unwrap();
-            assert!((open.height() - whole.height()).abs() <= 2.0 * crate::shell::SHELL_GAP + 1.0, "{layout}: {open:?} vs {whole:?}");
+            assert!((open.height() - whole.height()).abs() <= 2.0 * crate::ui_kit::SHELL_GAP + 1.0, "{layout}: {open:?} vs {whole:?}");
             assert!(rect_of("panel:SURFACE:CREATE").is_some(), "{layout}: the panels are drawn");
             if layout == "compact" {
                 let top = h.app.viewport.rect.unwrap().top();
@@ -5548,7 +5555,7 @@ mod app_bar_tests {
             (a.max(b) + 0.05) / (a.min(b) + 0.05)
         }
         for dark in [false, true] {
-            for vision in crate::theme::ColorVision::ALL {
+            for vision in solidcraft_theme::ColorVision::ALL {
                 let t = Tokens::themed(dark, vision);
                 for fill in [t.app_bar_hover, t.app_bar_hover_subtle, t.app_bar_hover_button, t.app_bar_hover_strong] {
                     let channel = |fg: u8, bg: u8| fg.saturating_add((u16::from(bg) * u16::from(255 - fill.a()) / 255) as u8);
@@ -5630,7 +5637,7 @@ mod ribbon_label_tests {
     fn tab_test_themes() -> Vec<Tokens> {
         let mut themes = Vec::new();
         for dark in [false, true] {
-            for vision in crate::theme::ColorVision::ALL {
+            for vision in solidcraft_theme::ColorVision::ALL {
                 themes.push(Tokens::themed(dark, vision));
             }
         }
@@ -5642,17 +5649,17 @@ mod ribbon_label_tests {
     fn a_selected_contextual_tab_stands_out_and_an_unselected_one_is_outlined() {
         for t in tab_test_themes() {
             for tab in ["SKETCH", "SHEET METAL"] {
-                let accent = crate::theme::TabAccent::for_tab(&t, tab);
+                let accent = solidcraft_theme::TabAccent::for_tab(&t, tab);
                 for hovered in [false, true] {
                     let active = ribbon_tab_style(&t, tab, true, true, hovered);
                     let inactive = ribbon_tab_style(&t, tab, true, false, hovered);
                     assert_eq!(active, RibbonTabStyle { fill: accent.color, ink: accent.on_fill(&t), outline: Color32::TRANSPARENT });
                     assert_eq!(inactive, RibbonTabStyle { outline: accent.color, ..ribbon_tab_style(&t, tab, false, false, hovered) });
-                    assert!(crate::theme::contrast_ratio(active.ink, active.fill) >= 4.5, "{tab}: selected text must remain readable");
+                    assert!(solidcraft_theme::contrast_ratio(active.ink, active.fill) >= 4.5, "{tab}: selected text must remain readable");
                     // The selected contextual tab is the solid pill; the unselected one never is.
                     assert!(
-                        crate::theme::contrast_ratio(active.fill, t.toolbar)
-                            > crate::theme::contrast_ratio(if hovered { t.hover } else { t.toolbar }, t.toolbar),
+                        solidcraft_theme::contrast_ratio(active.fill, t.toolbar)
+                            > solidcraft_theme::contrast_ratio(if hovered { t.hover } else { t.toolbar }, t.toolbar),
                         "{tab}: the selected tab must be the more prominent one"
                     );
                 }
@@ -5664,7 +5671,7 @@ mod ribbon_label_tests {
     fn ordinary_tabs_keep_their_selected_hovered_and_idle_colors() {
         for t in tab_test_themes() {
             for tab in ["MODEL", "SURFACE", "SHEET METAL"] {
-                let accent = crate::theme::TabAccent::for_tab(&t, tab);
+                let accent = solidcraft_theme::TabAccent::for_tab(&t, tab);
                 for hovered in [false, true] {
                     let none = Color32::TRANSPARENT;
                     assert_eq!(ribbon_tab_style(&t, tab, false, true, hovered), RibbonTabStyle { fill: accent.soft, ink: accent.ink, outline: none });
@@ -5715,7 +5722,7 @@ mod ribbon_label_tests {
                 let (commands, count) = crate::workspace::layout(section.tab, section.panel, &specs).unwrap();
                 for command in commands.iter().take(count) {
                     for catalog in crate::i18n::LOCALES {
-                        let locale = crate::i18n::Locale::for_language(catalog.id);
+                        let locale = solidcraft_ui_text::Locale::for_language(catalog.id);
                         let label = locale.label(crate::workspace::ribbon_button_label(command));
                         let whole = Rect::from_min_size(pos2(40.0, 2.0), vec2(ribbon_button_width(&painter, label), BUTTON_HEIGHT));
                         let galley = ribbon_button_galley(&painter, label, whole.width() - BUTTON_LABEL_PADDING, Color32::WHITE);
@@ -5747,13 +5754,13 @@ mod ribbon_label_tests {
                 let (commands, count) = crate::workspace::layout(section.tab, section.panel, &specs).unwrap();
                 for command in commands.iter().take(count) {
                     for catalog in crate::i18n::LOCALES {
-                        let locale = crate::i18n::Locale::for_language(catalog.id);
+                        let locale = solidcraft_ui_text::Locale::for_language(catalog.id);
                         let label = locale.label(crate::workspace::ribbon_button_label(command));
                         let width = ribbon_button_width(&painter, label) - BUTTON_LABEL_PADDING;
                         let galley = ribbon_button_galley(&painter, label, width, Color32::WHITE);
                         assert!(galley.rows.len() <= 2, "{}: {label}", command.id);
                         assert!(galley.size().x <= width + 0.01, "{}: {label}: {} > {width}", command.id, galley.size().x);
-                        if crate::bidi::has_rtl(label) {
+                        if solidcraft_ui_text::bidi::has_rtl(label) {
                             // epaint adds zero-width glyphs to right-to-left rows, so their text
                             // is not the source text: check the lines the galley is built from.
                             let lines = ribbon_button_lines(&painter, label, width);
@@ -5823,13 +5830,13 @@ mod ribbon_label_tests {
             let lines = ribbon_button_lines(&painter, "長い日本語のラベル 続き", 50.0);
             assert_eq!(lines.len(), 2);
             assert!(lines[0].ends_with('…'));
-            // Hebrew comes in display order (`bidi::visual`): the reader starts at the right end,
+            // Hebrew comes in display order (`solidcraft_ui_text::bidi::visual`): the reader starts at the right end,
             // so "סקיצה חדשה" (New Sketch, stored as "חדשה סקיצה") puts סקיצה on the first line.
-            let label = crate::bidi::visual("סקיצה חדשה").into_owned();
+            let label = solidcraft_ui_text::bidi::visual("סקיצה חדשה").into_owned();
             let width = ribbon_label_width(&painter, "סקיצה").max(ribbon_label_width(&painter, "חדשה")) + 1.0;
             assert!(ribbon_label_width(&painter, &label) > width);
             assert_eq!(ribbon_button_lines(&painter, &label, width), vec!["סקיצה", "חדשה"]);
-            let lines = ribbon_button_lines(&painter, &crate::bidi::visual("אחת שתיים שלוש ארבע חמש"), 50.0);
+            let lines = ribbon_button_lines(&painter, &solidcraft_ui_text::bidi::visual("אחת שתיים שלוש ארבע חמש"), 50.0);
             assert_eq!(lines.len(), 2);
             assert!(lines[1].starts_with('…'), "{lines:?}");
         });
@@ -5842,7 +5849,7 @@ mod ribbon_label_tests {
         ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let painter = ui.painter().clone();
-            let ja = crate::i18n::Locale::for_language("ja");
+            let ja = solidcraft_ui_text::Locale::for_language("ja");
             for (id, expected) in [
                 ("sketch.create", vec!["新規", "スケッチ"]),
                 ("config.table", vec!["構成", "テーブル"]),
@@ -6322,7 +6329,7 @@ mod persistent_ribbon_tests {
             h.app.session.execute("inspect.zebra", &json!({})).unwrap();
             h.frame();
             assert_presentation(&h, "inspect.zebra", enabled, enabled);
-            let accent = crate::theme::TabAccent::for_tab(&Tokens::get(), "INSPECT");
+            let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), "INSPECT");
             assert!(button_shapes(&h, "inspect.zebra").iter().any(|shape| matches!(shape, egui::Shape::Rect(rect) if rect.rect == zebra && rect.stroke.width == 2.0 && rect.stroke.color == accent.color.gamma_multiply(h.app.sbox.reveal.as_ref().unwrap().strength(h.ctx.input(|input| input.time), h.ctx.global_style().animation_time > 0.0)))), "the upstream pulse remains painted above the selected background");
             for (id, active) in [("inspect.draft", true), ("inspect.draft", false)] {
                 let at = scenario::handle_at(&format!("button:{id}")).unwrap();
@@ -6762,7 +6769,7 @@ mod persistent_ribbon_tests {
             h.call("ui.prefs", json!({"language":language}));
             let command = solidcraft_engine::find_command("inspect.zebra").unwrap();
             let name = h.app.tr_label(crate::workspace::ribbon_button_label(command));
-            let expected = crate::i18n::Locale::for_language(language).format("ui.viewport_status_clear_hint", &[("name", name)]);
+            let expected = solidcraft_ui_text::Locale::for_language(language).format("ui.viewport_status_clear_hint", &[("name", name)]);
             assert_eq!(persistent_hint(&h.app, command, true), Some(expected.clone()));
             let at = scenario::handle_at("button:inspect.zebra").unwrap();
             h.frame_with(vec![egui::Event::PointerMoved(at)]);
@@ -6804,7 +6811,7 @@ mod persistent_ribbon_tests {
         assert_eq!(scenario::count_of("ribbon:pressed"), Some(0.0));
         assert_presentation(&h, "inspect.continuity", false, false);
         let r = scenario::rect_of("button:inspect.continuity").unwrap();
-        let accent = crate::theme::TabAccent::for_tab(&Tokens::get(), "INSPECT");
+        let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), "INSPECT");
         assert!(
             button_shapes(&h, "inspect.continuity")
                 .iter()
@@ -6835,7 +6842,7 @@ mod persistent_ribbon_tests {
     fn persistent_click_clear_and_replacement_remove_old_tool_paint_in_the_release_frame() {
         fn no_tool_paint(h: &Harness) {
             let r = scenario::rect_of("button:inspect.continuity").unwrap();
-            let accent = crate::theme::TabAccent::for_tab(&Tokens::get(), "INSPECT");
+            let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), "INSPECT");
             assert!(
                 !button_shapes(h, "inspect.continuity")
                     .iter()

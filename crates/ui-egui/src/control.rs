@@ -2573,7 +2573,7 @@ mod tests {
                 *counts.entry(img.get_pixel(x, 0).0).or_insert(0) += 1;
             }
             let top = counts.into_iter().max_by_key(|(_, n)| *n).map(|(c, _)| c).unwrap();
-            let want = if dark { crate::theme::Tokens::dark() } else { crate::theme::Tokens::light() }.viewport_top;
+            let want = if dark { solidcraft_theme::Tokens::dark() } else { solidcraft_theme::Tokens::light() }.viewport_top;
             let near = top.iter().zip([want.r(), want.g(), want.b()]).all(|(a, b)| a.abs_diff(b) <= 2);
             assert!(near, "{theme}: the render's top row is {top:?}, the view's background {want:?}");
         }

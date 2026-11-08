@@ -164,13 +164,14 @@ pub(super) fn tone_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::text(ui, app.tr("render.studio_tone_map"), ui_kit::Text::Inline);
     let selected = app.render_workspace.view.studio.tone_map;
     let label = match selected {
-        ToneMap::Reinhard => crate::i18n::tr("render.tone_reinhard"),
-        ToneMap::AcesFitted => crate::i18n::tr("render.tone_aces_fitted"),
+        ToneMap::Reinhard => solidcraft_ui_text::tr("render.tone_reinhard"),
+        ToneMap::AcesFitted => solidcraft_ui_text::tr("render.tone_aces_fitted"),
     };
     let response = ui_kit::dropdown_menu(ui, "render_tone_map", label, |ui| {
-        for (map, label) in
-            [(ToneMap::Reinhard, crate::i18n::tr("render.tone_reinhard")), (ToneMap::AcesFitted, crate::i18n::tr("render.tone_aces_fitted"))]
-        {
+        for (map, label) in [
+            (ToneMap::Reinhard, solidcraft_ui_text::tr("render.tone_reinhard")),
+            (ToneMap::AcesFitted, solidcraft_ui_text::tr("render.tone_aces_fitted")),
+        ] {
             if ui_kit::list_picker(ui, label, label, map == selected).clicked() {
                 app.render_workspace.view.studio.tone_map = map;
                 ui.close();
