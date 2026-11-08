@@ -1,0 +1,18 @@
+#### WR-306. `SmProtoEdge::Resolve` imprints a curve that lies inside one proto vertex as a closed edge, splitting off a speck face
+- **Severity:** Invalid result (edge and vertex tolerances of 1.73 mm against 0.01; volume lost)
+- **Area:** Boolean (proto topology)
+- **Location:** `source/SMLib/src/SmProtoTopology.cpp` (`SmProtoEdge::Resolve`, the degenerate test `dLen < 2*m_dTol`); `source/SMLib/src/SmTopologyIntersector.cpp` (`ImprintIntersections`).
+- **What happens:** both ends of a short intersection curve fall inside one proto vertex (capture distance 0.01), on its one vertex definition. `Resolve` drops a proto edge from a proto vertex back to itself only below `2*m_dTol` (1e-5), so it keeps this one. `MakeEdgeInFace` then imprints it as a closed edge, V1 → V1, 1.43e-5 long. The split leaves a speck face (8.5e-9 × 1.6e-7 in UV) that still holds a 15 mm intersection edge in its loop. `RadialSectorClassify` drops that edge's trim 0.86 mm off the face, giving edge tolerances of 1.73 mm.
+- **Trigger:** the union of two pleated loft skins whose pleat creases cross, passing about 1e-5 apart. This is SolidCraft rig case booleans/4623; the operands are in the fork's `capi/tests/data/pleated-skins.txt`. The join also lost 11.6 mm³.
+- **How found:** SolidCraft regression rig on the SMLib fork (tangency-labs/solidcore#1058).
+- **Confirmed:** no (read at c9c5979 `source/SMLib/src/SmProtoTopology.cpp:3412` (`SmProtoEdge::Resolve`, def. `:3391`); reproduced on the SolidCraft fork build: the capi test `booleans/pleated_skins_join` fails before the fix and passes after; with the rig's operands the check passes, union + intersection equals the two skins' volumes to 2e-8 relative, and no speck faces are left). The Rust port has only a unit test; the rig case was not run on it.
+- **Fix:** the fix has two parts.
+  - In `Resolve`, when both curve ends find the same vertex definition, the proto edge is degenerate below 2 × the proto vertex's containment radius (`max(m_dTol, CaptureDistance)`, the radius `ContainsPoint` uses). The proto vertex is then marked as having absorbed it, and `CombineProtoVertex` carries the mark over. Ends on two vertex definitions keep the old test.
+  - After the imprints in `ImprintIntersections`, each final vertex of such a proto vertex is fitted to its edges with `UpdateVertexEdgeIntervals`. Each of the vertex pair's tolerances is then raised to cover the other: the other's tolerance plus twice the distance between them.
+- **Rust port:** opt-in `Kernel::fixes.degenerate_proto_edge_in_one_vertex` (default `false`, upstream behaviour). The pieces are:
+  - `ProtoTopologyManager::resolve_proto_edge` in `crates/solidcore/src/topology/proto_topology/p2.rs`.
+  - `proto_vertex_containment_radius` in `crates/solidcore/src/query/face/p2.rs`.
+  - The `ProtoVertex` absorbed mark in `crates/solidcore/src/topology/proto_topology/p1/proto.rs`.
+  - The fit in `imprint_body` in `crates/solidcore/src/boolean/topology_intersector/p1.rs`, through the new `IntersectorBrep::vertex_update_edge_intervals`, implemented in `crates/solidcore/src/boolean/merge/p4/arena_pair.rs`.
+  - Test: `resolve_self_loop_inside_one_vertex_is_absorbed` in `proto_topology/p2.rs`.
+  - Default off, so no difftest case changes. Fixes tangency-labs/solidcore#1058.

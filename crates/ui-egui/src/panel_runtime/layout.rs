@@ -280,7 +280,7 @@ pub struct HostMetrics {
 
 impl Default for HostMetrics {
     fn default() -> Self {
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         Self {
             header_height: t.form_header_height,
             content_header_height: 0.0,
@@ -655,7 +655,7 @@ pub struct HostSection {
     pub inline: bool,
     /// Editable inline content is separate from the shared title drag region.
     pub inline_content: Option<LogicalRect>,
-    pub collapse: LogicalRect,
+    pub collapse: Option<LogicalRect>,
     pub close: Option<LogicalRect>,
     pub actions: Vec<(ControlId, LogicalRect)>,
     pub footer: Option<LogicalRect>,
@@ -862,7 +862,7 @@ impl HostLayout {
                 Some(section.header),
                 section.title,
                 Some(section.menu),
-                Some(section.collapse),
+                section.collapse,
                 section.close,
                 section.tab_strip,
                 section.body,
@@ -1175,12 +1175,13 @@ fn append_section(
     outer.validate()?;
     let metrics = out.metrics;
     let spec = service.registry().get(&proposed.instance(instance)?.kind)?;
+    let collapsible = section_collapsible(proposed, service.registry(), section)?;
     let (flow, _) = responsive(section.location.zone(), outer.size, None)?;
     // A single row owns inline controls AND content; no hidden second body.
     let inline = !section.collapsed && flow == Flow::Wide && outer.size.height <= metrics.inline_max_height;
     let header =
         rect(outer.origin.x, outer.origin.y, outer.size.width, if inline { outer.size.height } else { metrics.header_height.min(outer.size.height) });
-    let control_count = spec.header_actions.len() + 2 + usize::from(spec.features.hot_closable);
+    let control_count = spec.header_actions.len() + 1 + usize::from(collapsible) + usize::from(spec.features.hot_closable);
     let extent = metrics.control_extent.min(header.size.width / control_count.max(1) as f32);
     let mut cursor = if out.direction == Direction::Ltr { right(header) } else { header.origin.x };
     let take = |cursor: &mut f32| {
@@ -1189,7 +1190,7 @@ fn append_section(
         rect(x, header.origin.y, extent, header.size.height)
     };
     let close = if spec.features.hot_closable { Some(take(&mut cursor)) } else { None };
-    let collapse = take(&mut cursor);
+    let collapse = collapsible.then(|| take(&mut cursor));
     let menu = take(&mut cursor);
     let mut actions = Vec::new();
     let (heading, inline_content) = if inline {
@@ -1231,7 +1232,7 @@ fn append_section(
     // that same slot. Collapsing never removes access to individual tabs.
     let (title, tab_strip) = if section.tabs.len() > 1 {
         if let Some(heading) = heading {
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let grip_width = metrics.control_extent.min(t.space_10 + t.space_8).min(heading.size.width);
             let grip_x = if out.direction == Direction::Ltr { heading.origin.x } else { right(heading) - grip_width };
             let tabs_x = if out.direction == Direction::Ltr { grip_x + grip_width } else { heading.origin.x };
@@ -1331,7 +1332,9 @@ fn append_section(
         add_control(out, HostPointerTarget::Header { instance: instance.clone() }, title, InputRole::Header, "ui.panel_host.header");
     }
     add_control(out, HostPointerTarget::Menu { instance: instance.clone() }, menu, InputRole::Action, "ui.panel_host.menu");
-    add_control(out, HostPointerTarget::Collapse { instance: instance.clone() }, collapse, InputRole::Action, "ui.panel_host.collapse");
+    if let Some(collapse) = collapse {
+        add_control(out, HostPointerTarget::Collapse { instance: instance.clone() }, collapse, InputRole::Action, "ui.panel_host.collapse");
+    }
     if let Some(close) = close {
         add_control(out, HostPointerTarget::Close { instance: instance.clone() }, close, InputRole::Action, "ui.panel_host.close");
     }
@@ -1353,7 +1356,8 @@ fn append_section(
         Zone::Left => HostResizeEdge::Right,
         _ => HostResizeEdge::Left,
     };
-    if !section.collapsed {
+    let (min, max) = tab_bounds(proposed, service.registry(), section)?;
+    if !section.collapsed && !(section.location.zone() == Zone::Bottom && min.height == max.height) {
         add_control(
             out,
             HostPointerTarget::Resize { section: section.id.clone(), edge },

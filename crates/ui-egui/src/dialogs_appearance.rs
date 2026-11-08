@@ -385,7 +385,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
     // Apply To: bodies or faces (the input follows).
     if let Some(component) = &k.component {
         ui_kit::row(ui, "Apply To", |ui| ui_kit::text(ui, &format!("Component: {component}"), ui_kit::Text::Cell));
-        if ui_kit::row(ui, "", |ui| ui_kit::button(ui, crate::i18n::tr_label("Select bodies or faces instead"), ui_kit::Button::Normal)).clicked() {
+        if ui_kit::row(ui, "", |ui| ui_kit::button(ui, solidcraft_ui_text::tr_label("Select bodies or faces instead"), ui_kit::Button::Normal))
+            .clicked()
+        {
             k.component = None;
         }
     } else {
@@ -462,7 +464,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
             });
         }
         if ui_kit::button(ui, "Remove override", ui_kit::Button::Enabled(has_target))
-            .backing_on_hover_text(crate::i18n::tr_label("Restore the inherited component or physical material appearance"))
+            .backing_on_hover_text(solidcraft_ui_text::tr_label("Restore the inherited component or physical material appearance"))
             .clicked()
             && let Some(p) = clear_params(k, &picked)
         {
@@ -523,7 +525,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
         .filter(|(_, l)| matches_library_filter(l, (k.category != 0).then_some(want.as_str()), &query, k.only_available))
         .collect();
     if shown.is_empty() {
-        ui_kit::text(ui, crate::i18n::tr_label("No matching appearances"), ui_kit::Text::Note("appearances_empty"));
+        ui_kit::text(ui, solidcraft_ui_text::tr_label("No matching appearances"), ui_kit::Text::Note("appearances_empty"));
     }
     ui_kit::swatch_grid(ui, &shown, |ui, (i, l)| {
         let picked_look = k.look.as_deref() == Some(l.name.as_str()) && k.pbr == l.pbr;

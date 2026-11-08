@@ -295,3 +295,57 @@ fn a_tangent_plane_on_a_numbered_piece_of_a_round_face_is_found_again() {
     let off = run(doc("F2:side:c1#2", [10., 0., 30.]));
     assert!(off.result(3).unwrap().error.is_some());
 }
+
+/// An edge picked when its side face was split in two keeps the piece in its name
+/// (`F2:side:l1#[F2:start]`); once the side is one face again the edge is still found (#11731).
+#[test]
+fn an_edge_named_by_a_piece_of_a_face_that_is_whole_again_is_found() {
+    let doc = Document {
+        features: serde_json::from_value(serde_json::json!([
+            {
+                "id": 1, "name": "Sketch1", "type": "sketch", "plane": {"name": "XY", "type": "origin"},
+                "sketch": {
+                    "points": [
+                        {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p1", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p2", "pos": [10., 0.]},
+                        {"fixed": false, "id": "p3", "pos": [10., 16.1]},
+                        {"fixed": false, "id": "p4", "pos": [0., 16.1]}
+                    ],
+                    "curves": [
+                        {"a": 1, "b": 2, "construction": false, "id": "l1", "type": "line"},
+                        {"a": 2, "b": 3, "construction": false, "id": "l2", "type": "line"},
+                        {"a": 3, "b": 4, "construction": false, "id": "l3", "type": "line"},
+                        {"a": 4, "b": 1, "construction": false, "id": "l4", "type": "line"}
+                    ],
+                    "constraints": [],
+                    "counters": {"k": 0, "l": 4, "p": 4}
+                }
+            },
+            {
+                "id": 2, "name": "Extrude1", "type": "extrude", "body_names": ["Body1"],
+                "extent": {"convention": "total_distance", "direction": "positive", "distance": "5"},
+                "operation": "new_body", "profiles": {"loops": [["l1", "l2", "l3", "l4"]], "type": "curves"}, "sketch": 1
+            }
+        ]))
+        .unwrap(),
+        ..Document::default()
+    };
+    let doc = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = state.body("Body1").unwrap();
+    // The side along x = 0 meets the start cap in the edge under the pick.
+    let near = Vec3::new(0., 8.05, 0.);
+    let names = crate::naming::edge_names(body);
+    let whole = names.iter().find(|n| n.contains("F2:start") && n.contains("F2:side:l4")).expect("the side's edge on the start cap");
+    let piece = whole.replace("F2:side:l4", "F2:side:l4#[F2:start]");
+    let hit = crate::name_lookup::locate_edge(body, &piece, near).unwrap_or_else(|e| panic!("{piece}: {e}"));
+    assert!(hit.on_point, "the edge under the saved pick");
+    assert_eq!(hit.point, near);
+    assert_eq!(names.get(hit.edge), Some(whole));
+    // A piece told apart by a face the side never touches (the opposite side) is still refused.
+    let gone = whole.replace("F2:side:l4", "F2:side:l4#[F2:side:l2]");
+    assert!(crate::name_lookup::locate_edge(body, &gone, near).is_err(), "{gone}");
+}

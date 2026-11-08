@@ -15,6 +15,22 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 }
 
 #[test]
+fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_apply() {
+    let mut h = Harness::new();
+    crate::keymap::bind(&mut h.app, "panel.sash.left", "Ctrl+Left", false).unwrap();
+    crate::keymap::bind(&mut h.app, "panel.sash.right", "", false).unwrap();
+    run(&mut h, "settings.profile.save", json!({"name":"Panels"}));
+    let profile = run(&mut h, "settings.profile.export", json!({"name":"Panels"}))["profile"].clone();
+    assert_eq!(profile["shortcuts"]["panel.sash.left"], "Ctrl+Left");
+    assert_eq!(profile["shortcuts"]["panel.sash.right"], "");
+    crate::keymap::reset(&mut h.app, None);
+    run(&mut h, "settings.profile.import", json!({"profile":profile,"name":"Imported panels"}));
+    run(&mut h, "settings.profile.apply", json!({"name":"Imported panels"}));
+    assert_eq!(crate::keymap::keys(&h.app, "panel.sash.left"), ["Ctrl+Left"]);
+    assert!(crate::keymap::keys(&h.app, "panel.sash.right").is_empty());
+}
+
+#[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
     assert_eq!(keys.len(), 103, "Appearance includes its two system-theme slots");
@@ -249,7 +265,7 @@ fn theme_options_profiles_restore_replace_and_preserve_stale_values() {
     assert_eq!(out["skipped"], json!([]));
     assert_eq!(serde_json::to_value(&h.app.preferences.theme_options).unwrap(), options);
     h.frames(2);
-    assert_eq!(crate::theme::Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
+    assert_eq!(solidcraft_theme::Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
     run(&mut h, "settings.profile.apply", json!({"name":"Empty"}));
     assert!(h.app.preferences.theme_options.is_empty());
     run(&mut h, "settings.profile.apply", json!({"name":"Options"}));
@@ -466,7 +482,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
                 .unwrap();
             let count = crate::scenario::rect_of("dialog:section:Profiles:count").unwrap();
             assert!((count.left() - title.right() - 12.0).abs() < 1.1, "{theme}: count follows the painted title");
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let rule = h
                 .shapes
                 .iter()
@@ -584,7 +600,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
         let active = crate::scenario::rect_of("prefs:profile:Desk:active").unwrap();
         assert!(desk.contains_rect(active));
         assert!((active.height() - 18.0).abs() < 0.5);
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == desk && rect.fill == t.selected_bg && rect.stroke.color == t.form_primary)));
         assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if desk.contains(text.pos) && text.galley.job.text == "Desk" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::fonts::semibold(t.font_label)))));
         let body = crate::scenario::rect_of("prefs:page_body").unwrap();

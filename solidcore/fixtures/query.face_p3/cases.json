@@ -1,0 +1,4076 @@
+{
+ "cases": [
+  {
+   "name": "tight_Mouse_f0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_Mouse_f0_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_Mouse_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "face": 0,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_Mouse_f0_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_Mouse_f0_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_Mouse_f1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "face": 1,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_Mouse_f1_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "face": 1,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_Mouse_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "face": 1,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_Mouse_f1_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "face": 1,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_Mouse_f1_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "face": 1,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_Mouse_f2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "face": 2,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_Mouse_f2_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "face": 2,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_Mouse_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "face": 2,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_Mouse_f2_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "face": 2,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_Mouse_f2_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "face": 2,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_Mouse_f3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "face": 3,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_Mouse_f3_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "face": 3,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_Mouse_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "face": 3,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_Mouse_f3_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "face": 3,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_Mouse_f3_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "face": 3,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_Endcap_f0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_Endcap_f0_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_Endcap_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "face": 0,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_Endcap_f0_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_Endcap_f0_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_Endcap_f1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "face": 1,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_Endcap_f1_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "face": 1,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_Endcap_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "face": 1,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_Endcap_f1_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "face": 1,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_Endcap_f1_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "face": 1,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f0_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_box_with_large_fillet_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 0,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f0_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f0_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "face": 1,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f1_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "face": 1,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_box_with_large_fillet_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 1,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f1_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 1,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f1_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 1,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "face": 2,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f2_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "face": 2,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_box_with_large_fillet_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 2,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f2_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 2,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f2_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 2,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "face": 3,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f3_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "face": 3,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_box_with_large_fillet_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 3,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f3_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 3,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f3_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 3,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f4",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "face": 4,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f4_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "face": 4,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_box_with_large_fillet_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 4,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f4_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 4,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f4_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 4,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f5",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "face": 5,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f5_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "face": 5,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_box_with_large_fillet_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 5,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f5_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 5,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f5_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 5,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f6",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "face": 6,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f6_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "face": 6,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_box_with_large_fillet_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 6,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f6_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 6,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f6_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 6,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f7",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "face": 7,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_box_with_large_fillet_f7_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "face": 7,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_box_with_large_fillet_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 7,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f7_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 7,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_box_with_large_fillet_f7_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "face": 7,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_cone_f0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_cone_f0_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_cone_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "face": 0,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_cone_f0_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_cone_f0_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_disk_f0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_disk_f0_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_disk_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "face": 0,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_disk_f0_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_disk_f0_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_ellips_ts2_f0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_ellips_ts2_f0_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_ellips_ts2_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "face": 0,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_ellips_ts2_f0_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_ellips_ts2_f0_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_plane_circ_f0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_plane_circ_f0_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_plane_circ_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "face": 0,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_plane_circ_f0_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_plane_circ_f0_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_plane_square_f0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_plane_square_f0_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_plane_square_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "face": 0,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_plane_square_f0_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_plane_square_f0_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_sphere_f0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_sphere_f0_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_sphere_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "face": 0,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_sphere_f0_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_sphere_f0_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_surf_extrude_f0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_surf_extrude_f0_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": true
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_surf_extrude_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "face": 0,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_surf_extrude_f0_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_surf_extrude_f0_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_surf_rev_f0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_surf_rev_f0_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": true
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_surf_rev_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "face": 0,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_surf_rev_f0_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_surf_rev_f0_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_surf_sphere150_f0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_surf_sphere150_f0_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": true
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_surf_sphere150_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "face": 0,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_surf_sphere150_f0_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_surf_sphere150_f0_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_vase_rev_f0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_vase_rev_f0_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": true
+    },
+    "face": 0,
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_vase_rev_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::CalculateAnInternalPoint (the caller of sm_FaceClassifyUVLine) over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "face": 0,
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_vase_rev_f0_t0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 0
+   }
+  },
+  {
+   "name": "bisector_vase_rev_f0_t1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:4444 SmFace::ClassifyLoops -> sms_FindAndClassifyLoopBisector over upstream TestFiles",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "face": 0,
+    "op": "bisector",
+    "target": 1
+   }
+  },
+  {
+   "name": "tight_plane_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:423 SmApiFaceBoundingBox(face, TRUE) of a planar top face",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1.0,
+      -0.5,
+      2.0,
+      1.0
+     ]
+    },
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_plane_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:423 SmApiFaceBoundingBox(face, TRUE) of a planar top face",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0.001,
+        0.002,
+        0.003
+       ],
+       "n": [
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -0.001,
+      -0.0005,
+      0.002,
+      0.001
+     ]
+    },
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_plane_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:423 SmApiFaceBoundingBox(face, TRUE) of a planar top face",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        -5000.0,
+        0.0,
+        2000.0
+       ],
+       "n": [
+        0,
+        1,
+        0
+       ]
+      }
+     },
+     "dom": [
+      -1000.0,
+      -500.0,
+      2000.0,
+      1000.0
+     ]
+    },
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_plane_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:423 SmApiFaceBoundingBox(face, TRUE) of a planar top face",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0.0,
+        0.0,
+        10.0
+       ],
+       "n": [
+        0,
+        0,
+        -1
+       ]
+      }
+     },
+     "dom": [
+      -1.0,
+      -0.5,
+      2.0,
+      1.0
+     ]
+    },
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_plane_4",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:423 SmApiFaceBoundingBox(face, TRUE) of a planar top face",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0.3,
+        -0.2,
+        0.1
+       ],
+       "n": [
+        0.2,
+        -0.7,
+        0.4
+       ]
+      }
+     },
+     "dom": [
+      -1.0,
+      -0.5,
+      2.0,
+      1.0
+     ]
+    },
+    "op": "tight"
+   }
+  },
+  {
+   "name": "tight_holed_box_top_flat",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "surface": {
+      "kind": "bspline",
+      "surface": {
+       "bspline": {
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         [
+          [
+           10.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           10.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ]
+        ],
+        "p": 1,
+        "q": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0,
+        "c": 1,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 0,
+        "d": 0
+       }
+      ]
+     ]
+    },
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_holed_box_top_flat",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "surface": {
+      "kind": "bspline",
+      "surface": {
+       "bspline": {
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         [
+          [
+           10.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           10.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ]
+        ],
+        "p": 1,
+        "q": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0,
+        "c": 1,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 0,
+        "d": 0
+       }
+      ]
+     ]
+    },
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_holed_box_top_flat",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "surface": {
+      "kind": "bspline",
+      "surface": {
+       "bspline": {
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         [
+          [
+           10.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           10.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ]
+        ],
+        "p": 1,
+        "q": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0,
+        "c": 1,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 0,
+        "d": 0
+       }
+      ]
+     ]
+    },
+    "op": "bisector"
+   }
+  },
+  {
+   "name": "tight_holed_box_top_flat_hole",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "surface": {
+      "kind": "bspline",
+      "surface": {
+       "bspline": {
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         [
+          [
+           10.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           10.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ]
+        ],
+        "p": 1,
+        "q": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0,
+        "c": 1,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 0,
+        "d": 0
+       }
+      ],
+      [
+       {
+        "t": "circle",
+        "a": 0.5,
+        "b": 0.5,
+        "r": 0.2,
+        "rev": true
+       }
+      ]
+     ]
+    },
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_holed_box_top_flat_hole",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "surface": {
+      "kind": "bspline",
+      "surface": {
+       "bspline": {
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         [
+          [
+           10.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           10.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ]
+        ],
+        "p": 1,
+        "q": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0,
+        "c": 1,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 0,
+        "d": 0
+       }
+      ],
+      [
+       {
+        "t": "circle",
+        "a": 0.5,
+        "b": 0.5,
+        "r": 0.2,
+        "rev": true
+       }
+      ]
+     ]
+    },
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_holed_box_top_flat_hole",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "surface": {
+      "kind": "bspline",
+      "surface": {
+       "bspline": {
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         [
+          [
+           10.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           10.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ]
+        ],
+        "p": 1,
+        "q": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0,
+        "c": 1,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 0,
+        "d": 0
+       }
+      ],
+      [
+       {
+        "t": "circle",
+        "a": 0.5,
+        "b": 0.5,
+        "r": 0.2,
+        "rev": true
+       }
+      ]
+     ]
+    },
+    "op": "bisector"
+   }
+  },
+  {
+   "name": "tight_holed_box_top_tilted",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "surface": {
+      "kind": "bspline",
+      "surface": {
+       "bspline": {
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         [
+          [
+           10.0,
+           0.0,
+           11.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           10.0,
+           10.0,
+           11.0,
+           -1.7976931348623157e+308
+          ]
+         ]
+        ],
+        "p": 1,
+        "q": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0,
+        "c": 1,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 0,
+        "d": 0
+       }
+      ]
+     ]
+    },
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_holed_box_top_tilted",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "surface": {
+      "kind": "bspline",
+      "surface": {
+       "bspline": {
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         [
+          [
+           10.0,
+           0.0,
+           11.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           10.0,
+           10.0,
+           11.0,
+           -1.7976931348623157e+308
+          ]
+         ]
+        ],
+        "p": 1,
+        "q": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0,
+        "c": 1,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 0,
+        "d": 0
+       }
+      ]
+     ]
+    },
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_holed_box_top_tilted",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "surface": {
+      "kind": "bspline",
+      "surface": {
+       "bspline": {
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         [
+          [
+           10.0,
+           0.0,
+           11.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           10.0,
+           10.0,
+           11.0,
+           -1.7976931348623157e+308
+          ]
+         ]
+        ],
+        "p": 1,
+        "q": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0,
+        "c": 1,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 0,
+        "d": 0
+       }
+      ]
+     ]
+    },
+    "op": "bisector"
+   }
+  },
+  {
+   "name": "tight_holed_box_top_tilted_hole",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "surface": {
+      "kind": "bspline",
+      "surface": {
+       "bspline": {
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         [
+          [
+           10.0,
+           0.0,
+           11.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           10.0,
+           10.0,
+           11.0,
+           -1.7976931348623157e+308
+          ]
+         ]
+        ],
+        "p": 1,
+        "q": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0,
+        "c": 1,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 0,
+        "d": 0
+       }
+      ],
+      [
+       {
+        "t": "circle",
+        "a": 0.5,
+        "b": 0.5,
+        "r": 0.2,
+        "rev": true
+       }
+      ]
+     ]
+    },
+    "op": "tight"
+   }
+  },
+  {
+   "name": "internal_holed_box_top_tilted_hole",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "surface": {
+      "kind": "bspline",
+      "surface": {
+       "bspline": {
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         [
+          [
+           10.0,
+           0.0,
+           11.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           10.0,
+           10.0,
+           11.0,
+           -1.7976931348623157e+308
+          ]
+         ]
+        ],
+        "p": 1,
+        "q": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0,
+        "c": 1,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 0,
+        "d": 0
+       }
+      ],
+      [
+       {
+        "t": "circle",
+        "a": 0.5,
+        "b": 0.5,
+        "r": 0.2,
+        "rev": true
+       }
+      ]
+     ]
+    },
+    "op": "internal"
+   }
+  },
+  {
+   "name": "bisector_holed_box_top_tilted_hole",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "surface": {
+      "kind": "bspline",
+      "surface": {
+       "bspline": {
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           10.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0.0,
+           10.0,
+           10.0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         [
+          [
+           10.0,
+           0.0,
+           11.0,
+           -1.7976931348623157e+308
+          ],
+          [
+           10.0,
+           10.0,
+           11.0,
+           -1.7976931348623157e+308
+          ]
+         ]
+        ],
+        "p": 1,
+        "q": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      }
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0,
+        "c": 1,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 0,
+        "d": 0
+       }
+      ],
+      [
+       {
+        "t": "circle",
+        "a": 0.5,
+        "b": 0.5,
+        "r": 0.2,
+        "rev": true
+       }
+      ]
+     ]
+    },
+    "op": "bisector"
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m0_c0_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 0,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m0_c1_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 0,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m0_c0_1.0_1.0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 0,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m0_c2_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 0,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m1_c0_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 1,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m1_c1_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 1,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m1_c0_1.0_1.0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 1,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m1_c2_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 1,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m2_c0_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 2,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m2_c0_0.5_0.5_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 2,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m2_c1_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 2,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m2_c1_0.5_0.5_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 2,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m2_c0_1.0_1.0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 2,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m2_c0_1.0_1.0_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 2,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m2_c2_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 2,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu0_m2_c2_0.5_0.5_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 0,
+    "mode": 2,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m0_c0_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 0,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m0_c1_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 0,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m0_c0_1.0_1.0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 0,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m0_c2_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 0,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m1_c0_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 1,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m1_c1_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 1,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m1_c0_1.0_1.0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 1,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m1_c2_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 1,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m2_c0_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 2,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m2_c0_0.5_0.5_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 2,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m2_c1_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 2,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m2_c1_0.5_0.5_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 2,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m2_c0_1.0_1.0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 2,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m2_c0_1.0_1.0_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 2,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m2_c2_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 2,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu1_m2_c2_0.5_0.5_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 1,
+    "mode": 2,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m0_c0_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 0,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m0_c1_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 0,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m0_c0_1.0_1.0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 0,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m0_c2_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 0,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m1_c0_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 1,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m1_c1_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 1,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m1_c0_1.0_1.0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 1,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m1_c2_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 1,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m2_c0_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 2,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m2_c0_0.5_0.5_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 2,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m2_c1_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 2,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m2_c1_0.5_0.5_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 2,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m2_c0_1.0_1.0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 2,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m2_c0_1.0_1.0_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 2,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m2_c2_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 2,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu2_m2_c2_0.5_0.5_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 2,
+    "mode": 2,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m0_c0_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 0,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m0_c1_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 0,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m0_c0_1.0_1.0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 0,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m0_c2_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 0,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m1_c0_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 1,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m1_c1_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 1,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m1_c0_1.0_1.0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 1,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m1_c2_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 1,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m2_c0_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 2,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m2_c0_0.5_0.5_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 2,
+    "curve": 0,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m2_c1_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 2,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m2_c1_0.5_0.5_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 2,
+    "curve": 1,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m2_c0_1.0_1.0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 2,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m2_c0_1.0_1.0_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 2,
+    "curve": 0,
+    "ta": 1.0,
+    "tb": 1.0,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m2_c2_0.5_0.5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 2,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": false,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  },
+  {
+   "name": "sector_plane_square_eu3_m2_c2_0.5_0.5_sing",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:9967 SectorClassifyCurveOn at a vertex / 9064 at an edge, on upstream TestFiles plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "sector",
+    "eu": 3,
+    "mode": 2,
+    "curve": 2,
+    "ta": 0.5,
+    "tb": 0.5,
+    "singular": true,
+    "sa": 0.5,
+    "sb": 0.0
+   }
+  }
+ ]
+}

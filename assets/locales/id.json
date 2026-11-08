@@ -1889,6 +1889,7 @@
   "material.editor.preserved_appearance": "Tampilan yang dipertahankan",
   "material.editor.public_reference": "Referensi publik",
   "material.editor.reference": "Referensi",
+  "material.editor.remove": "Hapus",
   "material.editor.save_or_discard": "Simpan atau buang draf material sebelum menetapkan material.",
   "material.editor.saved": "Material disimpan. Penetapan ke bodi tidak berubah.",
   "material.editor.scope": "Simpan menyimpan material ini tanpa menetapkannya ke bodi. Properti dan kondisi yang dikosongkan tetap dianggap tidak diketahui. Massa jenis pada kartu tidak mengubah massa jenis atau massa yang sudah ditetapkan.",

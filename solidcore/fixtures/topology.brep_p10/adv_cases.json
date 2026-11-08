@@ -1,0 +1,4260 @@
+{
+ "cases": [
+  {
+   "name": "adv_spine_fan_p_manifold3",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_manifold_neg1",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": -1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_manifold3_closure",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 3
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_eu1_loop1",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 5,
+       "index": 1,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_loop1_start0",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 2,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_loop0_num2",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_loop0_num9",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 9
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_eu2_pole",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 2,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_eu0_pole",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_eu1_wire",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 1,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_eu1_vertex",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 1,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_prims",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -1
+      }
+     },
+     {
+      "set": {
+       "field": 8,
+       "index": 1,
+       "value": -2
+      }
+     },
+     {
+      "set": {
+       "field": 8,
+       "index": 2,
+       "value": 5
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_prim_huge",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": 9223372036854775807
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_edge0_sv4",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 15,
+       "index": 0,
+       "value": 4
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_iges_empty",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_iges_closure",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_eu_next_self",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     },
+     {
+      "set": {
+       "field": 6,
+       "index": 0,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_share_uv",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 11,
+       "index": 0,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_zt_0.0001",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.0001
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_zt_1e-08",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-08
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_zt_9.999999999999999e-09",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 9.999999999999999e-09
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_zt_0.00010000000000000002",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.00010000000000000002
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_zt_5e-324",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 5e-324
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_healer10_heal_on",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 10
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_healer_max",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 9223372036854775807
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_borrowed_sharecurve",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 2,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_borrowed_sharesurf",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "set": {
+       "field": 0,
+       "index": 1,
+       "value": 0
+      }
+     },
+     {
+      "set": {
+       "field": 0,
+       "index": 2,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_p_stamp_closure_m0",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 123456789
+     },
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_manifold3",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_manifold_neg1",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": -1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_manifold3_closure",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 3
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_eu1_loop1",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 5,
+       "index": 1,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_loop1_start0",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 2,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_loop0_num2",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_loop0_num9",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 9
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_eu2_pole",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 2,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_eu0_pole",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_eu1_wire",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 1,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_eu1_vertex",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 1,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_prims",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -1
+      }
+     },
+     {
+      "set": {
+       "field": 8,
+       "index": 1,
+       "value": -2
+      }
+     },
+     {
+      "set": {
+       "field": 8,
+       "index": 2,
+       "value": 5
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_prim_huge",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": 9223372036854775807
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_edge0_sv4",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 15,
+       "index": 0,
+       "value": 4
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_iges_empty",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_iges_closure",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_eu_next_self",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     },
+     {
+      "set": {
+       "field": 6,
+       "index": 0,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_share_uv",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 11,
+       "index": 0,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_zt_0.0001",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.0001
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_zt_1e-08",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-08
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_zt_9.999999999999999e-09",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 9.999999999999999e-09
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_zt_0.00010000000000000002",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.00010000000000000002
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_zt_5e-324",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 5e-324
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_healer10_heal_on",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 10
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_healer_max",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 9223372036854775807
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_borrowed_sharecurve",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 2,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_borrowed_sharesurf",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "set": {
+       "field": 0,
+       "index": 1,
+       "value": 0
+      }
+     },
+     {
+      "set": {
+       "field": 0,
+       "index": 2,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_fan_a_stamp_closure_m0",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 123456789
+     },
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_manifold3",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_manifold_neg1",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": -1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_manifold3_closure",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 3
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_eu1_loop1",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 5,
+       "index": 1,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_loop1_start0",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 2,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_loop0_num2",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_loop0_num9",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 9
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_eu2_pole",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 2,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_eu0_pole",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_eu1_wire",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 1,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_eu1_vertex",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 1,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_prims",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -1
+      }
+     },
+     {
+      "set": {
+       "field": 8,
+       "index": 1,
+       "value": -2
+      }
+     },
+     {
+      "set": {
+       "field": 8,
+       "index": 2,
+       "value": 5
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_prim_huge",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": 9223372036854775807
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_edge0_sv4",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 15,
+       "index": 0,
+       "value": 4
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_iges_empty",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_iges_closure",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_eu_next_self",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     },
+     {
+      "set": {
+       "field": 6,
+       "index": 0,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_share_uv",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 11,
+       "index": 0,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_zt_0.0001",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.0001
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_zt_1e-08",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-08
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_zt_9.999999999999999e-09",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 9.999999999999999e-09
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_zt_0.00010000000000000002",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.00010000000000000002
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_zt_5e-324",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 5e-324
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_healer10_heal_on",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 10
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_healer_max",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 9223372036854775807
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_borrowed_sharecurve",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 2,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_borrowed_sharesurf",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "set": {
+       "field": 0,
+       "index": 1,
+       "value": 0
+      }
+     },
+     {
+      "set": {
+       "field": 0,
+       "index": 2,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_p_stamp_closure_m0",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 123456789
+     },
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_manifold3",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_manifold_neg1",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": -1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_manifold3_closure",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 3
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_eu1_loop1",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 5,
+       "index": 1,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_loop1_start0",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 2,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_loop0_num2",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_loop0_num9",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 9
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_eu2_pole",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 2,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_eu0_pole",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_eu1_wire",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 1,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_eu1_vertex",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 1,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_prims",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -1
+      }
+     },
+     {
+      "set": {
+       "field": 8,
+       "index": 1,
+       "value": -2
+      }
+     },
+     {
+      "set": {
+       "field": 8,
+       "index": 2,
+       "value": 5
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_prim_huge",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": 9223372036854775807
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_edge0_sv4",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 15,
+       "index": 0,
+       "value": 4
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_iges_empty",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_iges_closure",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_eu_next_self",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     },
+     {
+      "set": {
+       "field": 6,
+       "index": 0,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_share_uv",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 11,
+       "index": 0,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_zt_0.0001",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.0001
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_zt_1e-08",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-08
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_zt_9.999999999999999e-09",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 9.999999999999999e-09
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_zt_0.00010000000000000002",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.00010000000000000002
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_zt_5e-324",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 5e-324
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_healer10_heal_on",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 10
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_healer_max",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 9223372036854775807
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_borrowed_sharecurve",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 2,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_borrowed_sharesurf",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "set": {
+       "field": 0,
+       "index": 1,
+       "value": 0
+      }
+     },
+     {
+      "set": {
+       "field": 0,
+       "index": 2,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_spine_doubled_a_stamp_closure_m0",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 123456789
+     },
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_Boolean_BoltMBox1_manifold3",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Boolean_BoltMBox1_manifold0",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Boolean_BoltMBox1_manifold0_closure",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_Boolean_BoltMBox1_sharesurf",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Boolean_BoltMBox1_sharecurve",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 2,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Boolean_BoltMBox1_sharecurve_an_borrowed",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Boolean_BoltMBox1_eu0_pole",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Boolean_BoltMBox1_loop0_num1",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Boolean_BoltMBox1_iges_closure",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_Boolean_BoltMBox1_scale_tiny_force",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1e-12
+     },
+     {
+      "zone_tol": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Defeature_inset_cube_manifold3",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Defeature_inset_cube_manifold0",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Defeature_inset_cube_manifold0_closure",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_Defeature_inset_cube_sharesurf",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Defeature_inset_cube_sharecurve",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 2,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Defeature_inset_cube_sharecurve_an_borrowed",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Defeature_inset_cube_eu0_pole",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Defeature_inset_cube_loop0_num1",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Defeature_inset_cube_iges_closure",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_Defeature_inset_cube_scale_tiny_force",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1e-12
+     },
+     {
+      "zone_tol": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_square_manifold3",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_square_manifold0",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_square_manifold0_closure",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_plane_square_sharesurf",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_square_sharecurve",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 2,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_square_sharecurve_an_borrowed",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_square_eu0_pole",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_square_loop0_num1",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_square_iges_closure",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_plane_square_scale_tiny_force",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1e-12
+     },
+     {
+      "zone_tol": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Fillet_box1x1x2_manifold3",
+   "inputs": {
+    "file": "Fillet/box1x1x2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Fillet_box1x1x2_manifold0",
+   "inputs": {
+    "file": "Fillet/box1x1x2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Fillet_box1x1x2_manifold0_closure",
+   "inputs": {
+    "file": "Fillet/box1x1x2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_Fillet_box1x1x2_sharesurf",
+   "inputs": {
+    "file": "Fillet/box1x1x2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Fillet_box1x1x2_sharecurve",
+   "inputs": {
+    "file": "Fillet/box1x1x2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 2,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Fillet_box1x1x2_sharecurve_an_borrowed",
+   "inputs": {
+    "file": "Fillet/box1x1x2.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Fillet_box1x1x2_eu0_pole",
+   "inputs": {
+    "file": "Fillet/box1x1x2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Fillet_box1x1x2_loop0_num1",
+   "inputs": {
+    "file": "Fillet/box1x1x2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_Fillet_box1x1x2_iges_closure",
+   "inputs": {
+    "file": "Fillet/box1x1x2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_Fillet_box1x1x2_scale_tiny_force",
+   "inputs": {
+    "file": "Fillet/box1x1x2.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1e-12
+     },
+     {
+      "zone_tol": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_composite_v38_p_m0",
+   "inputs": {
+    "file": "fixture:uv_composite_v38.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_composite_v38_p_borrowed",
+   "inputs": {
+    "file": "fixture:uv_composite_v38.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_composite_v38_p_dropuv1",
+   "inputs": {
+    "file": "fixture:uv_composite_v38.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "drop_uv": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_composite_v38_p_closure_inf",
+   "inputs": {
+    "file": "fixture:uv_composite_v38.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_uv_composite_v38_p_remove_noedit",
+   "inputs": {
+    "file": "fixture:uv_composite_v38.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_uv_composite_v38_a_m0",
+   "inputs": {
+    "file": "fixture:uv_composite_v38.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_composite_v38_a_borrowed",
+   "inputs": {
+    "file": "fixture:uv_composite_v38.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_composite_v38_a_dropuv1",
+   "inputs": {
+    "file": "fixture:uv_composite_v38.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "drop_uv": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_composite_v38_a_closure_inf",
+   "inputs": {
+    "file": "fixture:uv_composite_v38.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_uv_composite_v38_a_remove_noedit",
+   "inputs": {
+    "file": "fixture:uv_composite_v38.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_uv_bspline_p_m0",
+   "inputs": {
+    "file": "fixture:uv_bspline.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_bspline_p_borrowed",
+   "inputs": {
+    "file": "fixture:uv_bspline.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_bspline_p_dropuv1",
+   "inputs": {
+    "file": "fixture:uv_bspline.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "drop_uv": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_bspline_p_closure_inf",
+   "inputs": {
+    "file": "fixture:uv_bspline.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_uv_bspline_p_remove_noedit",
+   "inputs": {
+    "file": "fixture:uv_bspline.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_uv_bspline_a_m0",
+   "inputs": {
+    "file": "fixture:uv_bspline.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_bspline_a_borrowed",
+   "inputs": {
+    "file": "fixture:uv_bspline.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_bspline_a_dropuv1",
+   "inputs": {
+    "file": "fixture:uv_bspline.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "drop_uv": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_uv_bspline_a_closure_inf",
+   "inputs": {
+    "file": "fixture:uv_bspline.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_uv_bspline_a_remove_noedit",
+   "inputs": {
+    "file": "fixture:uv_bspline.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_wire_quad_sub_p_m0",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_wire_quad_sub_p_borrowed",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_wire_quad_sub_p_dropuv1",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "drop_uv": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_wire_quad_sub_p_closure_inf",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_wire_quad_sub_p_remove_noedit",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_wire_quad_sub_a_m0",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_wire_quad_sub_a_borrowed",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_wire_quad_sub_a_dropuv1",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "drop_uv": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_wire_quad_sub_a_closure_inf",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_wire_quad_sub_a_remove_noedit",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_wire_vertex_p_m0",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_wire_vertex_p_borrowed",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_wire_vertex_p_dropuv1",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "drop_uv": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_wire_vertex_p_closure_inf",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_wire_vertex_p_remove_noedit",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_wire_vertex_a_m0",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_wire_vertex_a_borrowed",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_wire_vertex_a_dropuv1",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "drop_uv": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_wire_vertex_a_closure_inf",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_wire_vertex_a_remove_noedit",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     true,
+     true,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  }
+ ]
+}

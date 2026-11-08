@@ -1,0 +1,1832 @@
+{
+ "cases": [
+  {
+   "name": "attributed_sweep_face0",
+   "note": "#1462 P6: sweep_face0 with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_null_face",
+   "note": "#1462 P6: sweep_null_face with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0,
+      null
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_null_edge",
+   "note": "#1462 P6: sweep_null_edge with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "edges": [
+      0,
+      null
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_null_vertex",
+   "note": "#1462 P6: sweep_null_vertex with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "vertices": [
+      0,
+      null
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_whole_box",
+   "note": "#1462 P6: sweep_whole_box with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_edge",
+   "note": "#1462 P6: sweep_edge with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "edges": [
+      3
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_vertex",
+   "note": "#1462 P6: sweep_vertex with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "vertices": [
+      5
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_sheet",
+   "note": "#1462 P6: sweep_sheet with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      1.0,
+      1,
+      0
+     ],
+     "size": [
+      4.0,
+      3
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_sheet_face_merge",
+   "note": "#1462 P6: sweep_sheet_face_merge with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      1.0,
+      1,
+      0
+     ],
+     "size": [
+      4.0,
+      3
+     ]
+    },
+    "stitch": true,
+    "merge": true,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_disk_no_stitch",
+   "note": "#1462 P6: sweep_disk_no_stitch with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "disk",
+     "origin": [
+      3.0,
+      3,
+      0
+     ],
+     "radius": 2.0
+    },
+    "stitch": false,
+    "merge": false,
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_empty_lists",
+   "note": "#1462 P6: sweep_empty_lists with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [],
+     "edges": [],
+     "vertices": []
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_face0",
+   "note": "#1462 P6: rotational_sweep_face0 with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      5.0,
+      5,
+      5
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_null_face",
+   "note": "#1462 P6: rotational_sweep_null_face with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0,
+      null
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_null_edge",
+   "note": "#1462 P6: rotational_sweep_null_edge with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "edges": [
+      0,
+      null
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_null_vertex",
+   "note": "#1462 P6: rotational_sweep_null_vertex with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "vertices": [
+      0,
+      null
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_edge",
+   "note": "#1462 P6: rotational_sweep_edge with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "edges": [
+      3
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_vertex",
+   "note": "#1462 P6: rotational_sweep_vertex with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "vertices": [
+      5
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_sheet_face_merge",
+   "note": "#1462 P6: rotational_sweep_sheet_face_merge with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      1.0,
+      1,
+      0
+     ],
+     "size": [
+      4.0,
+      3
+     ]
+    },
+    "stitch": true,
+    "merge": true,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_empty_lists",
+   "note": "#1462 P6: rotational_sweep_empty_lists with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [],
+     "edges": [],
+     "vertices": []
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_zero_dir",
+   "note": "#1462 P6: sweep_zero_dir with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     0
+    ],
+    "dist": 5.0,
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_long_dir",
+   "note": "#1462 P6: sweep_long_dir with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     3
+    ],
+    "dist": 5.0,
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_negative_dist",
+   "note": "#1462 P6: sweep_negative_dist with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": -5.0,
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_region_null_face0",
+   "note": "#1462 P6: sweep_region_null_face0 with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "null",
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_region_null_whole",
+   "note": "#1462 P6: sweep_region_null_whole with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "null",
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_region_swept_face0",
+   "note": "#1462 P6: sweep_region_swept_face0 with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "swept",
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_region_swept_whole",
+   "note": "#1462 P6: sweep_region_swept_whole with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "swept",
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_region_other_face0",
+   "note": "#1462 P6: sweep_region_other_face0 with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "other",
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_region_other_whole",
+   "note": "#1462 P6: sweep_region_other_whole with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "other",
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_region_null_face0",
+   "note": "#1462 P6: rotational_sweep_region_null_face0 with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "null",
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_region_swept_face0",
+   "note": "#1462 P6: rotational_sweep_region_swept_face0 with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "swept",
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_region_other_face0",
+   "note": "#1462 P6: rotational_sweep_region_other_face0 with every face and edge of the swept B-rep tagged by its own SM_AB_COPY long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "other",
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_sweep_face0_reference",
+   "note": "#1462 P6: sweep_face0 with every face and edge tagged by its own SM_AB_REFERENCE long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 1
+   }
+  },
+  {
+   "name": "attributed_sweep_face0_standalone_copy",
+   "note": "#1462 P6: sweep_face0 with every face and edge tagged by its own SM_AB_STANDALONE_COPY long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 2
+   }
+  },
+  {
+   "name": "attributed_sweep_face0_standalone_reference",
+   "note": "#1462 P6: sweep_face0 with every face and edge tagged by its own SM_AB_STANDALONE_REFERENCE long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 3
+   }
+  },
+  {
+   "name": "attributed_sweep_face0_temp",
+   "note": "#1462 P6: sweep_face0 with every face and edge tagged by its own SM_AB_TEMP long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 4
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_face0_reference",
+   "note": "#1462 P6: rotational_sweep_face0 with every face and edge tagged by its own SM_AB_REFERENCE long attribute first.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      5.0,
+      5,
+      5
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 1
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_face0_standalone_copy",
+   "note": "#1462 P6: rotational_sweep_face0 with every face and edge tagged by its own SM_AB_STANDALONE_COPY long attribute first.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      5.0,
+      5,
+      5
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 2
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_face0_standalone_reference",
+   "note": "#1462 P6: rotational_sweep_face0 with every face and edge tagged by its own SM_AB_STANDALONE_REFERENCE long attribute first.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      5.0,
+      5,
+      5
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 3
+   }
+  },
+  {
+   "name": "attributed_rotational_sweep_face0_temp",
+   "note": "#1462 P6: rotational_sweep_face0 with every face and edge tagged by its own SM_AB_TEMP long attribute first.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      5.0,
+      5,
+      5
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "attributed": 4
+   }
+  },
+  {
+   "name": "attributed_sweep_sheet_face_merge_reference",
+   "note": "#1462 P6: sweep_sheet_face_merge with every face and edge tagged by its own SM_AB_REFERENCE long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      1.0,
+      1,
+      0
+     ],
+     "size": [
+      4.0,
+      3
+     ]
+    },
+    "stitch": true,
+    "merge": true,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 1
+   }
+  },
+  {
+   "name": "attributed_sweep_sheet_face_merge_standalone_copy",
+   "note": "#1462 P6: sweep_sheet_face_merge with every face and edge tagged by its own SM_AB_STANDALONE_COPY long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      1.0,
+      1,
+      0
+     ],
+     "size": [
+      4.0,
+      3
+     ]
+    },
+    "stitch": true,
+    "merge": true,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 2
+   }
+  },
+  {
+   "name": "attributed_sweep_sheet_face_merge_standalone_reference",
+   "note": "#1462 P6: sweep_sheet_face_merge with every face and edge tagged by its own SM_AB_STANDALONE_REFERENCE long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      1.0,
+      1,
+      0
+     ],
+     "size": [
+      4.0,
+      3
+     ]
+    },
+    "stitch": true,
+    "merge": true,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 3
+   }
+  },
+  {
+   "name": "attributed_sweep_sheet_face_merge_temp",
+   "note": "#1462 P6: sweep_sheet_face_merge with every face and edge tagged by its own SM_AB_TEMP long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      1.0,
+      1,
+      0
+     ],
+     "size": [
+      4.0,
+      3
+     ]
+    },
+    "stitch": true,
+    "merge": true,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 4
+   }
+  },
+  {
+   "name": "attributed_sweep_whole_box_reference",
+   "note": "#1462 P6: sweep_whole_box with every face and edge tagged by its own SM_AB_REFERENCE long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 1
+   }
+  },
+  {
+   "name": "attributed_sweep_whole_box_standalone_copy",
+   "note": "#1462 P6: sweep_whole_box with every face and edge tagged by its own SM_AB_STANDALONE_COPY long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 2
+   }
+  },
+  {
+   "name": "attributed_sweep_whole_box_standalone_reference",
+   "note": "#1462 P6: sweep_whole_box with every face and edge tagged by its own SM_AB_STANDALONE_REFERENCE long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 3
+   }
+  },
+  {
+   "name": "attributed_sweep_whole_box_temp",
+   "note": "#1462 P6: sweep_whole_box with every face and edge tagged by its own SM_AB_TEMP long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 4
+   }
+  },
+  {
+   "name": "attributed_sweep_edge_reference",
+   "note": "#1462 P6: sweep_edge with every face and edge tagged by its own SM_AB_REFERENCE long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "edges": [
+      3
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 1
+   }
+  },
+  {
+   "name": "attributed_sweep_edge_standalone_copy",
+   "note": "#1462 P6: sweep_edge with every face and edge tagged by its own SM_AB_STANDALONE_COPY long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "edges": [
+      3
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 2
+   }
+  },
+  {
+   "name": "attributed_sweep_edge_standalone_reference",
+   "note": "#1462 P6: sweep_edge with every face and edge tagged by its own SM_AB_STANDALONE_REFERENCE long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "edges": [
+      3
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 3
+   }
+  },
+  {
+   "name": "attributed_sweep_edge_temp",
+   "note": "#1462 P6: sweep_edge with every face and edge tagged by its own SM_AB_TEMP long attribute first.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "edges": [
+      3
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 4
+   }
+  },
+  {
+   "name": "attributed_sweep_sheet_reference",
+   "note": "#1462 P6: sweep_sheet with every face and edge of the swept B-rep tagged by its own SM_AB_REFERENCE long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      1.0,
+      1,
+      0
+     ],
+     "size": [
+      4.0,
+      3
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 1
+   }
+  },
+  {
+   "name": "attributed_sweep_disk_no_stitch_reference",
+   "note": "#1462 P6: sweep_disk_no_stitch with every face and edge of the swept B-rep tagged by its own SM_AB_REFERENCE long attribute first; the swept B-rep's attribute sets are compared.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "disk",
+     "origin": [
+      3.0,
+      3,
+      0
+     ],
+     "radius": 2.0
+    },
+    "stitch": false,
+    "merge": false,
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "attributed": 1
+   }
+  }
+ ]
+}
