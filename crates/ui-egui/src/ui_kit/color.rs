@@ -1,14 +1,14 @@
 //! Document RGB and optional separate opacity editing. Interface paint uses tokens; gradients are colour data.
+use super::recent_colors::{MAX_RECENT_COLORS, recent_colors, remember_color};
 use super::{layout::label, metrics::dimension};
-use crate::recent_colors::{MAX_RECENT_COLORS, recent_colors, remember_color};
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
-use crate::{i18n, scenario, theme::Tokens};
 use egui::{Color32, Response, Sense, Ui, ecolor::HsvaGamma, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 fn publish(key: &str, response: &Response) {
-    scenario::publish_rect(key, response.rect);
-    scenario::publish_handle(key, response.rect.center());
+    solidcraft_ui_registry::publish_rect(key, response.rect);
+    solidcraft_ui_registry::publish_handle(key, response.rect.center());
 }
 
 /// Linear RGB swatch and precise channel fields. The preview is clipped to display gamut;
@@ -22,7 +22,7 @@ pub(crate) fn linear_color_field(ui: &mut Ui, rgb: &mut [f64; 3], maximum: f64) 
         let color = Color32::from(egui::Rgba::from_rgb(preview[0], preview[1], preview[2]));
         let mut bytes = [color.r(), color.g(), color.b()];
         if color_field(ui, &mut bytes).changed() {
-            let linear = egui::Rgba::from(crate::theme::srgb(bytes.map(|c| f32::from(c) / 255.0))).to_array();
+            let linear = egui::Rgba::from(solidcraft_theme::srgb(bytes.map(|c| f32::from(c) / 255.0))).to_array();
             for (channel, value) in rgb.iter_mut().zip(linear) {
                 *channel = f64::from(value);
             }
@@ -70,11 +70,11 @@ fn color_field_inner(ui: &mut Ui, rgb: &mut [u8; 3], opacity: Option<&mut f64>, 
     ui.painter().rect(
         rect,
         t.control_radius,
-        crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0)),
+        solidcraft_theme::srgb(rgb.map(|c| f32::from(c) / 255.0)),
         t.control_border_stroke(t.control_border),
         egui::StrokeKind::Inside,
     );
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ColorWell, ui.is_enabled(), i18n::tr("color.edit")));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ColorWell, ui.is_enabled(), solidcraft_ui_text::tr("color.edit")));
     publish(&format!("dialog:color:{}", label(ui)), &response);
     let mut edited = false;
     let popup = Container::new(ui.ctx(), Surface::Popup)
@@ -100,7 +100,7 @@ fn color_field_inner(ui: &mut Ui, rgb: &mut [u8; 3], opacity: Option<&mut f64>, 
         response.mark_changed();
     }
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-    if ui.style().explanation_tooltips { response.backing_on_hover_text(i18n::tr("color.edit")) } else { response }
+    if ui.style().explanation_tooltips { response.backing_on_hover_text(solidcraft_ui_text::tr("color.edit")) } else { response }
 }
 
 /// Popover body, also rendered independently by the gallery. Format is global, alpha is opaque.
@@ -113,7 +113,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
     let t = Tokens::get();
     ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
     let id = ui.scope_id().with("color_hsv");
-    let color = crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0));
+    let color = solidcraft_theme::srgb(rgb.map(|c| f32::from(c) / 255.0));
     // Retain hue for black/grey, and sub-byte precision while dragging.
     let (saved, hsv) = ui.ctx().data(|d| d.get_temp::<([u8; 3], HsvaGamma)>(id)).unwrap_or((*rgb, color.into()));
     let mut hsv = if saved == *rgb { hsv } else { color.into() };
@@ -136,15 +136,15 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                 super::segmented(
                     ui,
                     &mut selected,
-                    &["U8", "F", i18n::tr("color.hex")],
+                    &["U8", "F", solidcraft_ui_text::tr("color.hex")],
                     super::Segments { compact: true, primary: true, ..Default::default() },
                 );
                 let rect = ui.min_rect();
                 for (index, (key, name)) in [("color.gamma", "U8"), ("color.linear", "F"), ("color.hex_help", "Hex")].iter().enumerate() {
                     let rect =
                         egui::Rect::from_min_size(rect.min + vec2(index as f32 * rect.width() / 3.0, 0.0), vec2(rect.width() / 3.0, rect.height()));
-                    ui.interact(rect, ui.scope_id().with(("format_tip", index)), Sense::hover()).backing_on_hover_text(i18n::tr(key));
-                    scenario::publish_handle(&format!("color:format:{name}"), rect.center());
+                    ui.interact(rect, ui.scope_id().with(("format_tip", index)), Sense::hover()).backing_on_hover_text(solidcraft_ui_text::tr(key));
+                    solidcraft_ui_registry::publish_handle(&format!("color:format:{name}"), rect.center());
                 }
             });
             hexadecimal = selected == 2;
@@ -157,7 +157,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let (rect, _) = ui.allocate_exact_size(vec2(t.form_close_size, t.form_close_size), Sense::hover());
-                let copy = super::icon_button_at(ui, rect, "copy", i18n::tr("color.copy"));
+                let copy = super::icon_button_at(ui, rect, "copy", solidcraft_ui_text::tr("color.copy"));
                 publish("color:copy", &copy);
                 if copy.clicked() {
                     let [r, g, b] = *rgb;
@@ -182,9 +182,9 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         if hexadecimal {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = t.space_3;
-                ui.add(egui::Label::new(egui::RichText::new(i18n::tr("color.hex")).size(t.font_small).color(t.form_dim)));
-                let response = super::cell_editor(ui, hex_id.with("input"), &mut hex.draft, i18n::tr("color.hex_hint"), false)
-                    .backing_on_hover_text(i18n::tr("color.hex_help"));
+                ui.add(egui::Label::new(egui::RichText::new(solidcraft_ui_text::tr("color.hex")).size(t.font_small).color(t.form_dim)));
+                let response = super::cell_editor(ui, hex_id.with("input"), &mut hex.draft, solidcraft_ui_text::tr("color.hex_hint"), false)
+                    .backing_on_hover_text(solidcraft_ui_text::tr("color.hex_help"));
                 publish("color:hex", &response);
                 if response.changed()
                     && let Some((value, alpha)) = parse_hex(&hex.draft)
@@ -198,7 +198,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                     hex.alpha = alpha.is_some();
                     hex.set(*rgb, opacity.as_deref().copied());
                     if *rgb != before_rgb {
-                        hsv = crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0)).into();
+                        hsv = solidcraft_theme::srgb(rgb.map(|c| f32::from(c) / 255.0)).into();
                     }
                 }
             });
@@ -213,7 +213,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                 for ((ui, channel), (name, tip)) in
                     columns.iter_mut().zip(channels.iter_mut()).zip([("R", "color.red"), ("G", "color.green"), ("B", "color.blue")])
                 {
-                    edited |= spin_channel(ui, name, Some(i18n::tr(tip)), channel, spin);
+                    edited |= spin_channel(ui, name, Some(solidcraft_ui_text::tr(tip)), channel, spin);
                 }
             });
         }
@@ -225,7 +225,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
             } else {
                 channels.map(|v| v.round() as u8)
             };
-            hsv = crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0)).into();
+            hsv = solidcraft_theme::srgb(rgb.map(|c| f32::from(c) / 255.0)).into();
         }
         // Only graphical edits convert HSV back to RGB. Typed byte values stay exact.
         let mut graphical_edit = false;
@@ -235,7 +235,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         let mut hsv_edited = false;
         ui.columns(3, |columns| {
             for ((ui, value), (name, tip, max)) in columns.iter_mut().zip(hsv_fields.iter_mut()).zip(HSV) {
-                hsv_edited |= spin_channel(ui, name, Some(i18n::tr(tip)), value, Spin { max, step: 1.0, speed: 0.5, decimals: 0 });
+                hsv_edited |= spin_channel(ui, name, Some(solidcraft_ui_text::tr(tip)), value, Spin { max, step: 1.0, speed: 0.5, decimals: 0 });
             }
         });
         if hsv_edited {
@@ -257,9 +257,9 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         }
         gradient(ui, square, |x, y| Color32::from(HsvaGamma { h: hsv.h, s: x, v: 1.0 - y, a: 1.0 }));
         marker(ui, pos2(square.left() + hsv.s * square.width(), square.bottom() - hsv.v * square.height()), t.space_6);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, ui.is_enabled(), i18n::tr("color.saturation_value")));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, ui.is_enabled(), solidcraft_ui_text::tr("color.saturation_value")));
         publish("color:sv", &response);
-        response.backing_on_hover_text(i18n::tr("color.saturation_value"));
+        response.backing_on_hover_text(solidcraft_ui_text::tr("color.saturation_value"));
         let (hue, response) = ui.allocate_exact_size(vec2(width, t.space_14), Sense::click_and_drag());
         if (response.clicked() || response.dragged())
             && let Some(pos) = response.interact_pointer_pos()
@@ -269,9 +269,9 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         }
         gradient(ui, hue, |x, _| Color32::from(HsvaGamma { h: x, s: 1.0, v: 1.0, a: 1.0 }));
         marker(ui, pos2(hue.left() + hsv.h * hue.width(), hue.center().y), t.space_8);
-        response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), f64::from(hsv.h), i18n::tr("color.hue")));
+        response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), f64::from(hsv.h), solidcraft_ui_text::tr("color.hue")));
         publish("color:hue", &response);
-        response.backing_on_hover_text(i18n::tr("color.hue"));
+        response.backing_on_hover_text(solidcraft_ui_text::tr("color.hue"));
         if graphical_edit {
             let c = Color32::from(hsv);
             *rgb = [c.r(), c.g(), c.b()];
@@ -281,22 +281,22 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         ui.painter().rect(
             strip,
             t.control_radius,
-            crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0)),
+            solidcraft_theme::srgb(rgb.map(|c| f32::from(c) / 255.0)),
             t.control_border_stroke(t.control_border),
             egui::StrokeKind::Inside,
         );
         publish("color:current", &response);
-        response.backing_on_hover_text(i18n::tr("color.selected"));
+        response.backing_on_hover_text(solidcraft_ui_text::tr("color.selected"));
         if let Some(picked) = recent_row(ui, width) {
             *rgb = picked;
             picked_recent = true;
             accepted_mixed = mixed;
-            hsv = crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0)).into();
+            hsv = solidcraft_theme::srgb(rgb.map(|c| f32::from(c) / 255.0)).into();
             hex.set(*rgb, opacity.as_deref().copied());
         }
     });
     // A colour joins the recent list once an edit is finished: a drag or a held step button is
-    // released, a typed value is entered. Every picker shares the list (`crate::recent_colors`).
+    // released, a typed value is entered. Every picker shares the list (`super::recent_colors`).
     // While the popover stays open, fine-tuning replaces the colour it added rather than filling
     // the list with each step; a colour taken from the list starts a new entry.
     let session_id = id.with("recent_session");
@@ -320,7 +320,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         d.insert_temp(hex_id, hex);
         d.insert_temp(format_id, hexadecimal);
     });
-    scenario::publish_rect("color:popover", ui.min_rect());
+    solidcraft_ui_registry::publish_rect("color:popover", ui.min_rect());
     *rgb != before_rgb || opacity.as_deref().copied() != before_opacity || hsv != before || accepted_mixed
 }
 
@@ -405,7 +405,7 @@ fn spin_channel(ui: &mut Ui, name: &str, tip: Option<&str>, value: &mut f64, spi
                 egui::DragValue::new(value)
                     .range(0.0..=max)
                     .speed(speed)
-                    .custom_parser(crate::prefs::parse_number)
+                    .custom_parser(super::parse_number)
                     .custom_formatter(move |v, _| format!("{v:.decimals$}")),
             );
             response.widget_info(|| {
@@ -447,7 +447,7 @@ fn spin_buttons(ui: &mut Ui, key: &str, height: f32) -> i32 {
         // only stops counting once it outlasts egui's longest click (0.8 s), and the repeat with
         // it, after 8 steps (#10201).
         let response = ui.interact(half, id, Sense::click_and_drag());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), i18n::tr(label)));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr(label)));
         publish(&format!("color:spin:{key}:{end}"), &response);
         let held = response.is_pointer_button_down_on();
         if response.hovered() || held {
@@ -478,7 +478,7 @@ fn spin_buttons(ui: &mut Ui, key: &str, height: f32) -> i32 {
         } else {
             ui.ctx().data_mut(|d| d.remove::<f64>(repeat));
         }
-        response.backing_on_hover_text(i18n::tr(label));
+        response.backing_on_hover_text(solidcraft_ui_text::tr(label));
     }
     steps
 }
@@ -502,14 +502,14 @@ fn recent_row(ui: &mut Ui, width: f32) -> Option<[u8; 3]> {
     let mut picked = None;
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = t.space_3;
-        ui.add(egui::Label::new(egui::RichText::new(i18n::tr("color.recent")).size(t.font_small).color(t.form_dim)));
+        ui.add(egui::Label::new(egui::RichText::new(solidcraft_ui_text::tr("color.recent")).size(t.font_small).color(t.form_dim)));
         let gap = t.space_4;
         let slots = MAX_RECENT_COLORS as f32;
         let side = ((width - gap * (slots - 1.0)) / slots).max(t.space_8);
         let (row, response) = ui.allocate_exact_size(vec2(width, side), Sense::hover());
         publish("color:recent", &response);
         if colors.is_empty() {
-            response.backing_on_hover_text(i18n::tr("color.recent_help"));
+            response.backing_on_hover_text(solidcraft_ui_text::tr("color.recent_help"));
         }
         for slot in 0..MAX_RECENT_COLORS {
             let rect = egui::Rect::from_min_size(row.min + vec2(slot as f32 * (side + gap), 0.0), vec2(side, side));
@@ -519,7 +519,13 @@ fn recent_row(ui: &mut Ui, width: f32) -> Option<[u8; 3]> {
             };
             let response = ui.interact(rect, ui.scope_id().with(("color_recent", slot)), Sense::click());
             let stroke = if response.hovered() { t.control_border_stroke(t.form_ink) } else { t.control_border_stroke(t.control_border) };
-            ui.painter().rect(rect, t.control_radius, crate::theme::srgb([r, g, b].map(|c| f32::from(c) / 255.0)), stroke, egui::StrokeKind::Inside);
+            ui.painter().rect(
+                rect,
+                t.control_radius,
+                solidcraft_theme::srgb([r, g, b].map(|c| f32::from(c) / 255.0)),
+                stroke,
+                egui::StrokeKind::Inside,
+            );
             let hex = format!("#{r:02x}{g:02x}{b:02x}");
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &hex));
             publish(&format!("color:recent:{slot}"), &response);

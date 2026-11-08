@@ -999,6 +999,140 @@ impl JsonSchema for SketchRef {
     }
 }
 
+/// A sweep's `orientation`, as `features::sweep_orientation` reads it, with its messages.
+/// `null` is the default, as the handler reads it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SweepOrientationParam(pub solidcraft_doc::SweepOrientation);
+
+impl<'de> Deserialize<'de> for SweepOrientationParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::sweep_orientation(&Value::deserialize(d)?).map(SweepOrientationParam).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for SweepOrientationParam {
+    fn schema_name() -> Cow<'static, str> {
+        "SweepOrientation".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "How the profile turns as it follows the path: perpendicular (the default), square to the path and turning with it; parallel, as drawn, moving without turning (the path must keep crossing the profile's plane); or a direction, [x, y, z], {\"x\", \"y\", \"z\"} or {\"direction\": [x, y, z]}, not zero: square to the path, its turn about the path fixed so that the direction's projection onto the profile stays where it was at the start. Matching ignores case.",
+            "anyOf": [
+                {"type": "string", "enum": ["perpendicular", "parallel"]},
+                point,
+                {"type": "object", "properties": {"direction": point}, "required": ["direction"]}
+            ]
+        })
+    }
+}
+
+/// A sweep's `twist`: an expression as [`AngleExpr`] reads one, with the handler's message for
+/// anything else. Whether it evaluates, and to within four turns, is the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SweepTwist(pub Expr);
+
+impl<'de> Deserialize<'de> for SweepTwist {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        params::expr(&wrap(Value::deserialize(d)?), "v")
+            .map(SweepTwist)
+            .ok_or_else(|| D::Error::custom(whole("`twist` must be an angle or an expression")))
+    }
+}
+
+/// Guide rails' `rail_fit`, as `features::rail_fit_form` reads it, with its message.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RailFitParam(pub solidcraft_doc::RailFit);
+
+impl<'de> Deserialize<'de> for RailFitParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::rail_fit_form(&Value::deserialize(d)?).map(RailFitParam).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for RailFitParam {
+    fn schema_name() -> Cow<'static, str> {
+        "RailFit".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["scale", "stretch"],
+            "How guide rails reshape the profile: scale (the default) grows and shrinks it evenly with the distance from the path to the rail (between the rails); stretch only across to the rail (between the rails). Matching ignores case.",
+        )
+    }
+}
+
+/// What `features::guide_rails` says about a sweep's or a loft's (`what`) `rails`, as given (not
+/// `null`), before it looks a sketch up: its message, or `None`. `default_sketch`: a rail may
+/// leave its `sketch` out. A key a rail doesn't take, which the handler ignores, is refused too.
+fn guide_rails_problem(v: &Value, what: &str, default_sketch: bool) -> Option<String> {
+    let Value::Array(given) = v else { return Some(whole("`rails` must list one or two rails: [{sketch, curves: [ids]}]")) };
+    if !(1..=2).contains(&given.len()) {
+        return Some(whole(format!("a {what} takes one or two guide rails")));
+    }
+    for (i, rail) in given.iter().enumerate() {
+        match rail.get("sketch").filter(|v| !v.is_null()) {
+            None if !default_sketch => return Some(whole("each rail needs the `sketch` its curves are in")),
+            Some(sketch) if crate::cmd::sketch_key(Some(sketch)).is_none() => return Some(whole("`rails[].sketch` must be a sketch id or name")),
+            _ => {}
+        }
+        let curves = match params::string_list(params::UNKNOWN_COMMAND, rail, "curves") {
+            Ok(curves) => curves,
+            Err(crate::EngineError::BadParams { msg, .. }) => return Some(whole(msg)),
+            Err(e) => return Some(whole(e)),
+        };
+        if curves.is_empty() || curves.len() > 1000 {
+            return Some(whole("each rail's `curves` must list 1…1000 curve ids in order"));
+        }
+        if let Some(key) = rail.as_object().and_then(|o| o.keys().find(|k| !matches!(k.as_str(), "sketch" | "curves"))) {
+            let key = super::check::truncate(key, 64);
+            return Some(whole(format!("unknown key `{key}` in `rails[{i}]`: a rail takes `sketch` and `curves`")));
+        }
+    }
+    None
+}
+
+/// A sweep's guide `rails`, as `features::guide_rails` reads them before it looks the sketches up,
+/// with its messages: one or two `{sketch?, curves}`, each rail's sketch the path's when it
+/// names none. Kept as given, for the handler. Whether the sketches and curves exist, and that
+/// `orientation`, `twist` and `scale` are left out, is the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SweepRails(pub Value);
+
+impl<'de> Deserialize<'de> for SweepRails {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        match guide_rails_problem(&v, "sweep", true) {
+            Some(why) => Err(D::Error::custom(why)),
+            None => Ok(SweepRails(v)),
+        }
+    }
+}
+
+impl JsonSchema for SweepRails {
+    fn schema_name() -> Cow<'static, str> {
+        "SweepRails".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let sketch = generator.subschema_for::<SketchRef>();
+        json_schema!({
+            "description": "One or two guide rails, each {\"sketch\"?: the sketch its curves are in (default: the path's sketch), \"curves\": its curve ids in order, 1 to 1000 (one id may be given as text)}.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "sketch": {"anyOf": [sketch, {"type": "null"}]},
+                    "curves": {"anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 1000}]}
+                },
+                "required": ["curves"],
+                "additionalProperties": false
+            }
+        })
+    }
+}
+
 /// What `features::plane_param` says about `v` as a plane before it looks anything up, as a
 /// complete message, or `None`. Names and ids are the handler's to look up.
 fn plane_problem(v: &Value) -> Option<String> {

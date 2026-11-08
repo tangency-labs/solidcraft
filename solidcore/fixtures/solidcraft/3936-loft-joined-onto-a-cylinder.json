@@ -1,0 +1,98 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/3936",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "A loft from a circle to a rectangle joined onto the cylinder it stands on hung on SolidCraft's truck kernel (#3936). An r 10 cylinder 15 tall; a ruled loft from its top circle (z = 15) to a 40 x 30 rectangle at z = 45, joined to it. The loft's volume has no closed form here, but the join's does: the loft's bottom disc is the cylinder's top, so the union adds exactly the cylinder. Checked as the volume removed from the loft, -pi*10^2*15, and one solid.",
+ "cases": [
+  {
+   "name": "cylinder_then_loft",
+   "note": "union(cylinder, loft).",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "post",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 10,
+     "height": 15
+    },
+    {
+     "op": "loft",
+     "id": "loft",
+     "sections": [
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 10
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        15
+       ]
+      },
+      {
+       "profile": [
+        {
+         "kind": "polygon",
+         "points": [
+          [
+           -20,
+           -15
+          ],
+          [
+           20,
+           -15
+          ],
+          [
+           20,
+           15
+          ],
+          [
+           -20,
+           15
+          ]
+         ]
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        45
+       ]
+      }
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "post",
+     "b": "loft"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "loft",
+     "value": -4712.38898038469,
+     "tol": 0.0001,
+     "formula": "vol(loft) - (vol(loft) + pi*10^2*15): the union adds exactly the cylinder"
+    }
+   }
+  }
+ ]
+}

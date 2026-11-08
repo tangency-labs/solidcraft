@@ -31,9 +31,9 @@ use solidcraft_engine::sketch::CurveKind;
 use std::hash::{Hash, Hasher};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::tool_modifiers::Held;
 use crate::viewport::{Hit, Proj};
+use solidcraft_theme::Tokens;
 
 /// How long the left button stays down, without moving, before the list opens.
 pub const HOLD_SECS: f64 = 0.5;
@@ -630,7 +630,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut picked = None;
     let screen = ctx.content_rect();
     let margins = crate::ui_kit::Menu::frame().total_margin().sum();
-    let width = crate::context_menu::LIST_W.min(screen.width());
+    let width = crate::ui_kit::LIST_W.min(screen.width());
     let w = (width - margins.x).max(0.0);
     let header = 20.0;
     let gap = vec2(12.0, 12.0);
@@ -649,13 +649,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ui.set_max_height(size.y);
             crate::ui_kit::Menu::show(ui, width, |ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(w, header), Sense::hover());
-                let title = crate::i18n::tr_label("Select Other").to_uppercase();
+                let title = solidcraft_ui_text::tr_label("Select Other").to_uppercase();
                 let title = if p.total > p.rows.len() { format!("{title} · {} / {}", p.rows.len(), p.total) } else { title };
                 ui.painter().text(
                     pos2(r.left() + 8.0, r.center().y),
                     Align2::LEFT_CENTER,
                     title,
-                    FontId::proportional(crate::theme::Tokens::get().font_panel),
+                    FontId::proportional(solidcraft_theme::Tokens::get().font_panel),
                     t.text_dim,
                 );
                 egui::ScrollArea::vertical().min_scrolled_height(0.0).max_height(scroll_height).show(ui, |ui| {

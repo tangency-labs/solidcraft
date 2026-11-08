@@ -1,0 +1,1250 @@
+//! Runner for unit `heal.stitch_p1`: upstream `SmStitch` ported into
+//! `solidcore::heal::stitch::p1`, checked against the unit's golden.
+//!
+//! The C++ side builds a real `SmBrep` per call: an upstream `.smb` file, a wire edge,
+//! a face or the `prog_test` wire network (the B-rep blocks of `topology.edgeuse_p1`),
+//! unstitched sheets (one face per surface in one B-rep; generated as grids of
+//! bilinear or biquadratic patches whose shared corners and edges are pulled apart by
+//! a gap), `SmApiCreateBox` (the upstream tests' box), or a wire edge over one
+//! `SmHermiteCurve` ([`StitchBrep::HermiteWire`]). The Rust side builds the same
+//! B-rep with the Rust kernel ([`own_brep`]: the Rust `.smb` reader, the Rust
+//! constructors), renumbered into the shim's traversal order, so no C++ export reaches
+//! it. Every op's C++ output after the build status is compared with the Rust side's as
+//! one float array (`out`): statuses (`0`, an `SmStatus` code), traversal indices, flags
+//! and values, and after every op that changes the B-rep its digest ([`digest`]: counts,
+//! vertex points and tolerances, and the topology in list order, so a stitch that
+//! reports the right counts but builds a different B-rep fails); `-2` (the shim's guard on
+//! input upstream would dereference null or free twice) is an error on both sides.
+//!
+//! A [`StitchBrep::HermiteWire`] B-rep is not transported: the shared export carries
+//! B-spline and line curves only, so each side builds that B-rep from the same block
+//! with its own native constructors (the same curve data and tolerances, an independent
+//! object on each side).
+//!
+//! Selectors are taken modulo the entity count; an op needing an entity the B-rep
+//! lacks is rejected (nothing runs on either side). Edge parameters are given normalised to the
+//! edge's interval and split points as an offset from the edge, resolved on the Rust
+//! build for both sides (on the C++ side's import of its export only when the Rust
+//! build fails).
+//!
+//! **Owner tolerance of a nonlinear edge.** `Split` takes `editing` (set
+//! `m_bEditingEnabled` first: `MakeVertexSplitEdge` refuses every split with it off) and
+//! `probe` (append the post-call edge curve's cache geometry: spans and subdivision
+//! data, [`push_span`]). The split-point solve builds that cache through
+//! `SmTol::GetApproxTol3d(&m_crCurve)`, half its owning edge's tolerance.
+//! The probe is limited to Hermite edges: unlike B-splines their approximate spans
+//! exercise the distance test at this pin. Rust requests the post-call curve's
+//! cache through the solve's same builder, reusing its memo when valid and never
+//! supplying a separate tolerance override. This compares computed cache geometry,
+//! not an echoed tolerance or a claim of successful Hermite edge splitting.
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+use solidcore::curve::curve::p5::make_curve_cache;
+use solidcore::curve::curve::Curve;
+use solidcore::curve::curve_cache::BezierSpan;
+use solidcore::curve::hermite_curve::HermiteCurve;
+use solidcore::geom::extent1d::Extent1d;
+use solidcore::heal::stitch::p1 as st;
+use solidcore::kernel::Kernel;
+use solidcore::math::{Point3, Vec3};
+use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use solidcore::topology::brep::p1 as bp1;
+use solidcore::topology::brep::p5 as bp5;
+use solidcore::topology::edgeuse::p1 as eu1;
+use solidcore::topology::face::p2 as fp2;
+use solidcore::topology::loopuse as lu;
+use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
+use solidcore::{EntityRef, SolidError};
+
+use super::topology_edgeuse_p1::{
+    flag, gen_brep, sel, BrepIn, SrfIn,
+};
+use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+
+/// The unit runner.
+pub struct Runner;
+
+fn harness(msg: impl Into<String>) -> HarnessError {
+    HarnessError::new(msg)
+}
+
+/// "Upstream would dereference null or free twice" in a status slot.
+pub(crate) const NULL_DEREF: f64 = -2.0;
+
+/// `SM_ERR_INVALID_INPUT`.
+const SM_ERR_INVALID_INPUT: f64 = 1007.0;
+
+/// Largest `SmApi*` selector (`which` of [`OpIn::Api`]).
+const MAX_API: u8 = 6;
+
+// ---- inputs -----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct SheetFace {
+    pub(crate) surface: SrfIn,
+    pub(crate) dom: [f64; 4],
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum StitchBrep {
+    /// A B-rep block of `topology.edgeuse_p1`.
+    Brep {
+        brep: BrepIn,
+        #[serde(default)]
+        validate_only: bool,
+        #[serde(default)]
+        init_gaps: bool,
+    },
+    /// One face per surface in one B-rep.
+    Sheets { faces: Vec<SheetFace> },
+    /// `SmApiCreateBox(p, size[0], size[1], size[2])`.
+    Box { p: [f64; 3], size: [f64; 3] },
+    /// A wire edge over one `SmHermiteCurve` (`P1 D1 P2 D2`), built by each side's own
+    /// native constructors (`CreateWireEdgeFromCurve`, then the edge's and its vertices'
+    /// tolerances), never imported: the shared export flattens a Hermite curve to nothing.
+    /// Its drop builds the approximation cache `SmTol::GetApproxTol3d(&m_crCurve)` sizes,
+    /// the reason the split-point solve must resolve the edge's own tolerance.
+    HermiteWire {
+        p1: [f64; 3],
+        d1: [f64; 3],
+        p2: [f64; 3],
+        d2: [f64; 3],
+        /// The edge's interval inside the curve's natural `[0, 1]`.
+        interval: [f64; 2],
+        /// The edge's `m_sZoneTol3d`.
+        edge_tol: f64,
+        /// Both vertices' tolerance.
+        vertex_tol: f64,
+    },
+}
+
+/// A target: `ty` 0 vertex, 1 edge, 2 face; `sel` a selector.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct Target {
+    ty: u8,
+    sel: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+enum OpIn {
+    Export,
+    Select {
+        a: Target,
+        b: Target,
+        dist: f64,
+    },
+    Interior {
+        edge: i64,
+        s: f64,
+        tol: f64,
+    },
+    Split {
+        edge: i64,
+        s: f64,
+        offset: [f64; 3],
+        tol: f64,
+        /// Set the B-rep's `m_bEditingEnabled` before the call (`MakeVertexSplitEdge`
+        /// refuses every split with it off). Default off: the existing cases' splits are
+        /// refused, unchanged.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        editing: bool,
+        /// Append a Hermite edge's post-call cache geometry.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        probe: bool,
+    },
+    VPairs {
+        tol: f64,
+        #[serde(default)]
+        ignore: bool,
+        l1: Vec<i64>,
+        l2: Vec<i64>,
+    },
+    Edges {
+        tol: f64,
+        manifold: bool,
+        #[serde(default)]
+        fast: bool,
+        #[serde(default)]
+        ignore: bool,
+        #[serde(default)]
+        nesting: bool,
+        verts: Vec<i64>,
+    },
+    Simple {
+        api: bool,
+        tol: f64,
+        keep: Vec<i64>,
+        del: Vec<i64>,
+    },
+    Unify {
+        api: bool,
+        tol: f64,
+        face: i64,
+        n: u64,
+    },
+    /// `which`: 0 `SmApiStitch(brep)`, 1 `SmApiStitch(brep, face)`, 2
+    /// `SmApiStitchIntoSolid`, 3 `SmApiStitchIntoShell`, 4 `SmApiUnifyNormals`, 5
+    /// `SmApiSimpleFaceStitch` (empty lists), 6 `SmApiStitchAdvanced`.
+    Api {
+        which: u8,
+        #[serde(default)]
+        null_brep: bool,
+        /// selector, `-1` null
+        #[serde(default)]
+        face: i64,
+        #[serde(default)]
+        n: u64,
+        #[serde(default)]
+        well_formed: bool,
+        #[serde(default)]
+        ratio: f64,
+        #[serde(default)]
+        tol: f64,
+        #[serde(default)]
+        flags: [bool; 4],
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Inputs {
+    brep: StitchBrep,
+    op: OpIn,
+    /// Every face and edge first tagged with its own attribute, and the attributes the
+    /// faces and edges carry after the op appended to `out` (issue #1462).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    attributed: bool,
+}
+
+/// The Rust B-rep of the case's block, built by the Rust kernel as the shim's
+/// `build_block` builds it (no C++ export reaches the Rust side): a B-rep block of
+/// `topology.edgeuse_p1` ([`crate::own_builder::build_any`]: an `.smb` file read by the
+/// Rust reader, every other kind by the Rust constructors), the sheets
+/// (`CreateFaceFromSurface` per surface into `new (ctx) SmBrep()`, stopping at the
+/// first failure) or `SmApiCreateBox`. It is renumbered into the shim's traversal
+/// order (`walk` then `walk_more`, the `sc_edgeuse_graph.h` walk) and names its
+/// geometry under arena identities ([`Brep::use_arena_naming`], as the import did). A
+/// [`StitchBrep::HermiteWire`] block has no export, so it is built by the same native
+/// constructors as the shim's ([`native_brep`]) and returned as built. The output of a
+/// failed build otherwise.
+///
+/// # Errors
+///
+/// A harness error for a source the shim would not accept either or a dangling
+/// reference in the renumbering.
+pub(crate) fn own_brep(
+    k: &mut Kernel,
+    b: &StitchBrep,
+) -> Result<Result<Brep, Output>, HarnessError> {
+    use crate::own_builder::{build_any, build_status, finish, in_new_brep, Built, Conventions};
+    let conv = &Conventions::EDGEUSE_GRAPH;
+    let built = match b {
+        // a wire edge over one `SmHermiteCurve`: the shim's `build_block` builds it with
+        // the native constructors ([`native_brep`]), one edge and two vertices, so there
+        // is nothing to renumber
+        StitchBrep::HermiteWire { .. } => return Ok(Ok(native_brep(k, b)?)),
+        StitchBrep::Brep {
+            brep,
+            validate_only,
+            init_gaps,
+        } => build_any(k, brep, *validate_only, *init_gaps, conv)?,
+        StitchBrep::Sheets { faces } => {
+            let surfaces = faces
+                .iter()
+                .map(|f| super::topology_edgeuse_p1::surface_of(&f.surface).map(|s| (s, f.dom)))
+                .collect::<Result<Vec<_>, _>>()?;
+            let raw = in_new_brep(k, |k, b| {
+                for (s, dom) in surfaces {
+                    crate::own_builder::create_face(k, b, s, dom)?;
+                }
+                Ok(())
+            })?;
+            finish(k, raw, false, false, conv)?
+        }
+        StitchBrep::Box { p, size } => {
+            let raw = solidcore::primitive::api_primitives::create_box(
+                k,
+                Point3::new(p[0], p[1], p[2]),
+                size[0],
+                size[1],
+                size[2],
+            );
+            finish(k, raw, false, false, conv)?
+        }
+    };
+    match built {
+        Built::Brep(b) => {
+            let mut b = *b;
+            b.use_arena_naming()
+                .map_err(|e| harness(format!("rust naming: {e}")))?;
+            Ok(Ok(b))
+        }
+        Built::Failed(e) => Ok(Err(Output::unported(&e).unwrap_or_else(|| {
+            Output::err(format!("brep_build_status_{}", build_status(&e)))
+        }))),
+    }
+}
+
+/// The Rust B-rep of the `SmApiCreateBox(origin, 1, 1, 1)` block ([`own_brep`]), for
+/// the runners that run on the shim's unit box; a failed build is a harness error.
+///
+/// # Errors
+///
+/// As [`own_brep`], and when the box cannot be built.
+pub(crate) fn own_unit_box(origin: [f64; 3]) -> Result<Brep, HarnessError> {
+    let mut k = Kernel::default();
+    own_brep(
+        &mut k,
+        &StitchBrep::Box {
+            p: origin,
+            size: [1.0; 3],
+        },
+    )?
+    .map_err(|o| harness(format!("rust box build failed: {o:?}")))
+}
+
+/// An op naming an entity kind the B-rep lacks (e.g. a face op on a wire B-rep): no code
+/// runs on either side, so the case is rejected (not counted as a pass).
+pub(crate) fn no_entity() -> Output {
+    Output::rejected("no entity of the op's kind in this B-rep: nothing runs on either side")
+}
+
+/// The Rust B-rep of a [`StitchBrep::HermiteWire`] block: the same native constructors
+/// the shim runs (`SmBrep()`, `CreateWireEdgeFromCurve` with the Hermite curve, then the
+/// edge's and its vertices' tolerances), so both sides hold an equivalent, independent
+/// object and the comparison never sees a C++ output.
+fn native_brep(k: &mut Kernel, b: &StitchBrep) -> Result<Brep, HarnessError> {
+    let StitchBrep::HermiteWire {
+        p1,
+        d1,
+        p2,
+        d2,
+        interval,
+        edge_tol,
+        vertex_tol,
+    } = b
+    else {
+        return Err(harness("not a natively built B-rep"));
+    };
+    let he = |e: SolidError| harness(format!("hermite wire: {e}"));
+    let mut brep = Brep::new_with_infinite_region().map_err(he)?;
+    let curve = Curve::from(HermiteCurve::new(
+        Point3::new(p1[0], p1[1], p1[2]),
+        Vec3::new(d1[0], d1[1], d1[2]),
+        Point3::new(p2[0], p2[1], p2[2]),
+        Vec3::new(d2[0], d2[1], d2[2]),
+        3,
+    ));
+    let e = bp5::create_wire_edge_from_curve(
+        k,
+        &mut brep,
+        curve,
+        Extent1d::from_raw(interval[0], interval[1]),
+    )
+    .map_err(he)?;
+    edge::set_tolerance(&mut brep, e, *edge_tol, false, false).map_err(he)?;
+    let first = edge::vertex(&brep, e).map_err(he)?;
+    let last = edge::other_vertex(&brep, e, first).map_err(he)?;
+    for v in [first, last].into_iter().flatten() {
+        vertex::set_tolerance(&mut brep, v, *vertex_tol, false, false).map_err(he)?;
+    }
+    Ok(brep)
+}
+
+// ---- resolution ---------------------------------------------------------------------------
+
+/// An op with its selectors resolved and its parameters made concrete on the B-rep.
+#[derive(Debug, Clone)]
+enum Resolved {
+    Export,
+    Select {
+        a: EntityRef,
+        b: EntityRef,
+        dist: f64,
+    },
+    Interior {
+        edge: EdgeId,
+        t: f64,
+        tol: f64,
+    },
+    Split {
+        edge: EdgeId,
+        p: Point3,
+        tol: f64,
+        editing: bool,
+        probe: bool,
+    },
+    VPairs {
+        tol: f64,
+        ignore: bool,
+        l1: Vec<VertexId>,
+        l2: Vec<VertexId>,
+    },
+    Edges {
+        tol: f64,
+        flags: [bool; 4],
+        verts: Vec<VertexId>,
+    },
+    Simple {
+        api: bool,
+        tol: f64,
+        keep: Vec<FaceId>,
+        del: Vec<FaceId>,
+    },
+    Unify {
+        api: bool,
+        tol: f64,
+        face: FaceId,
+        n: u64,
+    },
+    Api {
+        which: u8,
+        null_brep: bool,
+        face: Option<FaceId>,
+        n: u64,
+        well_formed: bool,
+        ratio: f64,
+        tol: f64,
+        flags: [bool; 4],
+    },
+}
+
+pub(crate) fn pick(s: i64, n: usize) -> Option<u32> {
+    u32::try_from(sel(s, n)).ok()
+}
+
+fn target(t: Target, b: &Brep) -> Option<EntityRef> {
+    match t.ty {
+        0 => pick(t.sel, b.vertices().len()).map(|i| EntityRef::Vertex(VertexId::from_index(i))),
+        1 => pick(t.sel, b.edges().len()).map(|i| EntityRef::Edge(EdgeId::from_index(i))),
+        2 => pick(t.sel, b.faces().len()).map(|i| EntityRef::Face(FaceId::from_index(i))),
+        _ => None,
+    }
+}
+
+/// Distinct vertex ids of the selectors (repeats dropped), skipping those in `not`.
+fn vertex_list(s: &[i64], b: &Brep, not: &[VertexId]) -> Vec<VertexId> {
+    let mut v = Vec::new();
+    for &x in s {
+        if let Some(i) = pick(x, b.vertices().len()) {
+            let id = VertexId::from_index(i);
+            if !v.contains(&id) && !not.contains(&id) {
+                v.push(id);
+            }
+        }
+    }
+    v
+}
+
+fn face_list(s: &[i64], b: &Brep) -> Vec<FaceId> {
+    s.iter()
+        .filter_map(|&x| pick(x, b.faces().len()).map(FaceId::from_index))
+        .collect()
+}
+
+/// The parameter at normalised position `s` of the edge's interval.
+fn param(b: &Brep, e: EdgeId, s: f64) -> Result<f64, HarnessError> {
+    let ivl = edge::interval(b, e).map_err(|e| harness(e.to_string()))?;
+    Ok(ivl.min() + (ivl.max() - ivl.min()) * s)
+}
+
+fn resolve(k: &Kernel, op: &OpIn, b: &Brep) -> Result<Option<Resolved>, HarnessError> {
+    let ne = b.edges().len();
+    Ok(Some(match op {
+        OpIn::Export => Resolved::Export,
+        OpIn::Select { a, b: tb, dist } => {
+            let (Some(a), Some(c)) = (target(*a, b), target(*tb, b)) else {
+                return Ok(None);
+            };
+            Resolved::Select {
+                a,
+                b: c,
+                dist: *dist,
+            }
+        }
+        OpIn::Interior { edge, s, tol } => {
+            let Some(e) = pick(*edge, ne).map(EdgeId::from_index) else {
+                return Ok(None);
+            };
+            Resolved::Interior {
+                edge: e,
+                t: param(b, e, *s)?,
+                tol: *tol,
+            }
+        }
+        OpIn::Split {
+            edge,
+            s,
+            offset,
+            tol,
+            editing,
+            probe,
+        } => {
+            let Some(e) = pick(*edge, ne).map(EdgeId::from_index) else {
+                return Ok(None);
+            };
+            let t = param(b, e, *s)?;
+            let c = edge::curve(b, e)
+                .map_err(|e| harness(e.to_string()))?
+                .ok_or_else(|| harness("edge without curve"))?;
+            if *probe && !matches!(c.kind(), solidcore::curve::curve::CurveKind::Hermite(_)) {
+                return Err(harness("cache probe requires a Hermite edge"));
+            }
+            let on = c
+                .evaluate_point(k, t)
+                .map_err(|e| harness(format!("split point: {e}")))?;
+            let p = Point3::new(on.x + offset[0], on.y + offset[1], on.z + offset[2]);
+            Resolved::Split {
+                edge: e,
+                p,
+                tol: *tol,
+                editing: *editing,
+                probe: *probe,
+            }
+        }
+        OpIn::VPairs {
+            tol,
+            ignore,
+            l1,
+            l2,
+        } => {
+            if b.vertices().is_empty() {
+                return Ok(None);
+            }
+            let a = vertex_list(l1, b, &[]);
+            let c = vertex_list(l2, b, &a);
+            Resolved::VPairs {
+                tol: *tol,
+                ignore: *ignore,
+                l1: a,
+                l2: c,
+            }
+        }
+        OpIn::Edges {
+            tol,
+            manifold,
+            fast,
+            ignore,
+            nesting,
+            verts,
+        } => {
+            if b.vertices().is_empty() {
+                return Ok(None);
+            }
+            let v = verts
+                .iter()
+                .filter_map(|&x| pick(x, b.vertices().len()).map(VertexId::from_index))
+                .collect();
+            Resolved::Edges {
+                tol: *tol,
+                flags: [*manifold, *fast, *ignore, *nesting],
+                verts: v,
+            }
+        }
+        OpIn::Simple {
+            api,
+            tol,
+            keep,
+            del,
+        } => {
+            if b.faces().is_empty() {
+                return Ok(None);
+            }
+            Resolved::Simple {
+                api: *api,
+                tol: *tol,
+                keep: face_list(keep, b),
+                del: face_list(del, b),
+            }
+        }
+        OpIn::Unify { api, tol, face, n } => {
+            let Some(f) = pick(*face, b.faces().len()).map(FaceId::from_index) else {
+                return Ok(None);
+            };
+            Resolved::Unify {
+                api: *api,
+                tol: *tol,
+                face: f,
+                n: (*n).min(64),
+            }
+        }
+        OpIn::Api {
+            which,
+            null_brep,
+            face,
+            n,
+            well_formed,
+            ratio,
+            tol,
+            flags,
+        } => {
+            if *which > MAX_API {
+                return Err(harness(format!("unknown SmApi selector {which}")));
+            }
+            // SmApiStitch(brep, face) crashes upstream for any face with a real B-rep
+            // (SmMerge(ctx, brep, NULL) dereferences the null other B-rep, UB-167): only
+            // the null face is defined there (the FFI refuses the rest)
+            let f = if *face < 0 || (*which == 1 && !*null_brep) {
+                None
+            } else {
+                pick(*face, b.faces().len()).map(FaceId::from_index)
+            };
+            Resolved::Api {
+                which: *which,
+                null_brep: *null_brep,
+                face: f,
+                n: (*n).min(64),
+                well_formed: *well_formed,
+                ratio: *ratio,
+                tol: *tol,
+                flags: *flags,
+            }
+        }
+    }))
+}
+
+fn idx<I: solidcore::topology::ArenaId>(id: I) -> f64 {
+    f64::from(id.index())
+}
+
+fn push_ids<I: solidcore::topology::ArenaId + Copy>(v: &mut Vec<f64>, ids: &[I]) {
+    v.push(ids.len() as f64);
+    v.extend(ids.iter().map(|&i| idx(i)));
+}
+
+// ---- C++ side ---------------------------------------------------------------------------
+
+fn guarded_output(o: Vec<f64>) -> Output {
+    if o.first() == Some(&NULL_DEREF) {
+        Output::err("null_dereference_guard")
+    } else {
+        Output::new().values("out", o)
+    }
+}
+
+// ---- Rust side --------------------------------------------------------------------------
+
+/// The `SmStatus` of a Rust error: an upstream code as is; `InvalidInput` raised by the
+/// port itself marks a null dereference upstream (`-2`), from the API entry points or a
+/// callee it is `SM_ERR_INVALID_INPUT`.
+fn status_of(e: &SolidError) -> f64 {
+    match e {
+        SolidError::Upstream { code, .. } => f64::from(*code),
+        SolidError::InvalidInput { operation, .. } | SolidError::PortInvariant { operation, .. } if *operation == "heal::stitch::p1" => {
+            NULL_DEREF
+        }
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
+        _ => -9.0,
+    }
+}
+
+/// `Ok(values)` on success; `Err` propagates `Unported`, any other error becomes its
+/// status.
+fn status_or<T>(
+    r: solidcore::Result<T>,
+    f: impl FnOnce(T) -> Vec<f64>,
+) -> solidcore::Result<Vec<f64>> {
+    match r {
+        Ok(v) => {
+            let mut o = vec![0.0];
+            o.extend(f(v));
+            Ok(o)
+        }
+        Err(e) if e.is_unported() => Err(e),
+        Err(e) => Ok(vec![status_of(&e)]),
+    }
+}
+
+fn ids_out<I: solidcore::topology::ArenaId + Copy>(ids: &[I]) -> Vec<f64> {
+    let mut v = Vec::new();
+    push_ids(&mut v, ids);
+    v
+}
+
+fn opt_ids_out(ids: &[Option<VertexId>]) -> Vec<f64> {
+    let mut v = vec![ids.len() as f64];
+    v.extend(ids.iter().map(|i| i.map_or(-1.0, idx)));
+    v
+}
+
+/// The B-rep after a mutating op (as the shim's `put_digest`): the counts, each vertex's
+/// point and tolerance, then [`topology_digest`].
+pub(crate) fn digest(k: &mut Kernel, b: &Brep, o: &mut Vec<f64>) -> solidcore::Result<()> {
+    let fs = bp1::faces(b, None)?;
+    let es = bp1::edges(b, None)?;
+    let vs = bp1::vertices(b, None)?;
+    o.extend([fs.len() as f64, es.len() as f64, vs.len() as f64]);
+    for v in vs {
+        let p = vertex::point(b, v)?;
+        o.extend([p.x, p.y, p.z, vertex::tolerance(b, v)?]);
+    }
+    topology_digest(k, b, o)
+}
+
+/// The tags of an attributed case (`sc_attribute_tags.h`'s `tag_objects`): face `i` and
+/// edge `i` of the build (the shim's traversal order: arena order here) each get their own
+/// copy attribute, `10007 + i` and `10507 + i`.
+fn tag_objects(b: &mut Brep) -> solidcore::Result<()> {
+    use solidcore::geom::attribute::{Attribute, Behavior};
+    let faces: Vec<_> = b.faces().ids().collect();
+    for (i, f) in faces.into_iter().enumerate() {
+        let id = 10007 + i as u64;
+        b.add_attribute(EntityRef::Face(f), Attribute::long(id, id as i64, Behavior::Copy))?;
+    }
+    let edges: Vec<_> = b.edges().ids().collect();
+    for (i, e) in edges.into_iter().enumerate() {
+        let id = 10507 + i as u64;
+        b.add_attribute(EntityRef::Edge(e), Attribute::long(id, id as i64, Behavior::Copy))?;
+    }
+    Ok(())
+}
+
+/// An attributed case's tail (`sc_attribute_tags.h`'s `put_tags`): `nf (n id*)* ne
+/// (n id*)*`, the ascending attribute ids of every face and edge in list order.
+pub(crate) fn put_tags(o: &mut Vec<f64>, b: &Brep) -> solidcore::Result<()> {
+    let ids = |o: &mut Vec<f64>, e: EntityRef| {
+        let mut v: Vec<u64> = b
+            .entity_attributes(e)
+            .into_iter()
+            .map(|(_, a)| a.attribute_id())
+            .collect();
+        v.sort_unstable();
+        o.push(v.len() as f64);
+        o.extend(v.into_iter().map(|x| x as f64));
+    };
+    let fs = bp1::faces(b, None)?;
+    o.push(fs.len() as f64);
+    for f in fs {
+        ids(o, EntityRef::Face(f));
+    }
+    let es = bp1::edges(b, None)?;
+    o.push(es.len() as f64);
+    for e in es {
+        ids(o, EntityRef::Edge(e));
+    }
+    Ok(())
+}
+
+/// The topology after a stitch, in list order (as the reference shim's `put_topology` wrote
+/// it): the shell count; per edge its start and end vertex (index in the vertex list, `-1`
+/// none), tolerance, interval and edge use count; per face its loops, each as its edge
+/// uses' edges (index in the edge list) and orientations. Positions in the lists, not arena
+/// ids, so record numbering never enters the comparison.
+pub(crate) fn topology_digest(k: &mut Kernel, b: &Brep, o: &mut Vec<f64>) -> solidcore::Result<()> {
+    let shells = bp1::shells(k, b, None)?;
+    let fs = bp1::faces(b, None)?;
+    let es = bp1::edges(b, None)?;
+    let vs = bp1::vertices(b, None)?;
+    let vpos = |v: Option<VertexId>| {
+        v.and_then(|v| vs.iter().position(|&x| x == v))
+            .map_or(-1.0, |i| i as f64)
+    };
+    let epos = |e: Option<EdgeId>| {
+        e.and_then(|e| es.iter().position(|&x| x == e))
+            .map_or(-1.0, |i| i as f64)
+    };
+    o.push(shells.len() as f64);
+    for &e in &es {
+        let iv = edge::interval(b, e)?;
+        o.extend([
+            vpos(edge::start_vertex(b, e)?),
+            vpos(edge::end_vertex(b, e)?),
+            edge::tolerance(b, e)?,
+            iv.min(),
+            iv.max(),
+            edge::edgeuses(b, e, None, None)?.len() as f64,
+        ]);
+    }
+    for f in fs {
+        let ls = fp2::loops(b, f, false, None)?;
+        o.push(ls.len() as f64);
+        for l in ls {
+            let eus = lu::loop_edgeuses(b, l)?;
+            o.push(eus.len() as f64);
+            for eu in eus {
+                o.push(epos(eu1::edge(b, eu)?));
+                o.push(match eu1::orientation(b, eu)? {
+                    OrientType::Unknown => 0.0,
+                    OrientType::Same => 1.0,
+                    OrientType::Opposite => 2.0,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The Hermite edge's post-call cache geometry, using the solve's builder and its
+/// memo when valid. No tolerance override is supplied. Layout matches the native
+/// cache's `1 n_spans` followed by each span's subdivision data: `left right c0 c1
+/// max_length max_chord_height_squared max_turning_angle_deg interval_min interval_max`.
+fn push_curve_cache(k: &Kernel, b: &Brep, edge: EdgeId, o: &mut Vec<f64>) -> solidcore::Result<()> {
+    let curve = edge::curve(b, edge)?
+        .ok_or_else(|| SolidError::invalid_input("difftest", "edge without curve"))?;
+    let cache = make_curve_cache::<u32>(k, curve, None)?;
+    o.push(1.0);
+    o.push(cache.span_count() as f64);
+    for span in cache.spans() {
+        push_span(o, span);
+    }
+    Ok(())
+}
+
+/// One span's subdivision data (`SmBezierAux1d`), the first nine values of
+/// `curve.curve_cache`'s `put_aux`.
+fn push_span(o: &mut Vec<f64>, span: &BezierSpan) {
+    let a = &span.aux;
+    o.extend([
+        a.left as f64,
+        a.right as f64,
+        f64::from(a.conts[0] as i32),
+        f64::from(a.conts[1] as i32),
+        a.max_length,
+        a.max_chord_height_squared,
+        a.max_turning_angle_deg,
+        a.interval.min(),
+        a.interval.max(),
+    ]);
+}
+
+#[allow(clippy::too_many_lines)] // one arm per op
+fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result<Vec<f64>> {
+    let mut cb = st::DefaultStitchCallback::new();
+    match op {
+        Resolved::Export => Err(SolidError::invalid_input(
+            "difftest",
+            "export has no Rust op",
+        )),
+        Resolved::Select { a, b: c, dist } => {
+            if matches!((a, c), (EntityRef::Edge(_), EntityRef::Edge(_))) {
+                for f in b.faces().ids().collect::<Vec<_>>() {
+                    if fp2::surface(b, f)?.is_none() {
+                        return Ok(vec![NULL_DEREF]);
+                    }
+                }
+            }
+            status_or(
+                st::select_topology_to_keep(&mut cb, k, b, *a, *c, *dist),
+                |r| vec![flag(r.keep_first), r.max_distance],
+            )
+        }
+        Resolved::Interior { edge, t, tol } => {
+            status_or(st::check_interior_edge(k, b, *edge, *t, *tol), |r| {
+                vec![flag(r)]
+            })
+        }
+        Resolved::Split {
+            edge,
+            p,
+            tol,
+            editing,
+            probe,
+        } => {
+            if *editing {
+                b.set_editing_enabled(true);
+            }
+            let r = match st::test_and_split_edge(k, b, *edge, *p, *tol) {
+                Ok(r) => {
+                    let mut o = vec![
+                        0.0,
+                        f64::from(r.reason as u8),
+                        r.dist_to_edge,
+                        flag(r.new_vertex.is_some()),
+                    ];
+                    if r.new_vertex.is_some() {
+                        digest(k, b, &mut o)?;
+                    }
+                    Ok(o)
+                }
+                Err(e) if e.is_unported() => Err(e),
+                Err(e) => Ok(vec![status_of(&e)]),
+            };
+            let mut o = r?;
+            if *probe {
+                push_curve_cache(k, b, *edge, &mut o)?;
+            }
+            Ok(o)
+        }
+        Resolved::VPairs {
+            tol,
+            ignore,
+            l1,
+            l2,
+        } => {
+            let mut s = st::Stitch::new(&mut cb, *tol, true, true);
+            s.ignore_problems = *ignore;
+            let mut a: Vec<Option<VertexId>> = l1.iter().copied().map(Some).collect();
+            let mut c: Vec<Option<VertexId>> = l2.iter().copied().map(Some).collect();
+            match s.stitch_vertex_pairs(k, b, &mut a, &mut c) {
+                Ok(r) => {
+                    let mut o = vec![0.0, r.max_vertex_gap, r.min_unstitched_vert_gap];
+                    o.extend(ids_out(&r.processed));
+                    o.extend(ids_out(&r.deleted));
+                    o.extend(opt_ids_out(&a));
+                    o.extend(opt_ids_out(&c));
+                    if !r.processed.is_empty() {
+                        digest(k, b, &mut o)?;
+                    }
+                    Ok(o)
+                }
+                Err(e) if e.is_unported() => Err(e),
+                Err(e) => Ok(vec![status_of(&e)]),
+            }
+        }
+        Resolved::Edges { tol, flags, verts } => {
+            let [manifold, fast, ignore, nesting] = *flags;
+            let mut s = st::Stitch::new(&mut cb, *tol, nesting, true);
+            s.making_manifold_solid = manifold;
+            s.fast_edge_compare = fast;
+            s.ignore_problems = ignore;
+            let v: Vec<Option<VertexId>> = verts.iter().copied().map(Some).collect();
+            match s.stitch_edges_of_vertices(k, b, &v) {
+                Ok(r) => {
+                    let mut o = vec![0.0, r.max_edge_gap, r.min_unstitched_edge_gap];
+                    o.extend(ids_out(&r.glued));
+                    o.extend(ids_out(&r.deleted));
+                    if !r.glued.is_empty() {
+                        digest(k, b, &mut o)?;
+                    }
+                    Ok(o)
+                }
+                Err(e) if e.is_unported() => Err(e),
+                Err(e) => Ok(vec![status_of(&e)]),
+            }
+        }
+        Resolved::Simple {
+            api,
+            tol,
+            keep,
+            del,
+        } => {
+            let r = if *api {
+                st::api_simple_face_stitch(k, Some(b), keep, del)
+            } else {
+                st::Stitch::new(&mut cb, *tol, true, true).do_simple_face_stitch(k, b, keep, del)
+            };
+            match r {
+                Ok(r) => {
+                    let mut o = vec![
+                        0.0,
+                        r.max_vertex_gap,
+                        r.max_edge_gap,
+                        r.stitched_edges as f64,
+                    ];
+                    digest(k, b, &mut o)?;
+                    Ok(o)
+                }
+                Err(e) if e.is_unported() => Err(e),
+                Err(e) => Ok(vec![status_of(&e)]),
+            }
+        }
+        Resolved::Unify { api, tol, face, n } => {
+            let r = if *api {
+                st::api_unify_normals(k, Some(b), Some(*face), *n)
+            } else {
+                // (as SmApiUnifyNormals: through the kernel context's callbacks)
+                solidcore::topology::brep::p3::with_kernel_callbacks(k, b, |k, b, env| {
+                    st::Stitch::new(&mut cb, *tol, true, true).unify_normals(k, b, *face, *n, env)
+                })
+            };
+            match r {
+                Ok(flipped) => {
+                    let mut o = vec![0.0];
+                    o.extend(ids_out(&flipped));
+                    for f in &flipped {
+                        let d = fp2::uv_domain(b, *f)?;
+                        o.extend([d.min().x, d.min().y, d.max().x, d.max().y]);
+                    }
+                    digest(k, b, &mut o)?;
+                    Ok(o)
+                }
+                Err(e) if e.is_unported() => Err(e),
+                Err(e) => Ok(vec![status_of(&e)]),
+            }
+        }
+        Resolved::Api {
+            which,
+            null_brep,
+            face,
+            n,
+            well_formed,
+            ratio,
+            tol,
+            flags,
+        } => {
+            let brep = if *null_brep { None } else { Some(&mut *b) };
+            let out = match which {
+                0 => status_or(st::api_stitch(k, brep), |()| Vec::new()),
+                1 => status_or(st::api_stitch_face(k, brep, *face), |()| Vec::new()),
+                2 => status_or(st::api_stitch_into_solid(k, brep), |r| {
+                    vec![
+                        flag(r.produces_a_solid),
+                        r.stitched_edges as f64,
+                        r.max_vertex_gap,
+                        r.max_edge_gap,
+                    ]
+                }),
+                3 => status_or(
+                    st::api_stitch_into_shell(k, brep, *well_formed, *ratio),
+                    |r| vec![r.stitched_edges as f64, r.max_vertex_gap, r.max_edge_gap],
+                ),
+                4 => status_or(st::api_unify_normals(k, brep, *face, *n), |f| ids_out(&f)),
+                5 => status_or(st::api_simple_face_stitch(k, brep, &[], &[]), |_| {
+                    Vec::new()
+                }),
+                _ => {
+                    let [squeeze_small_edges, split_edges_with_vertices, making_manifold_solid, remove_laminar_slivers] =
+                        *flags;
+                    let options = st::AdvancedStitchOptions {
+                        squeeze_small_edges,
+                        split_edges_with_vertices,
+                        making_manifold_solid,
+                        remove_laminar_slivers,
+                    };
+                    status_or(st::api_stitch_advanced(k, brep, *tol, options), |r| {
+                        vec![
+                            r.stitched_edges as f64,
+                            r.lamina_edges as f64,
+                            r.max_vertex_gap,
+                            r.max_edge_gap,
+                        ]
+                    })
+                }
+            };
+            // the B-rep after a successful call (the shim's `put_digest`)
+            let mut out = out?;
+            if !*null_brep && out.first() == Some(&0.0) {
+                digest(k, b, &mut out)?;
+            }
+            Ok(out)
+        }
+    }
+}
+
+fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
+    // one context for the build, the resolution and the op, as the shim's
+    let mut k = Kernel::default();
+    let mut b = match own_brep(&mut k, &i.brep)? {
+        Ok(b) => b,
+        Err(o) => return Ok(o),
+    };
+    let Some(op) = resolve(&k, &i.op, &b)? else {
+        return Ok(no_entity());
+    };
+    if matches!(op, Resolved::Export) {
+        return Ok(Output::new().values("out", Vec::new()));
+    }
+    if i.attributed {
+        tag_objects(&mut b).map_err(|e| harness(format!("rust tags: {e}")))?;
+    }
+    match run_rust_op(&mut k, &mut b, &op) {
+        Ok(mut o) => {
+            if i.attributed {
+                put_tags(&mut o, &b).map_err(|e| harness(format!("rust tags: {e}")))?;
+            }
+            Ok(guarded_output(o))
+        }
+        Err(e) => match Output::unported(&e) {
+            Some(o) => Ok(o),
+            None => Err(harness(format!("rust: {e}"))),
+        },
+    }
+}
+
+// ---- generated cases --------------------------------------------------------------------
+
+/// `w = 1` marker of a non-rational control point (`topology.edgeuse_p1`'s `NOW`).
+const NOW: f64 = 1.0;
+
+/// A grid of `nx * ny` patches of degree `p` (1 or 2) over cells of size `h`, each face
+/// pulled apart from its neighbours by its own random offsets of size `gap` at every
+/// control point (0 for some faces), some faces reversed in u.
+pub(crate) fn gen_sheets(rng: &mut Rng) -> StitchBrep {
+    let h = *rng.choose(&[1e-3, 1.0, 1.0, 1.0, 1e3]).unwrap_or(&1.0);
+    let nx = 1 + rng.below(3) as usize;
+    let ny = 1 + rng.below(if nx == 3 { 2 } else { 3 }) as usize;
+    let p = 1 + rng.below(2) as usize;
+    let gaps = [0.0, 0.0, 1e-9, 1e-7, 1e-5, 1e-4, 1e-3, 1e-2, 0.1];
+    // base control net over the whole grid
+    let (gx, gy) = (nx * p + 1, ny * p + 1);
+    let mut base = vec![vec![[0.0; 3]; gy]; gx];
+    let bump = rng.uniform(0.0, 0.5);
+    for (i, col) in base.iter_mut().enumerate() {
+        for (j, pt) in col.iter_mut().enumerate() {
+            let (x, y) = (i as f64 / p as f64, j as f64 / p as f64);
+            *pt = [x * h, y * h, bump * h * rng.uniform(-0.5, 0.5)];
+        }
+    }
+    let mut faces = Vec::new();
+    for cx in 0..nx {
+        for cy in 0..ny {
+            let gap = *rng.choose(&gaps).unwrap_or(&0.0) * h;
+            let reverse = rng.chance(0.25);
+            let mut net: Vec<Vec<[f64; 4]>> = Vec::new();
+            for a in 0..=p {
+                let mut row = Vec::new();
+                for c in 0..=p {
+                    let q = base
+                        .get(cx * p + a)
+                        .and_then(|col| col.get(cy * p + c))
+                        .copied()
+                        .unwrap_or([0.0; 3]);
+                    let d = rng.point3(-1.0, 1.0);
+                    row.push([q[0] + gap * d[0], q[1] + gap * d[1], q[2] + gap * d[2], NOW]);
+                }
+                net.push(row);
+            }
+            if reverse {
+                net.reverse();
+            }
+            let mut knots = vec![0.0; p + 1];
+            knots.extend(vec![1.0; p + 1]);
+            let surface: SrfIn = match serde_json::from_value(json!({"bspline": {
+                "net": net, "p": p, "q": p, "u": knots, "v": knots,
+            }})) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            faces.push(SheetFace {
+                surface,
+                dom: [0.0, 0.0, 1.0, 1.0],
+            });
+        }
+    }
+    StitchBrep::Sheets { faces }
+}
+
+pub(crate) fn gen_tol(rng: &mut Rng) -> f64 {
+    *rng.choose(&[0.0, 1e-9, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 0.1, 1.0, 10.0])
+        .unwrap_or(&1e-3)
+}
+
+pub(crate) fn gen_sels(rng: &mut Rng, max: u64) -> Vec<i64> {
+    let n = rng.below(max + 1);
+    (0..n).map(|_| rng.below(1 << 20) as i64).collect()
+}
+
+fn gen_op(rng: &mut Rng) -> OpIn {
+    let s = |rng: &mut Rng| rng.below(1 << 20) as i64;
+    let ss = [
+        -0.1, 0.0, 1e-13, 1e-3, 0.01, 0.3, 0.5, 0.97, 0.999, 1.0, 1.1,
+    ];
+    match rng.below(20) {
+        0..=3 => {
+            let ty = u8::from(rng.chance(0.5));
+            let ty2 = if rng.chance(0.9) {
+                ty
+            } else {
+                rng.below(3) as u8
+            };
+            OpIn::Select {
+                a: Target { ty, sel: s(rng) },
+                b: Target {
+                    ty: ty2,
+                    sel: s(rng),
+                },
+                dist: *rng
+                    .choose(&[0.0, 1e-6, 5e-5, 1e-4, 1e-3, 1e-2, 0.1, 1.0])
+                    .unwrap_or(&1e-3),
+            }
+        }
+        4 | 5 => OpIn::Interior {
+            edge: s(rng),
+            s: *rng.choose(&ss).unwrap_or(&0.5),
+            tol: gen_tol(rng),
+        },
+        6 | 7 => {
+            let m = *rng.choose(&[0.0, 1e-7, 1e-4, 1e-2, 0.3]).unwrap_or(&0.0);
+            let d = rng.point3(-1.0, 1.0);
+            OpIn::Split {
+                edge: s(rng),
+                s: *rng.choose(&ss).unwrap_or(&0.5),
+                offset: [d[0] * m, d[1] * m, d[2] * m],
+                tol: gen_tol(rng),
+                // the split branch is exercised by the `owner_zone_tol` fixtures; the
+                // generated cases keep the pre-existing behaviour (editing off)
+                editing: false,
+                probe: false,
+            }
+        }
+        8..=11 => OpIn::VPairs {
+            tol: gen_tol(rng),
+            ignore: rng.chance(0.2),
+            l1: gen_sels(rng, 12),
+            l2: gen_sels(rng, 12),
+        },
+        12..=14 => OpIn::Edges {
+            tol: gen_tol(rng),
+            manifold: rng.chance(0.7),
+            fast: rng.chance(0.3),
+            ignore: rng.chance(0.2),
+            nesting: rng.chance(0.5),
+            verts: gen_sels(rng, 8),
+        },
+        15 => OpIn::Simple {
+            api: rng.chance(0.3),
+            tol: gen_tol(rng),
+            keep: gen_sels(rng, 3),
+            del: gen_sels(rng, 3),
+        },
+        16 | 17 => OpIn::Unify {
+            api: rng.chance(0.3),
+            tol: gen_tol(rng),
+            face: s(rng),
+            n: *rng.choose(&[0, 1, 2, 3, 10]).unwrap_or(&3),
+        },
+        _ => OpIn::Api {
+            which: rng.below(u64::from(MAX_API) + 1) as u8,
+            null_brep: rng.chance(0.3),
+            face: if rng.chance(0.2) { -1 } else { s(rng) },
+            n: *rng.choose(&[0, 3, 10]).unwrap_or(&3),
+            well_formed: rng.chance(0.5),
+            ratio: *rng.choose(&[0.0, 1.0, 10.0, 100.0]).unwrap_or(&10.0),
+            tol: gen_tol(rng),
+            flags: [
+                rng.chance(0.5),
+                rng.chance(0.5),
+                rng.chance(0.5),
+                rng.chance(0.5),
+            ],
+        },
+    }
+}
+
+impl UnitDiff for Runner {
+    fn id(&self) -> &'static str {
+        "heal.stitch_p1"
+    }
+
+    fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        run_rust(&case.parse::<Inputs>()?)
+    }
+
+    fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        let brep = match rng.below(10) {
+            0..=6 => gen_sheets(rng),
+            7 => StitchBrep::Box {
+                p: rng.point3(-5.0, 5.0),
+                size: [
+                    rng.uniform(0.5, 20.0),
+                    rng.uniform(0.5, 20.0),
+                    rng.uniform(0.5, 20.0),
+                ],
+            },
+            _ => StitchBrep::Brep {
+                brep: gen_brep(rng),
+                validate_only: false,
+                init_gaps: false,
+            },
+        };
+        serde_json::to_value(Inputs {
+            brep,
+            op: gen_op(rng),
+            attributed: false,
+        })
+        .ok()
+    }
+}

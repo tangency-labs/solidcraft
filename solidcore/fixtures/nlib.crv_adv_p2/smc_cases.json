@@ -1,0 +1,4247 @@
+{
+ "cases": [
+  {
+   "name": "DropCurveCurve_xdist_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "g1"
+   }
+  },
+  {
+   "name": "DropCurveCurve_xpar_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "g1"
+   }
+  },
+  {
+   "name": "DropCurveCurve_unbounded_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "g1",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 3,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_xdist_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "g2"
+   }
+  },
+  {
+   "name": "DropCurveCurve_xpar_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "g2"
+   }
+  },
+  {
+   "name": "DropCurveCurve_unbounded_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "g2",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 3,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_xdist_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "cmax"
+   }
+  },
+  {
+   "name": "DropCurveCurve_xpar_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "cmax"
+   }
+  },
+  {
+   "name": "DropCurveCurve_unbounded_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "cmax",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 3,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_offset_max2nd",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "offset_max2nd",
+    "d": 0.5,
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_offset_max2nd_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "offset_max2nd",
+    "d": -1.25,
+    "normal": [
+     0.0,
+     0.0,
+     -1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_remove_deriv_w0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 0,
+    "der": 1
+   }
+  },
+  {
+   "name": "DropCurveCurve_remove_deriv_w1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 1,
+    "der": 1
+   }
+  },
+  {
+   "name": "DropCurveCurve_remove_deriv_w2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 2,
+    "der": 1
+   }
+  },
+  {
+   "name": "DropCurveCurve_remove_deriv_w3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 3,
+    "der": 1
+   }
+  },
+  {
+   "name": "DropCurveCurve_remove_deriv_w4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 4,
+    "der": 1
+   }
+  },
+  {
+   "name": "DropCurveCurve_remove_deriv_both2_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 0.001,
+    "whr": 3,
+    "der": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_refine",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "refine_to_knots",
+    "x": [
+     {
+      "knot": 0,
+      "offset": 0.2371
+     },
+     {
+      "knot": 0,
+      "offset": 0.6113
+     },
+     {
+      "knot": 0,
+      "offset": 0.7
+     }
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_refine_low",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "refine_to_knots",
+    "x": [
+     {
+      "knot": 0,
+      "offset": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_sum_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_diff_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "minus": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_sum_other",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_diff_other",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "minus": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_nonrat_d0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 0
+   }
+  },
+  {
+   "name": "DropCurveCurve_nonrat_d1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 1
+   }
+  },
+  {
+   "name": "DropCurveCurve_nonrat_d2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 2
+   }
+  },
+  {
+   "name": "DropCurveCurve_rat_deriv",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "rat_deriv"
+   }
+  },
+  {
+   "name": "DropCurveCurve_const_mul",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "const_mul",
+    "alpha": -1.5
+   }
+  },
+  {
+   "name": "DropCurveCurve_linear_mul",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "linear_mul",
+    "s0": 0.5,
+    "s1": 2.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_linear_mul_eq",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "linear_mul",
+    "s0": 2.0,
+    "s1": 2.0000000000001
+   }
+  },
+  {
+   "name": "DropCurveCurve_const_mul4d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "const_mul4d",
+    "alpha": 0.75
+   }
+  },
+  {
+   "name": "DropCurveCurve_reparam_rat",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "reparam_rat",
+    "alf": 2.0,
+    "bet": 0.5,
+    "gam": 0.01,
+    "del": 101.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_reparam_rat_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "reparam_rat",
+    "alf": 1.0,
+    "bet": -0.25,
+    "gam": 0.0,
+    "inplace": true,
+    "del": 2.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_reparam_weights",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "reparam_weights",
+    "w": 1.0,
+    "c": 0.0,
+    "d": 1.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_reparam_mult_knots",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "reparam_mult_knots",
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "DropCurveCurve_reparam_mult_knots_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "reparam_mult_knots",
+    "tol": 0.001,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_reparam_end_weights",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "op": "reparam_end_weights",
+    "wt0": 2.0,
+    "wtn": 0.5
+   }
+  },
+  {
+   "name": "closedCurve_xdist_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "g1"
+   }
+  },
+  {
+   "name": "closedCurve_xpar_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "g1"
+   }
+  },
+  {
+   "name": "closedCurve_unbounded_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "g1",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 13,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_xdist_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "g2"
+   }
+  },
+  {
+   "name": "closedCurve_xpar_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "g2"
+   }
+  },
+  {
+   "name": "closedCurve_unbounded_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "g2",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 13,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_xdist_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "cmax"
+   }
+  },
+  {
+   "name": "closedCurve_xpar_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "cmax"
+   }
+  },
+  {
+   "name": "closedCurve_unbounded_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "cmax",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 13,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_offset_max2nd",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "offset_max2nd",
+    "d": 0.5,
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_offset_max2nd_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "offset_max2nd",
+    "d": -1.25,
+    "normal": [
+     0.0,
+     0.0,
+     -1.0
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_remove_deriv_w0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 0,
+    "der": 1
+   }
+  },
+  {
+   "name": "closedCurve_remove_deriv_w1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 1,
+    "der": 1
+   }
+  },
+  {
+   "name": "closedCurve_remove_deriv_w2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 2,
+    "der": 1
+   }
+  },
+  {
+   "name": "closedCurve_remove_deriv_w3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 3,
+    "der": 1
+   }
+  },
+  {
+   "name": "closedCurve_remove_deriv_w4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 4,
+    "der": 1
+   }
+  },
+  {
+   "name": "closedCurve_remove_deriv_both2_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 0.001,
+    "whr": 3,
+    "der": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "closedCurve_refine",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "refine_to_knots",
+    "x": [
+     {
+      "knot": 0,
+      "offset": 0.2371
+     },
+     {
+      "knot": 0,
+      "offset": 0.6113
+     },
+     {
+      "knot": 0,
+      "offset": 0.6113
+     }
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_refine_low",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "refine_to_knots",
+    "x": [
+     {
+      "knot": 0,
+      "offset": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_sum_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "closedCurve_diff_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "minus": true
+   }
+  },
+  {
+   "name": "closedCurve_sum_other",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "closedCurve_diff_other",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "minus": true
+   }
+  },
+  {
+   "name": "closedCurve_nonrat_d0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 0
+   }
+  },
+  {
+   "name": "closedCurve_nonrat_d1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 1
+   }
+  },
+  {
+   "name": "closedCurve_nonrat_d2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 2
+   }
+  },
+  {
+   "name": "closedCurve_nonrat_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 3
+   }
+  },
+  {
+   "name": "closedCurve_rat_deriv",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "rat_deriv"
+   }
+  },
+  {
+   "name": "closedCurve_const_mul",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "const_mul",
+    "alpha": -1.5
+   }
+  },
+  {
+   "name": "closedCurve_linear_mul",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "linear_mul",
+    "s0": 0.5,
+    "s1": 2.0
+   }
+  },
+  {
+   "name": "closedCurve_linear_mul_eq",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "linear_mul",
+    "s0": 2.0,
+    "s1": 2.0000000000001
+   }
+  },
+  {
+   "name": "closedCurve_const_mul4d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "const_mul4d",
+    "alpha": 0.75
+   }
+  },
+  {
+   "name": "closedCurve_reparam_rat",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "reparam_rat",
+    "alf": 2.0,
+    "bet": 0.5,
+    "gam": 0.01,
+    "del": 101.0
+   }
+  },
+  {
+   "name": "closedCurve_reparam_rat_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "reparam_rat",
+    "alf": 1.0,
+    "bet": -0.25,
+    "gam": 0.0,
+    "inplace": true,
+    "del": 2.0
+   }
+  },
+  {
+   "name": "closedCurve_reparam_weights",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "reparam_weights",
+    "w": 1.0,
+    "c": 0.0,
+    "d": 1.0
+   }
+  },
+  {
+   "name": "closedCurve_reparam_mult_knots",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "reparam_mult_knots",
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "closedCurve_reparam_mult_knots_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "reparam_mult_knots",
+    "tol": 0.001,
+    "inplace": true
+   }
+  },
+  {
+   "name": "closedCurve_reparam_end_weights",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "op": "reparam_end_weights",
+    "wt0": 2.0,
+    "wtn": 0.5
+   }
+  },
+  {
+   "name": "crvToOffset_xdist_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "g1"
+   }
+  },
+  {
+   "name": "crvToOffset_xpar_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "g1"
+   }
+  },
+  {
+   "name": "crvToOffset_unbounded_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "g1",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 97,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_xdist_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "g2"
+   }
+  },
+  {
+   "name": "crvToOffset_xpar_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "g2"
+   }
+  },
+  {
+   "name": "crvToOffset_unbounded_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "g2",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 97,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_xdist_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "cmax"
+   }
+  },
+  {
+   "name": "crvToOffset_xpar_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "cmax"
+   }
+  },
+  {
+   "name": "crvToOffset_unbounded_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "cmax",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 97,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_offset_max2nd",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "offset_max2nd",
+    "d": 0.5,
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_offset_max2nd_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "offset_max2nd",
+    "d": -1.25,
+    "normal": [
+     0.0,
+     0.0,
+     -1.0
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_remove_deriv_w0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 0,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvToOffset_remove_deriv_w1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 1,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvToOffset_remove_deriv_w2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 2,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvToOffset_remove_deriv_w3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 3,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvToOffset_remove_deriv_w4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 4,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvToOffset_remove_deriv_both2_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 0.001,
+    "whr": 3,
+    "der": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvToOffset_refine",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "refine_to_knots",
+    "x": [
+     {
+      "knot": 0,
+      "offset": 0.2371
+     },
+     {
+      "knot": 0,
+      "offset": 0.6113
+     },
+     {
+      "knot": 0,
+      "offset": 0.6113
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_refine_low",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "refine_to_knots",
+    "x": [
+     {
+      "knot": 0,
+      "offset": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_sum_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_diff_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "minus": true
+   }
+  },
+  {
+   "name": "crvToOffset_sum_other",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_diff_other",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "minus": true
+   }
+  },
+  {
+   "name": "crvToOffset_nonrat_d0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 0
+   }
+  },
+  {
+   "name": "crvToOffset_nonrat_d1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 1
+   }
+  },
+  {
+   "name": "crvToOffset_nonrat_d2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 2
+   }
+  },
+  {
+   "name": "crvToOffset_nonrat_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 3
+   }
+  },
+  {
+   "name": "crvToOffset_rat_deriv",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "rat_deriv"
+   }
+  },
+  {
+   "name": "crvToOffset_const_mul",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "const_mul",
+    "alpha": -1.5
+   }
+  },
+  {
+   "name": "crvToOffset_linear_mul",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "linear_mul",
+    "s0": 0.5,
+    "s1": 2.0
+   }
+  },
+  {
+   "name": "crvToOffset_linear_mul_eq",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "linear_mul",
+    "s0": 2.0,
+    "s1": 2.0000000000001
+   }
+  },
+  {
+   "name": "crvToOffset_const_mul4d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "const_mul4d",
+    "alpha": 0.75
+   }
+  },
+  {
+   "name": "crvToOffset_reparam_rat",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "reparam_rat",
+    "alf": 2.0,
+    "bet": 0.5,
+    "gam": 0.01,
+    "del": 101.0
+   }
+  },
+  {
+   "name": "crvToOffset_reparam_rat_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "reparam_rat",
+    "alf": 1.0,
+    "bet": -0.25,
+    "gam": 0.0,
+    "inplace": true,
+    "del": 2.0
+   }
+  },
+  {
+   "name": "crvToOffset_reparam_weights",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "reparam_weights",
+    "w": 1.0,
+    "c": 0.0,
+    "d": 1.0
+   }
+  },
+  {
+   "name": "crvToOffset_reparam_mult_knots",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "reparam_mult_knots",
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "crvToOffset_reparam_mult_knots_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "reparam_mult_knots",
+    "tol": 0.001,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvToOffset_reparam_end_weights",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "op": "reparam_end_weights",
+    "wt0": 2.0,
+    "wtn": 0.5
+   }
+  },
+  {
+   "name": "crvTrim1_xdist_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "g1"
+   }
+  },
+  {
+   "name": "crvTrim1_xpar_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "g1"
+   }
+  },
+  {
+   "name": "crvTrim1_unbounded_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "g1",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 10,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_xdist_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "g2"
+   }
+  },
+  {
+   "name": "crvTrim1_xpar_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "g2"
+   }
+  },
+  {
+   "name": "crvTrim1_unbounded_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "g2",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 10,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_xdist_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "cmax"
+   }
+  },
+  {
+   "name": "crvTrim1_xpar_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "cmax"
+   }
+  },
+  {
+   "name": "crvTrim1_unbounded_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "cmax",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 10,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_offset_max2nd",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "offset_max2nd",
+    "d": 0.5,
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_offset_max2nd_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "offset_max2nd",
+    "d": -1.25,
+    "normal": [
+     0.0,
+     0.0,
+     -1.0
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_remove_deriv_w0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 0,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvTrim1_remove_deriv_w1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 1,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvTrim1_remove_deriv_w2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 2,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvTrim1_remove_deriv_w3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 3,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvTrim1_remove_deriv_w4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 4,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvTrim1_remove_deriv_both2_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 0.001,
+    "whr": 3,
+    "der": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim1_refine",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "refine_to_knots",
+    "x": [
+     {
+      "knot": 0,
+      "offset": 0.2371
+     },
+     {
+      "knot": 0,
+      "offset": 0.6113
+     },
+     {
+      "knot": 0,
+      "offset": 0.6113
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_refine_low",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "refine_to_knots",
+    "x": [
+     {
+      "knot": 0,
+      "offset": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_sum_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_diff_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "minus": true
+   }
+  },
+  {
+   "name": "crvTrim1_sum_other",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_diff_other",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "minus": true
+   }
+  },
+  {
+   "name": "crvTrim1_nonrat_d0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 0
+   }
+  },
+  {
+   "name": "crvTrim1_nonrat_d1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 1
+   }
+  },
+  {
+   "name": "crvTrim1_nonrat_d2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 2
+   }
+  },
+  {
+   "name": "crvTrim1_nonrat_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 3
+   }
+  },
+  {
+   "name": "crvTrim1_rat_deriv",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "rat_deriv"
+   }
+  },
+  {
+   "name": "crvTrim1_const_mul",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "const_mul",
+    "alpha": -1.5
+   }
+  },
+  {
+   "name": "crvTrim1_linear_mul",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "linear_mul",
+    "s0": 0.5,
+    "s1": 2.0
+   }
+  },
+  {
+   "name": "crvTrim1_linear_mul_eq",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "linear_mul",
+    "s0": 2.0,
+    "s1": 2.0000000000001
+   }
+  },
+  {
+   "name": "crvTrim1_const_mul4d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "const_mul4d",
+    "alpha": 0.75
+   }
+  },
+  {
+   "name": "crvTrim1_reparam_rat",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "reparam_rat",
+    "alf": 2.0,
+    "bet": 0.5,
+    "gam": 0.01,
+    "del": 101.0
+   }
+  },
+  {
+   "name": "crvTrim1_reparam_rat_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "reparam_rat",
+    "alf": 1.0,
+    "bet": -0.25,
+    "gam": 0.0,
+    "inplace": true,
+    "del": 2.0
+   }
+  },
+  {
+   "name": "crvTrim1_reparam_weights",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "reparam_weights",
+    "w": 1.0,
+    "c": 0.0,
+    "d": 1.0
+   }
+  },
+  {
+   "name": "crvTrim1_reparam_mult_knots",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "reparam_mult_knots",
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "crvTrim1_reparam_mult_knots_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "reparam_mult_knots",
+    "tol": 0.001,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim1_reparam_end_weights",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "op": "reparam_end_weights",
+    "wt0": 2.0,
+    "wtn": 0.5
+   }
+  },
+  {
+   "name": "crvTrim2_xdist_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "g1"
+   }
+  },
+  {
+   "name": "crvTrim2_xpar_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "g1"
+   }
+  },
+  {
+   "name": "crvTrim2_unbounded_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "g1",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 8,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_xdist_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "g2"
+   }
+  },
+  {
+   "name": "crvTrim2_xpar_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "g2"
+   }
+  },
+  {
+   "name": "crvTrim2_unbounded_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "g2",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 8,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_xdist_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "cmax"
+   }
+  },
+  {
+   "name": "crvTrim2_xpar_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "cmax"
+   }
+  },
+  {
+   "name": "crvTrim2_unbounded_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "cmax",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 8,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_offset_max2nd",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "offset_max2nd",
+    "d": 0.5,
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_offset_max2nd_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "offset_max2nd",
+    "d": -1.25,
+    "normal": [
+     0.0,
+     0.0,
+     -1.0
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_remove_deriv_w0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 0,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvTrim2_remove_deriv_w1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 1,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvTrim2_remove_deriv_w2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 2,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvTrim2_remove_deriv_w3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 3,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvTrim2_remove_deriv_w4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 4,
+    "der": 1
+   }
+  },
+  {
+   "name": "crvTrim2_remove_deriv_both2_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 0.001,
+    "whr": 3,
+    "der": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim2_refine",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "refine_to_knots",
+    "x": [
+     {
+      "knot": 0,
+      "offset": 0.2371
+     },
+     {
+      "knot": 0,
+      "offset": 0.6113
+     },
+     {
+      "knot": 0,
+      "offset": 0.6113
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_refine_low",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "refine_to_knots",
+    "x": [
+     {
+      "knot": 0,
+      "offset": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_sum_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_diff_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "minus": true
+   }
+  },
+  {
+   "name": "crvTrim2_nonrat_d0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 0
+   }
+  },
+  {
+   "name": "crvTrim2_nonrat_d1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 1
+   }
+  },
+  {
+   "name": "crvTrim2_nonrat_d2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 2
+   }
+  },
+  {
+   "name": "crvTrim2_nonrat_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 3
+   }
+  },
+  {
+   "name": "crvTrim2_rat_deriv",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "rat_deriv"
+   }
+  },
+  {
+   "name": "crvTrim2_const_mul",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "const_mul",
+    "alpha": -1.5
+   }
+  },
+  {
+   "name": "crvTrim2_linear_mul",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "linear_mul",
+    "s0": 0.5,
+    "s1": 2.0
+   }
+  },
+  {
+   "name": "crvTrim2_linear_mul_eq",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "linear_mul",
+    "s0": 2.0,
+    "s1": 2.0000000000001
+   }
+  },
+  {
+   "name": "crvTrim2_const_mul4d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "const_mul4d",
+    "alpha": 0.75
+   }
+  },
+  {
+   "name": "crvTrim2_reparam_rat",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "reparam_rat",
+    "alf": 2.0,
+    "bet": 0.5,
+    "gam": 0.01,
+    "del": 101.0
+   }
+  },
+  {
+   "name": "crvTrim2_reparam_rat_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "reparam_rat",
+    "alf": 1.0,
+    "bet": -0.25,
+    "gam": 0.0,
+    "inplace": true,
+    "del": 2.0
+   }
+  },
+  {
+   "name": "crvTrim2_reparam_weights",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "reparam_weights",
+    "w": 1.0,
+    "c": 0.0,
+    "d": 1.0
+   }
+  },
+  {
+   "name": "crvTrim2_reparam_mult_knots",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "reparam_mult_knots",
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "crvTrim2_reparam_mult_knots_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "reparam_mult_knots",
+    "tol": 0.001,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim2_reparam_end_weights",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "op": "reparam_end_weights",
+    "wt0": 2.0,
+    "wtn": 0.5
+   }
+  },
+  {
+   "name": "curve0_xdist_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "g1"
+   }
+  },
+  {
+   "name": "curve0_xpar_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "g1"
+   }
+  },
+  {
+   "name": "curve0_unbounded_g1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "g1",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 1393,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "curve0_xdist_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "g2"
+   }
+  },
+  {
+   "name": "curve0_xpar_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "g2"
+   }
+  },
+  {
+   "name": "curve0_unbounded_g2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "g2",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 1393,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "curve0_xdist_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "extend_dist",
+    "dist": 0.2,
+    "relative": true,
+    "end": "end",
+    "cont": "cmax"
+   }
+  },
+  {
+   "name": "curve0_xpar_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "extend_param",
+    "par": {
+     "knot": 0,
+     "offset": -0.3
+    },
+    "end": "start",
+    "cont": "cmax"
+   }
+  },
+  {
+   "name": "curve0_unbounded_cmax",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "eval_unbounded",
+    "cont": "cmax",
+    "evals": [
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.5
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -0.4
+      },
+      "ndr": 2
+     },
+     {
+      "u": {
+       "knot": 1393,
+       "offset": 0.0
+      },
+      "ndr": 0
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 1.7
+      },
+      "ndr": 1
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": -2.5
+      },
+      "ndr": 3
+     },
+     {
+      "u": {
+       "knot": 0,
+       "offset": 0.25
+      },
+      "ndr": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "curve0_offset_max2nd",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "offset_max2nd",
+    "d": 0.5,
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "curve0_offset_max2nd_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "offset_max2nd",
+    "d": -1.25,
+    "normal": [
+     0.0,
+     0.0,
+     -1.0
+    ]
+   }
+  },
+  {
+   "name": "curve0_remove_deriv_w0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 0,
+    "der": 1
+   }
+  },
+  {
+   "name": "curve0_remove_deriv_w1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 1,
+    "der": 1
+   }
+  },
+  {
+   "name": "curve0_remove_deriv_w2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 2,
+    "der": 1
+   }
+  },
+  {
+   "name": "curve0_remove_deriv_w3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 3,
+    "der": 1
+   }
+  },
+  {
+   "name": "curve0_remove_deriv_w4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 1e-06,
+    "whr": 4,
+    "der": 1
+   }
+  },
+  {
+   "name": "curve0_remove_deriv_both2_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "remove_knots_deriv",
+    "tol": 0.001,
+    "whr": 3,
+    "der": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "curve0_refine",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "refine_to_knots",
+    "x": [
+     {
+      "knot": 0,
+      "offset": 0.2371
+     },
+     {
+      "knot": 0,
+      "offset": 0.6113
+     },
+     {
+      "knot": 0,
+      "offset": 0.6113
+     }
+    ]
+   }
+  },
+  {
+   "name": "curve0_refine_low",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "refine_to_knots",
+    "x": [
+     {
+      "knot": 0,
+      "offset": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "curve0_sum_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "curve0_diff_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "sum_diff",
+    "other": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "minus": true
+   }
+  },
+  {
+   "name": "curve0_nonrat_d0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 0
+   }
+  },
+  {
+   "name": "curve0_nonrat_d1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 1
+   }
+  },
+  {
+   "name": "curve0_nonrat_d2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 2
+   }
+  },
+  {
+   "name": "curve0_nonrat_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "non_rat_deriv",
+    "d": 3
+   }
+  },
+  {
+   "name": "curve0_rat_deriv",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "rat_deriv"
+   }
+  },
+  {
+   "name": "curve0_const_mul",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "const_mul",
+    "alpha": -1.5
+   }
+  },
+  {
+   "name": "curve0_linear_mul",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "linear_mul",
+    "s0": 0.5,
+    "s1": 2.0
+   }
+  },
+  {
+   "name": "curve0_linear_mul_eq",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "linear_mul",
+    "s0": 2.0,
+    "s1": 2.0000000000001
+   }
+  },
+  {
+   "name": "curve0_const_mul4d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "const_mul4d",
+    "alpha": 0.75
+   }
+  },
+  {
+   "name": "curve0_reparam_rat",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "reparam_rat",
+    "alf": 2.0,
+    "bet": 0.5,
+    "gam": 0.01,
+    "del": 101.0
+   }
+  },
+  {
+   "name": "curve0_reparam_rat_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "reparam_rat",
+    "alf": 1.0,
+    "bet": -0.25,
+    "gam": 0.0,
+    "inplace": true,
+    "del": 2.0
+   }
+  },
+  {
+   "name": "curve0_reparam_weights",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "reparam_weights",
+    "w": 1.0,
+    "c": 0.0,
+    "d": 1.0
+   }
+  },
+  {
+   "name": "curve0_reparam_mult_knots",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "reparam_mult_knots",
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "curve0_reparam_mult_knots_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "reparam_mult_knots",
+    "tol": 0.001,
+    "inplace": true
+   }
+  },
+  {
+   "name": "curve0_reparam_end_weights",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; prog_test my_test_surface_closest_point / my_test_drop_point / my_test_matrix / my_test_reversed_line_join and SM_API tests TestSmCreateRectangle / TestSmCreateRegularPolygon reach NL_CrvAdv through SmNurbsCurve)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "op": "reparam_end_weights",
+    "wt0": 2.0,
+    "wtn": 0.5
+   }
+  }
+ ]
+}

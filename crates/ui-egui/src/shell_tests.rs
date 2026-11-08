@@ -1,5 +1,6 @@
 use super::*;
 use crate::scenario::{Harness, rect_of};
+use crate::toolbar;
 use serde_json::json;
 use solidcraft_engine::panels::ActionSink as _;
 
@@ -534,14 +535,11 @@ fn actual_tabs_preset_raw_widget_drag_retains_the_inactive_editor_identity_and_d
             let target = HostControlTarget::Pointer(HostPointerTarget::Tab { instance: editor.clone() });
             let control = h.app.universal_panel_frame().unwrap().controls.iter().find(|control| control.target == target).unwrap();
             assert!(
-                h.output
-                    .accesskit_update
-                    .as_ref()
-                    .unwrap()
-                    .nodes
-                    .iter()
-                    .any(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(control.accessible_name.as_str())),
-                "use an actual accessible Tab widget, not a reducer-only target"
+                h.output.accesskit_update.as_ref().unwrap().nodes.iter().any(|(id, node)| *id == control.id.accesskit_id()
+                    && node.role() == egui::accesskit::Role::Tab
+                    && node.label() == Some(control.accessible_name.as_str())
+                    && node.is_selected() == Some(false)),
+                "use the actual inactive accessible Tab widget, not a reducer-only target"
             );
             let bounds = control.bounds;
             let card = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|card| card.section == source_id).unwrap();
@@ -836,7 +834,7 @@ fn host_full_canvas_and_same_pass_controls_follow_actual_sizing_footprints_witho
                             assert!(frame.layout.usable.contains_rect(logical_rect(bounds)));
                             assert!(frame.layout.usable.obstacles.iter().all(|obstacle| {
                                 !bounds
-                                    .expand(crate::theme::Tokens::get().space_4)
+                                    .expand(solidcraft_theme::Tokens::get().space_4)
                                     .intersect(crate::panel_runtime::egui_rect(*obstacle))
                                     .is_positive()
                             }));
@@ -948,7 +946,7 @@ fn actual_host_fit_and_centring_respect_the_measured_sketch_palette_at_both_scal
         for (name, control) in [("nav:outer", layout.navigation), ("axis_view:outer", layout.axis_view)] {
             if control.is_positive() {
                 assert_eq!(rect_of(name), Some(control), "published controls must match the actual same-pass footprint");
-                assert!(!control.expand(crate::theme::Tokens::get().space_4).intersect(palette).is_positive());
+                assert!(!control.expand(solidcraft_theme::Tokens::get().space_4).intersect(palette).is_positive());
                 assert!(effective.contains_rect(logical_rect(control)));
                 assert!(frame.layout.usable.obstacles.iter().all(|obstacle| !control.intersect(egui_rect(*obstacle)).is_positive()));
             } else {
@@ -987,7 +985,7 @@ fn actual_host_fit_and_centring_respect_the_measured_sketch_palette_at_both_scal
             h.settle();
             assert_eq!(h.app.viewport.rect, Some(domain), "explicit fitting preserves the full render domain");
             let footprint = projected_extent(&h, bounds);
-            let padded = footprint.expand(crate::theme::Tokens::get().space_8 - 0.01);
+            let padded = footprint.expand(solidcraft_theme::Tokens::get().space_8 - 0.01);
             assert!(
                 h.app.viewport.layout.as_ref().unwrap().usable.as_ref().unwrap().contains_rect(logical_rect(padded)),
                 "{scale}x {mode:?}: the full 100 mm line and its clearance must avoid the palette, host and controls: {padded:?}"
@@ -1931,7 +1929,7 @@ fn compact_chrome_is_flush_and_browser_hugs_content_in_both_themes() {
         assert!(browser.height() < h.app.viewport.rect.unwrap().height() / 2.0, "Browser hugs its contents");
         let compact = crate::ui_kit::Container::new(&h.ctx, crate::ui_kit::Surface::Panel);
         assert_eq!(compact.gap(), 0.0);
-        let frame = compact.frame(&h.ctx, crate::theme::Tokens::get().panel, crate::frame::Side::Left);
+        let frame = compact.frame(&h.ctx, solidcraft_theme::Tokens::get().panel, crate::frame::Side::Left);
         assert_eq!(frame.shadow, egui::Shadow::NONE);
         assert_eq!(frame.corner_radius, egui::CornerRadius::ZERO);
         h.app.start("solid.extrude");
@@ -1944,7 +1942,7 @@ fn compact_chrome_is_flush_and_browser_hugs_content_in_both_themes() {
         let moved = h.app.viewport.dialog_rect.unwrap();
         assert!(moved.right() < before.right() - 100.0, "compact tool sheets detach from the right edge");
         let feature = crate::ui_kit::Container::new(&h.ctx, crate::ui_kit::Surface::Feature);
-        assert_eq!(feature.frame(&h.ctx, crate::theme::Tokens::get().dialog_body, crate::frame::Side::Right).shadow, egui::Shadow::NONE);
+        assert_eq!(feature.frame(&h.ctx, solidcraft_theme::Tokens::get().dialog_body, crate::frame::Side::Right).shadow, egui::Shadow::NONE);
         h.app.run("view.layout", json!({"mode":"floating"})).unwrap();
         h.settle();
         assert_eq!(rect_of("browser:card").unwrap().left(), SHELL_GAP);
@@ -2113,7 +2111,7 @@ fn a_host_keeps_the_design_and_gives_it_back_with_its_timeline() {
 /// beside it, and OK, Cancel or Esc bring the column back exactly as it was.
 #[test]
 fn a_dialog_in_the_left_column_takes_the_place_of_browser_and_history() {
-    let card = crate::theme::Tokens::get().form_card_width;
+    let card = solidcraft_theme::Tokens::get().form_card_width;
     for mode in [LayoutMode::Floating, LayoutMode::Docked] {
         for (dock, close) in [("bottom", "Cancel"), ("left", "Escape"), ("under_browser", "OK")] {
             let what = format!("{mode:?}, History {dock}, {close}");
@@ -2170,7 +2168,7 @@ fn a_dialog_in_the_left_column_takes_the_place_of_browser_and_history() {
 /// the left column docks at the left edge at its own width, above the bottom History strip.
 #[test]
 fn without_a_left_column_a_dialog_docks_at_the_left_edge_at_its_own_width() {
-    let card = crate::theme::Tokens::get().form_card_width;
+    let card = solidcraft_theme::Tokens::get().form_card_width;
     for (mode, browser) in [(LayoutMode::Floating, "hidden"), (LayoutMode::Docked, "hidden"), (LayoutMode::Floating, "translucent")] {
         let what = format!("{mode:?}, browser {browser}");
         let mut h = Harness::new();
@@ -2442,7 +2440,7 @@ fn status_bar_names_what_is_edited_and_the_sketch_state_and_replaces_the_views_c
     assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some()));
     assert_eq!(crate::status_bar::contents(&h.app).editing.as_deref(), Some("Editing Extrude1"));
     // In another language the text is translated, and so is a default feature name.
-    let _ja = crate::i18n::scope("ja");
+    let _ja = solidcraft_ui_text::scope("ja");
     assert_eq!(crate::status_bar::contents(&h.app).editing, Some(format!("編集中: {}", crate::i18n::tr_name("Extrude1"))));
     assert_eq!(crate::i18n::tr_name("Sketch1"), "スケッチ1");
 }
@@ -2530,7 +2528,7 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
     assert_eq!(h.app.session.undo.len(), undo);
     // An unknown mapping changes nothing.
     let before = serde_json::to_value(&h.app.preferences).unwrap();
-    let hostile = crate::context_menu::Item::action("ui.navPreset", "Nope", "").with(json!({"preset": "nope"}));
+    let hostile = crate::ui_kit::Item::action("ui.navPreset", "Nope", "").with(json!({"preset": "nope"}));
     crate::context_menu::run_item(&mut h.app, &hostile, egui::pos2(0.0, 0.0));
     assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), before);
     // A second click on the button closes the menu it opened.

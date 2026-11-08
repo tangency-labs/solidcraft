@@ -1,0 +1,175 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  13.228756555322963,
+                  -15.0,
+                  10.0
+                ],
+                [
+                  16.357363863159545,
+                  11.508112245203474,
+                  10.0
+                ]
+              ],
+              "index": 7
+            },
+            {
+              "at": [
+                [
+                  16.357363863159545,
+                  11.508112245203474,
+                  10.0
+                ],
+                [
+                  13.228756555322946,
+                  15.0,
+                  10.0
+                ]
+              ],
+              "index": 9
+            }
+          ],
+          "points": [
+            [
+              19.849045376133375,
+              -2.34383220286971,
+              9.999999999999998
+            ],
+            [
+              14.793060209241245,
+              13.254056122601737,
+              10.0
+            ]
+          ],
+          "tolerance": 6.347528024625401
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "1207-fillet-concave-arc-at-boss",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "bar 100x30x10 (x 0..100, y -15..15) joined with a diameter 40 boss 20 tall at the origin. Boss in bar = integral of sqrt(400-y^2) over |y|<=15 = 537.656 mm^2 x 10 high, so V0 = 30000 + 25132.74 - 5376.56. The R2 concave round along the arc (r=20, z=10, from y=-15 to y=15) adds the spandrel region 20<=r<=22, 10<=z<=12 outside the circle at (22,12) swept over the angle 2 asin(15/r) (the strip ends on the side planes y=+-15, not on radial planes): add = integral over r of [2 - sqrt(4-(r-22)^2)] r 2 asin(15/r) dr = 28.9190 (Simpson). V = V0 + add.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1207"
+    ],
+    "volume_mm3": 49785.098450739075,
+    "what": "an R2 round on the concave arc where a bar top meets a boss that only partly sits on it"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 20,
+      "faces": 9,
+      "vertices": 13
+    }
+  },
+  "records": "1207-fillet-concave-arc-at-boss.bodies.json.gz",
+  "result": [
+    {
+      "body": "Arm",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 11620.69607885928,
+      "body_count": 1,
+      "edges": 20,
+      "faces": 9,
+      "vertices": 13,
+      "volume_mm3": 49785.09845085136
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1207"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "an R2 round on the concave arc where a bar top meets a boss that only partly sits on it",
+  "why_not": []
+}

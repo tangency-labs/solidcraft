@@ -1,0 +1,35 @@
+{
+  "area": "construction",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-plane-three-points-refuses-collinear-points",
+  "expected": {
+    "method": "(0,0,0), (10,10,10), (20,20,20) are on one line: every plane through it holds them: refused",
+    "outcome": "refused",
+    "refusal": "the three points are on one line",
+    "source": "analytic",
+    "sources": [],
+    "what": "a plane through three points on one line"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 1 (construct.plane.three_points): the three points are on one line",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 1 (construct.plane.three_points): the three points are on one line",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a plane through three points on one line",
+  "why_not": [
+    "no kernel operation ran before the failure: step 1 (construct.plane.three_points): the three points are on one line"
+  ]
+}

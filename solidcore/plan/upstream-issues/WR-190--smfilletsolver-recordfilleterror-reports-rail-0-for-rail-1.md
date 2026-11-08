@@ -1,0 +1,11 @@
+#### WR-190. `SmFilletSolver::RecordFilletError` reports rail 0 for rail 1
+- **Severity:** Wrong result
+- **Area:** Topology, attributes, solvers
+- **Location:** `source/SMLib/src/SmFilletSolver.cpp:7930` (`SmFilletSolver::RecordFilletError`).
+- **What happens:** `if ( pThisGeom->GetRail(1)->GetCurve() != NULL ) { apFilEdges.AddUnique( pThisGeom->GetRail(0) ); }`: the second rail is tested but the first is added, so the fillet edges handed to `SmFilletExecutive::NoteFilletError` never contain a geometry's second rail.
+- **Trigger:** any fillet error recorded after a geometry got its second rail curve.
+- **How found:** read during porting (unit `blend.fillet_solver_p2`).
+- **Confirmed:** no (the fillet geometry queries are unported).
+- **Severity:** wrong result (incomplete error report).
+- **Cause:** copy-paste slip (`GetRail(0)` for `GetRail(1)`).
+- **Rust port:** Reproduced (`FilletSolver::record_fillet_error` adds rail 0 where it tests rail 1); the list only feeds `SmFilletExecutive::NoteFilletError`, an `UNPORTED(blend.fillet_executive_p1)` stop, so it is not observable yet.
