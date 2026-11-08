@@ -208,6 +208,17 @@ fn a_misspelt_key_is_reported_in_warn() {
     assert!(scene(ParamCheck::Strict).execute(ID, &p).is_err());
 }
 
+/// A misspelt key of the creator and one of the call itself are both reported in Warn.
+#[test]
+fn warn_keeps_the_creators_warnings_beside_its_own() {
+    let p = json!({"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 3, "constructon": true}, "dimensions": {"diameter": 10}, "as_draw": true});
+    let reply = run(&mut scene(ParamCheck::Warn), ID, p);
+    let warnings = reply["param_warnings"].as_array().unwrap_or_else(|| panic!("{reply}"));
+    assert_eq!(warnings.len(), 2, "{reply}");
+    assert!(warnings.iter().any(|w| w.as_str().is_some_and(|w| w.contains("constructon"))), "{reply}");
+    assert!(warnings.iter().any(|w| w.as_str().is_some_and(|w| w.contains("as_draw"))), "{reply}");
+}
+
 /// The reply is what the handler returned before: the creator's keys, `dimensions`, `defined`,
 /// `located`, and the creator's own `param_warnings` kept.
 #[test]
