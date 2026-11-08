@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::*;
 
-mod mesh_convert;
+pub(crate) mod mesh_convert;
 
 /// Counts the copies `Session::doc_mut` makes of a shared document.
 pub(crate) mod doc_copies {
