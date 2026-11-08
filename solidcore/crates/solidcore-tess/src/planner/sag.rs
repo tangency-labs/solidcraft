@@ -196,6 +196,9 @@ pub(crate) struct Poles<'a> {
     reach: f64,
     /// Per node index; `None` until asked.
     flags: Vec<Option<[bool; 2]>>,
+    /// Calls of the kernel's classifier made, for the tests.
+    #[cfg(test)]
+    asked: usize,
 }
 
 impl<'a> Poles<'a> {
@@ -204,6 +207,8 @@ impl<'a> Poles<'a> {
             s,
             reach,
             flags: Vec::new(),
+            #[cfg(test)]
+            asked: 0,
         }
     }
 
@@ -212,6 +217,10 @@ impl<'a> Poles<'a> {
         let i = i as usize;
         if let Some(Some(f)) = self.flags.get(i) {
             return Ok(*f);
+        }
+        #[cfg(test)]
+        {
+            self.asked += 2;
         }
         let f = [
             super::pole_at(self.s, q, 0, self.reach)?,
@@ -722,6 +731,62 @@ mod tests {
                 &[[0, 1, 2], [0, 1, 3]]
             ),
             Err(Stop::Corner(1))
+        );
+    }
+
+    /// Refining, flipping and measuring a coarse patch of a cylinder (every sag over the
+    /// tolerance, so the nodes are looked at by many triangles, sides and rounds) asks the
+    /// kernel's classifier once per node and direction, not once per look.
+    #[test]
+    fn the_classifier_is_asked_once_per_node() {
+        use solidcore::eval::EvalCurve;
+        let s = EvalSurface::Revolved {
+            profile: EvalCurve::new(
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![[3.0, 0.0, 0.0, 1.0], [3.0, 0.0, 4.0, 1.0]],
+            ),
+            origin: solidcore::Vec3::ZERO,
+            axis: solidcore::Vec3::Z,
+            transform: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+            ],
+            swap: false,
+        };
+        let n = 6u32;
+        let mut uv: Vec<[f64; 2]> = Vec::new();
+        for i in 0..=n {
+            for j in 0..=n {
+                uv.push([
+                    f64::from(i) / f64::from(n),
+                    3.0 * f64::from(j) / f64::from(n),
+                ]);
+            }
+        }
+        let mut tris: Vec<[u32; 3]> = Vec::new();
+        for i in 0..n {
+            for j in 0..n {
+                let a = i * (n + 1) + j;
+                let (b, c, d) = (a + 1, a + n + 1, a + n + 2);
+                tris.push([a, c, d]);
+                tris.push([a, d, b]);
+            }
+        }
+        let mut poles = Poles::new(&s, 1e-9);
+        let start = uv.len();
+        // Refinement is capped (it may or may not run out of room): the count holds either way.
+        refine(&s, 5e-2, &mut poles, &[], &mut uv, &mut tris, 300).unwrap();
+        flip(&s, 5e-2, &mut poles, &[], &uv, &mut tris).unwrap();
+        worst(&s, &mut poles, &[], &uv, &tris).unwrap();
+        assert!(uv.len() > 2 * start, "{} nodes: not refined", uv.len());
+        assert!(poles.asked > 0);
+        assert!(
+            poles.asked <= 2 * uv.len(),
+            "{} calls for {} nodes",
+            poles.asked,
+            uv.len()
         );
     }
 }

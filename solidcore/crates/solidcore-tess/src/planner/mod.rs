@@ -230,8 +230,6 @@ pub(crate) fn pole_at(
     d: usize,
     reach: f64,
 ) -> std::result::Result<bool, Unclassified> {
-    #[cfg(test)]
-    tests::POLE_CALLS.with(|c| c.set(c.get() + 1));
     solidcore::eval::uv::degenerate_within(s, q, d, reach).map_err(|e| Unclassified {
         at: q,
         why: crate::eval_message(e),
