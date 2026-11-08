@@ -426,6 +426,11 @@ fn grid_drawn_step(half_height: f64) -> f64 {
         return minor;
     };
     let (own_lo, own_hi) = b.own();
+    // A nested level that still draws its own lines is drawn at its own step: the crossings the
+    // user sees are the finer ones.
+    if b.nested && own_lo > 0.0 {
+        return b.lo;
+    }
     // The level with the bigger weight is the one the grid is drawn at (`grid_step`).
     let (level, own) = if b.s >= 0.5 { (b.hi, own_hi) } else { (b.lo, own_lo) };
     if own > 0.0 { level } else { grid_shared_step(&b) }

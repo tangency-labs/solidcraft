@@ -113,6 +113,7 @@ const PROFILE_KEYS: &[&str] = &[
     "sketch_face_activates_part",
     "sketch_open_look_at",
     "sketch_recent_snap",
+    "sketch_snap_to_visible_grid",
     "sketch_state_icons",
     "sketch_tab_always",
     "sketch_tracking_guides",

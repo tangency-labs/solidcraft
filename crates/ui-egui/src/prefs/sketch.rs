@@ -18,7 +18,13 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "sketch", app.tr("prefs.sketch.snapping_guides"), |ui| {
         let available = ui.available_width();
         let figure_width = t.space_24 * 5.0;
-        let labels_width = ["prefs.sketch.tracking_guides", "prefs.sketch.tracking_points", "prefs.sketch.recent_snap", "prefs.sketch.align_points"]
+        let labels_width = [
+            "prefs.sketch.tracking_guides",
+            "prefs.sketch.tracking_points",
+            "prefs.sketch.recent_snap",
+            "prefs.sketch.align_points",
+            "prefs.sketch.snap_to_visible_grid",
+        ]
             .into_iter()
             .map(|id| check_width(ui, app.tr(id), true))
             .fold(0.0, f32::max);
@@ -59,6 +65,13 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "prefs.sketch.align_points",
                     Some("prefs.sketch.align_points_note"),
                     &mut app.preferences.sketch_align_points,
+                );
+                check(
+                    ui,
+                    "sketch_snap_to_visible_grid",
+                    "prefs.sketch.snap_to_visible_grid",
+                    Some("prefs.sketch_snap_to_visible_grid_note"),
+                    &mut app.preferences.sketch_snap_to_visible_grid,
                 );
             });
         });

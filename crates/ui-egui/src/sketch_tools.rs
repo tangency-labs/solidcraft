@@ -717,7 +717,7 @@ pub fn refine_snap(
     // `fixed` is the coordinate the point lines up with, on the other axis: the crossing has to
     // run through it. With Snap off (Sketch Palette) the grid holds the point as before.
     let g = |free: f64, fixed: f64| {
-        if sk.view.no_snap {
+        if sk.view.no_snap || !app.preferences.sketch_snap_to_visible_grid {
             solidcraft_engine::view::sketch_grid_lattice_axis(free, fine)
         } else {
             solidcraft_engine::view::sketch_grid_free(free, fixed, minor, fine)

@@ -1524,6 +1524,9 @@ preference_settings! {
     /// horizontal or vertical snap to the previous point, and the click adds the alignments
     /// (#7828). Off by default: only with the previous point, one axis at a time, as before.
     sketch_align_points: bool = false, PAGE_SKETCH;
+    /// A point snaps to the crossings of the lines the grid draws, and to the finer lattice
+    /// between them. Off: the point snaps to the finer lattice only.
+    sketch_snap_to_visible_grid: bool = true, PAGE_SKETCH;
     /// Open Project's options before picking; off restores its previous direct-pick workflow.
     project_options_dialog: bool = true, PAGE_SKETCH;
     /// Whether Alt/Option also frees gizmo / canvas manipulator arrows (Primary always does).
@@ -6360,6 +6363,7 @@ mod tests {
             ("sketch_tracking_points", json!(false), PAGE_SKETCH),
             ("sketch_align_points", json!(true), PAGE_SKETCH),
             ("sketch_recent_snap", json!(true), PAGE_SKETCH),
+            ("sketch_snap_to_visible_grid", json!(false), PAGE_SKETCH),
             ("line_hover_tangent_arc", json!(true), PAGE_SKETCH),
             ("ribbon_click_ends_tool", json!(false), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
@@ -7819,6 +7823,7 @@ mod tests {
                 ("sketch_tracking_guides", "prefs.sketch.tracking_guides"),
                 ("sketch_recent_snap", "prefs.sketch.recent_snap"),
                 ("sketch_align_points", "prefs.sketch.align_points"),
+                ("sketch_snap_to_visible_grid", "prefs.sketch.snap_to_visible_grid"),
                 ("line_drag_draws_one", "prefs.line_drag_draws_one"),
                 ("line_hover_tangent_arc", "prefs.line_hover_tangent_arc"),
                 ("center_arc_follows_cursor", "prefs.sketch.center_arc"),
