@@ -132,11 +132,16 @@ pub struct Dep {
     pub kind: DepKind,
     /// `true` if the dependency is a workspace member.
     pub workspace: bool,
+    /// `true` if the package comes from tangency-labs/solidcore (its git URL, or the vendored
+    /// `solidcore/` directory), whatever it is called.
+    pub from_solidcore: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct Crate {
     pub name: String,
+    /// The crate's directory relative to the workspace root (`crates/smlib`).
+    pub path: String,
     pub deps: Vec<Dep>,
 }
 
@@ -243,12 +248,17 @@ fn check_with(crates: &[Crate], classify: impl Fn(&str) -> Option<Class>) -> Vec
 }
 
 /// Build the model from `cargo metadata --format-version 1 --no-deps`.
-pub fn from_metadata(meta: &Value) -> Result<Vec<Crate>, String> {
+pub fn from_metadata(meta: &Value, root: Option<&std::path::Path>) -> Result<Vec<Crate>, String> {
     let pkgs = meta["packages"].as_array().ok_or("metadata: no packages array")?;
     let members: Vec<&str> = pkgs.iter().filter_map(|p| p["name"].as_str()).collect();
     let mut out = Vec::new();
     for p in pkgs {
         let name = p["name"].as_str().ok_or("package without name")?.to_owned();
+        let manifest = p["manifest_path"].as_str().unwrap_or_default();
+        let path = match (root, std::path::Path::new(manifest).parent()) {
+            (Some(r), Some(dir)) => dir.strip_prefix(r).map(|d| d.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| name.clone()),
+            _ => name.clone(),
+        };
         let mut deps = Vec::new();
         for d in p["dependencies"].as_array().into_iter().flatten() {
             let dname = d["name"].as_str().unwrap_or_default().to_owned();
@@ -258,12 +268,111 @@ pub fn from_metadata(meta: &Value) -> Result<Vec<Crate>, String> {
                 _ => DepKind::Normal,
             };
             let workspace = members.contains(&dname.as_str()) || d["path"].is_string();
-            deps.push(Dep { name: dname, kind, workspace });
+            let from_git = d["source"].as_str().is_some_and(|u| u.contains("tangency-labs/solidcore"));
+            let vendored = match (root, d["path"].as_str()) {
+                (Some(r), Some(p)) => std::path::Path::new(p).strip_prefix(r).is_ok_and(|rel| rel.starts_with("solidcore")),
+                _ => false,
+            };
+            deps.push(Dep { name: dname, kind, workspace, from_solidcore: from_git || vendored });
         }
-        out.push(Crate { name, deps });
+        out.push(Crate { name, path, deps });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
+}
+
+/// The allowlist of today's direct uses of solidcore's inner crates.
+pub const SEAM_LIST: &str = "xtask/solidcore-seam.txt";
+
+/// The solidcore crates apps may use, one a line (solidcore docs/layers.md §1). After vendoring
+/// solidcore owns the list at `solidcore/public-crates.txt`; the rule reads that first and falls
+/// back to the xtask copy, so cutover changes no code.
+pub const SEAM_PUBLIC: &[&str] = &["solidcore/public-crates.txt", "xtask/solidcore-public.txt"];
+
+/// The crate names in a public-crates file (`#` comments, blank lines skipped).
+fn parse_public(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| l.split_whitespace().next().unwrap_or(l).to_owned())
+        .collect()
+}
+
+/// The public-crates text under `root`: the first of [`SEAM_PUBLIC`] that exists.
+pub fn read_public(root: &std::path::Path) -> Result<String, String> {
+    for p in SEAM_PUBLIC {
+        if let Ok(t) = std::fs::read_to_string(root.join(p)) {
+            return Ok(t);
+        }
+    }
+    Err(format!("none of {SEAM_PUBLIC:?} exists"))
+}
+
+/// Package names that are solidcore's, whichever way they come in. Anything else from
+/// tangency-labs/solidcore is caught by its source (`Dep::from_solidcore`).
+fn is_solidcore_name(name: &str) -> bool {
+    name == "solidcore" || name.starts_with("solidcore-") || name == "ssi" || name.starts_with("step-") || name == "nurbs-grid-mesh"
+}
+
+/// The seam rule: SolidCraft crosses into solidcore only through the public crates ([`SEAM_PUBLIC`]). Every other
+/// solidcore crate, in any dependency kind, must be named in `allow` (lines
+/// `crate-path -> solidcore-crate  reason`; `#` comments). The list only shrinks: a listed use
+/// that is gone is an error too. Returns the messages, sorted.
+pub fn seam_check(crates: &[Crate], allow: &str, public: &str) -> Vec<String> {
+    let public = parse_public(public);
+    let mut errors = Vec::new();
+    let mut listed: Vec<(String, String)> = Vec::new();
+    for (n, line) in allow.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut it = line.splitn(2, " -> ");
+        let (Some(from), Some(rest)) = (it.next(), it.next()) else {
+            errors.push(format!("{SEAM_LIST}:{}: expected `crate-path -> solidcore-crate  reason`", n + 1));
+            continue;
+        };
+        let mut parts = rest.split_whitespace();
+        let (Some(to), Some(_reason)) = (parts.next(), parts.next()) else {
+            errors.push(format!(
+                "{SEAM_LIST}:{}: `{line}` needs a one-line reason after the crate name, naming the solidcore issue or plan step that removes it",
+                n + 1
+            ));
+            continue;
+        };
+        listed.push((from.trim().to_owned(), to.to_owned()));
+    }
+    let mut used: Vec<(String, String)> = Vec::new();
+    for c in crates {
+        // After vendoring, solidcore's own crates are workspace members; their rules are its own.
+        if is_solidcore_name(&c.name) {
+            continue;
+        }
+        for d in &c.deps {
+            if !(is_solidcore_name(&d.name) || d.from_solidcore) || public.contains(&d.name) {
+                continue;
+            }
+            let key = (c.path.clone(), d.name.clone());
+            if used.contains(&key) {
+                continue;
+            }
+            used.push(key.clone());
+            if !listed.contains(&key) {
+                errors.push(format!(
+                    "{} ({}) uses solidcore crate `{}` [{:?}]: call solidcore-ops or solidcore-tess instead (solidcore docs/layers.md; `Order` comes via solidcore_ops::Order, not solidcore-convert)",
+                    c.path, c.name, d.name, d.kind
+                ));
+            }
+        }
+    }
+    for (from, to) in &listed {
+        if !used.contains(&(from.clone(), to.clone())) {
+            errors.push(format!("{SEAM_LIST}: `{from} -> {to}` is no longer used; remove it from the list"));
+        }
+    }
+    errors.sort();
+    errors.dedup();
+    errors
 }
 
 pub fn describe(class: Option<Class>) -> String {
@@ -282,7 +391,11 @@ mod tests {
     use super::*;
 
     fn c(name: &str, deps: &[(&str, DepKind, bool)]) -> Crate {
-        Crate { name: name.into(), deps: deps.iter().map(|(n, k, w)| Dep { name: (*n).into(), kind: *k, workspace: *w }).collect() }
+        Crate {
+            name: name.into(),
+            path: format!("crates/{}", short_name(name)),
+            deps: deps.iter().map(|(n, k, w)| Dep { name: (*n).into(), kind: *k, workspace: *w, from_solidcore: false }).collect(),
+        }
     }
     use DepKind::*;
 
@@ -391,6 +504,95 @@ mod tests {
         assert!(matches!(v[..], [Violation::SharedDependsOnApp { .. }]));
     }
 
+    const PUB: &str = "# public\nsolidcore-ops\nsolidcore-tess\nsolidcore-record\n";
+
+    fn seam_crate(dep: &str, kind: DepKind, from_solidcore: bool) -> Crate {
+        Crate {
+            name: "solidcraft-smlib".into(),
+            path: "crates/smlib".into(),
+            deps: vec![Dep { name: dep.into(), kind, workspace: false, from_solidcore }],
+        }
+    }
+
+    #[test]
+    fn seam_direct_kernel_use_fails() {
+        for kind in [Normal, Dev, Build] {
+            let e = seam_check(&[seam_crate("solidcore", kind, true)], "", PUB);
+            assert_eq!(e.len(), 1, "{kind:?}");
+            assert!(e[0].contains("crates/smlib") && e[0].contains("`solidcore`"), "{}", e[0]);
+            assert!(e[0].contains("call solidcore-ops or solidcore-tess instead (solidcore docs/layers.md") && e[0].contains("solidcore_ops::Order"));
+        }
+        for dep in ["solidcore-convert", "solidcore-ssi", "ssi", "step-import", "step-reader", "nurbs-grid-mesh"] {
+            assert_eq!(seam_check(&[seam_crate(dep, Normal, false)], "", PUB).len(), 1, "{dep}");
+        }
+        // a solidcore crate with a name this list does not know, found by where it comes from
+        assert_eq!(seam_check(&[seam_crate("brand-new-kernel-crate", Normal, true)], "", PUB).len(), 1);
+    }
+
+    #[test]
+    fn seam_public_crates_pass() {
+        for dep in ["solidcore-ops", "solidcore-tess", "solidcore-record"] {
+            assert!(seam_check(&[seam_crate(dep, Normal, true)], "", PUB).is_empty(), "{dep}");
+        }
+    }
+
+    #[test]
+    fn seam_allowlisted_use_passes() {
+        let list = "# today\ncrates/smlib -> solidcore  the kernel wrapper, until the switch\n";
+        assert!(seam_check(&[seam_crate("solidcore", Normal, true)], list, PUB).is_empty());
+        // listing one crate does not cover another solidcore crate
+        assert_eq!(seam_check(&[seam_crate("solidcore-convert", Normal, true)], list, PUB).len(), 2);
+    }
+
+    #[test]
+    fn seam_removed_use_must_leave_the_list() {
+        let list = "crates/smlib -> solidcore  the kernel wrapper\n";
+        let e = seam_check(&[seam_crate("solidcore-ops", Normal, true)], list, PUB);
+        assert_eq!(e.len(), 1);
+        assert!(e[0].contains("remove it from the list"), "{}", e[0]);
+    }
+
+    #[test]
+    fn seam_public_list_is_data() {
+        // a crate added to the public list passes; one left off it fails
+        let c = [seam_crate("solidcore-newthing", Normal, true)];
+        assert_eq!(seam_check(&c, "", PUB).len(), 1);
+        assert!(seam_check(&c, "", "solidcore-newthing  # ops gained it\n").is_empty());
+    }
+
+    #[test]
+    fn seam_public_list_prefers_solidcore_copy() {
+        let dir = std::env::temp_dir().join(format!("seam-public-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("solidcore")).unwrap();
+        std::fs::create_dir_all(dir.join("xtask")).unwrap();
+        std::fs::write(dir.join("xtask/solidcore-public.txt"), "old\n").unwrap();
+        assert_eq!(read_public(&dir).unwrap(), "old\n");
+        std::fs::write(dir.join("solidcore/public-crates.txt"), "new\n").unwrap();
+        assert_eq!(read_public(&dir).unwrap(), "new\n");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn seam_list_lines_need_a_reason() {
+        let e = seam_check(&[seam_crate("solidcore", Normal, true)], "crates/smlib -> solidcore\n", PUB);
+        assert!(e.iter().any(|m| m.contains("needs a one-line reason")), "{e:?}");
+    }
+
+    #[test]
+    fn seam_matches_by_package_name_not_source() {
+        let meta: Value = serde_json::from_str(
+            r#"{"packages":[{"name":"solidcraft-smlib","manifest_path":"/w/crates/smlib/Cargo.toml","dependencies":[
+                {"name":"solidcore","kind":null,"path":"/w/solidcore/crates/solidcore"},
+                {"name":"solidcore-ops","kind":null,"source":"git+https://github.com/tangency-labs/solidcore?rev=abc"}]}]}"#,
+        )
+        .unwrap();
+        let g = from_metadata(&meta, Some(std::path::Path::new("/w"))).unwrap();
+        assert_eq!(g[0].path, "crates/smlib");
+        let e = seam_check(&g, "", PUB);
+        assert_eq!(e.len(), 1, "{e:?}");
+        assert!(e[0].contains("`solidcore`"));
+    }
+
     #[test]
     fn metadata_parsing() {
         let meta: Value = serde_json::from_str(
@@ -403,7 +605,7 @@ mod tests {
             ]}"#,
         )
         .unwrap();
-        let g = from_metadata(&meta).unwrap();
+        let g = from_metadata(&meta, None).unwrap();
         assert_eq!(g.len(), 2);
         let doc = g.iter().find(|c| c.name == "solidcraft-doc").unwrap();
         assert!(doc.deps[0].workspace && !doc.deps[1].workspace);
