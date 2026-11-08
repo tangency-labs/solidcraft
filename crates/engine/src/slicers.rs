@@ -197,13 +197,7 @@ const TARGETS: &[Target] = &[
         ..Target::SLICER
     },
     // QIDI Studio is a Bambu Studio fork and takes what it takes.
-    Target {
-        id: "qidi",
-        name: "QIDI Studio",
-        keys: &["qidistudio"],
-        exes: &["qidi-studio", "QIDIStudio", "qidi-studio.exe"],
-        ..Target::SLICER
-    },
+    Target { id: "qidi", name: "QIDI Studio", keys: &["qidistudio"], exes: &["qidi-studio", "QIDIStudio", "qidi-studio.exe"], ..Target::SLICER },
     // The resin slicers read STL.
     Target {
         id: "chitubox",
