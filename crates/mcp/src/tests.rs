@@ -3586,9 +3586,14 @@ fn a_bridged_server_checks_calls_at_its_param_check_level() {
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     assert!(text(&r).contains(&format!("invalid parameters for `solid.box`: {warning}")), "{r}");
     assert_eq!(sent("engine.execute solid.box"), 0, "refused unsent");
-    let r = raw_tool(&mut s, "execute", json!({"command": "solid.chamfer", "params": {"nonsense": 1}}));
-    assert_ne!(r["result"]["isError"], json!(true), "{r}");
-    assert_eq!(sent("engine.execute solid.chamfer"), 1, "no contract here: the app decides");
+    // A body command with no contract yet: the first stands for them all, so converting a command
+    // doesn't break this.
+    let unchecked = solidcraft_engine::cmd::command_specs().into_iter().find(|c| c.contract.is_none() && c.id.starts_with("solid."));
+    if let Some(id) = unchecked.map(|c| c.id) {
+        let r = raw_tool(&mut s, "execute", json!({"command": id, "params": {"nonsense": 1}}));
+        assert_ne!(r["result"]["isError"], json!(true), "{id}: {r}");
+        assert_eq!(sent(&format!("engine.execute {id}")), 1, "{id}: no contract here, so the app decides");
+    }
     let r = raw_tool(&mut s, "batch", json!({"commands": [good, misspelt]}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     let reply: Value = serde_json::from_str(&text(&r)).unwrap();
@@ -3897,4 +3902,46 @@ fn compact_output_follows_the_apps_preference() {
     assert!(inspect_design_is_compact(&mut s));
     let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true });
     assert!(inspect_design_is_compact(&mut s));
+}
+
+/// A screw's counterbore through MCP alone (#12321): `describe_command` lists `head` and
+/// `head_gap`, `execute` forwards them to `solid.hole` unchanged (the command has no typed
+/// contract), the recess measures as the head table says, and a wrong head or gap is refused
+/// with the value named, leaving the part as it was.
+#[test]
+fn execute_forwards_a_screw_head_to_a_hole_and_describes_it() {
+    let mut s = server();
+    let d = tool(&mut s, "describe_command", json!({"id": "solid.hole"}));
+    let params = d["params"].as_str().unwrap();
+    assert!(params.contains("head?: \"ISO 4762\"") && params.contains("head_gap?"), "{params}");
+    assert!(d["input"].is_null(), "no typed contract: execute forwards the parameters to the command unchanged: {d}");
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 80, "width": 30, "height": 10, "body_name": "Plate"}}));
+    // ISO 4762 M4 (dk 7, k 4) with the default 0.5 mm gap: a Ø4.5 bore under a Ø8 × 4.5 recess.
+    let want = 24000.0 - PI * 2.25 * 2.25 * (10.0 - 4.5) - PI * 4.0 * 4.0 * 4.5;
+    let r = tool(
+        &mut s,
+        "execute",
+        json!({"command": "solid.hole", "params": {"position": [15, 15, 10], "clearance": "M4", "head": "ISO 4762"}, "expect": {"volume_mm3": want, "tol": 0.01}}),
+    );
+    assert_eq!(r["expectation"]["mismatch"], json!([]), "{r}");
+    assert!(rel(volume(&mut s), want) < 1e-6, "{want}");
+    // ISO 7380-1 M4 (dk 7.6, k 2.2) with a 0.25 mm gap: Ø8.1 × 2.45.
+    tool(
+        &mut s,
+        "execute",
+        json!({"command": "solid.hole", "params": {"position": [40, 15, 10], "clearance": "M4", "head": "ISO 7380-1", "head_gap": "0.25 mm"}}),
+    );
+    let want = want - PI * 2.25 * 2.25 * (10.0 - 2.45) - PI * 4.05 * 4.05 * 2.45;
+    assert!(rel(volume(&mut s), want) < 1e-6, "{want}");
+    for (params, names) in [
+        (json!({"position": [65, 15, 10], "clearance": "M4", "head": "DIN 912"}), "no head standard `DIN 912`"),
+        (json!({"position": [65, 15, 10], "clearance": "M4", "head": "ISO 4762", "head_gap": -1}), "`head_gap` must be 0 to 7 mm"),
+        (json!({"position": [65, 15, 10], "diameter": 4.5, "head": "ISO 4762"}), "`head` needs `clearance`"),
+    ] {
+        let r = raw_tool(&mut s, "execute", json!({"command": "solid.hole", "params": params}));
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(names), "{text}");
+    }
+    assert!(rel(volume(&mut s), want) < 1e-6, "a refused hole changes nothing");
 }
