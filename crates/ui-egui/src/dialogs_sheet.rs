@@ -5,14 +5,14 @@
 
 use crate::dialogs::put;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::ui_kit::{choice_row, expr_row, hint_row};
+use crate::ui_kit::{IconSegment, choice_row, expr_row, hint_row, row, segmented_icons};
 use egui::{Align2, Color32, FontId, Pos2, Rect, RichText, Stroke, pos2, vec2};
 use serde_json::{Map, Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::sheet::SheetRule;
-use solidcraft_engine::doc::{FeatureKind, FoldSide, ProfileSel};
+use solidcraft_engine::doc::{CornerJoinKind, FeatureKind, FoldSide, ModelState, ProfileSel, SheetEdgeName};
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
@@ -22,6 +22,8 @@ use solidcraft_theme::Tokens;
 
 const PERFORATION_PATTERNS: [&str; 2] = ["staggered", "square"];
 const PERFORATION_LABELS: [&str; 2] = ["ui.perforate_staggered", "ui.perforate_square"];
+
+const CORNER_KINDS: [CornerJoinKind; 3] = [CornerJoinKind::Butt, CornerJoinKind::PartialOverlap, CornerJoinKind::FullOverlap];
 
 const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
@@ -74,6 +76,38 @@ pub struct SegmentRow {
     pub equal: bool,
 }
 
+/// An edge flange's corner controls, identified by source rims rather than viewport picks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlangeCorner {
+    /// Covering and covered source rims, in that order.
+    pub sources: [SheetEdgeName; 2],
+    /// The selected entry in `CORNER_KINDS`.
+    pub kind: usize,
+    /// Partial overlap's authored distance.
+    pub overlap: String,
+    /// Authored clearance, empty to follow the rule.
+    pub gap: String,
+}
+
+/// Corner choices from an evaluated flange preview. An edit uses its actual feature ID;
+/// a new flange uses appended bends whose source panel existed before the command.
+pub(crate) fn flange_corner_sources(before: &ModelState, after: &ModelState, editing: Option<u64>) -> Vec<[SheetEdgeName; 2]> {
+    let mut corners = Vec::new();
+    for sheet in &after.surface_sheets {
+        let Some(previous) = before.surface_sheets.iter().find(|previous| previous.body == sheet.body) else { continue };
+        let belongs = |source: &SheetEdgeName| {
+            let Ok(index) = sheet.bend_joint_for_edge_name(source) else { return false };
+            let Some(joint) = sheet.sheet.joints.get(index) else { return false };
+            match editing {
+                Some(feature) => sheet.sheet.panels.get(joint.b.panel).is_some_and(|panel| panel.name.starts_with(&format!("F{feature}."))),
+                None => index >= previous.sheet.joints.len() && joint.a.panel < previous.sheet.panels.len(),
+            }
+        };
+        corners.extend(sheet.corner_join_sources().into_iter().filter(|sources| sources.iter().any(belongs)));
+    }
+    corners
+}
+
 crate::dialog_descriptor::dialog_descriptors! {
     #[derive(Clone, Debug)]
     pub enum Sm {
@@ -109,6 +143,12 @@ crate::dialog_descriptor::dialog_descriptors! {
             radius: String = String::new() => radius.as_deref().map(str::to_string).unwrap_or_default(),
         } => json!({});
         ; custom {
+            CornerJoin {
+                kind: usize,
+                overlap: String,
+                gap: String,
+                saved: Option<[SheetEdgeName; 2]>,
+            },
             /// Base, edge or contour flange (`ty` follows the picks: profiles, edges, sketch lines).
             Flange {
                 ty: usize,
@@ -136,6 +176,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// by the point of the edge each belongs to: one stretch of that edge each, with
                 /// its own fractions, angle, height and side; an edge with none is the whole edge.
                 segments: Vec<(Vec3, Vec<SegmentRow>)>,
+                /// Edge flanges: corner choices saved by the two source rims.
+                corners: Vec<FlangeCorner>,
             },
             Unfold {
                 refold: bool,
@@ -190,6 +232,7 @@ impl Sm {
     pub fn title(&self) -> &'static str {
         match self {
             Sm::Flange { .. } => "FLANGE",
+            Sm::CornerJoin { .. } => "cmd.sheet.corner_join",
             Sm::Unfold { refold: false } => "UNFOLD",
             Sm::Unfold { refold: true } => "REFOLD",
             Sm::Convert { .. } => "CONVERT TO SHEET METAL",
@@ -236,6 +279,7 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
         relief_size: String::new(),
         then: Vec::new(),
         segments: Vec::new(),
+        corners: Vec::new(),
     }
 }
 
@@ -243,6 +287,9 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let (sm, inputs) = match id {
         "sheet.flange" => (new_flange(app, 0), vec![SelInput::new("Profile / Edges", PROFILES | EDGES | CURVES, true)]),
+        "sheet.corner_join" => {
+            (Sm::CornerJoin { kind: 0, overlap: crate::dialogs::length_default(&app.session, "1"), gap: String::new(), saved: None }, corner_inputs())
+        }
         "sheet.unfold" => (Sm::Unfold { refold: false }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         "sheet.refold" => (Sm::Unfold { refold: true }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         "sheet.convert" => (Sm::Convert { rule: 0, side: 0, thin: None }, convert_inputs()),
@@ -362,12 +409,153 @@ pub(crate) fn convert_inputs() -> Vec<SelInput> {
     ]
 }
 
+fn corner_inputs() -> Vec<SelInput> {
+    vec![SelInput::new("ui.surface_corner_covering", PLANAR_FACES, false), SelInput::new("ui.surface_corner_covered", PLANAR_FACES, false)]
+}
+
+pub(crate) fn swap_corner(saved: &mut Option<[SheetEdgeName; 2]>, inputs: &mut [SelInput]) {
+    if let Some([covering, covered]) = saved {
+        std::mem::swap(covering, covered);
+    } else if let [covering, covered] = inputs {
+        std::mem::swap(&mut covering.items, &mut covered.items);
+    }
+}
+
+fn corner_rows(ui: &mut egui::Ui, kind: &mut usize, overlap: &mut String, gap: &mut String) -> bool {
+    row(ui, "ui.surface_corner_type", |ui| {
+        let butt = solidcraft_ui_text::tr("ui.surface_corner_butt");
+        let partial = solidcraft_ui_text::tr("ui.surface_corner_partial");
+        let full = solidcraft_ui_text::tr("ui.surface_corner_full");
+        let options = [
+            IconSegment { key: butt, icon: "sheet_corner_butt", tip: butt.to_owned() },
+            IconSegment { key: partial, icon: "sheet_corner_partial", tip: partial.to_owned() },
+            IconSegment { key: full, icon: "sheet_corner_full", tip: full.to_owned() },
+        ];
+        ui.push_id("sm_corner_type", |ui| segmented_icons(ui, kind, &options, &[]));
+    });
+    let mut enter = false;
+    if CORNER_KINDS.get(*kind) == Some(&CornerJoinKind::PartialOverlap) {
+        enter |= expr_row(ui, "ui.surface_corner_overlap", overlap);
+    }
+    enter | hint_row(ui, "ui.surface_corner_gap", gap, solidcraft_ui_text::tr_label("from the rule"))
+}
+
+fn same_corner(first: &[SheetEdgeName; 2], second: &[SheetEdgeName; 2]) -> bool {
+    first == second || first.first() == second.get(1) && first.get(1) == second.first()
+}
+
+fn flange_corner_rows(app: &SolveApp, ui: &mut egui::Ui, corners: &mut Vec<FlangeCorner>) -> bool {
+    let mut pairs = app.preview.flange_corners.clone();
+    for corner in corners.iter() {
+        if !pairs.iter().any(|pair| same_corner(pair, &corner.sources)) {
+            pairs.push(corner.sources.clone());
+        }
+    }
+    if pairs.is_empty() {
+        return false;
+    }
+    let mut enter = false;
+    crate::ui_kit::section(ui, "flange_corners", "ui.surface_corners", true, |ui| {
+        for (index, sources) in pairs.into_iter().enumerate() {
+            let saved = corners.iter().position(|corner| same_corner(&corner.sources, &sources));
+            let mut corner = saved.and_then(|index| corners.get(index)).cloned().unwrap_or_else(|| FlangeCorner {
+                sources,
+                kind: 0,
+                overlap: crate::dialogs::length_default(&app.session, "1"),
+                gap: String::new(),
+            });
+            let original = corner.clone();
+            let mut reset = false;
+            ui.push_id(("sm_flange_corner", index), |ui| {
+                ui.add_enabled_ui(saved.is_some() || corners.len() < 2000, |ui| {
+                    let title = format!("{} {}", app.tr("ui.surface_corner"), index + 1);
+                    let header = ui.scope(|ui| {
+                        form_row(ui, &title, |ui| {
+                            ui.horizontal(|ui| {
+                                if crate::ui_kit::button(ui, app.tr("ui.surface_corner_swap"), crate::ui_kit::Button::Normal).clicked() {
+                                    corner.sources.swap(0, 1);
+                                }
+                                if saved.is_some() {
+                                    reset = crate::ui_kit::bin_button(ui, app.tr("ui.surface_corner_reset")).clicked();
+                                }
+                            });
+                        });
+                    });
+                    header.response.backing_on_hover_text(format!(
+                        "{}: {}\n{}: {}",
+                        app.tr("ui.surface_corner_covering"),
+                        corner.sources[0],
+                        app.tr("ui.surface_corner_covered"),
+                        corner.sources[1],
+                    ));
+                    enter |= corner_rows(ui, &mut corner.kind, &mut corner.overlap, &mut corner.gap);
+                });
+            });
+            if reset {
+                if let Some(index) = saved {
+                    corners.remove(index);
+                }
+            } else if corner != original {
+                if let Some(saved) = saved.and_then(|index| corners.get_mut(index)) {
+                    *saved = corner;
+                } else if corners.len() < 2000 {
+                    corners.push(corner);
+                }
+            }
+        }
+    });
+    enter
+}
+
 /// The dialog's own rows (after the selection inputs); true when Enter was pressed in a value.
-pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [SelInput]) -> bool {
+pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<SelInput>) -> bool {
     let t = Tokens::get();
     let mut enter = false;
     match k {
-        Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, segments } => {
+        Sm::CornerJoin { kind, overlap, gap, saved } => {
+            if let Some(names) = saved.as_ref() {
+                for (label, source) in ["ui.surface_corner_covering", "ui.surface_corner_covered"].into_iter().zip(names) {
+                    form_row(ui, label, |ui| {
+                        let name = source.to_string();
+                        ui.add(egui::Label::new(&name).truncate()).backing_on_hover_text(name);
+                    });
+                }
+            }
+            form_row(ui, "ui.surface_corner_flange_pair", |ui| {
+                ui.horizontal(|ui| {
+                    let can_swap = saved.is_some()
+                        || matches!(inputs.as_slice(), [covering, covered] if !covering.items.is_empty() && !covered.items.is_empty());
+                    ui.add_enabled_ui(can_swap, |ui| {
+                        if crate::ui_kit::button(ui, "ui.surface_corner_swap", crate::ui_kit::Button::Normal).clicked() {
+                            swap_corner(saved, inputs);
+                        }
+                    });
+                    if saved.is_some() && crate::ui_kit::button(ui, "ui.surface_corner_reselect", crate::ui_kit::Button::Normal).clicked() {
+                        *saved = None;
+                        *inputs = corner_inputs();
+                    }
+                });
+            });
+            enter |= corner_rows(ui, kind, overlap, gap);
+        }
+        Sm::Flange {
+            ty,
+            height,
+            angle,
+            radius,
+            position,
+            height_from,
+            flip,
+            distance,
+            reverse,
+            rule,
+            own,
+            relief,
+            relief_size,
+            then,
+            segments,
+            corners,
+        } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
                 ui.label(FLANGE_TYPES.get(*ty).copied().map(solidcraft_ui_text::tr).unwrap_or(""));
@@ -378,6 +566,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     enter |= expr_row(ui, "Angle", angle);
                     choice_row(ui, "Bend Position", "sm_pos", position, &POSITION_LABELS);
                     choice_row(ui, "Height From", "sm_height_from", height_from, &HEIGHT_FROM_LABELS);
+                    enter |= flange_corner_rows(app, ui, corners);
                     // Further bends: each a flange on the far edge of the one before it.
                     form_row(ui, "Further Bends", |ui| {
                         let add = crate::ui_kit::button(ui, "Add bend", crate::ui_kit::Button::Normal)
@@ -1006,12 +1195,66 @@ fn remove_segment(list: &mut Vec<SegmentRow>, m: usize) {
     }
 }
 
+fn corner_sources(app: &SolveApp, inputs: &[SelInput]) -> Result<(String, SheetEdgeName, SheetEdgeName), String> {
+    let Some(Sel::Face { body: covering_body, point: covering, .. }) = items(inputs, 0).first() else {
+        return Err(app.tr("ui.surface_corner_pick_covering").to_owned());
+    };
+    let Some(Sel::Face { body: covered_body, point: covered, .. }) = items(inputs, 1).first() else {
+        return Err(app.tr("ui.surface_corner_pick_covered").to_owned());
+    };
+    if covering_body != covered_body {
+        return Err(app.tr("ui.surface_corner_same_body").to_owned());
+    }
+    let world = crate::open_meshing::session_world(&app.session);
+    let body = world.bodies.iter().find(|body| &body.name == covering_body).ok_or_else(|| app.tr("ui.surface_corner_same_body"))?;
+    let source = body.source_name.as_deref().unwrap_or(&body.name);
+    let state = app.session.model.state();
+    let sheet = state.surface_sheets.iter().find(|sheet| sheet.body == source).ok_or_else(|| app.tr("ui.surface_corner_same_body"))?;
+    let [covering_joint, covered_joint] = sheet.corner_joints_at(&body.body, [*covering, *covered], 1e-6).map_err(|error| error.to_string())?;
+    let covering = sheet.bend_source_edge(covering_joint).map_err(|error| error.to_string())?;
+    let covered = sheet.bend_source_edge(covered_joint).map_err(|error| error.to_string())?;
+    Ok((source.to_string(), covering, covered))
+}
+
 /// The commands the dialog's OK runs (`extra`: parameters kept from the feature being edited).
 pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
     let (cmd, mut p): (&str, Value) = match k {
+        Sm::CornerJoin { kind, overlap, gap, saved } => {
+            let (body, covering, covered) = if let Some([covering, covered]) = saved {
+                (extra.get("body").and_then(Value::as_str).map(str::to_string), covering.clone(), covered.clone())
+            } else {
+                let (body, covering, covered) = corner_sources(app, inputs)?;
+                (Some(body), covering, covered)
+            };
+            let kind = CORNER_KINDS.get(*kind).copied().unwrap_or_default();
+            let mut p = json!({"covering": covering, "covered": covered, "kind": kind});
+            if let Some(body) = body {
+                p["body"] = json!(body);
+            }
+            if kind == CornerJoinKind::PartialOverlap {
+                put(&mut p, &[("overlap", overlap)]);
+            }
+            put(&mut p, &[("gap", gap)]);
+            ("sheet.corner_join", p)
+        }
         Sm::Flange {
-            height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, segments, ..
+            height,
+            angle,
+            radius,
+            position,
+            height_from,
+            flip,
+            distance,
+            reverse,
+            rule,
+            own,
+            relief,
+            relief_size,
+            then,
+            segments,
+            corners,
+            ..
         } => {
             let mut p = match flange_type(inputs) {
                 1 => {
@@ -1025,6 +1268,23 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                         p["corner_relief_shape"] = json!(shape);
                     }
                     put(&mut p, &[("corner_relief", relief_size)]);
+                    if !corners.is_empty() {
+                        p["corners"] = json!(
+                            corners
+                                .iter()
+                                .map(|corner| {
+                                    let kind = CORNER_KINDS.get(corner.kind).copied().unwrap_or_default();
+                                    let [covering, covered] = &corner.sources;
+                                    let mut params = json!({"covering": covering, "covered": covered, "kind": kind});
+                                    if kind == CornerJoinKind::PartialOverlap {
+                                        put(&mut params, &[("overlap", &corner.overlap)]);
+                                    }
+                                    put(&mut params, &[("gap", &corner.gap)]);
+                                    params
+                                })
+                                .collect::<Vec<_>>()
+                        );
+                    }
                     // A split edge takes no `then` in v1: a chain needs one far edge to stand on,
                     // and the refusal names the edge whose segments took it away.
                     if !then.is_empty() {
@@ -1243,6 +1503,18 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
     let rule_index = |r: &Option<String>| r.as_ref().and_then(|n| rule_list(app).iter().position(|x| &x.name == n)).map_or(0, |i| i + 1);
     let mut extra = Map::new();
     let (k, items): (Sm, Vec<Sel>) = match kind {
+        FeatureKind::SheetCornerJoin { body, corner } => {
+            if let Some(body) = body {
+                extra.insert("body".into(), json!(body));
+            }
+            let form = Sm::CornerJoin {
+                kind: CORNER_KINDS.iter().position(|kind| *kind == corner.kind).unwrap_or(0),
+                overlap: corner.overlap.as_ref().map(ToString::to_string).unwrap_or_default(),
+                gap: corner.gap.as_ref().map(ToString::to_string).unwrap_or_default(),
+                saved: Some([corner.covering.clone(), corner.covered.clone()]),
+            };
+            return Some((Kind::Sheet(form), Vec::new(), extra));
+        }
         FeatureKind::SheetBase { sketch, profiles, rule, flip } => {
             let ps = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
             let mut f = new_flange(app, 0);
@@ -1262,7 +1534,20 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (f, curves.iter().map(|id| crate::selection::curve_pick(id, sketch.0, app.session.active_sketch)).collect())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief, height_from, .. } => {
+        FeatureKind::SheetFlange {
+            edges,
+            height,
+            angle,
+            radius,
+            position,
+            flip,
+            body,
+            corner_relief_shape,
+            corner_relief,
+            height_from,
+            corners,
+            ..
+        } => {
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
             }
@@ -1322,6 +1607,15 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 relief_size: corner_relief.as_deref().map(str::to_string).unwrap_or_default(),
                 then: Vec::new(),
                 segments,
+                corners: corners
+                    .iter()
+                    .map(|corner| FlangeCorner {
+                        sources: [corner.covering.clone(), corner.covered.clone()],
+                        kind: CORNER_KINDS.iter().position(|kind| *kind == corner.kind).unwrap_or(0),
+                        overlap: corner.overlap.as_ref().map(ToString::to_string).unwrap_or_default(),
+                        gap: corner.gap.as_ref().map(ToString::to_string).unwrap_or_default(),
+                    })
+                    .collect(),
             };
             (f, picked)
         }

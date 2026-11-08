@@ -6,7 +6,7 @@ use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::sheet::{self, SheetRule};
 use solidcraft_doc::sheet_library as library;
-use solidcraft_doc::{BodyName, SketchId};
+use solidcraft_doc::{BodyName, CornerJoinKind, SheetEdgeName, SketchId};
 use solidcraft_doc::{FacePick, Position};
 use solidcraft_doc::{FeatureKind, FlangeEdge, FlangeSegment};
 use solidcraft_geom::prelude::*;
@@ -17,15 +17,16 @@ use super::features::{add_feature, check_expr, feature_sketch, profiles, sketch_
 use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
-    BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams, FlatCircle,
-    FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams,
-    ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult,
-    RuleReply, RulesParams, RulesResult, SheetBodyMeasure, UnfoldParams,
+    BendTableFormat, BendTableParams, BendTableResult, ConvertParams, CornerJoinParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams,
+    FlatCircle, FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HemParams, LibraryRule, LibrarySource, ListedRule,
+    ManageRulesParams, ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams,
+    RuleLibraryResult, RuleReply, RulesParams, RulesResult, SheetBodyMeasure, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const FLANGE_CONTRACT: TypedContract<FlangeParams> = TypedContract::new();
+const CORNER_JOIN_CONTRACT: TypedContract<CornerJoinParams> = TypedContract::new();
 const PERFORATE_CONTRACT: TypedContract<PerforateParams> = TypedContract::new();
 const HEM_CONTRACT: TypedContract<HemParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<FoldParams> = TypedContract::new();
@@ -76,6 +77,15 @@ pub static COMMANDS: &[CommandSpec] = &[
          that edge, from the edge out (each line one flange as long as the line, to the outer face from the virtual sharp; each \
          corner one bend, turning the way the lines turn); radius? (default: rule); body?. One feature, one body",
     ),
+    CommandSpec::new("sheet.corner_join", "Corner Join", crate::checked!("sheet.corner_join", corner_join))
+        .at("SHEET METAL", "MODIFY")
+        .icon("corner_join")
+        .contract(&CORNER_JOIN_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "covering, covered: source sheet rim names <panel>:rim.<rim>:top|bottom; kind?: butt (default), partial_overlap or full_overlap; \
+             overlap: length expression for partial_overlap only; gap?: length expression (default: sheet rule); body?: sheet body; name?",
+        ),
     CommandSpec::new("sheet.perforate", "Perforate", crate::checked!("sheet.perforate", perforate))
         .at("SHEET METAL", "CREATE")
         .icon("perforate")
@@ -461,6 +471,9 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
     if ty == "edge" && p.get("segments").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`segments` belongs inside an `edges` item: edges [{point, segments}]"));
     }
+    if ty != "edge" && p.get("corners").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`corners` is only for edge flanges"));
+    }
     match flange_type(&ty).map_err(|why| bad(cmd, why))? {
         FlangeType::Base => {
             let sketch = feature_sketch(s, p, cmd)?;
@@ -495,6 +508,24 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
         }
         FlangeType::Edge => {
             let edges = flange_edges(s, p, cmd)?;
+            let corners = match p.get("corners").filter(|value| !value.is_null()) {
+                Some(value) => {
+                    let items = value
+                        .as_array()
+                        .filter(|items| items.len() <= 2000)
+                        .ok_or_else(|| bad(cmd, "corners: expected an array of at most 2000 corner choices"))?;
+                    items
+                        .iter()
+                        .enumerate()
+                        .map(|(index, item)| {
+                            serde_json::from_value::<crate::schema::sheet::FlangeCornerParams>(item.clone())
+                                .map_err(|error| bad(cmd, format!("corner {}: {error}", index + 1)))?;
+                            read_corner_join(s, item, cmd)
+                        })
+                        .collect::<Result<Vec<_>>>()?
+                }
+                None => Vec::new(),
+            };
             let then = then_steps(s, p, cmd)?;
             if !then.is_empty() && edges.iter().any(|e| !e.segments.is_empty()) {
                 return Err(bad(cmd, "not supported yet: then on a segmented edge (bend each segment's far edge in its own feature)"));
@@ -549,6 +580,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     corner_relief_shape,
                     corner_relief,
                     height_from: height_from.clone(),
+                    corners,
                 },
             )?;
             // The first bend owns the supplied name. Keep its identity and report the completed chain's result.
@@ -572,6 +604,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                         corner_relief_shape: None,
                         corner_relief: None,
                         height_from: height_from.clone(),
+                        corners: Vec::new(),
                     },
                 )?;
             }
@@ -582,6 +615,40 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             Ok(reply)
         }
     }
+}
+
+fn corner_join(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.corner_join";
+    let corner = read_corner_join(s, p, cmd)?;
+    add_feature(s, p, FeatureKind::SheetCornerJoin { body: str_(p, "body").map(|name| BodyName(name.to_string())), corner })
+}
+
+fn read_corner_join(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_doc::CornerJoinParams> {
+    let source = |key| {
+        let text = str_(p, key).ok_or_else(|| bad(cmd, format!("{key}: a sheet rim name is required")))?;
+        SheetEdgeName::parse(text).map_err(|error| bad(cmd, format!("{key}: {error}")))
+    };
+    let covering = source("covering")?;
+    let covered = source("covered")?;
+    let kind = match p.get("kind").filter(|value| !value.is_null()) {
+        Some(value) => serde_json::from_value::<CornerJoinKind>(value.clone()).map_err(|error| bad(cmd, format!("kind: {error}")))?,
+        None => CornerJoinKind::default(),
+    };
+    let overlap = if kind == CornerJoinKind::PartialOverlap {
+        let length = req_expr(cmd, p, "overlap")?;
+        check_expr(s, &length, Kind::Length, cmd, "overlap")?;
+        Some(length)
+    } else {
+        None
+    };
+    let gap = if p.get("gap").is_some_and(|value| !value.is_null()) {
+        let length = req_expr(cmd, p, "gap")?;
+        check_expr(s, &length, Kind::Length, cmd, "gap")?;
+        Some(length)
+    } else {
+        None
+    };
+    Ok(solidcraft_doc::CornerJoinParams { covering, covered, kind, overlap, gap })
 }
 
 /// The three kinds of flange.

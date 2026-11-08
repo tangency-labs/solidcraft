@@ -1192,9 +1192,28 @@ pub(super) fn sheet_eval(
             st.surface_sheets.push(sheet);
             Ok(())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, height_from, corner_relief_shape, corner_relief }
+        FeatureKind::SheetCornerJoin { body, corner } => {
+            let mut candidates = st.surface_sheets.iter().enumerate().filter(|(_, sheet)| match body {
+                Some(name) => &sheet.body == name,
+                None => corner.joint_pair(|source| sheet.bend_joint_for_edge_name(source)).is_ok(),
+            });
+            let Some((i, before)) = candidates.next() else {
+                return Err(DocError::reselect(body.as_ref().map(|name| name.to_string()).unwrap_or_else(|| corner.covering.to_string())));
+            };
+            if candidates.next().is_some() {
+                return Err(DocError::Invalid("select a sheet body; these corner sources match more than one sheet".into()));
+            }
+            let mut next = before.clone();
+            corner.apply(&mut next, |source| before.bend_joint_for_edge_name(source), |expr| val(vals, expr, Kind::Length))?;
+            *st.surface_sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))? = next;
+            rebuild_surface_sheet(st, i)
+        }
+        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, height_from, corner_relief_shape, corner_relief, corners }
             if surface_flange_sheet(st, body, f, edges).is_some() =>
         {
+            if corners.len() > 2000 {
+                return Err(DocError::Invalid("at most 2000 flange corner choices are supported".into()));
+            }
             // The sheet with a free edge at the first pick; else, for an edge split into
             // segments, the one with a curved edge there, where the split is refused for what it
             // is (see `surface_flange_sheet`).
@@ -1300,6 +1319,16 @@ pub(super) fn sheet_eval(
             let made: Vec<usize> = made.into_iter().flatten().collect();
             sk.clear_of_neighbours(&made)?;
             tag_panels(&mut sk, Some(&before), n0, f.id, PanelsBy::Bends(&[]));
+            if !corners.is_empty() {
+                let sources = sk.clone();
+                for corner in corners {
+                    let joints = corner.joint_pair(|source| sources.bend_joint_for_edge_name(source))?;
+                    if !joints.iter().any(|joint| made.contains(joint)) {
+                        return Err(DocError::Invalid("a flange corner choice must include one of this feature's bends".into()));
+                    }
+                    corner.apply(&mut sk, |source| sources.bend_joint_for_edge_name(source), |expr| val(vals, expr, Kind::Length))?;
+                }
+            }
             if let Some(slot) = st.surface_sheets.get_mut(i) {
                 *slot = sk;
             }

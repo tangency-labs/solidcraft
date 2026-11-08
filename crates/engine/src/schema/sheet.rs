@@ -24,6 +24,81 @@ use solidcraft_doc::FlangeEdge;
 use super::check::whole;
 use super::types::{AngleExpr, FaceRef, FeatureCommon, IdOrName, LengthExpr, Point3, ProfilesParam, SketchRef, StringList, feature_common, present};
 
+/// A persistent sheet rim, including its panel and slab side.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(transparent)]
+pub struct SheetRimName(pub solidcraft_doc::SheetEdgeName);
+
+impl JsonSchema for SheetRimName {
+    fn schema_name() -> Cow<'static, str> {
+        "SheetRimName".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A named sheet rim: <panel>:rim.<rim>:top or bottom.",
+            "type": "string",
+            "pattern": "^[^.:|]+(?:\\.[^.:|]+)*:rim\\.[^:]+:(top|bottom)$"
+        })
+    }
+}
+
+/// The way two flanges meet at a corner.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(transparent)]
+pub struct CornerJoinType(pub solidcraft_doc::CornerJoinKind);
+
+impl JsonSchema for CornerJoinType {
+    fn schema_name() -> Cow<'static, str> {
+        "CornerJoinType".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "string", "enum": ["butt", "partial_overlap", "full_overlap"]})
+    }
+}
+
+/// Join two edge flanges by their persistent source rims.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CornerJoinParams {
+    /// The source rim of the flange that covers the other.
+    pub covering: SheetRimName,
+    /// The source rim of the covered flange.
+    pub covered: SheetRimName,
+    /// Butt by default, including an explicit null.
+    #[serde(default)]
+    pub kind: Option<CornerJoinType>,
+    /// Partial overlap's distance. Ignored by Butt and Full Overlap.
+    #[serde(default)]
+    pub overlap: Option<LengthExpr>,
+    /// Clearance between the flanges. Default: the sheet rule's gap.
+    #[serde(default)]
+    pub gap: Option<LengthExpr>,
+    /// Sheet body. Without it, the two source names must identify exactly one sheet.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// One corner choice made with an edge flange, without a separate feature or body target.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FlangeCornerParams {
+    /// The source rim of the flange that covers the other.
+    pub covering: SheetRimName,
+    /// The source rim of the covered flange.
+    pub covered: SheetRimName,
+    /// Butt by default, including an explicit null.
+    #[serde(default)]
+    pub kind: Option<CornerJoinType>,
+    /// Partial overlap's distance. Ignored by Butt and Full Overlap.
+    #[serde(default)]
+    pub overlap: Option<LengthExpr>,
+    /// Clearance between the flanges. Default: the sheet rule's gap.
+    #[serde(default)]
+    pub gap: Option<LengthExpr>,
+}
+
 /// Points on sheet edges, as the `edges` of a hem and the `bends` of a conversion: 1 to 1000
 /// points `[x, y, z]`, `{x, y, z}` or `{point}` (read by `sheet::sheet_points`).
 #[derive(Clone, Debug, PartialEq)]
@@ -445,6 +520,11 @@ pub struct FlangeParams {
     /// Refused on a base or contour flange.
     #[serde(default)]
     pub corner_relief: Option<LengthExpr>,
+    /// Edge: corner choices by source rim names, applied after these flanges are made.
+    /// Each corner must include one of this feature's bends. Refused on base and contour flanges.
+    #[serde(default)]
+    #[schemars(length(max = 2000))]
+    pub corners: Option<Vec<FlangeCornerParams>>,
     /// Edge: further bends, each a flange on the far edge of the one before (at most 16). Refused
     /// on a base or contour flange.
     #[serde(default)]
