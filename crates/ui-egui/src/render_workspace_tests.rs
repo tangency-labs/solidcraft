@@ -1356,6 +1356,7 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
                 [eye[0], eye[1], eye[2], 0.0],
                 SIZE,
                 srgb,
+                None,
             ) else {
                 eprintln!("skipping: no GPU adapter");
                 return;
@@ -1383,6 +1384,65 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
             let mean = error as f64 / (3 * core) as f64;
             eprintln!("PBR m={metallic} r={roughness} srgb={srgb}: core={core}, mean={mean}, outliers={outliers}");
             assert!(mean < 2.0 && outliers * 100 < core * 2, "CPU/GPU color or material interpretation differs");
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn product_preview_lights_decode_simple_colours_as_the_cpu_image_does() {
+    use solidcraft_engine::render::StandardView;
+    // The CPU image's transfer (`job::image` decode/encode, `studio::tone_map`).
+    let decode = |s: f64| if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) };
+    let encode = |l: f64| if l <= 0.0031308 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
+    // One uniform light of radiance π: every lit pixel is the albedo itself, whatever its normal.
+    let mut light = [0.0_f32; 16];
+    light[3] = 4.0;
+    light[4..7].fill(std::f32::consts::PI);
+    const SIZE: u32 = 64;
+    let mut s = Session::default();
+    s.execute("solid.sphere", &json!({"radius":10,"body_name":"Sphere"})).unwrap();
+    // Black, both sides of the decoder's 0.04045 knee (#0a = 0.0392, #0b = 0.0431), and mid-tones.
+    for hex in ["000000", "050505", "0a0a0a", "0b0b0b", "202020", "808080", "b47846"] {
+        s.execute("appearance.assign", &json!({"bodies":["Sphere"],"color":format!("#{hex}")})).unwrap();
+        let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
+        let (_, gpu) = gpu_scene(&scene).unwrap();
+        let mut camera = Camera { fov: 0.0, ..Default::default() };
+        camera.set_view(StandardView::Iso);
+        camera.fit(&scene.bounds);
+        let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(camera.target);
+        let eye = camera.eye().to_f32();
+        let expected: Vec<u8> = (0..3)
+            .map(|c| {
+                let l = decode(f64::from(u8::from_str_radix(&hex[2 * c..2 * c + 2], 16).unwrap()) / 255.0);
+                (encode(l / (1.0 + l)) * 255.0).round() as u8
+            })
+            .collect();
+        for srgb in [false, true] {
+            let Some(pixels) = crate::gpu::render_product_offscreen(
+                gpu.clone(),
+                None,
+                camera.view_proj(1.0, radius).to_f32(),
+                camera.back().to_f32(),
+                [eye[0], eye[1], eye[2], 0.0],
+                SIZE,
+                srgb,
+                Some(vec![light]),
+            ) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            // The middle of the sphere, well inside its silhouette.
+            for y in SIZE / 2 - 4..SIZE / 2 + 4 {
+                for x in SIZE / 2 - 4..SIZE / 2 + 4 {
+                    let i = ((y * SIZE + x) * 4) as usize;
+                    let got = &pixels[i..i + 3];
+                    assert!(
+                        got.iter().zip(&expected).all(|(a, b)| a.abs_diff(*b) <= 1),
+                        "#{hex} srgb={srgb}: preview {got:?}, CPU image {expected:?}"
+                    );
+                }
+            }
         }
     }
 }
@@ -3978,7 +4038,7 @@ fn cpu_progressive_controls_resize_only_on_request_and_save_reload_without_a_hos
     assert_eq!(h.app.session.undo.len(), undo);
     h.app.run("view.render_select", json!({"kind":"output"})).unwrap();
     h.frames(3);
-    let resize = crate::i18n::format("render.output_largest", &[("width", "512"), ("height", "512")]);
+    let resize = solidcraft_ui_text::format("render.output_largest", &[("width", "512"), ("height", "512")]);
     assert!(h.widget(&resize).is_some(), "the proposed dimensions must be visible before accepting them");
     h.step(&json!({"widget":resize})).unwrap();
     assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (512, 512));
@@ -4915,7 +4975,7 @@ fn render_workspace_stage_chips_dispatch_without_mutations_and_remember_each_doc
 
 #[test]
 fn render_workspace_stage_shell_degrades_without_overlap_at_small_window_sizes() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         enter(&mut h.app, true).unwrap();
         h.app.ui.layout = mode;
@@ -5121,6 +5181,7 @@ fn render_workspace_compact_browser_card_and_focus_preserve_remembered_widths() 
 
 #[test]
 fn render_workspace_focus_messages_have_five_complete_locales() {
+    crate::i18n::install();
     let keys = [
         "cmd.view.render_focus",
         "cmd.view.render_browser",
@@ -5208,7 +5269,7 @@ fn render_workspace_focus_messages_have_five_complete_locales() {
         ("ko", include_str!(concat!(env!("OUT_DIR"), "/locales/ko.json"))),
     ] {
         let translated: std::collections::BTreeMap<String, String> = serde_json::from_str(source).unwrap();
-        let locale = crate::i18n::Locale::for_language(language);
+        let locale = solidcraft_ui_text::Locale::for_language(language);
         for key in keys {
             let value = translated.get(key).unwrap_or_else(|| panic!("{language}: missing {key}"));
             assert!(!value.is_empty());
@@ -5342,7 +5403,7 @@ fn render_workspace_shots_toggle_persists_and_design_roundtrip_preserves_state()
 
 #[test]
 fn render_workspace_canvas_controls_and_fit_respect_panels_and_shots_in_both_layouts() {
-    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = layout;
         h.call("ui.resize", json!({"width":1600,"height":1000}));
@@ -5427,7 +5488,7 @@ fn assert_product_fits_canvas(app: &SolveApp) {
 
 #[test]
 fn render_workspace_hosts_float_and_shield_input_in_both_ribbon_layouts() {
-    for (layout, page) in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked]
+    for (layout, page) in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked]
         .into_iter()
         .flat_map(|layout| [inspector::Editor::Scene, inspector::Editor::Appearance].map(|page| (layout, page)))
     {
@@ -5516,7 +5577,7 @@ fn render_workspace_hosts_float_and_shield_input_in_both_ribbon_layouts() {
 
 #[test]
 fn render_workspace_assignment_footer_fits_stacked_card_with_shots_shown_and_hidden() {
-    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = layout;
         h.call("ui.resize", json!({"width":1600,"height":1000}));
@@ -5539,7 +5600,7 @@ fn render_workspace_assignment_footer_fits_stacked_card_with_shots_shown_and_hid
 
 #[test]
 fn render_workspace_card_grips_swap_sides_and_resize_without_design_edits() {
-    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = layout;
         h.call("ui.resize", json!({"width":1600,"height":1000}));
@@ -5559,7 +5620,7 @@ fn render_workspace_card_grips_swap_sides_and_resize_without_design_edits() {
         h.step(&json!({"drag":[[rail.x,rail.y],[rail.x+50.0,rail.y]],"steps":8})).unwrap();
         h.frames(3);
         // A compact dock keeps its minimum width and leaves the remembered width alone.
-        if layout == crate::shell::LayoutMode::Docked {
+        if layout == crate::ui_kit::LayoutMode::Docked {
             assert_eq!(h.app.preferences.render_inspector_width, width);
             assert_eq!(h.app.shell.workspace_panels["render:inspector"].0.width(), card_width);
         } else {
@@ -5787,6 +5848,7 @@ fn render_workspace_product_pass_draws_only_requested_face_or_body_overlay() {
             [eye[0], eye[1], eye[2], 1.0],
             256,
             false,
+            None,
         )
     };
     let Some(clean) = draw(None) else {
@@ -5985,7 +6047,7 @@ fn render_workspace_browser_look_lens_counts_distinct_objects_and_selects_them()
 
 #[test]
 fn render_workspace_dock_command_swaps_sides_without_design_edits() {
-    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = layout;
         h.call("ui.resize", json!({"width":1600,"height":1000}));
@@ -6027,7 +6089,7 @@ fn render_workspace_dock_command_swaps_sides_without_design_edits() {
 
 #[test]
 fn render_workspace_dock_grip_menus_dispatch_the_other_side() {
-    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = layout;
         h.call("ui.resize", json!({"width":1600,"height":1000}));
@@ -6268,8 +6330,10 @@ fn render_workspace_wear_tree_selects_the_scene_stack_and_counts_layers_in_both_
     for count in 1..=2 {
         h.app.render_workspace.view.studio.aging.push(AgingLayer::preset(AgingKind::Dust)).unwrap();
         h.app.render_workspace.view.dirty = true;
-        let label =
-            crate::i18n::format(if count == 1 { "render.wear_layer_one" } else { "render.wear_layer_count" }, &[("count", &count.to_string())]);
+        let label = solidcraft_ui_text::format(
+            if count == 1 { "render.wear_layer_one" } else { "render.wear_layer_count" },
+            &[("count", &count.to_string())],
+        );
         assert_eq!(scene::wear_subtitle(&h.app), label);
         for by_look in [false, true] {
             h.app.run("view.render_browser", json!({"by_look":by_look})).unwrap();
@@ -6601,7 +6665,7 @@ fn render_workspace_shots_heading_matches_design_history_typography_and_strip_ba
     }
     let mut h = Harness::new();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
-    h.app.ui.layout = crate::shell::LayoutMode::Docked;
+    h.app.ui.layout = crate::ui_kit::LayoutMode::Docked;
     h.app.preferences.timeline_left = false;
     h.app.ui.show_timeline = true;
     h.frames(3);
@@ -7580,8 +7644,9 @@ fn render_assign_gestures_grid_drag_modifiers_cancel_and_context_menu() {
 
 #[test]
 fn render_assign_gestures_labels_translate_in_all_five_catalogs() {
+    crate::i18n::install();
     for language in ["en", "ja", "zh", "de", "ko"] {
-        let locale = crate::i18n::Locale::for_language(language);
+        let locale = solidcraft_ui_text::Locale::for_language(language);
         for id in [
             "cmd.appearance_copy",
             "cmd.appearance_paste",
@@ -8489,7 +8554,7 @@ fn render_results_batch_output_footer_only_starts_on_click_and_cancel_drops_wait
     let queue = h.app.session.render_queue_state();
     assert_eq!((queue.running, queue.waiting), (1, 2));
     assert_eq!(h.app.render_workspace.view.job, queue.job);
-    let status = crate::i18n::format("render.batch_status", &[("running", "1"), ("waiting", "2")]);
+    let status = solidcraft_ui_text::format("render.batch_status", &[("running", "1"), ("waiting", "2")]);
     assert!(h.shapes.iter().any(|shape| matches!(&shape.shape,egui::Shape::Text(text) if text.galley.text()==status)));
     assert!(crate::scenario::rect_of("render:shots:queue").is_some());
     h.step(&json!({"click":{"handle":"render:stage:render.cancel"}})).unwrap();
@@ -10357,12 +10422,14 @@ fn live_source_labels_use_captured_executor_names_instead_of_the_selected_method
     h.app.render_workspace.view.method = ImageMethod::CpuRaytrace;
     for (executor, key) in [("cpu-raytrace", "render.method_cpu"), ("gpu-path", "render.method_gpu")] {
         for current in [true, false] {
-            let expected =
-                crate::i18n::format(if current { "render.live.source_current" } else { "render.live.source_outdated" }, &[("method", h.app.tr(key))]);
+            let expected = solidcraft_ui_text::format(
+                if current { "render.live.source_current" } else { "render.live.source_outdated" },
+                &[("method", h.app.tr(key))],
+            );
             assert_eq!(live::source_text(&h.app, executor, current), expected);
         }
     }
-    let expected = crate::i18n::format("render.live.source_outdated", &[("method", "test-image-executor")]);
+    let expected = solidcraft_ui_text::format("render.live.source_outdated", &[("method", "test-image-executor")]);
     assert_eq!(live::source_text(&h.app, "test-image-executor", false), expected, "unrecognised captures cannot claim CPU or GPU transport");
 }
 
@@ -10381,7 +10448,7 @@ fn live_source_badge_follows_real_pixels_and_its_settings_gear_opens_output_with
     let Some(mut h) = live_cpu_fixture() else { return };
     live::advance(&mut h.app, &h.ctx, 1.0);
     wait_live_complete(&mut h, 1.3);
-    let current = crate::i18n::format("render.live.source_current", &[("method", h.app.tr("render.method_cpu"))]);
+    let current = solidcraft_ui_text::format("render.live.source_current", &[("method", h.app.tr("render.method_cpu"))]);
     assert_eq!(live::source_note(&h.app), (current.clone(), "render.live.quality_help"));
     let document = h.app.session.doc.clone();
     let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
@@ -10449,7 +10516,7 @@ fn live_source_badge_follows_real_pixels_and_its_settings_gear_opens_output_with
 
     // A method change before the next lifecycle tick cannot rename an existing CPU image.
     h.app.render_workspace.view.method = ImageMethod::GpuRaytrace;
-    let previous = crate::i18n::format("render.live.source_outdated", &[("method", h.app.tr("render.method_cpu"))]);
+    let previous = solidcraft_ui_text::format("render.live.source_outdated", &[("method", h.app.tr("render.method_cpu"))]);
     assert_eq!(live::source_note(&h.app), (previous.clone(), "render.live.source_outdated_help"));
     live::advance(&mut h.app, &h.ctx, 2.0);
     assert_eq!(live::source_note(&h.app), (previous, "render.live.source_outdated_help"), "a refused update retains the captured source name");
@@ -11392,7 +11459,7 @@ fn cpu_general_glass_path_availability_uses_reviewed_unsaved_saved_optics_withou
 fn render_ui_at_world_points_hit_the_painted_surface_and_letterbox_does_not_select() {
     use solidcore_record::Vec3;
     use solidcraft_engine::Sel;
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         for side in ["left", "right"] {
             let mut h = Harness::new();
             h.app.run("solid.box", json!({"corner":[-10,-10,-10],"length":20,"width":20,"height":20,"body_name":"Pick target"})).unwrap();
@@ -11471,7 +11538,7 @@ fn render_ui_at_world_points_hit_the_painted_surface_and_letterbox_does_not_sele
 
 #[test]
 fn rendered_camera_layout_cache_and_fit_share_the_exact_frame_without_moving_outer_controls() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         for side in ["left", "right"] {
             let mut h = Harness::new();
             h.app.ui.layout = mode;
@@ -11672,7 +11739,7 @@ fn light_stage_describes_world_coordinates_without_inert_frame_settings_or_edits
             let preview = light::preview(&h.app).unwrap();
             assert!(!lights.is_empty());
             let lights = serde_json::to_value(lights).unwrap();
-            for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+            for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
                 h.app.ui.layout = layout;
                 for width in [800.0, 1440.0] {
                     let output = draw(&mut h, width, vec![]);
@@ -14416,7 +14483,7 @@ fn stable_glass_pointer_draft_composes_saved_glass_maps_coat_and_lens_until_one_
         let saved = document.render.setups["Studio"].clone();
         assert_ne!(camera, saved.camera, "the optical save must preserve an independently saved camera");
         assert_eq!((saved.optics.len(), saved.surfaces.len(), saved.coats.len()), (1, 1, 1));
-        let mut scrolls = stable_glass_draft_click(&mut h, &format!("dialog:section:{}", crate::i18n::tr("render.appearance_editor.glass")));
+        let mut scrolls = stable_glass_draft_click(&mut h, &format!("dialog:section:{}", solidcraft_ui_text::tr("render.appearance_editor.glass")));
         scrolls += stable_glass_draft_click(&mut h, "render:glass:enable");
         let absorption = h.app.tr("render.appearance_editor.absorption").to_owned();
         for axis in 0..3 {
@@ -14449,7 +14516,7 @@ fn stable_glass_pointer_draft_composes_saved_glass_maps_coat_and_lens_until_one_
         assert_eq!(h.app.session.selection, selection);
         assert_eq!(h.app.cam, camera);
         assert!(h.app.render_workspace.view.job.is_none());
-        scrolls += stable_glass_draft_click(&mut h, &format!("dialog:section:{}", crate::i18n::tr("render.appearance_editor.saved")));
+        scrolls += stable_glass_draft_click(&mut h, &format!("dialog:section:{}", solidcraft_ui_text::tr("render.appearance_editor.saved")));
         scrolls += stable_glass_draft_reveal(&mut h, "render:optics-save");
         let save_label = h.app.tr("render.appearance_editor.save").to_owned();
         let save_enabled = {
@@ -15623,7 +15690,7 @@ fn advanced_glass_pointer_edit_keeps_saved_dispersion_film_and_independent_optic
         let original = saved.optics.iter().next().unwrap().clone();
         assert!(h.app.render_workspace.view.materials.bindings.is_empty(), "opening a saved row must not create an unsaved material override");
         assert_eq!(image_request(&h.app).unwrap()["settings"], json!(saved), "opening the advanced editor must preserve the complete saved setup");
-        stable_glass_draft_click(&mut h, &format!("dialog:section:{}", crate::i18n::tr("render.appearance_editor.glass")));
+        stable_glass_draft_click(&mut h, &format!("dialog:section:{}", solidcraft_ui_text::tr("render.appearance_editor.glass")));
         stable_glass_draft_reveal(&mut h, "render:glass:roughness");
         let field = crate::scenario::rect_of("render:glass:roughness").unwrap();
         assert!(stable_glass_draft_viewport(&h).contains_rect(field));
@@ -15646,7 +15713,7 @@ fn advanced_glass_pointer_edit_keeps_saved_dispersion_film_and_independent_optic
         assert!(h.app.render_workspace.view.dirty);
         assert!(Arc::ptr_eq(&document, &h.app.session.doc));
         assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
-        stable_glass_draft_click(&mut h, &format!("dialog:section:{}", crate::i18n::tr("render.appearance_editor.saved")));
+        stable_glass_draft_click(&mut h, &format!("dialog:section:{}", solidcraft_ui_text::tr("render.appearance_editor.saved")));
         h.step(&json!({"widget":h.app.tr("render.appearance_editor.replace")})).unwrap();
         stable_glass_draft_click(&mut h, "render:optics-save");
         assert_eq!(

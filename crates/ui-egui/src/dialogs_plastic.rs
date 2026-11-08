@@ -137,7 +137,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 
 /// A value row whose empty value means "from the rule" (or another default).
 fn opt_field(ui: &mut egui::Ui, label: &str, v: &mut String, unit: &str, hint: &str) -> bool {
-    let hint = format!("{unit}, {}", crate::i18n::tr_label(hint));
+    let hint = format!("{unit}, {}", solidcraft_ui_text::tr_label(hint));
     hint_row(ui, label, v, &hint)
 }
 

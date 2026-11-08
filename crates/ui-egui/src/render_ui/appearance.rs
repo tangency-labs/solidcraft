@@ -426,7 +426,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
     let mut draft = view.draft.clone().unwrap_or_else(|| from.clone());
     let name = if is_mixed { app.tr("render.tree_mixed").to_owned() } else { from.name.clone() };
     let source = app.tr(if source_step == LookStep::Material { "render.inspector_material" } else { "render.library_in_design" }).to_owned();
-    let used = crate::i18n::format("render.inspector_used_by", &[("count", &count.to_string())]);
+    let used = solidcraft_ui_text::format("render.inspector_used_by", &[("count", &count.to_string())]);
     let replacements = &view.replacements;
     let ids: Vec<_> = (0..replacements.len()).map(|index| index.to_string()).collect();
     let handles: Vec<_> = ids.iter().map(|id| format!("render:appearance:replace:{id}")).collect();
@@ -477,7 +477,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
     }
     let step = view.inspected.unwrap_or(mode_step(view.mode));
     let mut scope = usize::from(view.all_users);
-    let all_label = crate::i18n::format("render.inspector_all_users", &[("count", &count.to_string())]);
+    let all_label = solidcraft_ui_text::format("render.inspector_all_users", &[("count", &count.to_string())]);
     let this_label = app
         .tr(match step {
             LookStep::Face => "render.inspector_this_face",

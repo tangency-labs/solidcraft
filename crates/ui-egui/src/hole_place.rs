@@ -443,7 +443,7 @@ pub(crate) fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     for s in snaps.iter() {
         let Some(c) = proj.to_screen(s.at) else { continue };
         if on.as_ref().is_some_and(|o| o.at == s.at) {
-            let name = crate::i18n::tr_label(crate::dialogs_assembly::snap_name(s.kind));
+            let name = solidcraft_ui_text::tr_label(crate::dialogs_assembly::snap_name(s.kind));
             crate::icons::markers::snap(painter, c, None, s.kind, t.hover_profile_edge, Some(name));
         } else {
             crate::icons::markers::snap_hint(painter, c, s.kind, t.manipulator);

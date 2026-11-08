@@ -557,8 +557,11 @@ fn copies_left(doc: &Document, other: &str) -> i64 {
 
 fn icons(ui: &mut egui::Ui, label: &str, labels: &[&'static str], icons: &[&'static str], selected: &mut usize) {
     ui_kit::row(ui, label, |ui| {
-        let choices: Vec<_> =
-            labels.iter().zip(icons).map(|(key, icon)| ui_kit::IconSegment { key, icon, tip: crate::i18n::tr_label(key).to_string() }).collect();
+        let choices: Vec<_> = labels
+            .iter()
+            .zip(icons)
+            .map(|(key, icon)| ui_kit::IconSegment { key, icon, tip: solidcraft_ui_text::tr_label(key).to_string() })
+            .collect();
         ui_kit::segmented_icons(ui, selected, &choices, &[]);
     });
 }
@@ -575,7 +578,7 @@ fn alignment(ui: &mut egui::Ui, label: &str, alignment: &mut PatternAlignment, r
 fn pattern_hint(ui: &mut egui::Ui) {
     ui_kit::text(
         ui,
-        crate::i18n::tr_label("Counts include the original. Center balances copies; Flip chooses the extra side for even totals."),
+        solidcraft_ui_text::tr_label("Counts include the original. Center balances copies; Flip chooses the extra side for even totals."),
         ui_kit::Text::Note("pattern"),
     );
 }
@@ -614,10 +617,10 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             // The size in millimetres follows the factor and the other way round; the aspect is kept.
             if let Some((_, size)) = frame {
                 for (label, natural) in [("Width", size[0]), ("Height", size[1])] {
-                    let k = crate::prefs::parse_number(factor.trim()).filter(|k| *k > 0.0).unwrap_or(1.0);
+                    let k = crate::ui_kit::parse_number(factor.trim()).filter(|k| *k > 0.0).unwrap_or(1.0);
                     let mut shown = format!("{} mm", crate::sketch_transform_ui::plain(natural * k));
                     if number(ui, label, &mut shown)
-                        && let Some(mm) = crate::prefs::parse_number(shown.trim_end_matches("mm").trim())
+                        && let Some(mm) = crate::ui_kit::parse_number(shown.trim_end_matches("mm").trim())
                         && mm > 0.0
                         && natural > 1e-9
                     {
@@ -650,7 +653,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
         }
         Mod::Divide { count } => {
             enter |= quantity(ui, doc, "Segments", count, 2, DIVIDE_MAX);
-            ui_kit::text(ui, crate::i18n::tr("sketch.divide_hint"), ui_kit::Text::Note("divide"));
+            ui_kit::text(ui, solidcraft_ui_text::tr("sketch.divide_hint"), ui_kit::Text::Note("divide"));
         }
         Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
             ui_kit::choice_row(ui, "Form", "equation_form", form, &EQUATION_FORMS);
@@ -663,9 +666,9 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             enter |= number(ui, "Start", start);
             enter |= number(ui, "End", end);
             enter |= number(ui, "Tolerance", tolerance);
-            ui_kit::checkbox_grid(ui, &mut [(crate::i18n::tr("ui.equation_variable_unit"), range_unit)], 1);
+            ui_kit::checkbox_grid(ui, &mut [(solidcraft_ui_text::tr("ui.equation_variable_unit"), range_unit)], 1);
             let note = if *range_unit { "ui.equation_note_range" } else { "ui.equation_note" };
-            ui_kit::text(ui, crate::i18n::tr(note), ui_kit::Text::Note("equation"));
+            ui_kit::text(ui, solidcraft_ui_text::tr(note), ui_kit::Text::Note("equation"));
         }
         Mod::Corner { chamfer, ctype, size, distance2, angle, flip } => {
             if *chamfer {

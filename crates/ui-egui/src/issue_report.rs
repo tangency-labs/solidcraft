@@ -28,20 +28,6 @@ const MAX_URL: usize = 6000;
 /// past about 7,600 characters GitHub drops it and the form comes back empty after signing in.
 const MAX_SIGN_IN_URL: usize = 7000;
 
-thread_local! {
-    static CAD_INPUT_BLOCKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Tests set the barrier by hand to see what ignores it.
-#[cfg(test)]
-pub(crate) fn set_cad_input_blocked_for_test(blocked: bool) {
-    CAD_INPUT_BLOCKED.with(|cell| cell.set(blocked));
-}
-
-pub(crate) fn cad_input_blocked() -> bool {
-    CAD_INPUT_BLOCKED.with(std::cell::Cell::get)
-}
-
 /// Draw CAD behind a report or native picker without delivering input or focus to editors.
 /// Fresh focus history also prevents inline editors from committing on report focus loss.
 pub(crate) struct CadInput {
@@ -85,14 +71,15 @@ impl CadInput {
             *m = neutral;
             saved
         });
-        let previous_blocked = CAD_INPUT_BLOCKED.with(|blocked| blocked.replace(true));
+        let previous_blocked = crate::ui_kit::input_blocked();
+        crate::ui_kit::set_input_blocked(true);
         Some(Self { ctx: ctx.clone(), input: Some(input), memory: Some(memory), previous_blocked })
     }
 }
 
 impl Drop for CadInput {
     fn drop(&mut self) {
-        CAD_INPUT_BLOCKED.with(|blocked| blocked.set(self.previous_blocked));
+        crate::ui_kit::set_input_blocked(self.previous_blocked);
         if let Some(input) = self.input.take() {
             self.ctx.input_mut(|i| *i = input);
         }
@@ -1836,7 +1823,7 @@ mod tests {
         });
         output.textures_delta.clear();
         app.issue_report.draft = None;
-        assert!(!cad_input_blocked());
+        assert!(!crate::ui_kit::input_blocked());
     }
 
     #[test]

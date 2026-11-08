@@ -59,13 +59,13 @@ impl SketchState {
     /// The state in words, for the row's tooltip.
     pub(crate) fn text(self) -> String {
         match self {
-            SketchState::Empty => crate::i18n::tr("ui.no_geometry_yet").to_string(),
-            SketchState::Under(dof) => crate::i18n::format(
+            SketchState::Empty => solidcraft_ui_text::tr("ui.no_geometry_yet").to_string(),
+            SketchState::Under(dof) => solidcraft_ui_text::format(
                 if dof == 1 { "history.sketch_under_constrained_one" } else { "history.sketch_under_constrained" },
                 &[("count", &dof.to_string())],
             ),
-            SketchState::Full => crate::i18n::tr("ui.fully_constrained").to_string(),
-            SketchState::Conflict => crate::i18n::tr("ui.constraints_conflict").to_string(),
+            SketchState::Full => solidcraft_ui_text::tr("ui.fully_constrained").to_string(),
+            SketchState::Conflict => solidcraft_ui_text::tr("ui.constraints_conflict").to_string(),
         }
     }
 }
@@ -95,6 +95,7 @@ mod tests {
 
     #[test]
     fn states_ink_their_icons_in_the_sketch_colours_and_name_themselves() {
+        crate::i18n::install();
         for t in [Tokens::light(), Tokens::dark()] {
             assert_eq!(SketchState::Under(3).ink(&t), Some(t.sketch));
             assert_eq!(SketchState::Full.ink(&t), Some(t.sketch_fixed));

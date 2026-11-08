@@ -1,6 +1,6 @@
 //! Modal confirmations share the Panel/Window frame and the single kit footer.
 use super::{Action, Footer, Window, actions::footer_with_left, text::paint_text};
-use crate::{scenario, theme::Tokens};
+use crate::theme::Tokens;
 use egui::{Ui, vec2};
 
 #[derive(Clone, Copy)]
@@ -68,7 +68,7 @@ impl<'a> Confirm<'a> {
     pub(crate) fn show(self, ctx: &egui::Context, valid: bool, message: impl FnOnce(&mut Ui)) -> (bool, Action) {
         // Reviewed reports and native pickers temporarily own input. Keep the pending
         // answer untouched and resume the modal when that boundary closes.
-        if crate::issue_report::cad_input_blocked() {
+        if super::input_blocked() {
             return (false, Action::None);
         }
         self.window.surface(ctx, true, |ui| self.content(ui, valid, message))
@@ -104,7 +104,7 @@ impl<'a> Confirm<'a> {
                         } else {
                             crate::icons::paint_accented(ui.painter(), disc.shrink(t.space_8), self.icon, accent, 1.0);
                         }
-                        scenario::publish_rect("confirm:disc", disc);
+                        solidcraft_ui_registry::publish_rect("confirm:disc", disc);
                         ui.vertical(|ui| {
                             ui.set_width(ui.available_width().max(0.0));
                             let (heading, _) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), t.form_close_size), egui::Sense::hover());
@@ -118,8 +118,8 @@ impl<'a> Confirm<'a> {
                                 .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), self.title));
                             let response = super::icon_button_at(ui, close, "close", "Close");
                             closed = response.clicked();
-                            scenario::publish_target("dialog:close", response.rect);
-                            scenario::publish_rect("dialog:header", heading);
+                            solidcraft_ui_registry::publish_target("dialog:close", response.rect);
+                            solidcraft_ui_registry::publish_rect("dialog:header", heading);
                             message(ui);
                             if let Some(detail) = self.detail {
                                 super::list_frame(ui, "confirm_detail", |ui| {

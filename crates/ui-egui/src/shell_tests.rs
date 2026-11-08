@@ -1,5 +1,6 @@
 use super::*;
 use crate::scenario::{Harness, rect_of};
+use crate::toolbar;
 use serde_json::json;
 use solidcraft_engine::panels::ActionSink as _;
 
@@ -534,14 +535,11 @@ fn actual_tabs_preset_raw_widget_drag_retains_the_inactive_editor_identity_and_d
             let target = HostControlTarget::Pointer(HostPointerTarget::Tab { instance: editor.clone() });
             let control = h.app.universal_panel_frame().unwrap().controls.iter().find(|control| control.target == target).unwrap();
             assert!(
-                h.output
-                    .accesskit_update
-                    .as_ref()
-                    .unwrap()
-                    .nodes
-                    .iter()
-                    .any(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(control.accessible_name.as_str())),
-                "use an actual accessible Tab widget, not a reducer-only target"
+                h.output.accesskit_update.as_ref().unwrap().nodes.iter().any(|(id, node)| *id == control.id.accesskit_id()
+                    && node.role() == egui::accesskit::Role::Tab
+                    && node.label() == Some(control.accessible_name.as_str())
+                    && node.is_selected() == Some(false)),
+                "use the actual inactive accessible Tab widget, not a reducer-only target"
             );
             let bounds = control.bounds;
             let card = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|card| card.section == source_id).unwrap();
@@ -2442,7 +2440,7 @@ fn status_bar_names_what_is_edited_and_the_sketch_state_and_replaces_the_views_c
     assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some()));
     assert_eq!(crate::status_bar::contents(&h.app).editing.as_deref(), Some("Editing Extrude1"));
     // In another language the text is translated, and so is a default feature name.
-    let _ja = crate::i18n::scope("ja");
+    let _ja = solidcraft_ui_text::scope("ja");
     assert_eq!(crate::status_bar::contents(&h.app).editing, Some(format!("編集中: {}", crate::i18n::tr_name("Extrude1"))));
     assert_eq!(crate::i18n::tr_name("Sketch1"), "スケッチ1");
 }
@@ -2530,7 +2528,7 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
     assert_eq!(h.app.session.undo.len(), undo);
     // An unknown mapping changes nothing.
     let before = serde_json::to_value(&h.app.preferences).unwrap();
-    let hostile = crate::context_menu::Item::action("ui.navPreset", "Nope", "").with(json!({"preset": "nope"}));
+    let hostile = crate::ui_kit::Item::action("ui.navPreset", "Nope", "").with(json!({"preset": "nope"}));
     crate::context_menu::run_item(&mut h.app, &hostile, egui::pos2(0.0, 0.0));
     assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), before);
     // A second click on the button closes the menu it opened.
