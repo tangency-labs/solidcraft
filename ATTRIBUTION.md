@@ -843,6 +843,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | crates/sketch/assets/fonts/liberation-sans/OFL.txt | Red Hat, Inc.; Liberation Fonts contributors | Unmodified accompanying font licence | SIL OFL 1.1 |
 | assets/locales/pending/drag-to-zoom.json | SolidCraft contributors | Original drag-to-zoom labels and translations | MIT OR Apache-2.0 |
 | `assets/locales/pending/hole-group-folder.json` | SolidCraft contributors | Original Hole grouping preference labels and translations | MIT OR Apache-2.0 |
+| assets/locales/pending/press-pull-dialog-title.json | SolidCraft contributors | Original Press Pull dialog title translations for SolidCraft's English catalog; no external text used | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
