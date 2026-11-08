@@ -13320,7 +13320,8 @@ fn production_short_render_assistant_keeps_conversation_above_the_pinned_compose
         assert!(conversation.height() < 64.0, "exercise the short viewport that formerly expanded over the composer");
         assert!(
             !conversation.is_positive() || conversation.bottom() <= composer.top() + 1.0,
-            "a short transcript viewport must not paint or scroll over the composer"
+            "a short transcript viewport must not paint or scroll over the composer: draft bytes={}, conversation={conversation:?}, composer={composer:?}",
+            draft.len()
         );
         let body = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|card| card.instance == id("assistant")).unwrap().body.unwrap();
         assert!(composer.bottom() <= body.origin.y + body.size.height + 1.0, "the full footer remains inside the shared content slot");

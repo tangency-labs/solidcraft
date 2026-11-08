@@ -950,7 +950,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         let t = Tokens::get();
         let composer = crate::panel_runtime::shared_content_composer_height(ui.ctx())
             .unwrap_or(48.0 + t.control_height * 3.0 + t.space_8 * 2.0 + t.space_6 * 3.0);
-        (ui.available_height() - composer).max(0.0)
+        (ui.available_height() - composer - ui.spacing().item_spacing.y).max(0.0)
     } else {
         ui.available_height() / 3.0
     };
