@@ -403,8 +403,8 @@ impl OffsetExecutive {
             let mut shell = run_shell_offset(kernel, original, options, faces, notifications)?;
             // Opt-in (WR-454, #380; tangency-labs/smlib@fbe43bb): an inset of a solid whose
             // offset leaves nothing has no cavity to take away (the difference would hand
-            // the input back unhollowed). Its non-manifold case is the shared typed guard
-            // below, which both flag states use.
+            // the input back unhollowed). Its non-empty non-manifold case is the shell
+            // guard below.
             if kernel.fixes.shell_empty_cavity_fails
                 && options.offset.distance < 0.0
                 && input_is_manifold
@@ -412,10 +412,8 @@ impl OffsetExecutive {
             {
                 return Err(invalid_input(OP_SHELL));
             }
-            // WR-578 (the loop gaps close on the default path since #2981): a shell of a
-            // solid that is still no closed manifold solid is refused rather than returned.
-            // A non-empty offset of a manifold solid that is no closed solid reaches this
-            // one typed refusal (1001) whichever state WR-454's flag is in.
+            // WR-578: keep the conservative manifold-solid gate. A closed one-region
+            // offset is not yet a labelled solid suitable for the shell's Boolean.
             if let Some(what) =
                 lost_manifold(brep_is_manifold_solid(&shell)?, || Ok(input_is_manifold))?
             {
@@ -556,13 +554,14 @@ impl OffsetExecutive {
                 notifications,
             )?;
             // (not upstream) a shell of a manifold solid is a manifold solid or a refusal (the
-            // ops contract, `finish`): the early check above refuses an intermediate offset of
-            // a manifold solid that is no manifold solid, and this final gate refuses a result
-            // the merge or difference leaves that way (a ruled square-to-circle loft shelled
-            // inward: ten faces, not manifold, volume 0; a box's chamfer left open by an inset
-            // of its two sides' width, which the cavity meets along a line only). The ungated
-            // return above is a sheet input's offset: with `create_offset_solid` false it is
-            // the sheet the caller asked for, and its thickening has its own path.
+            // ops contract, `finish`): the guard above refuses a shell that is no closed
+            // manifold solid where the shell is the result, and this final gate refuses a
+            // result the difference leaves that way (a ruled square-to-circle loft shelled
+            // inward: ten faces, not manifold, volume 0; a box's chamfer left open by an
+            // inset of its two sides' width, which the cavity meets along a line only). The
+            // ungated return above is a sheet input's offset: with `create_offset_solid`
+            // false it is the sheet the caller asked for, and its thickening has its own
+            // path.
             if let Some(what) =
                 lost_manifold(brep_is_closed_manifold(&shell)?, || Ok(input_is_manifold))?
             {
@@ -574,6 +573,13 @@ impl OffsetExecutive {
         // (not upstream) the attributes the notifications left on the result's objects
         let result = result.and_then(|mut shell| {
             attributes::finish_attributes(&mut shell, original_key, notifications)?;
+            // (not upstream) the port's cached topology, true again for the caller, as the
+            // API shell and offset wrappers ensure for theirs: the Boolean difference, the
+            // stitch and the exact-edge pass maintain only the use links, so a field
+            // derived from them (a loop's edges, a shell's faces, an edge's end vertices)
+            // can still say what the body held before they ran. Only those derived fields
+            // are rewritten: no geometry, tolerance or geometry owner changes.
+            shell.refresh_cached_topology();
             Ok(shell)
         });
         ShellOutcome {
@@ -1826,8 +1832,11 @@ pub fn api_shell_brep_full(
         &mut working_notifications,
     );
     let mut result = outcome.result?;
-    // (not upstream: the port's cached topology, true again for the caller)
-    result.refresh_cached_topology();
+    // `shell_brep` already rewrote the port's cached topology at its hand-back, after
+    // the Boolean, the stitch and the exact-edge pass; the only later step is the
+    // tolerance growth below, which never changes the use links those fields derive
+    // from (`offset_brep`, unlike the shell, does not refresh its own result, so its
+    // wrapper keeps its refresh).
     update_result_tolerances(kernel, &mut result)?;
     // (not upstream, #2136 / #2372: a cancel a status-ignoring helper absorbed still
     // ends the shell as `Cancelled`, never `Ok`)

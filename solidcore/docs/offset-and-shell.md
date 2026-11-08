@@ -166,6 +166,7 @@ job (§5.1).
 | `OffsetFailure::Folds` | the offset of a NURB-based face is not certified regular over its parameter box | the face, the distance and `largest`, the least radius on the displaced side | with `shell_one_construction` only | `p2.rs`, `refuse_folding_offset`; `sheets.rs`, `certify_regular` |
 | `DistanceUnresolved`, `ToleranceUnresolved` | \|d\| below the input's tolerance; an approximation tolerance in (0, 1e-12] | the distance and the tolerance | always | `p2.rs`, `check_resolvable` |
 | `OffsetFailure::WallsTouch`, `LoopsCross`, `EdgeVanishes` | an offset face's loops touch or cross, or a vertex moves past its edge's end | the face or the edge | per their flags | `error/offset.rs` |
+| `OffsetFailure::LoopGapUncertified` | the loop-gap solve could not establish a boundary within tolerance | the original input face, when available | always | `offset_executive/step_gaps.rs` |
 
 **The regularity test** (`certify_regular`) multiplies det(I − d W) out in homogeneous forms:
 Q = X⁴ − d w² X H + d² w⁴ K, with X² = |A_u × A_v|² and H, K built from the first and second

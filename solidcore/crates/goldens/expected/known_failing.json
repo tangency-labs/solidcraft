@@ -145,5 +145,11 @@
   "primitive.primitive_creation_p2": {
     "gen0092": "tangency-labs/solidcore#2794: a circle of radius 1e-3 swept along two 1e-2 legs at a right angle returns success, but the body fails check_brep level 2 (vertex 1.8284271e-3 off its faces); a refusal or the valid body of volume 6.2832e-8 is right; fix in #2840",
     "gen0189": "tangency-labs/solidcore#2794: the same input as gen0092 (circle of radius 1e-3 swept along two 1e-2 legs at a right angle) returns success with an invalid body (vertex 1.8284271e-3 off its faces); fix in #2840"
+  },
+  "topology.brep_local_operation": {
+    "gen0014": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",
+    "gen0019": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",
+    "gen0073": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",
+    "gen0078": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one"
   }
 }

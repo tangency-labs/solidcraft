@@ -10,8 +10,8 @@
 //!
 //! `shell_open_at_the_top_is_valid_on_the_default_split_path` checks the corrected
 //! top-open result, including validity rather than only matching historical counts.
-//! `shell_open_at_y20_fails_as_upstream` retains the side-open refusal expectation;
-//! that separate regression is still unresolved.
+//! `shell_open_at_y20_is_valid_and_keeps_the_input` checks the side-open result and
+//! preserves the borrowed input's topology and vertex positions.
 //! `issue_1795_extended_edges_mated` (ignored) shells the plate under WR-344's opt-in
 //! `offset_extended_edges_mated`, the setting that made the top-open shell fail before its
 //! refinement; `issue_1795_y20_read_back` (ignored) shells the y = 20 case on every
@@ -123,26 +123,51 @@ fn shell_open_at_the_top_is_valid_on_the_default_split_path() {
     assert!(report(&k, label, Ok(r), Some(9655.150697869625), 1e-9));
 }
 
-/// Open at y = 20 the default fixes fail the shell with `SM_ERR` (1001, in
-/// `make_faceuse`), as pinned SMLib 1.0.1 does (WR-617; difftest
-/// `issue1795_plate_{api,static}_shell_2_y20*` compare the status), with and without the
-/// offset solid.
+/// The default split path builds the side-open shell, rather than preserving the
+/// historical C++ refusal. Grade the returned geometry before mass queries and
+/// retain the borrowed input's topology and vertex positions.
 #[test]
-fn shell_open_at_y20_fails_as_upstream() {
+fn shell_open_at_y20_is_valid_and_keeps_the_input() {
     for cos in [false, true] {
         let mut k = Kernel::default();
         let mut b = drilled(&mut k);
         let open = planar_faces_at(&k, &b, 1, 20.0);
         assert_eq!(open.len(), 1, "the y = 20 face");
-        let r = api_shell(&mut k, &mut b, options(cos), &open);
-        assert!(
-            matches!(
-                r.as_ref().map_err(solidcore::SolidError::sm_status),
-                Err(Some(1001))
+        let source_faces = b.face_list().to_vec();
+        let source_edges = b.edge_list().to_vec();
+        let source_vertices: Vec<_> = b
+            .vertex_list()
+            .iter()
+            .map(|&v| (v, b.vertex(v).unwrap().point))
+            .collect();
+        let source_tolerance = b.tolerance();
+        let mut r = api_shell(&mut k, &mut b, options(cos), &open).unwrap();
+        solidcore::topology::integrity::check(&r).unwrap();
+        for pass in 0..3 {
+            let checked = check_brep(&mut k, &mut r, CheckLevel::Level2).unwrap();
+            assert!(
+                checked.is_valid(),
+                "create_offset_solid={cos}, pass={pass}: {:?}",
+                checked.lines()
+            );
+        }
+        assert_eq!(
+            (
+                r.face_list().len(),
+                r.edge_list().len(),
+                r.vertex_list().len()
             ),
-            "create_offset_solid={cos}: {:?}",
-            r.map(|b| b.face_list().len())
+            (16, 37, 24)
         );
+        assert_eq!(b.face_list(), source_faces);
+        assert_eq!(b.edge_list(), source_edges);
+        assert_eq!(b.tolerance(), source_tolerance);
+        let after: Vec<_> = b
+            .vertex_list()
+            .iter()
+            .map(|&v| (v, b.vertex(v).unwrap().point))
+            .collect();
+        assert_eq!(after, source_vertices);
     }
 }
 
