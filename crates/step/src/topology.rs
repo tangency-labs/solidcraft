@@ -25,7 +25,9 @@
 //! when the file has none, never below [`MIN_TOLERANCE`]) is the brep's tolerance and every
 //! vertex's and edge's to start with. A vertex measurably off its curve or surface, or an edge
 //! whose curve lies measurably off a face's surface, gets that distance (with margin) as its
-//! tolerance, and the solid's notes say how many and how far.
+//! tolerance, and the solid's notes say how many and how far. When those lie farther off than the
+//! file's uncertainty allows SMLib (a file that understates it), the body's tolerance is raised to
+//! cover them ([`BODY_TOLERANCE_RATIO`], [`BODY_VERTEX_GAP_MARGIN`]).
 //!
 //! Pcurves are the closed forms the 3D edges have on our surfaces ([`pcurve::exact_pcurves`]); a
 //! use with none gets its pcurve from the kernel ([`read_solids_with`], SMLib's own trims). The
@@ -83,6 +85,16 @@ const MAX_SAMPLES: usize = 4096;
 /// EDGE_TOLERANCE and VERTEX_TOLERANCE, `solidcraft_smlib::flat::MAX_TOLERANCE`). Geometry that
 /// would need more is refused, with how far off it lies.
 const MAX_TOLERANCE: f64 = 1.0;
+/// The most an edge's or vertex's tolerance may be over its body's. SMLib's check takes no edge
+/// or vertex zone (half its record tolerance) of 1000 times the body's or more, and its trims
+/// raise an edge's zone to no more than twice its gap, under its record tolerance: a body over
+/// `t / 1000` holds an edge or vertex of tolerance `t`, and 250 keeps a margin of four. A body
+/// whose edges lie farther off than its file's uncertainty allows (a file that understates it,
+/// #11997) gets the tolerance that keeps them within SMLib's ratio.
+const BODY_TOLERANCE_RATIO: f64 = 250.0;
+/// A body's tolerance over the largest gap of a vertex from its faces: SMLib checks that gap
+/// against the body's intersection tolerance, its record tolerance, whatever the vertex's own.
+const BODY_VERTEX_GAP_MARGIN: f64 = 2.0;
 /// A vertex's tolerance over its largest gap from its curves and surfaces: a record tolerance is
 /// SMLib's intersection tolerance, twice the zone (the bridge halves it), and SMLib checks a
 /// vertex's gaps against half its zone, so a vertex covers its gap with margin at twice an edge's.
@@ -1206,6 +1218,41 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
         }
 
+        // The body's tolerance covers its raised vertices' gaps from their faces and keeps its
+        // edges' and vertices' tolerances within SMLib's ratio (#11997).
+        let mut vertex_gap = 0.0f64;
+        for &f in &face_order {
+            let Some(face) = self.faces.get(f as usize) else { continue };
+            let mut raised = Vec::new();
+            for l in &face.loops {
+                match l {
+                    LoopB::Vertex(v) => raised.push(*v),
+                    LoopB::Edges(es) => raised.extend(es.iter().filter_map(|&(e, _)| self.edges.get(e as usize)).flat_map(|x| x.vertices)),
+                }
+            }
+            raised.retain(|&v| self.vertices.get(v as usize).is_some_and(|x| x.tolerance > self.tol));
+            if raised.is_empty() {
+                continue;
+            }
+            let surface = SurfaceEval::new(&face.surface).map_err(|m| m.to_string())?;
+            for v in raised {
+                let Some(x) = self.vertices.get(v as usize) else { continue };
+                let p = v3(x.point);
+                // A vertex the surface does not take is the record check's to name.
+                if let Some(s) = surface.project(p, None, f64::INFINITY).and_then(|q| surface.point(q)) {
+                    vertex_gap = vertex_gap.max(s.dist(p));
+                }
+            }
+        }
+        let widest = self.edges.iter().map(|e| e.tolerance).chain(self.vertices.iter().map(|v| v.tolerance)).fold(0.0, f64::max);
+        let tolerance = self.tol.max(widest / BODY_TOLERANCE_RATIO).max(BODY_VERTEX_GAP_MARGIN * vertex_gap);
+        if tolerance > self.tol {
+            notes.push(format!(
+                "the file states its geometry within {} mm, but its edges and vertices need tolerances up to {widest:.3e} mm and its vertices lie up to {vertex_gap:.3e} mm off their faces: the body's tolerance is {tolerance:.3e} mm",
+                self.tol
+            ));
+        }
+
         let mut vertices = Vec::with_capacity(vertex_order.len());
         for &v in &vertex_order {
             vertices.push(self.vertices.get(v as usize).cloned().ok_or("vertex reference")?);
@@ -1271,7 +1318,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
             out_shells.push(Shell::Faces { faces, wires: Vec::new() });
         }
-        let brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
+        let brep = Brep { version: brep::VERSION, tolerance, regions, shells: out_shells, faces, edges, vertices };
         solidcraft_geom::brep::check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
         solidcraft_geom::brep::geometry::check(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })

@@ -1427,7 +1427,10 @@ fn nearly_round_spindle_torus_pin_end_in_halves_imports_whole() {
     t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))").replace("LENGTH_MEASURE(1.E-6)", "LENGTH_MEASURE(1.E-5)");
     t += TAIL;
     let (volume, area) = pin_with_cylinder(major, minor);
-    assert_closed_measures(&t, volume, area, &[]);
+    // The apex lies 3.6e-5 mm off the pole, past the file's 1e-5: the body's tolerance covers it,
+    // as SMLib checks a vertex's gap from its faces against the body's.
+    let note = "solid 'Pin': the file states its geometry within 0.00001 mm, but its edges and vertices need tolerances up to 2.174e-4 mm and its vertices lie up to 3.623e-5 mm off their faces: the body's tolerance is 7.246e-5 mm";
+    assert_closed_measures(&t, volume, area, &[note]);
 }
 
 /// The lemon of a spindle torus (the tube's part across the axis: a closed surface with a pole
@@ -2209,6 +2212,36 @@ fn edges_written_off_their_spline_face_carry_their_gap_as_their_tolerance() {
         Err(e) => e.to_string().contains("off the face's surface"),
     };
     assert!(refused, "{far:?}");
+}
+
+/// A file whose edges or vertices lie farther off their faces than its stated uncertainty allows
+/// SMLib (#11997: a body written with 1e-6 whose intersection edges lie 5.6e-4 off a spline face).
+/// SMLib checks each vertex's gap from its faces against the body's tolerance, and takes no edge
+/// or vertex zone of 1000 times the body's: such a body was refused before any operation. The
+/// body's tolerance now covers both, and the body checks.
+#[test]
+fn edges_farther_off_than_the_stated_uncertainty_allows_raise_the_bodys_tolerance() {
+    let tolerances = |imp: &crate::step_in::StepImport| {
+        let r = imp.bodies[0].body.record();
+        let widest = r.edges.iter().map(|e| e.tolerance).chain(r.vertices.iter().map(|v| v.tolerance)).fold(0.0, f64::max);
+        (r.tolerance, widest)
+    };
+    // Edges bowed up to 3.75e-4 mm off between vertices on the dome, 375 times the file's 1e-6:
+    // the body's tolerance keeps the widest edge or vertex within SMLib's ratio, no more.
+    let imp = step_import(&dome_with_edges_bowed(5e-4)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    crate::validation::check_kept(&imp.bodies[0].body).unwrap();
+    let (body, widest) = tolerances(&imp);
+    assert!(body >= widest / 1000.0 && body <= widest / 100.0, "body {body}, widest {widest}");
+    assert!(imp.warnings.iter().any(|w| w.contains("the body's tolerance is")), "{:?}", imp.warnings);
+    // Edges and vertices 5e-4 mm off: the body's tolerance covers the vertices' gaps.
+    let imp = step_import(&dome_with_edges_raised(5e-4)).unwrap();
+    crate::validation::check_kept(&imp.bodies[0].body).unwrap();
+    let (body, _) = tolerances(&imp);
+    assert!((5e-4..=1.1e-3).contains(&body), "body {body}");
+    // Within what the stated uncertainty allows, the body keeps it.
+    let imp = step_import(&dome_with_edges_bowed(5e-5)).unwrap();
+    assert_eq!(tolerances(&imp).0, 1e-6, "{:?}", imp.warnings);
 }
 
 #[test]
