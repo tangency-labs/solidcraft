@@ -403,22 +403,23 @@ impl OffsetExecutive {
             let mut shell = run_shell_offset(kernel, original, options, faces, notifications)?;
             // Opt-in (WR-454, #380; tangency-labs/smlib@fbe43bb): an inset of a solid whose
             // offset leaves nothing has no cavity to take away (the difference would hand
-            // the input back unhollowed); an offset that is no closed solid bounds none.
+            // the input back unhollowed). Its non-manifold case is the shared typed guard
+            // below, which both flag states use.
             if kernel.fixes.shell_empty_cavity_fails
                 && options.offset.distance < 0.0
                 && input_is_manifold
+                && bp1::num_faces(&shell) == 0
             {
-                if bp1::num_faces(&shell) == 0 {
-                    return Err(invalid_input(OP_SHELL));
-                }
-                if !brep_is_manifold_solid(&shell)? {
-                    return Err(SolidError::sm_err(OP_SHELL));
-                }
+                return Err(invalid_input(OP_SHELL));
             }
             // WR-578 (the loop gaps close on the default path since #2981): a shell of a
-            // solid that is still no closed manifold solid is refused rather than returned
-            if input_is_manifold && !brep_is_manifold_solid(&shell)? {
-                return Err(SolidError::sm_err(OP_SHELL));
+            // solid that is still no closed manifold solid is refused rather than returned.
+            // A non-empty offset of a manifold solid that is no closed solid reaches this
+            // one typed refusal (1001) whichever state WR-454's flag is in.
+            if let Some(what) =
+                lost_manifold(brep_is_manifold_solid(&shell)?, || Ok(input_is_manifold))?
+            {
+                return Err(Failure::new(OP_SHELL, OffsetFailure::Unsound { what }).into_error());
             }
             if !brep_is_manifold_solid(&shell)? && !options.create_offset_solid {
                 return Ok(shell);
@@ -555,13 +556,13 @@ impl OffsetExecutive {
                 notifications,
             )?;
             // (not upstream) a shell of a manifold solid is a manifold solid or a refusal (the
-            // ops contract, `finish`): an offset the merge would have refused can reach the
-            // difference, which then hands back no solid (a ruled square-to-circle loft
-            // shelled inward: ten faces, not manifold, volume 0; a box's chamfer left open
-            // by an inset of its two sides' width, which the cavity meets along a line only).
-            // The returns above are ungated by design: a solid's offset that is no solid with
-            // `create_offset_solid` false is the sheet the caller asked for, and a sheet
-            // input's thickening is not a solid's shell.
+            // ops contract, `finish`): the early check above refuses an intermediate offset of
+            // a manifold solid that is no manifold solid, and this final gate refuses a result
+            // the merge or difference leaves that way (a ruled square-to-circle loft shelled
+            // inward: ten faces, not manifold, volume 0; a box's chamfer left open by an inset
+            // of its two sides' width, which the cavity meets along a line only). The ungated
+            // return above is a sheet input's offset: with `create_offset_solid` false it is
+            // the sheet the caller asked for, and its thickening has its own path.
             if let Some(what) =
                 lost_manifold(brep_is_closed_manifold(&shell)?, || Ok(input_is_manifold))?
             {

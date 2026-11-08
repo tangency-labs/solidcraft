@@ -22,7 +22,8 @@ mod offset_fixture;
 use offset_fixture::{planar_faces_at, shell, volume, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
-use solidcore::error::SM_ERR;
+use solidcore::error::offset::{OffsetFailure, Unsoundness};
+use solidcore::error::Reason;
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
@@ -163,15 +164,18 @@ fn wr_531_without_a_tip_cap_the_shell_is_refused_and_keeps_the_input() {
                 &mut notifications.context(),
             );
             let error = outcome.result.as_ref().unwrap_err();
-            assert!(
-                matches!(
-                    error,
-                    SolidError::Upstream {
-                        operation: "offset::offset_executive::p2::shell_brep",
-                        code: SM_ERR,
-                        ..
-                    }
-                ),
+            let SolidError::Failed(failure) = error else {
+                panic!("{case}: not a typed refusal: {error}");
+            };
+            assert_eq!(
+                failure.operation, "offset::offset_executive::p2::shell_brep",
+                "{case}: {error:?}"
+            );
+            assert_eq!(
+                failure.reason,
+                Reason::Offset(OffsetFailure::Unsound {
+                    what: Unsoundness::NotManifoldSolid
+                }),
                 "{case}: {error:?}"
             );
             assert!(!outcome.input_ownership_transferred());
