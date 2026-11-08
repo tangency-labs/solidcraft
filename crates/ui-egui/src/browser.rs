@@ -1080,6 +1080,9 @@ impl Lit {
                 ),
             }
         }
+        // A body both holding the selection and under the pointer leads to its placement once.
+        paths.sort_unstable();
+        paths.dedup();
         Lit { selected, holding, hovered, paths, components }
     }
 

@@ -179,7 +179,7 @@ fn a_pick_in_the_viewport_leaves_the_browser_alone_while_its_rows_start_closed()
     // The call's frames took the hover from the pointer, which is elsewhere.
     h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: second.clone(), index: 0, point });
     let lit = super::Lit::of(&mut h.app);
-    assert_eq!(lit.paths, [vec![copy]], "the placement above the hovered body; the picked face marks its feature");
+    assert_eq!(lit.paths, [vec![copy]], "the placement above the hovered body, which also holds the picked face, once");
 }
 
 /// #8768: while the Browser's rows start closed, a new design's Bodies and Sketches folders list
