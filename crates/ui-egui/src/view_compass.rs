@@ -11,8 +11,6 @@ use solidcraft_theme::Tokens;
 const AXIS_LENGTH: f64 = 38.0;
 /// The artwork sits inside the pointer reach so the compass keeps breathing room in its circle.
 const ART_SCALE: f64 = 0.84;
-/// How far a tip in the screen plane is drawn from the centre (a figure of the compass scales it).
-pub const TIP_REACH: f32 = (AXIS_LENGTH * ART_SCALE) as f32;
 /// The compass circle's radius: anywhere inside drags the view.
 const RADIUS: f32 = 49.5;
 
@@ -80,14 +78,20 @@ pub struct Compass {
     pub home_label: String,
 }
 
+/// Where a tip is drawn from the centre, for a direction posed on screen as `[right, down]`
+/// ([`ViewAxes::pose`]); a figure of the compass scales it.
+pub fn tip_offset([x, y]: [f64; 2]) -> egui::Vec2 {
+    vec2((x * AXIS_LENGTH * ART_SCALE) as f32, (y * AXIS_LENGTH * ART_SCALE) as f32)
+}
+
 /// The six signed axes as `axes` poses them around `c`, back to front so overlapping tips have
 /// one owner.
 pub fn tips(axes: &ViewAxes, c: Pos2) -> Vec<Tip> {
     let mut tips: Vec<Tip> = AXES
         .into_iter()
         .map(|(name, d)| {
-            let ([x, y], depth) = axes.pose(d);
-            (name, d, c + vec2((x * AXIS_LENGTH * ART_SCALE) as f32, (y * AXIS_LENGTH * ART_SCALE) as f32), depth)
+            let (screen, depth) = axes.pose(d);
+            (name, d, c + tip_offset(screen), depth)
         })
         .collect();
     tips.sort_by(|a, b| a.3.total_cmp(&b.3));

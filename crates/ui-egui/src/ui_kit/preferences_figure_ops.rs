@@ -350,7 +350,8 @@ pub(crate) fn paint_navigation_axes(p: &Painter, rect: Rect, axes: &[NavigatorAx
     let t = Tokens::get();
     let c = rect.center();
     p.circle(c, 46.0 * scale, t.overlay.gamma_multiply(0.35), Stroke::new(scale, t.border.gamma_multiply(0.75)));
-    let mut tips: Vec<_> = axes.iter().map(|axis| (axis, c + axis.screen * (crate::view_compass::TIP_REACH * scale))).collect();
+    let mut tips: Vec<_> =
+        axes.iter().map(|axis| (axis, c + crate::view_compass::tip_offset([f64::from(axis.screen.x), f64::from(axis.screen.y)]) * scale)).collect();
     tips.sort_by(|a, b| a.0.depth.total_cmp(&b.0.depth));
     for (index, (axis, at)) in tips.iter().enumerate() {
         if index == 3 {
