@@ -1995,6 +1995,27 @@ fn same_region(a: &Region2, b: &Region2, tol: f64) -> bool {
     a.holes.len() == b.holes.len() && same_loop(&a.outer, &b.outer) && a.holes.iter().all(|h| b.holes.iter().any(|g| same_loop(h, g)))
 }
 
+/// `s` starting at `p`, a point within a corner's tolerance of its start, its end kept: a line
+/// from `p`, an arc from `p`'s angle about its centre, a free-form segment from `p` as its first
+/// control point.
+fn started_at(s: Seg2, p: Vec2) -> Seg2 {
+    match s {
+        Seg2::Line { b, .. } => Seg2::Line { a: p, b },
+        Seg2::Arc { center, radius, start, sweep } => {
+            let turn = ((p - center).angle() - start + std::f64::consts::PI).rem_euclid(TAU) - std::f64::consts::PI;
+            Seg2::Arc { center, radius, start: start + turn, sweep: sweep - turn }
+        }
+        Seg2::Cubic { p1, p2, p3, .. } => Seg2::Cubic { p0: p, p1, p2, p3 },
+        Seg2::Conic { apex, b, w, .. } => Seg2::Conic { a: p, apex, b, w },
+        Seg2::Bezier { n, p: mut ctrl } => {
+            if let Some(c) = ctrl.first_mut() {
+                *c = p;
+            }
+            Seg2::Bezier { n, p: ctrl }
+        }
+    }
+}
+
 /// Union of regions that touch along shared boundary segments (one extrude of several adjacent
 /// profiles makes one body). Disjoint regions stay separate.
 pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
@@ -2003,7 +2024,10 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
     // with four such circles retried with the tool nudged and took fifty times as long.
     let distinct = without_repeats(regions);
     let regions = distinct.as_slice();
-    let tol = MERGE_TOL * 10.0;
+    // Curve ends this close are one corner of a profile, so two regions' copies of a boundary
+    // whose corners are that close are one shared boundary: a tangent touch splits into two
+    // corners a few hundredths of a micron apart, each region taking its own (#12612).
+    let tol = ENDPOINT_JOIN_TOL;
     // Every boundary segment oriented with the region on its left.
     let mut segs: Vec<Seg2> = Vec::new();
     for r in regions {
@@ -2056,21 +2080,29 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
         if used.get(start).copied().unwrap_or(true) {
             continue;
         }
-        let mut lp = Vec::new();
+        let mut lp: Vec<Seg2> = Vec::new();
         let mut cur = start;
+        // Where the segment taken last ends: the next starts there, so each corner closes
+        // exactly where two regions' corners were apart.
+        let mut corner: Option<Vec2> = None;
         for _ in 0..=rest.len() {
             if let Some(u) = used.get_mut(cur) {
                 *u = true;
             }
             let Some(seg) = rest.get(cur).copied() else { break };
+            let seg = corner.map_or(seg, |p| started_at(seg, p));
             lp.push(seg);
             let end = seg.end();
             if let Some(first) = rest.get(start)
                 && end.dist(first.start()) <= tol
                 && lp.len() > 1
             {
+                if let Some(first) = lp.first_mut() {
+                    *first = started_at(*first, end);
+                }
                 break;
             }
+            corner = Some(end);
             let back = (-seg.end_tangent()).angle();
             let next = (0..rest.len())
                 .filter(|k| !used.get(*k).copied().unwrap_or(true) && rest.get(*k).is_some_and(|s| s.start().dist(end) <= tol))
