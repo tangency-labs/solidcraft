@@ -4,13 +4,11 @@
 
 use std::collections::HashMap;
 
-use egui::vec2;
 use solidcraft_engine::Session;
 use solidcraft_engine::render::{Camera, StandardView};
 
 use crate::SolveApp;
-use crate::ui_kit::{self, FileView, RecoveryMessage};
-use solidcraft_theme::Tokens;
+use crate::start_page;
 
 /// Recent designs kept.
 pub const MAX_RECENT: usize = 12;
@@ -623,6 +621,10 @@ enum FileAction {
     Crashes,
     About,
     Recovery(solidcraft_engine::recovery::Entry, bool),
+    OpenRecent(String),
+    ForgetRecent(String),
+    ShowInFolder(String),
+    Sample(usize),
 }
 
 /// File view replaces the workspace while keeping the open design and its history intact.
@@ -672,7 +674,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             return;
         }
     }
-    let t = Tokens::get();
     let samples = solidcraft_engine::sample::samples();
     for i in 0..samples.len() {
         let key = format!("sample:{i}");
@@ -695,246 +696,177 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             want(&mut app.home, path);
         }
     }
-    let mut action = None;
-    FileView::page(ui, |ui| {
-        ui.add_enabled_ui(interactive, |ui| {
-            let full = ui.available_rect_before_wrap();
-            crate::scenario::publish_rect("home:page", full);
-            let narrow = full.width() < t.file_nav_width + FileView::tile_min_width() + t.file_content_inset_x * 2.0;
-            if narrow {
-                FileView::navigation(ui, |ui| {
-                    ui_kit::dropdown_menu(ui, "home_navigation", app.tr("ui.start_page"), |ui| {
-                        ui.set_min_width(t.file_nav_width);
-                        FileView::navigation(ui, |ui| {
-                            navigation(app, ui, &mut action);
-                            if action.is_some() {
-                                ui.close();
-                            }
-                        });
-                    });
-                });
-                content(app, ui, &mut action, true);
-            } else {
-                let rail = egui::Rect::from_min_size(full.min, vec2(t.file_nav_width, full.height()));
-                FileView::rail(ui, rail, |ui| {
-                    egui::ScrollArea::vertical().id_salt("home_navigation").auto_shrink([false, false]).show(ui, |ui| {
-                        navigation(app, ui, &mut action);
-                    });
-                });
-                let body = egui::Rect::from_min_max(egui::pos2(rail.right(), full.top()), full.max);
-                ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| content(app, ui, &mut action, false));
-            }
-        });
-    });
-    if let Some(action) = action {
+    let page = start_page::Page {
+        id: "home",
+        name: app.tr("ui.start_page").into(),
+        interactive,
+        back: start_page::Back {
+            template: app.tr("home.back").into(),
+            document: app.session.doc.name.as_str().into(),
+            shortcut: "Esc".into(),
+            chosen: FileAction::Back,
+        },
+        rail: rail(app),
+        title: match app.home.section {
+            Section::Start => app.tr_label("Start").into(),
+            Section::Recovery => app.tr_label("Recover").into(),
+            Section::Export => app.tr("home.export").into(),
+        },
+        hint: app
+            .tr(match app.home.section {
+                Section::Start => "home.start_hint",
+                Section::Recovery => "home.recovery_hint",
+                Section::Export => "home.export_hint",
+            })
+            .into(),
+        error: app.status.as_ref().filter(|(_, _, error)| *error).map(|(message, _, _)| message.as_str().into()),
+        body: match app.home.section {
+            Section::Start => start_page::Body::Start(start_body(app)),
+            Section::Recovery => start_page::Body::Reviews(recovery_body(app)),
+            Section::Export => start_page::Body::Tiles(export_tiles(app)),
+        },
+    };
+    if let Some(action) = start_page::show(ui, page) {
         dispatch(app, ui.ctx(), action);
     }
 }
 
-fn navigation(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>) {
+/// SolidCraft's rail: Start, New, Open, Recover; the design's own entries; the app's.
+fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
     let busy = app.file_picker_busy();
     let design = !crate::documents::active_is_blank(app);
-    let response = FileView::back_to(ui, "home:back", app.tr("home.back"), &app.session.doc.name, "Esc");
-    publish("home:back", &response);
-    if response.clicked() {
-        *action = Some(FileAction::Back);
-    }
     let primary = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl+" };
     let shift = if cfg!(target_os = "macos") { "⇧" } else { "Shift+" };
-    let recover = if app.recoverable.is_empty() {
-        app.tr_label("Recover").to_string()
+    let recover: start_page::Label<'_> = if app.recoverable.is_empty() {
+        app.tr_label("Recover").into()
     } else {
-        format!("{} ({})", app.tr_label("Recover"), app.recoverable.len())
+        format!("{} ({})", app.tr_label("Recover"), app.recoverable.len()).into()
     };
-    let nav = [
-        ("home:start", app.tr_label("Start"), String::new(), Some(Section::Start), true, FileAction::Section(Section::Start)),
-        ("home:new", app.tr_label("New"), format!("{primary}N"), None, true, FileAction::New("preferred")),
-        ("home:open", app.tr("ui.open"), format!("{primary}O"), None, true, FileAction::Open),
-        ("home:recover", recover.as_str(), String::new(), Some(Section::Recovery), true, FileAction::Section(Section::Recovery)),
-        ("home:save", app.tr("ui.save"), format!("{primary}S"), None, design, FileAction::Save),
-        ("home:save_as", app.tr("ui.save_as"), format!("{primary}{shift}S"), None, design, FileAction::SaveAs),
-        ("home:export", app.tr("home.export"), String::new(), Some(Section::Export), design, FileAction::Section(Section::Export)),
-        ("home:properties", app.tr("home.properties"), String::new(), None, design, FileAction::Properties),
-        ("home:settings", app.tr("home.settings"), format!("{primary},"), None, true, FileAction::Settings),
-        ("home:shortcuts", app.tr("home.shortcuts"), String::new(), None, true, FileAction::Shortcuts),
-        ("home:crashes", app.tr("home.crashes"), String::new(), None, true, FileAction::Crashes),
-        ("home:about", app.tr_label("About SolidCraft"), String::new(), None, true, FileAction::About),
+    let nav: [(&str, start_page::Label<'_>, String, Option<Section>, bool, FileAction); 12] = [
+        ("home:start", app.tr_label("Start").into(), String::new(), Some(Section::Start), true, FileAction::Section(Section::Start)),
+        ("home:new", app.tr_label("New").into(), format!("{primary}N"), None, true, FileAction::New("preferred")),
+        ("home:open", app.tr("ui.open").into(), format!("{primary}O"), None, true, FileAction::Open),
+        ("home:recover", recover, String::new(), Some(Section::Recovery), true, FileAction::Section(Section::Recovery)),
+        ("home:save", app.tr("ui.save").into(), format!("{primary}S"), None, design, FileAction::Save),
+        ("home:save_as", app.tr("ui.save_as").into(), format!("{primary}{shift}S"), None, design, FileAction::SaveAs),
+        ("home:export", app.tr("home.export").into(), String::new(), Some(Section::Export), design, FileAction::Section(Section::Export)),
+        ("home:properties", app.tr("home.properties").into(), String::new(), None, design, FileAction::Properties),
+        ("home:settings", app.tr("home.settings").into(), format!("{primary},"), None, true, FileAction::Settings),
+        ("home:shortcuts", app.tr("home.shortcuts").into(), String::new(), None, true, FileAction::Shortcuts),
+        ("home:crashes", app.tr("home.crashes").into(), String::new(), None, true, FileAction::Crashes),
+        ("home:about", app.tr_label("About SolidCraft").into(), String::new(), None, true, FileAction::About),
     ];
-    for (index, (id, label, key, section, enabled, picked)) in nav.into_iter().enumerate() {
+    let mut rail = Vec::with_capacity(nav.len() + 2);
+    for (index, (id, label, shortcut, section, enabled, chosen)) in nav.into_iter().enumerate() {
         if index == 4 || index == 8 {
-            FileView::separator(ui);
+            rail.push(start_page::RailItem::Separator);
         }
-        let response = FileView::nav_row(ui, id, label, &key, section == Some(app.home.section), enabled && !busy);
-        publish(id, &response);
-        if response.clicked() {
-            *action = Some(picked);
-        }
+        rail.push(start_page::RailItem::Entry(start_page::RailEntry {
+            id: id.into(),
+            label,
+            shortcut: shortcut.into(),
+            selected: section == Some(app.home.section),
+            enabled: enabled && !busy,
+            chosen,
+        }));
     }
+    rail
 }
 
-fn publish(id: &str, response: &egui::Response) {
-    crate::scenario::publish_handle(id, response.rect.center());
-    crate::scenario::publish_rect(id, response.rect);
-}
-
-fn content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>, narrow: bool) {
-    let t = Tokens::get();
-    FileView::content(ui, narrow, |ui| {
-        egui::ScrollArea::vertical().id_salt("home_content").auto_shrink([false, false]).show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            let (title, hint) = match app.home.section {
-                Section::Start => (app.tr_label("Start"), app.tr("home.start_hint")),
-                Section::Recovery => (app.tr_label("Recover"), app.tr("home.recovery_hint")),
-                Section::Export => (app.tr("home.export"), app.tr("home.export_hint")),
-            };
-            FileView::title(ui, title);
-            ui.add_space(t.space_6);
-            FileView::subtitle(ui, hint);
-            ui.add_space(t.file_section_gap);
-            if let Some((message, _, true)) = &app.status {
-                ui_kit::text(ui, message, ui_kit::Text::Error("home_status"));
-            }
-            match app.home.section {
-                Section::Start => start_content(app, ui, action),
-                Section::Recovery => recovery_content(app, ui, action),
-                Section::Export => export_content(app, ui, action),
-            }
-        });
-    });
-}
-
-fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>) {
-    let t = Tokens::get();
-    if let Some(entry) = app.recoverable.first().cloned() {
-        let title = solidcraft_ui_text::format("home.recovery_count", &[("count", &app.recoverable.len().to_string())]);
+fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
+    let banner = app.recoverable.first().map(|entry| {
         let filename = entry
             .path
             .as_deref()
             .and_then(|path| std::path::Path::new(path).file_name())
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| entry.name.clone());
-        let metadata = format!(" · {}", crate::recovery_ui::ago(entry.saved_at));
-        let (recover, discard) = FileView::recovery_banner(
-            ui,
-            "home:recovery",
-            RecoveryMessage { title: &title, before_filename: " · ", filename: &filename, after_filename: &metadata },
-            app.tr_label("Recover"),
-            (app.recoverable.len() == 1).then(|| app.tr_label("Discard")),
-        );
-        publish("home:recovery:recover", &recover);
-        if recover.clicked() {
-            *action =
-                Some(if app.recoverable.len() == 1 { FileAction::Recovery(entry.clone(), true) } else { FileAction::Section(Section::Recovery) });
+        let single = app.recoverable.len() == 1;
+        start_page::Banner {
+            title: solidcraft_ui_text::format("home.recovery_count", &[("count", &app.recoverable.len().to_string())]).into(),
+            before_filename: " · ".into(),
+            filename: filename.into(),
+            after_filename: format!(" · {}", crate::recovery_ui::ago(entry.saved_at)).into(),
+            recover: (
+                app.tr_label("Recover").into(),
+                if single { FileAction::Recovery(entry.clone(), true) } else { FileAction::Section(Section::Recovery) },
+            ),
+            discard: single.then(|| (app.tr_label("Discard").into(), FileAction::Recovery(entry.clone(), false))),
         }
-        if let Some(discard) = discard {
-            publish("home:recovery:discard", &discard);
-            if discard.clicked() {
-                *action = Some(FileAction::Recovery(entry, false));
-            }
-        }
-        ui.add_space(t.file_section_gap);
-    }
+    });
     let shortcut = if cfg!(target_os = "macos") { "⌘O" } else { "Ctrl+O" };
     let open_hint = solidcraft_ui_text::format("home.open_hint", &[("shortcut", shortcut)]);
     let tiles = [
-        ("home:new_mm", "new", app.tr("home.new_mm"), app.tr("home.new_mm_hint"), true),
-        ("home:new_inches", "new", app.tr("home.new_inches"), app.tr("home.new_inches_hint"), false),
-        ("home:open_tile", "open", app.tr("home.open"), open_hint.as_str(), false),
-        ("home:import", "import", app.tr("home.import"), app.tr("home.import_hint"), false),
-    ];
-    FileView::section(ui, app.tr_label("New"), t.space_12, |ui| {
-        FileView::grid(ui, "home_new", FileView::tile_min_width(), tiles.len(), |ui, index, width| {
-            let Some((id, icon, title, hint, primary)) = tiles.get(index) else { return };
-            let response = FileView::action_tile(ui, id, width, icon, title, hint, *primary);
-            publish(id, &response);
-            if response.clicked() {
-                *action = Some(match index {
-                    0 => FileAction::New("mm"),
-                    1 => FileAction::New("in"),
-                    2 => FileAction::Open,
-                    _ => FileAction::Import,
-                });
-            }
+        ("home:new_mm", "new", app.tr("home.new_mm"), start_page::Label::from(app.tr("home.new_mm_hint")), true, FileAction::New("mm")),
+        ("home:new_inches", "new", app.tr("home.new_inches"), app.tr("home.new_inches_hint").into(), false, FileAction::New("in")),
+        ("home:open_tile", "open", app.tr("home.open"), open_hint.into(), false, FileAction::Open),
+        ("home:import", "import", app.tr("home.import"), app.tr("home.import_hint").into(), false, FileAction::Import),
+    ]
+    .into_iter()
+    .map(|(id, icon, title, hint, primary, chosen)| start_page::Tile { id: id.into(), icon, title: title.into(), hint, primary, chosen })
+    .collect();
+    let recent = app.home.recent.iter().map(|path| recent_entry(app, path)).collect();
+    let samples = solidcraft_engine::sample::samples()
+        .iter()
+        .enumerate()
+        .map(|(index, sample)| start_page::Sample {
+            title: app.tr_label(sample.name).into(),
+            description: (if app.home.wanted == Some(index) { app.tr("home.opening") } else { app.tr_label(sample.about) }).into(),
+            icon: "box",
+            thumbnail: texture(app.home.thumbs.get(&format!("sample:{index}")).and_then(Option::as_ref)),
+            chosen: FileAction::Sample(index),
+        })
+        .collect();
+    start_page::Start {
+        banner,
+        actions_title: app.tr_label("New").into(),
+        actions: start_page::Tiles { grid: "home_new", tiles },
+        recent_title: app.tr("home.recent").into(),
+        recent_empty: app.tr("home.recent_empty").into(),
+        recent,
+        samples_title: app.tr("home.samples").into(),
+        samples,
+    }
+}
+
+fn recent_entry<'a>(app: &'a SolveApp, path: &str) -> start_page::Recent<'a, FileAction> {
+    // Keep the extension so plate.step and plate.stl are not both "plate" (#9081).
+    let title = std::path::Path::new(path).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_owned());
+    let missing = !available(app, path);
+    let when = if app.session.path.as_deref() == Some(path) { app.tr("home.open_now").to_string() } else { recent_time(app, path) };
+    let shown_path: start_page::Label<'a> = if missing {
+        format!("{} · {}", app.tr("home.missing"), friendly_path(path)).into()
+    } else if path.starts_with("/disk/") {
+        app.tr_label("On your computer").into()
+    } else if path.starts_with("/opfs/") {
+        app.tr("home.in_this_browser").into()
+    } else {
+        friendly_path(path).into()
+    };
+    let mut menu = vec![start_page::MenuEntry {
+        label: app.tr_label("Remove from list").into(),
+        icon: "delete",
+        chosen: FileAction::ForgetRecent(path.to_owned()),
+    }];
+    if !cfg!(target_arch = "wasm32") {
+        menu.push(start_page::MenuEntry {
+            label: app.tr_label("Show in folder").into(),
+            icon: "folder",
+            chosen: FileAction::ShowInFolder(path.to_owned()),
         });
-    });
-    ui.add_space(t.file_section_gap);
-    FileView::section(ui, app.tr("home.recent"), t.space_10, |ui| {
-        if app.home.recent.is_empty() {
-            FileView::detail(ui, app.tr("home.recent_empty"));
-        }
-        if !app.home.recent.is_empty() {
-            FileView::recent_list(ui, |ui| {
-                for (index, path) in app.home.recent.clone().iter().enumerate() {
-                    // Keep the extension so plate.step and plate.stl are not both "plate" (#9081).
-                    let name = std::path::Path::new(path).file_name().map(|name| name.to_string_lossy()).unwrap_or_else(|| path.as_str().into());
-                    let missing = !available(app, path);
-                    let when = if app.session.path.as_ref() == Some(path) { app.tr("home.open_now").to_string() } else { recent_time(app, path) };
-                    let shown_path = if missing {
-                        format!("{} · {}", app.tr("home.missing"), friendly_path(path))
-                    } else if path.starts_with("/disk/") {
-                        app.tr_label("On your computer").to_string()
-                    } else if path.starts_with("/opfs/") {
-                        app.tr("home.in_this_browser").to_string()
-                    } else {
-                        friendly_path(path)
-                    };
-                    let kind = recent_kind(app, path);
-                    let response = FileView::recent_row(
-                        ui,
-                        &format!("home:recent:{index}"),
-                        ui_kit::RecentRow {
-                            title: &name,
-                            path: &shown_path,
-                            when: &when,
-                            workspace: &kind,
-                            thumbnail: texture(app.home.thumbs.get(path).and_then(Option::as_ref)),
-                            // A design whose picture could not be made shows a dimmed placeholder,
-                            // distinct from the one shown while a picture is still loading (#4655).
-                            thumbnail_failed: app.home.thumb_failed(path),
-                        },
-                    );
-                    publish(&format!("home:recent:{index}"), &response);
-                    ui_kit::Menu::context(&response, |ui| {
-                        if crate::context_menu::button(ui, app.tr_label("Remove from list"), "delete").clicked() {
-                            app.home.forget(path);
-                            ui.close();
-                        }
-                        if !cfg!(target_arch = "wasm32") && crate::context_menu::button(ui, app.tr_label("Show in folder"), "folder").clicked() {
-                            if let Some(show) = &app.services.show_in_folder {
-                                show(path);
-                            }
-                            ui.close();
-                        }
-                    });
-                    if response.clicked() {
-                        open_recent(app, path);
-                    }
-                }
-            });
-        }
-    });
-    ui.add_space(t.file_section_gap);
-    FileView::section(ui, app.tr("home.samples"), t.space_10, |ui| {
-        let samples: Vec<_> = solidcraft_engine::sample::samples()
-            .iter()
-            .enumerate()
-            .map(|(index, sample)| {
-                let hint = if app.home.wanted == Some(index) { app.tr("home.opening") } else { app.tr_label(sample.about) };
-                ui_kit::SampleCard {
-                    title: app.tr_label(sample.name),
-                    description: hint,
-                    icon: "box",
-                    thumbnail: texture(app.home.thumbs.get(&format!("sample:{index}")).and_then(Option::as_ref)),
-                }
-            })
-            .collect();
-        for (index, response) in FileView::sample_grid(ui, "home:sample", &samples).into_iter().enumerate() {
-            publish(&format!("home:sample:{index}"), &response);
-            if response.clicked() {
-                open_sample(app, index);
-            }
-        }
-    });
+    }
+    start_page::Recent {
+        title: title.into(),
+        path: shown_path,
+        when: when.into(),
+        kind: recent_kind(app, path).into(),
+        thumbnail: texture(app.home.thumbs.get(path).and_then(Option::as_ref)),
+        // A design whose picture could not be made shows a dimmed placeholder, distinct from the
+        // one shown while a picture is still loading (#4655).
+        thumbnail_failed: app.home.thumb_failed(path),
+        chosen: FileAction::OpenRecent(path.to_owned()),
+        menu,
+    }
 }
 
 fn texture(texture: Option<&egui::TextureHandle>) -> Option<(egui::TextureId, egui::Vec2)> {
@@ -1007,62 +939,54 @@ fn recent_time_at(app: &SolveApp, time: u64, now: u64) -> String {
     solidcraft_ui_text::format(key, &[("count", &count.to_string())])
 }
 
-fn recovery_content(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>) {
-    if app.recoverable.is_empty() {
-        ui_kit::text(ui, app.tr("home.recovery_empty"), ui_kit::Text::Inline);
-    }
-    for (index, entry) in app.recoverable.iter().take(20).enumerate() {
-        let detail = solidcraft_ui_text::format(
-            "recovery.detail",
-            &[
-                ("file", entry.path.as_deref().unwrap_or(app.tr("recovery.never_saved"))),
-                ("features", &entry.features.to_string()),
-                ("when", &crate::recovery_ui::ago(entry.saved_at)),
-            ],
-        );
-        let (recover, discard) =
-            FileView::recovery_review(ui, &format!("home:recovery:{index}"), &entry.name, &detail, app.tr_label("Recover"), app.tr_label("Discard"));
-        for (id, response, recover) in [("recover", Some(recover), true), ("discard", discard, false)] {
-            let Some(response) = response else { continue };
-            publish(&format!("home:recovery:{index}:{id}"), &response);
-            if response.clicked() {
-                *action = Some(FileAction::Recovery(entry.clone(), recover));
-            }
-        }
-        ui.add_space(Tokens::get().space_12);
-    }
+fn recovery_body(app: &SolveApp) -> start_page::Reviews<'_, FileAction> {
+    let items = app
+        .recoverable
+        .iter()
+        .take(20)
+        .map(|entry| start_page::Review {
+            title: entry.name.as_str().into(),
+            detail: solidcraft_ui_text::format(
+                "recovery.detail",
+                &[
+                    ("file", entry.path.as_deref().unwrap_or(app.tr("recovery.never_saved"))),
+                    ("features", &entry.features.to_string()),
+                    ("when", &crate::recovery_ui::ago(entry.saved_at)),
+                ],
+            )
+            .into(),
+            recover: (app.tr_label("Recover").into(), FileAction::Recovery(entry.clone(), true)),
+            discard: (app.tr_label("Discard").into(), FileAction::Recovery(entry.clone(), false)),
+        })
+        .collect();
+    start_page::Reviews { empty: app.tr("home.recovery_empty").into(), items }
 }
 
-fn export_content(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>) {
+fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
     let formats = [
-        ("step", "STEP", Some("home.export_step_hint")),
-        ("mesh", "Mesh", Some("home.export_mesh_hint")),
-        ("view_dxf", "DXF", None),
-        ("obj", "OBJ", None),
-        ("urdf", "URDF", None),
-        ("json", "JSON", Some("home.export_json_hint")),
+        ("step", "STEP", Some("home.export_step_hint"), FileAction::Export("step")),
+        ("mesh", "Mesh", Some("home.export_mesh_hint"), FileAction::Mesh),
+        ("view_dxf", "DXF", None, FileAction::ViewDxf),
+        ("obj", "OBJ", None, FileAction::Export("obj")),
+        ("urdf", "URDF", None, FileAction::Export("urdf")),
+        ("json", "JSON", Some("home.export_json_hint"), FileAction::Export("json")),
     ];
-    FileView::grid(ui, "home_exports", FileView::tile_min_width(), formats.len(), |ui, index, width| {
-        let Some((id, format, hint)) = formats.get(index) else { return };
-        let label = if *id == "view_dxf" {
-            app.tr_label("Export Current View as DXF…").to_string()
-        } else {
-            format!("{} {}…", app.tr("home.export"), app.tr_label(format))
-        };
-        let subtitle = hint.map(|key| app.tr(key)).unwrap_or(format);
-        let response = FileView::action_tile(ui, &format!("home:export:{id}"), width, "export", &label, subtitle, false);
-        publish(&format!("home:export:{id}"), &response);
-        if response.clicked() {
-            *action = Some(match *id {
-                "step" => FileAction::Export("step"),
-                "mesh" => FileAction::Mesh,
-                "view_dxf" => FileAction::ViewDxf,
-                "obj" => FileAction::Export("obj"),
-                "urdf" => FileAction::Export("urdf"),
-                _ => FileAction::Export("json"),
-            });
-        }
-    });
+    let tiles = formats
+        .into_iter()
+        .map(|(id, format, hint, chosen)| start_page::Tile {
+            id: format!("home:export:{id}").into(),
+            icon: "export",
+            title: if id == "view_dxf" {
+                app.tr_label("Export Current View as DXF…").into()
+            } else {
+                format!("{} {}…", app.tr("home.export"), app.tr_label(format)).into()
+            },
+            hint: hint.map_or(format, |key| app.tr(key)).into(),
+            primary: false,
+            chosen,
+        })
+        .collect();
+    start_page::Tiles { grid: "home_exports", tiles }
 }
 
 fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
@@ -1127,6 +1051,14 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
         FileAction::Crashes => crate::help::run(app, ctx, "crashes"),
         FileAction::About => crate::help::run(app, ctx, "about"),
         FileAction::Recovery(entry, recover) => crate::recovery_ui::apply(app, entry, recover),
+        FileAction::OpenRecent(path) => open_recent(app, &path),
+        FileAction::ForgetRecent(path) => app.home.forget(&path),
+        FileAction::ShowInFolder(path) => {
+            if let Some(show) = &app.services.show_in_folder {
+                show(&path);
+            }
+        }
+        FileAction::Sample(index) => open_sample(app, index),
     }
 }
 
