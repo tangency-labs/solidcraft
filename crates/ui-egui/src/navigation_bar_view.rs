@@ -358,6 +358,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let action = nav_bar::show(ui, &bar, |id| menu(app, id));
     if let Some(action) = action {
         run(app, action);
+        // Rows of a menu that stays open show the new state on the next frame, without new input.
+        ui.ctx().request_repaint();
     }
 }
 
