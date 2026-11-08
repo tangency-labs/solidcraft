@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "cmd.gear_insert": "إدراج ترس",
+    "help.gear.insert": "يدرج ترسًا أسطوانيًا خارجيًا بمنحنى ملتف كمكوّن جديد. تحدد المقياس وعدد الأسنان وزاوية الضغط وعرض السن، فتُرسم الأسنان وتُسحب كأي ميزة أخرى."
+  },
+  "de": {
+    "cmd.gear_insert": "Zahnrad einfügen",
+    "help.gear.insert": "Fügt ein außenverzahntes Evolventen-Stirnrad als neues Bauteil ein. Sie geben Modul, Zähnezahl, Eingriffswinkel und Zahnbreite an; der Zahnkranz entsteht als Skizze und wird extrudiert."
+  },
+  "en": {
+    "cmd.gear_insert": "Insert Gear",
+    "help.gear.insert": "Inserts an external involute spur gear as a new component. You give the module, tooth count, pressure angle and face width; the teeth are sketched and extruded like any other feature."
+  },
+  "he": {
+    "cmd.gear_insert": "הוספת גלגל שיניים",
+    "help.gear.insert": "מוסיף גלגל שיניים ישרות חיצוני בעל פרופיל אבולוטי כרכיב חדש. מזינים מודול, מספר שיניים, זווית לחץ ורוחב שן; השיניים משורטטות ונשלפות כמו כל תכונה אחרת."
+  },
+  "ja": {
+    "cmd.gear_insert": "歯車を挿入",
+    "help.gear.insert": "外歯のインボリュート平歯車を新しいコンポーネントとして挿入します。モジュール、歯数、圧力角、歯幅を指定すると、歯形がスケッチされ、ほかのフィーチャーと同じように押し出されます。"
+  },
+  "ko": {
+    "cmd.gear_insert": "기어 삽입",
+    "help.gear.insert": "외접 인벌루트 평기어를 새 컴포넌트로 삽입합니다. 모듈, 잇수, 압력각, 이 너비를 지정하면 잇날이 스케치되어 다른 피처처럼 돌출됩니다."
+  },
+  "vi": {
+    "cmd.gear_insert": "Chèn bánh răng",
+    "help.gear.insert": "Chèn bánh răng trụ răng thẳng ăn khớp ngoài, biên dạng thân khai, thành một thành phần mới. Bạn nhập mô-đun, số răng, góc áp lực và bề rộng răng; răng được phác thảo rồi kéo đùn như mọi tính năng khác."
+  },
+  "zh": {
+    "cmd.gear_insert": "插入齿轮",
+    "help.gear.insert": "将外啮合渐开线直齿轮作为新零部件插入。指定模数、齿数、压力角和齿宽后，齿形会被草绘并像其他特征一样拉伸。"
+  }
+}

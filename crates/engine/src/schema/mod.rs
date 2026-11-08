@@ -68,6 +68,7 @@ pub mod diagnostics;
 pub mod edit;
 pub mod features;
 pub mod file;
+pub mod gears;
 pub mod inspect;
 pub mod joints;
 pub mod libraries;
