@@ -909,7 +909,9 @@ fn body(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
 
 fn content(app: &mut SolveApp, ui: &mut egui::Ui) {
     #[cfg(not(target_arch = "wasm32"))]
-    ui_kit::assistant_controls(ui, |ui| switcher(app, ui));
+    if !crate::panel_runtime::shared_content_measurement(ui.ctx()) {
+        ui_kit::assistant_controls(ui, |ui| switcher(app, ui));
+    }
     #[cfg(target_arch = "wasm32")]
     {
         ui.label(tr("ui.agent_chat_desktop_only"));
@@ -944,8 +946,8 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
     }
-    // Discovery/install guidance must leave room for the pinned composer even when
-    // several agents are listed, or when a long message grows the editor.
+    // Shared top controls must yield scroll space to the pinned composer, including
+    // when discovery lists several agents or a long message grows the editor.
     let picker_max = if shared {
         let t = Tokens::get();
         let composer = crate::panel_runtime::shared_content_composer_height(ui.ctx())
@@ -959,8 +961,16 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         .min_scrolled_height(0.0)
         .max_height(picker_max)
         .auto_shrink([false, true])
-        .show(ui, |ui| picker(app, ui));
-    if state == State::NeedsAuth {
+        .show(ui, |ui| {
+            if shared {
+                ui_kit::assistant_controls(ui, |ui| switcher(app, ui));
+            }
+            picker(app, ui);
+            if shared && state == State::NeedsAuth {
+                inset(ui, |ui| auth_box(app, ui));
+            }
+        });
+    if !shared && state == State::NeedsAuth {
         inset(ui, |ui| auth_box(app, ui));
     }
     let top_height = ui.cursor().top() - top - picker.inner_rect.height().min(picker.content_size.y) + picker.content_size.y;
