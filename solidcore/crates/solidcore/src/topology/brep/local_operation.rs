@@ -31,12 +31,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::offset::OffsetFailure;
 use crate::error::{EntityRef, Failure, Result, SolidError};
-use crate::geom::attribute::ObjectKey;
+use crate::geom::attribute::{Attribute, Behavior, ObjectKey};
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::knots::Side;
+use crate::offset::offset_executive::clearance::{self, KeptEdge, MovedFace};
 use crate::offset::offset_executive::p1::{OffsetExecutive, OffsetOperation};
 use crate::offset::offset_executive::p2::OffsetNotifications;
 use crate::query::brep::{calculate_bounding_box, BoundingBoxOptions};
@@ -254,6 +256,17 @@ fn local_operation_on(
     // extend/intersect to fill new convex edge gaps rather than adding a fillet
     executive.set_extend_convex_edges(true);
 
+    // (not upstream) each moved face carries a private mark through the operation, as a
+    // caller's mark does (`Behavior::Copy`, found on the result's faces below): the
+    // faces of the result that lie where the operation moved, with their trimmed regions,
+    // are what the kept edges must stay clear of (`refuse_kept_edges_not_clear`)
+    for &face in &moved {
+        b.add_attribute(
+            EntityRef::Face(face),
+            Attribute::long(MOVED_FACE_MARK, 1, Behavior::Copy),
+        )?;
+    }
+
     // (not upstream) `b`'s own attributes go to the offset under the original
     // identities, as upstream's live on the faces it copies (`SM_NO_COPY` of each
     // source face); the caller's store does not keep them afterwards
@@ -272,6 +285,11 @@ fn local_operation_on(
     // whose status is then `SM_ERR`) the offset's error is the operation's, with its own
     // status and reason, as the reach's and the final gate's refusals are
     let offset = executive.do_extended_offset(k, Some(&mut *b), notifications);
+    // the edges it kept, as they were on `b` (the faces of `b` go with `move_faces`)
+    let kept = match &offset {
+        Ok(_) => executive.kept_edge_curves(b),
+        Err(_) => Ok(Vec::new()),
+    };
     drop(executive);
     let new_brep = offset.and_then(|mut new_brep| {
         // the offset B-rep's objects carry what the offset gave them
@@ -288,6 +306,7 @@ fn local_operation_on(
             .retain_rekeyed(&|key| (!seeded.contains(&key)).then_some(key))?;
     }
     let mut new_brep = new_brep?;
+    let kept = kept?;
 
     // remove all faces from this Brep, then move all faces of the new Brep into it
     // (`CopyFaces` with a merge, which also grows this Brep's tolerance to the new one's);
@@ -300,7 +319,81 @@ fn local_operation_on(
     // (not upstream: the port's cached topology fields, true again for the caller)
     b.refresh_cached_topology();
     moved?;
+    refuse_kept_edges_not_clear(k, b, &kept)?;
     refuse_unsound(k, b, &input)
+}
+
+/// The id of the private mark the moved faces carry through a local operation (below the
+/// application range, which starts above 10000).
+const MOVED_FACE_MARK: u64 = 9_999;
+
+/// (not upstream) The kept edges are proved clear of the faces the operation moved, or the
+/// operation is refused ([`Unsoundness::KeptEdgeNotClear`](crate::error::offset::Unsoundness)),
+/// the input as it came in.
+///
+/// The body's check has no face-face intersection test, so a face that crosses an edge
+/// the operation kept (an edge whose faces and vertices' faces all keep their surfaces: the
+/// executive does not intersect it again) leaves a self-intersecting body it cannot see. The
+/// certified bound (issue #2971): over the whole curve of each kept edge, a ball enclosure
+/// of each cell, rounding counted, and a surface distance lower bound to the part of each
+/// moved face's surface over the box of its trim curves in its parameters
+/// ([`clearance::all_clear`], `surface_distance_lower_bound`), must exceed the sum of the
+/// edge's and the face's tolerances. A moved face is found by its mark on the result; its
+/// trimmed region is the surface's part over its loops' boxes (the whole surface when a
+/// loop has none), not the surface's extension, which a plane's net makes wider than any
+/// part. No edge is intersected again: an edge not proved clear refuses the operation.
+fn refuse_kept_edges_not_clear(k: &mut Kernel, b: &mut Brep, kept: &[KeptEdge]) -> Result<()> {
+    use crate::error::offset::Unsoundness;
+    use crate::topology::loopuse;
+    // the marks come off the result whatever follows
+    let mut moved_faces = Vec::new();
+    for face in bp1::faces(b, None)? {
+        let handles: Vec<_> = b
+            .entity_attributes(EntityRef::Face(face))
+            .into_iter()
+            .filter(|(_, a)| a.attribute_id() == MOVED_FACE_MARK)
+            .map(|(h, _)| h)
+            .collect();
+        for h in &handles {
+            b.remove_attribute(EntityRef::Face(face), *h)?;
+        }
+        if !handles.is_empty() {
+            moved_faces.push(face);
+        }
+    }
+    if kept.is_empty() || moved_faces.is_empty() {
+        return Ok(());
+    }
+    // (the trim curves a face lacks are made on a private copy)
+    let mut copy = b.clone_standing_for_self()?;
+    let mut faces = Vec::new();
+    for face in moved_faces {
+        let surface = face_ops::surface(&copy, face)?.ok_or_else(null)?.clone();
+        let mut uv_box: Option<Extent2d> = None;
+        for l in face_ops::loops(&copy, face, false, None)? {
+            let Some(span) = loopuse::loop_uv_span(k, &mut copy, l)? else {
+                uv_box = None;
+                break;
+            };
+            uv_box = Some(uv_box.map_or(span, |u| u.union(&span)));
+        }
+        faces.push(MovedFace {
+            surface,
+            uv_box,
+            tolerance: copy.face(face)?.tolerance.max(copy.tolerance()),
+        });
+    }
+    if clearance::all_clear(k, kept, &faces)? {
+        Ok(())
+    } else {
+        Err(Failure::new(
+            OP,
+            OffsetFailure::Unsound {
+                what: Unsoundness::KeptEdgeNotClear,
+            },
+        )
+        .into_error())
+    }
 }
 
 /// (not upstream) The local operation's final gate: the body it built is refused when it
@@ -586,7 +679,7 @@ fn seam_gap(
     k: &Kernel,
     surface: &Surface,
     in_u: bool,
-    domain: &crate::geom::extent2d::Extent2d,
+    domain: &Extent2d,
 ) -> Result<Option<crate::geom::certified::Bounded>> {
     use crate::geom::certified::{distance, gamma, Bounded};
     use crate::geom::vector3d::Point3;
@@ -698,7 +791,7 @@ fn cone_seam_gap(
     surface: &Surface,
     cone: &crate::surface::cone::Cone,
     in_u: bool,
-    domain: &crate::geom::extent2d::Extent2d,
+    domain: &Extent2d,
 ) -> Result<Option<crate::geom::certified::Bounded>> {
     use crate::geom::certified::{distance, gamma, Bounded};
     use crate::geom::vector2d::Point2;
@@ -1290,14 +1383,12 @@ mod tests {
     /// Issue 2976: the top of a 2 x 2 x 2 box becomes the plane z = x + y - 1. It cuts the
     /// bottom edges y = 0 and x = 0 at (1, 0, 0) and (0, 1, 0), away from their vertices;
     /// every face at those vertices is the bottom or a side, never the top, so the
-    /// vertex-neighbourhood rule alone kept both crossed edges whole through the cut-off
-    /// corner (`OffsetExecutive::keep_unmoved_edges` now keeps an edge only when
-    /// `clearance::separated` proves it clear of the moved surface; see the unit test
-    /// there for the edges kept). The corner (0, 0, 0) lies above the plane, and the
-    /// vertical edge above it meets the plane's line only at (0, 0, -1), outside the edge:
-    /// the corner's sound solid needs that edge to vanish, which the extended offset does
-    /// not build. The operation therefore refuses the body, and `b` stays as it came in;
-    /// it never returns it with a crossed edge kept.
+    /// vertex-neighbourhood rule keeps both crossed edges whole through the cut-off corner
+    /// (the check of the kept edges, `refuse_kept_edges_not_clear`, is tested on its own
+    /// below). The corner (0, 0, 0) lies above the plane, and the vertical edge above it
+    /// meets the plane's line only at (0, 0, -1), outside the edge: the corner's sound
+    /// solid needs that edge to vanish, which the extended offset does not build. The
+    /// operation therefore refuses the body, and `b` stays as it came in.
     #[test]
     fn a_tilted_top_that_crosses_unmoved_edges_is_refused_not_returned_with_them_kept() {
         let mut k = Kernel::default();
@@ -1325,6 +1416,68 @@ mod tests {
         );
         let (volume, manifold) = volume_and_manifold(&k, &mut b);
         assert!(manifold && (volume - 8.0).abs() <= 1e-9 * 8.0, "{volume}");
+    }
+
+    /// The check of the kept edges against the faces moved (issue #2976, certified bound
+    /// #2971), on a 2-cube whose top carries the moved mark: a kept edge that goes through
+    /// the top's trimmed region refuses the operation (`KeptEdgeNotClear`), one far beside
+    /// it does not, and the marks are off the body after either. (That the face's trimmed
+    /// region, not its surface's whole net, is what is tested:
+    /// `clearance::tests::only_the_trimmed_region_of_a_surface_is_tested`, on a plane whose
+    /// net is far wider than the face, and the goldens cases whose planes cross other
+    /// solids' edges.)
+    #[test]
+    fn a_kept_edge_through_a_moved_face_refuses_and_one_beside_it_does_not() {
+        use crate::curve::curve::Curve;
+        use crate::curve::line::Line;
+        use crate::error::offset::Unsoundness;
+        use crate::geom::extent1d::Extent1d;
+        let kept_through = |x: f64, y: f64| KeptEdge {
+            curve: Curve::from(Line::from_points(
+                Point3::new(x, y, 1.0),
+                Point3::new(x, y, 3.0),
+                3,
+            )),
+            interval: Extent1d::from_min_max(0.0, 1.0),
+            tolerance: 1e-5,
+        };
+        for (x, y, refused) in [(1.0, 1.0, true), (50.0, 50.0, false)] {
+            let mut k = Kernel::default();
+            let mut b = create_box(&mut k, Point3::ZERO, 2.0, 2.0, 2.0).unwrap();
+            let top = bp1::faces(&b, None)
+                .unwrap()
+                .into_iter()
+                .find(|&f| {
+                    let s = face_ops::surface(&b, f).unwrap().unwrap();
+                    let uv = s
+                        .natural_uv_domain_with_nurb(&k)
+                        .unwrap()
+                        .evaluate(0.5, 0.5);
+                    (s.evaluate_point(&k, uv).unwrap().z - 2.0).abs() < 1e-9
+                })
+                .unwrap();
+            b.add_attribute(
+                EntityRef::Face(top),
+                Attribute::long(MOVED_FACE_MARK, 1, Behavior::Copy),
+            )
+            .unwrap();
+            let r = refuse_kept_edges_not_clear(&mut k, &mut b, &[kept_through(x, y)]);
+            if refused {
+                let e = r.unwrap_err();
+                assert!(
+                    matches!(
+                        e.failure().map(|f| &f.reason),
+                        Some(crate::error::Reason::Offset(OffsetFailure::Unsound {
+                            what: Unsoundness::KeptEdgeNotClear
+                        }))
+                    ),
+                    "{e}"
+                );
+            } else {
+                r.unwrap();
+            }
+            assert!(b.entity_attributes(EntityRef::Face(top)).is_empty());
+        }
     }
 
     #[test]

@@ -11,7 +11,7 @@
 
 mod attributes;
 mod cavity;
-mod clearance;
+pub(crate) mod clearance;
 mod crossing_loops;
 mod edgeuse;
 mod face;

@@ -1,16 +1,22 @@
-//! Not upstream: proving that a local operation may keep an edge clear of a moved surface.
+//! Not upstream: proving that the edges a local operation kept are clear of the faces it
+//! moved.
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`separated`] | none |
+//! | [`separated`], [`all_clear`] | none |
 //!
-//! A curve interval is enclosed by rounded interval evaluation, then by a ball B(c,r).
+//! What is tested (issue #2971's certified bound): a kept edge's whole curve against the
+//! trimmed domain of each moved result face, the surface restricted to the box of the
+//! face's trim curves in its parameters (`surface_distance_lower_bound`'s `uv_box`), never
+//! the surface's whole extension: a plane's net is hundreds of thousands of units wide and
+//! crosses edges of solids the face never reaches. A curve interval is enclosed by rounded interval evaluation, then by a ball B(c,r).
 //! Distance to a set is 1-Lipschitz: d(C,S) >= d(c,S) - r. The surface distance is the
 //! existing certified bound (positive-weight Bernstein hulls, including the definition's
 //! deviation and arithmetic rounding), not a projection or a sample. Thus every accepted
 //! cell proves all its curve points clear, including between evaluated parameters.
 //!
-//! Deviations: no recursion; at most 127 curve cells and six halvings per branch. A kind
+//! Deviations: no recursion; at most 255 curve cells and twelve halvings per branch (a cell is split only while its
+//! ball is not proved clear, so the cells gather where the curve passes near the face). A kind
 //! without an enclosure, a nonfinite enclosure, or an exhausted budget proves nothing.
 //! NURBS degree is at most 18 here: the factorials in `curve_derivs_over` are then exact
 //! binary64 integers. Lines are evaluated on their definition, not a rounded fitted form.
@@ -20,6 +26,7 @@ use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::math::Point3;
 use crate::nurbs::math::{NOW, NOZ};
@@ -28,8 +35,51 @@ use crate::surface::surface::Surface;
 use crate::{Result, SolidError};
 
 const OP: &str = "offset::offset_executive::clearance";
-const MAX_DEPTH: usize = 6;
-const MAX_CELLS: usize = 127;
+
+/// An edge a local operation kept as it was: its curve over its interval, and the
+/// tolerance (its own, at least the body's) it must stay clear within.
+#[derive(Debug, Clone)]
+pub(crate) struct KeptEdge {
+    pub(crate) curve: Curve,
+    pub(crate) interval: Extent1d,
+    pub(crate) tolerance: f64,
+}
+
+/// A face a local operation moved, as the result has it: its surface, the box of its trim
+/// curves in the surface's parameters (`None` when a trim curve has no box: the whole
+/// surface is then tested), and its tolerance (at least the body's).
+#[derive(Debug, Clone)]
+pub(crate) struct MovedFace {
+    pub(crate) surface: Surface,
+    pub(crate) uv_box: Option<Extent2d>,
+    pub(crate) tolerance: f64,
+}
+
+/// Every kept edge is proved clear of every moved face by more than their summed
+/// tolerances (rounded up). `false` means some pair is unproved, not necessarily crossing.
+///
+/// # Errors
+/// Cancellation.
+pub(crate) fn all_clear(kernel: &Kernel, kept: &[KeptEdge], moved: &[MovedFace]) -> Result<bool> {
+    for edge in kept {
+        for face in moved {
+            let tolerance = (Ivl::from(edge.tolerance) + Ivl::from(face.tolerance)).hi;
+            if !separated(
+                kernel,
+                &edge.curve,
+                &edge.interval,
+                &face.surface,
+                face.uv_box.as_ref(),
+                tolerance,
+            )? {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+const MAX_DEPTH: usize = 12;
+const MAX_CELLS: usize = 255;
 
 enum EnclosedCurve<'a> {
     Line(&'a Line),
@@ -122,7 +172,7 @@ impl<'a> EnclosedCurve<'a> {
 }
 
 /// Every point of `curve` over `interval` is proved farther than `tolerance` from the
-/// whole finite image of `surface` (the caller supplies the moved surface's extension).
+/// part of `surface` over `uv_box` (the whole finite image when `None`).
 /// `false` means unproved, not necessarily intersecting. No curve or surface samples can
 /// make this return true.
 ///
@@ -134,6 +184,7 @@ pub(super) fn separated(
     curve: &Curve,
     interval: &Extent1d,
     surface: &Surface,
+    uv_box: Option<&Extent2d>,
     tolerance: f64,
 ) -> Result<bool> {
     let Some(curve) = EnclosedCurve::of(curve) else {
@@ -179,7 +230,7 @@ pub(super) fn separated(
         let lower = match surface_distance_lower_bound(
             kernel,
             surface,
-            None,
+            uv_box,
             Point3::new(cx, cy, cz),
             want,
         ) {
@@ -206,7 +257,7 @@ pub(super) fn separated(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::math::Vec3;
+    use crate::math::{Point2, Vec3};
     use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::surface::offset_surface::OffsetSurface;
@@ -235,7 +286,7 @@ mod tests {
                 .unwrap(),
             ),
         ] {
-            assert!(separated(&k, &curve, &interval, &floor(), 0.01).unwrap());
+            assert!(separated(&k, &curve, &interval, &floor(), None, 0.01).unwrap());
         }
     }
 
@@ -254,7 +305,7 @@ mod tests {
                 Point3::new(1.0, 0.0, b),
                 3,
             ));
-            assert!(!separated(&k, &curve, &interval, &floor(), tolerance).unwrap());
+            assert!(!separated(&k, &curve, &interval, &floor(), None, tolerance).unwrap());
         }
     }
 
@@ -285,6 +336,7 @@ mod tests {
             &curve,
             &Extent1d::from_min_max(0.0, 1.0),
             &floor(),
+            None,
             0.01,
         )
         .unwrap());
@@ -293,9 +345,35 @@ mod tests {
             &curve,
             &Extent1d::from_min_max(0.0, 0.03125),
             &floor(),
+            None,
             0.01,
         )
         .unwrap());
+    }
+
+    /// An edge through the plane far outside the face's parameter box is clear of the face
+    /// (the plane's net is far wider than any face on it), and an edge through the plane
+    /// inside the box is not. Tested over the whole surface instead, the far edge would
+    /// be reported crossed.
+    #[test]
+    fn only_the_trimmed_region_of_a_surface_is_tested() {
+        let k = Kernel::default();
+        let plane = floor();
+        let vertical_through = |u: f64, v: f64| {
+            let p = plane.evaluate_point(&k, Point2::new(u, v)).unwrap();
+            Curve::from(Line::from_points(
+                Point3::new(p.x, p.y, p.z - 1.0),
+                Point3::new(p.x, p.y, p.z + 1.0),
+                3,
+            ))
+        };
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let face = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
+        let inside = vertical_through(0.25, 0.5);
+        let outside = vertical_through(500.0, 0.0);
+        assert!(!separated(&k, &inside, &interval, &plane, Some(&face), 0.01).unwrap());
+        assert!(separated(&k, &outside, &interval, &plane, Some(&face), 0.01).unwrap());
+        assert!(!separated(&k, &outside, &interval, &plane, None, 0.01).unwrap());
     }
 
     #[test]
@@ -304,13 +382,14 @@ mod tests {
         let curve = Curve::from(Line::from_points(Vec3::ZERO, Vec3::X, 3));
         let interval = Extent1d::from_min_max(0.0, 1.0);
         let implicit = Surface::from(OffsetSurface::new(&k, 2.0, floor(), true, 0).unwrap());
-        assert!(!separated(&k, &curve, &interval, &implicit, 0.01).unwrap());
-        assert!(!separated(&k, &curve, &interval, &floor(), f64::NAN).unwrap());
+        assert!(!separated(&k, &curve, &interval, &implicit, None, 0.01).unwrap());
+        assert!(!separated(&k, &curve, &interval, &floor(), None, f64::NAN).unwrap());
         assert!(!separated(
             &k,
             &curve,
             &Extent1d::from_min_max(-1.0, f64::INFINITY),
             &floor(),
+            None,
             0.01,
         )
         .unwrap());
