@@ -2348,6 +2348,8 @@
   "prefs.design_tools.degrees": "Grad",
   "prefs.design_tools.double_click_help": "Oder zum Bearbeiten einer verknüpften Komponente an Ort und Stelle.",
   "prefs.design_tools.ghost": "Alte Position verschobener Teile als Geisterbild zeigen",
+  "prefs.design_tools.hole_group": "Gemeinsam erstellte Bohrungen gruppieren",
+  "prefs.design_tools.hole_group_help": "In einem Schritt erstellte Bohrungen teilen sich einen Ordner im Verlauf, zunächst geschlossen; öffnen Sie ihn, um eine Bohrung einzeln zu bearbeiten.",
   "prefs.design_tools.hole_moves_help": "Erneutes Auswählen der Fläche verschiebt die Bohrung, statt sie zu entfernen.",
   "prefs.design_tools.hole_several": "Mehrere Bohrungen auf einer Fläche",
   "prefs.design_tools.hole_several_help": "Eine Auswahl an anderer Stelle der Fläche fügt eine weitere Bohrung hinzu; die Auswahl einer Bohrung entfernt sie.",

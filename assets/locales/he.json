@@ -2561,6 +2561,8 @@
   "prefs.design_tools.degrees": "מעלות",
   "prefs.design_tools.double_click_help": "או לעריכת רכיב מקושר במקומו.",
   "prefs.design_tools.ghost": "הצגת המיקום הקודם של חלקים שהוזזו כרפאים",
+  "prefs.design_tools.hole_group": "קיבוץ חורים שנוצרו יחד",
+  "prefs.design_tools.hole_group_help": "חורים שנוצרו בפעולה אחת חולקים תיקייה בהיסטוריה, סגורה בהתחלה; פתחו אותה כדי לערוך חור בנפרד.",
   "prefs.design_tools.hole_moves_help": "בחירה חוזרת בפאה מזיזה את החור במקום להסירו.",
   "prefs.design_tools.hole_several": "כמה חורים בפאה אחת",
   "prefs.design_tools.hole_several_help": "בחירה במקום אחר בפאה מוסיפה חור נוסף; בחירה בחור מסירה אותו.",

@@ -2561,6 +2561,8 @@
   "prefs.design_tools.degrees": "度",
   "prefs.design_tools.double_click_help": "或就地编辑链接的组件。",
   "prefs.design_tools.ghost": "以虚影显示已移动零件的原位置",
+  "prefs.design_tools.hole_group": "将一起创建的孔分组",
+  "prefs.design_tools.hole_group_help": "一次创建的孔在历史中共用一个文件夹，初始为折叠；展开后可单独编辑每个孔。",
   "prefs.design_tools.hole_moves_help": "再次选择该面会移动孔而非移除孔。",
   "prefs.design_tools.hole_several": "一个面上多个孔",
   "prefs.design_tools.hole_several_help": "在面的其他位置选择会再添加一个孔；选择孔会移除该孔。",
