@@ -3,9 +3,9 @@
 //! every colour comes from `Tokens`. A card sizes to the width its container gives it and its
 //! figure keeps the figure's aspect ratio.
 use super::{metrics::dimension, preferences::centred_text};
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, FontId, Painter, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 /// How a card or tile looks in a state. Kept separate from painting so the state rules can be tested.
 #[derive(Clone, Copy, Debug, PartialEq)]

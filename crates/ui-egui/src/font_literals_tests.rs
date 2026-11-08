@@ -157,7 +157,7 @@ fn font_sizes_and_dense_form_metrics_come_from_tokens() {
     failures.sort();
     assert!(
         failures.is_empty(),
-        "literals outside theme::Tokens (add a token, or a small per-file allowance with a reason):\n{}",
+        "literals outside solidcraft_theme::Tokens (add a token, or a small per-file allowance with a reason):\n{}",
         failures.join("\n")
     );
 }

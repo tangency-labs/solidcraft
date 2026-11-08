@@ -1,8 +1,9 @@
 //! Persistent viewport status content. The caller owns items and dispatches returned actions.
 use super::{Button, Container, Surface};
+use crate::fonts::RichTextExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{fonts::RichTextExt as _, theme::Tokens};
 use egui::{Id, Rect, Response, RichText, Ui, vec2};
+use solidcraft_theme::Tokens;
 
 /// Shape and outline communicate the kind independently of colour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

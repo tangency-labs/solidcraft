@@ -1,8 +1,9 @@
 //! Popup and tooltip skin from the approved navigation boards.
 use super::{Container, Surface, navigation::*};
+use crate::icons;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{icons, theme::Tokens};
 use egui::{Align2, FontId, Rect, Response, Sense, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) fn navigation_popup_frame() -> egui::Frame {
     Container::menu_frame().inner_margin(egui::Margin::same(NAV_POPUP_PADDING))

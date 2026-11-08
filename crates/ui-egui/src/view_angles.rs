@@ -17,8 +17,8 @@ use solidcraft_engine::render::{Camera, ViewAngles};
 
 use crate::SolveApp;
 use crate::fonts::RichTextExt as _;
-use crate::theme::Tokens;
 use crate::ui_kit::{self, Container, Surface};
+use solidcraft_theme::Tokens;
 
 /// The angles typed in the card while it is open; no entry while it is closed.
 pub(crate) fn draft_id() -> egui::Id {

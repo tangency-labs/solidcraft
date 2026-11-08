@@ -379,7 +379,7 @@ fn centre_and_axes(v: &Value) -> Option<(Vec3, Vec<Vec3>, f64)> {
 pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let Some((centre, axes, reach)) = app.menu.props.as_ref().and_then(|(_, v)| centre_and_axes(v)) else { return };
     let Some(at) = proj.to_screen(centre) else { return };
-    let tk = crate::theme::Tokens::view();
+    let tk = solidcraft_theme::Tokens::view();
     for (n, (axis, colour)) in axes.iter().zip(tk.axes()).enumerate() {
         let Some(tip) = proj.to_screen(centre + *axis * reach) else { continue };
         painter.line_segment([at, tip], Stroke::new(2.0, colour));

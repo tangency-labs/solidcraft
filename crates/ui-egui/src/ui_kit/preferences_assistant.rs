@@ -1,8 +1,8 @@
 //! Shared concise choice cards and the agent-pointer settings specimen.
 use super::{metrics::dimension, text::paint_text};
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 /// One concise choice with its full meaning available to keyboard users and on hover.
 pub(crate) struct SettingsChoice<'a> {
@@ -65,7 +65,7 @@ pub(crate) fn settings_choice_row(ui: &mut Ui, choice: &SettingsChoice<'_>, sele
 }
 fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: bool, row: bool) -> Response {
     let t = Tokens::get();
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     let selected_bg = if row { accent.soft } else { t.selected_bg };
     let selected_ink = if row { accent.ink } else { t.selected_ink };
     let primary = if row { accent.color } else { t.form_primary };

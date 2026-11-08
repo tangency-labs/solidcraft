@@ -468,7 +468,7 @@ fn case_variants(exts: &[&str]) -> Vec<String> {
 fn content_ui(app: &mut SolveApp, ui: &mut egui::Ui) {
     let content = ui.ctx().content_rect();
     let above = egui::Rect::from_min_max(ui.max_rect().min, egui::pos2(ui.max_rect().right(), content.top()));
-    ui.painter().rect_filled(above, 0.0, solidcraft_ui_egui::theme::Tokens::get().app_bar);
+    ui.painter().rect_filled(above, 0.0, solidcraft_theme::Tokens::get().app_bar);
     ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| app.ui(ui));
 }
 

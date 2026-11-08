@@ -482,7 +482,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     let tab = app.ui.tab.clone();
     let mut changes: Vec<(&'static str, bool)> = Vec::new();
     let mut reset_tab = false;
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     // This long card grows as sections open. A top-left pivot keeps its controls at their
     // published positions instead of shifting them after egui measures the taller content.
     let origin =
@@ -500,8 +500,8 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                 );
                 egui::ScrollArea::vertical()
                     .max_height(
-                        (ctx.content_rect().height() - crate::theme::Tokens::get().control_height * 8.0)
-                            .min(crate::theme::Tokens::get().control_height * 20.0),
+                        (ctx.content_rect().height() - solidcraft_theme::Tokens::get().control_height * 8.0)
+                            .min(solidcraft_theme::Tokens::get().control_height * 20.0),
                     )
                     .show(ui, |ui| {
                         for (panel, cmds, n) in panel_lists(&tab) {

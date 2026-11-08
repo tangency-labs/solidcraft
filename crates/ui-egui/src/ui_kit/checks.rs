@@ -1,7 +1,7 @@
 //! The only checkbox box and check glyph, shared by inline, palette, grid and menu rows.
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Rect, Response, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 /// Fixed logical size and pixel-aligned origin, independent of a caller's fonts or spacing.
 pub(super) fn box_at(ui: &Ui, center: egui::Pos2) -> Rect {

@@ -493,7 +493,7 @@ pub fn paint(app: &SolveApp, ctx: &egui::Context) {
     crate::icons::pointer::paint(&painter, p);
     if let Some((_, label)) = app.agent.job.as_ref().and_then(|job| job.stops.front()).filter(|(_, label)| !label.is_empty()) {
         use crate::ui_kit::{Container, Surface};
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         Container::new(ctx, Surface::Popup)
             .area(egui::Id::unique("sc_agent_command"))
             .order(egui::Order::Debug)

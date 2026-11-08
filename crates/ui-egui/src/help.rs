@@ -203,7 +203,7 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
             if copy.clicked() {
                 ctx.copy_text(diagnostics(app));
             }
-            egui::ScrollArea::vertical().max_height(crate::theme::Tokens::get().control_height * 15.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(solidcraft_theme::Tokens::get().control_height * 15.0).show(ui, |ui| {
                 ui_kit::section(ui, "attributions", solidcraft_ui_text::tr("help.attributions"), false, |ui| {
                     ui_kit::text(ui, ATTRIBUTION, ui_kit::Text::Report("attributions", false));
                 });

@@ -16,7 +16,7 @@ use solidcraft_engine::doc::joints::JointKind;
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, form_row};
 use crate::selection::{BODIES, SelInput};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 #[path = "configurations_ui.rs"]
 mod configurations_ui;

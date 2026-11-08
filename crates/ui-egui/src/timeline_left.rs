@@ -6,11 +6,11 @@ use egui::{Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
 
 use crate::history_rows::{HistoryFeature, HistoryRows};
-use crate::theme::Tokens;
 use crate::timeline::{
     TimelineKind, clipboard_buttons, delete_after_marker_button, delete_button, delete_features, message_button, selected_feature_ids,
 };
 use crate::{SolveApp, icons};
+use solidcraft_theme::Tokens;
 
 mod plan;
 
@@ -571,7 +571,7 @@ fn vertical_drop_bar_left(panel_left: f32, target: Option<u64>, groups: &[solidc
 fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag>) -> f32 {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_12), Sense::drag());
-    crate::ui_kit::history_marker(ui.painter(), rect, true, crate::theme::TabAccent::for_tab(&t, &app.ui.tab));
+    crate::ui_kit::history_marker(ui.painter(), rect, true, solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab));
     crate::scenario::publish_handle("timeline:rollback", rect.center());
     crate::scenario::publish_rect("history:marker", rect);
     if response.drag_started() {
@@ -1055,7 +1055,7 @@ fn timeline_group_name(
             pos2(rect.left() + 40.0 + offset, rect.center().y),
             egui::Align2::LEFT_CENTER,
             &group.name,
-            egui::FontId::proportional(crate::theme::Tokens::get().font_body),
+            egui::FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             if faint { t.text.gamma_multiply(0.42) } else { t.text },
         );
         return false;
@@ -1122,7 +1122,7 @@ fn vertical_group_row(
         ui.painter().rect_filled(
             rect,
             t.radius_sm.saturating_sub(1),
-            if selected { crate::theme::TabAccent::current(ui.ctx()).soft } else { t.hover },
+            if selected { solidcraft_theme::TabAccent::current(ui.ctx()).soft } else { t.hover },
         );
     }
     let offset = if names { depth as f32 * 14.0 } else { 0.0 };
@@ -1420,7 +1420,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
                 ui.painter(),
                 Rect::from_min_max(pos2(left, slot.y), pos2(ui.max_rect().right() - 5.0, slot.y)),
                 true,
-                if matches!(active, Drag::Marker) { crate::theme::TabAccent::current(ui.ctx()).color } else { t.sketch_accent },
+                if matches!(active, Drag::Marker) { solidcraft_theme::TabAccent::current(ui.ctx()).color } else { t.sketch_accent },
             );
         }
     }
@@ -1613,7 +1613,7 @@ fn feature_row_body(
         warning: warning.is_some(),
         reference,
         ink: sketch_state.and_then(|state| state.ink(&t)),
-        accent: crate::theme::TabAccent::for_tab(&t, if dragged { "SKETCH" } else { &app.ui.tab }),
+        accent: solidcraft_theme::TabAccent::for_tab(&t, if dragged { "SKETCH" } else { &app.ui.tab }),
     }
     .paint(ui.painter(), chip, style);
     if fold.is_some() {
@@ -1958,9 +1958,9 @@ mod tests {
 
     #[test]
     fn transport_to_first_item_gap_is_at_most_twelve_points() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
                 for names in [false, true] {
                     let mut h = Harness::new();
@@ -1976,7 +1976,7 @@ mod tests {
                             h.app.run("select.set", json!({"items":[{"type":"feature","id":id}]})).unwrap();
                         }
                         h.settle();
-                        assert_eq!(crate::theme::is_dark(), dark);
+                        assert_eq!(solidcraft_theme::is_dark(), dark);
                         let transport = crate::scenario::rect_of("history:transport").unwrap();
                         let first = crate::scenario::rect_of("history:feature:First").unwrap();
                         let gap = first.top() - transport.bottom();
@@ -1985,7 +1985,7 @@ mod tests {
                 }
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]

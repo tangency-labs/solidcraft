@@ -1899,6 +1899,7 @@
   "material.editor.preserved_appearance": "Apparence conservée",
   "material.editor.public_reference": "Référence publique",
   "material.editor.reference": "Référence",
+  "material.editor.remove": "Retirer",
   "material.editor.save_or_discard": "Enregistrez ou abandonnez le brouillon de matériau avant d'affecter un matériau.",
   "material.editor.saved": "Matériau enregistré. Les affectations des corps sont inchangées.",
   "material.editor.scope": "Enregistrer stocke ce matériau sans l'affecter à des corps. Les propriétés et conditions vides restent inconnues. La masse volumique de la fiche ne modifie ni la masse volumique affectée ni la masse.",

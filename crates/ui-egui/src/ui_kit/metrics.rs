@@ -1,7 +1,7 @@
 //! Metrics elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
 use super::layout::FORM;
-use crate::theme::Tokens;
 use egui::Ui;
+use solidcraft_theme::Tokens;
 
 /// Row height for controls. Tokens: `control_height`.
 pub(crate) fn row_height() -> f32 {

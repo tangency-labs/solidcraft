@@ -34,8 +34,8 @@ use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::dialogs_assembly::SnapKind;
 use crate::selection::same_item;
-use crate::theme::Tokens;
 use crate::viewport::{Hit, Proj};
+use solidcraft_theme::Tokens;
 
 /// How near (screen points) a pick must come to a snap point to take it.
 pub(crate) const POINT_REACH: f32 = 10.0;

@@ -1,7 +1,8 @@
 //! Navigation chrome and measurements shared by the viewport and Preferences editor.
-use crate::{icons, theme::Tokens};
+use crate::icons;
 use egui::{Rect, Response, Sense, Ui, pos2, vec2};
 use serde::{Deserialize, Serialize};
+use solidcraft_theme::Tokens;
 
 pub(crate) const NAV_BORDER: f32 = 1.0;
 pub(crate) const NAV_PADDING: f32 = 3.0;
@@ -147,7 +148,7 @@ pub(crate) fn navigation_ink(t: &Tokens, fill: NavigationFill) -> egui::Color32 
     if fill != NavigationFill::Active {
         return t.form_ink;
     }
-    if crate::theme::contrast_ratio(t.form_primary, t.selected_bg) >= NAV_ACTIVE_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
+    if solidcraft_theme::contrast_ratio(t.form_primary, t.selected_bg) >= NAV_ACTIVE_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
 }
 
 /// WCAG small-text contrast for an active slot's label on its selected fill.
@@ -280,13 +281,13 @@ mod active_ink_tests {
 
     #[test]
     fn active_navigation_slots_stay_readable_in_every_built_in_theme() {
-        let mut themes = vec![("Dark", crate::theme::Tokens::dark()), ("Light", crate::theme::Tokens::light())];
+        let mut themes = vec![("Dark", solidcraft_theme::Tokens::dark()), ("Light", solidcraft_theme::Tokens::light())];
         themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
         let mut failures = Vec::new();
         for (name, tokens) in themes {
             let Some(fill) = navigation_fill(&tokens, NavigationFill::Active) else { continue };
             let ink = navigation_ink(&tokens, NavigationFill::Active);
-            let ratio = crate::theme::contrast_ratio(ink, fill);
+            let ratio = solidcraft_theme::contrast_ratio(ink, fill);
             if ratio < 3.0 {
                 failures.push(format!("{name}: {ratio:.2}:1 ({ink:?} on {fill:?})"));
             }
