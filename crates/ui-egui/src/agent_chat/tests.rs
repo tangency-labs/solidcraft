@@ -3405,6 +3405,7 @@ fn a_cad_file_joins_the_message_once_its_import_is_in() {
 /// says so; any other file's × just takes it off.
 #[test]
 fn an_imported_parts_chip_says_the_part_stays() {
+    crate::i18n::install();
     assert_eq!(panel::remove_tip(&attach::Attachment::imported("motor.step".into())), tr("ui.agent_chat_remove_imported"));
     assert!(tr("ui.agent_chat_remove_imported").contains("stays in the design"));
     let picture = attach::from_rgba("a.png".into(), 2, 2, &[9; 16]).unwrap();
@@ -4397,6 +4398,7 @@ fn said(title: &str, input: Value, output: Option<&str>) -> Option<String> {
 /// parameters and what it returned.
 #[test]
 fn tool_calls_read_as_what_they_did() {
+    crate::i18n::install();
     let extrude = json!({"command": "solid.extrude", "params": {"sketch": "Sketch1", "distance": 10}});
     assert_eq!(said("execute: solid.extrude", extrude.clone(), None).as_deref(), Some("Extrude Sketch1 by 10 mm"));
     // As an ACP agent names the bridged tool, with the body the result made.
@@ -4430,6 +4432,7 @@ fn tool_calls_read_as_what_they_did() {
 /// Details and the tooltip.
 #[test]
 fn tool_cards_show_file_names_never_paths() {
+    crate::i18n::install();
     let shot = r"ui.screenshot: C:\Users\bherbruck\AppData\Local\Temp\solidcraft-mcp-8608-b4c7b64\shot-0.png";
     assert_eq!(said(shot, json!({}), None).as_deref(), Some("Screenshot"));
     assert_eq!(said("mcp__solidcraft-app__ui.screenshot", json!({}), None).as_deref(), Some("Screenshot"));

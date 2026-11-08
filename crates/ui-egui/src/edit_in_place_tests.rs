@@ -589,6 +589,7 @@ fn what_is_done_in_the_assembly_while_it_refreshes_stays() {
 
 #[test]
 fn the_ribbon_button_reads_finish_edit_not_a_surface_finish() {
+    crate::i18n::install();
     // A bare "Finish" is a surface finish in other catalogs (German "Oberfläche")
     let label = crate::workspace::ribbon_button_label(solidcraft_engine::find_command("component.finish_edit").unwrap());
     assert_eq!(label, "Finish Edit");

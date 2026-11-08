@@ -140,6 +140,7 @@ mod timeline_marks_tests;
 mod status_tests {
     #[test]
     fn the_status_bar_names_commands_by_label() {
+        crate::i18n::install();
         assert_eq!(super::command_label("solid.fillet"), "Fillet");
         assert_eq!(
             super::friendly_error("solid.shell", "invalid parameters for `solid.shell`: offset: must be positive"),

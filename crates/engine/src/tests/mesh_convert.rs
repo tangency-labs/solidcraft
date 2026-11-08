@@ -2,7 +2,9 @@ use super::*;
 use solidcore_record::Vec3;
 use solidcraft_doc::{Document, FeatureKind, MeshData};
 
-fn imported_box() -> Session {
+/// A design whose only feature imports a 10 x 20 x 30 mm box as the mesh body `Mesh`. The
+/// schema tests (`schema/mesh_tests.rs`) convert it too.
+pub(crate) fn imported_box() -> Session {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
     let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     let mut doc = Document::default();
