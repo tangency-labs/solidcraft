@@ -54,6 +54,7 @@ mod coverage_tests;
 mod tests;
 
 // The contracts, by command file.
+pub mod align;
 pub mod appearance;
 pub mod bom;
 pub mod browser;
