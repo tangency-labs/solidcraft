@@ -23,6 +23,7 @@ profile = ["solidcraft-engine/profile"]
 [dependencies]
 solidcraft-engine = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
+solidcraft-ui-text = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }

@@ -225,7 +225,11 @@ pub(super) fn rows(app: &SolveApp) -> Result<Vec<Light>, String> {
 }
 
 pub(super) fn name(app: &SolveApp, light: &Light) -> String {
-    if light.number <= 3 { app.tr(&light.name_key).into() } else { crate::i18n::format(&light.name_key, &[("number", &light.number.to_string())]) }
+    if light.number <= 3 {
+        app.tr(&light.name_key).into()
+    } else {
+        solidcraft_ui_text::format(&light.name_key, &[("number", &light.number.to_string())])
+    }
 }
 
 /// A known volume-only/transport adoption preserves the analytic rig's addresses.
@@ -724,7 +728,10 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     let readout = if unsupported {
                                         app.tr("render.lighting_unsupported").to_string()
                                     } else {
-                                        crate::i18n::format("render.lighting_used", &[("used", &count.to_string()), ("limit", &limit.to_string())])
+                                        solidcraft_ui_text::format(
+                                            "render.lighting_used",
+                                            &[("used", &count.to_string()), ("limit", &limit.to_string())],
+                                        )
                                     };
                                     column.add_enabled_ui(!unsupported, |ui| ui_kit::text(ui, &readout, ui_kit::Text::Inline));
                                 }

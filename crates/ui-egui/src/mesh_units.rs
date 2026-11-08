@@ -76,11 +76,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // The symbols themselves (mm, cm, m, in, ft), as everywhere else units are chosen.
     let names: Vec<&str> = UNITS.iter().map(|(name, _)| *name).collect();
     let (closed, action) =
-        ui_kit::Window::new(egui::Id::unique("sc_mesh_units"), "import", crate::i18n::tr("ui.point_cloud_units")).show(ctx, true, |ui| {
+        ui_kit::Window::new(egui::Id::unique("sc_mesh_units"), "import", solidcraft_ui_text::tr("ui.point_cloud_units")).show(ctx, true, |ui| {
             ui_kit::text(ui, &file, ui_kit::Text::Report("file", false));
-            ui_kit::choice_row(ui, crate::i18n::tr("ui.units"), "mesh_units", &mut ask.choice, &names);
-            let origin = ui_kit::checkbox(ui, crate::i18n::tr("ui.mesh_import_origin"), &mut ask.origin)
-                .backing_on_hover_text(crate::i18n::tr("ui.mesh_import_origin_tip"));
+            ui_kit::choice_row(ui, solidcraft_ui_text::tr("ui.units"), "mesh_units", &mut ask.choice, &names);
+            let origin = ui_kit::checkbox(ui, solidcraft_ui_text::tr("ui.mesh_import_origin"), &mut ask.origin)
+                .backing_on_hover_text(solidcraft_ui_text::tr("ui.mesh_import_origin_tip"));
             // Named like the dialog's buttons: outside a labelled row the checkbox's own handle
             // is a bare `dialog:`, which scripts can't tell apart.
             crate::scenario::publish_handle("mesh_units:origin", origin.rect.center());

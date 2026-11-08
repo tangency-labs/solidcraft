@@ -235,7 +235,7 @@ fn shown_mode(t: &Tool) -> Option<(&'static str, &'static str)> {
 
 /// The words next to the cursor, in the interface language.
 pub(crate) fn shown_label(t: &Tool) -> Option<&'static str> {
-    shown_mode(t).map(|(command, _)| crate::i18n::tr_label(crate::command_label(command)))
+    shown_mode(t).map(|(command, _)| solidcraft_ui_text::tr_label(crate::command_label(command)))
 }
 
 /// The label next to the cursor (below the point's coordinates).

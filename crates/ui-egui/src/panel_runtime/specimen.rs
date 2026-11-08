@@ -349,9 +349,12 @@ impl PanelController for VisibleSpecimen {
     fn presentation(&self) -> PanelPresentation {
         let snapshot = self.probe.state(&self.key).ok();
         PanelPresentation {
-            title: crate::i18n::format("ui.panel_fixture.title", &[("title", crate::i18n::tr(self.title_key)), ("id", &self.key.instance.0)]),
+            title: solidcraft_ui_text::format(
+                "ui.panel_fixture.title",
+                &[("title", solidcraft_ui_text::tr(self.title_key)), ("id", &self.key.instance.0)],
+            ),
             icon: "list".into(),
-            status: snapshot.map(|state| crate::i18n::format("ui.panel_fixture.updates", &[("count", &state.updates.to_string())])),
+            status: snapshot.map(|state| solidcraft_ui_text::format("ui.panel_fixture.updates", &[("count", &state.updates.to_string())])),
             attention: self.editor,
             actions: if self.editor {
                 [("apply", "ui.panel_fixture.apply"), ("cancel", "ui.panel_fixture.cancel"), ("finish", "ui.panel_fixture.finish")]
@@ -359,7 +362,7 @@ impl PanelController for VisibleSpecimen {
                     .map(|(id, key)| RuntimeAction {
                         pressed: None,
                         id: ControlId(id.into()),
-                        label: crate::i18n::tr(key).into(),
+                        label: solidcraft_ui_text::tr(key).into(),
                         enabled: true,
                         disabled_reason: None,
                     })
@@ -389,7 +392,7 @@ impl PanelController for VisibleSpecimen {
         self.inner.render(slot, ui, context, services)?;
         match slot {
             ContentSlot::Header => {
-                ui.label(crate::i18n::tr("ui.panel_fixture.caption"));
+                ui.label(solidcraft_ui_text::tr("ui.panel_fixture.caption"));
             }
             ContentSlot::Body => {
                 // Content owns its scrolling; the host still clips all three slots.
@@ -403,9 +406,9 @@ impl PanelController for VisibleSpecimen {
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                         ui.add_sized(
                             [ui.available_width(), t.control_height],
-                            egui::Label::new(crate::i18n::tr("ui.panel_fixture.explanation")).truncate(),
+                            egui::Label::new(solidcraft_ui_text::tr("ui.panel_fixture.explanation")).truncate(),
                         );
-                        let draft_label = crate::i18n::tr("ui.panel_fixture.draft");
+                        let draft_label = solidcraft_ui_text::tr("ui.panel_fixture.draft");
                         let label = ui.add_sized([ui.available_width(), t.control_height], egui::Label::new(draft_label).truncate());
                         let draft_id = egui::Id::unique(("specimen-draft", &context.instance, &context.owner));
                         let edit = crate::ui_kit::text_area(ui, draft_label, draft_id, &mut state.draft, 3, 1024);
@@ -420,7 +423,7 @@ impl PanelController for VisibleSpecimen {
                         );
                         let _ = edit.labelled_by(label.id);
                         if self.editor {
-                            let guard = crate::ui_kit::checkbox(ui, crate::i18n::tr("ui.panel_fixture.guard"), &mut state.reject_cancel);
+                            let guard = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("ui.panel_fixture.guard"), &mut state.reject_cancel);
                             if focus_result.is_ok() {
                                 focus_result = services.local.register_focus_response(
                                     &LocalScope {
@@ -434,7 +437,7 @@ impl PanelController for VisibleSpecimen {
                             }
                             ui.add_sized(
                                 [ui.available_width(), t.control_height],
-                                egui::Label::new(crate::i18n::tr(if state.transaction_live {
+                                egui::Label::new(solidcraft_ui_text::tr(if state.transaction_live {
                                     "ui.panel_fixture.live"
                                 } else {
                                     "ui.panel_fixture.finished"
@@ -448,7 +451,7 @@ impl PanelController for VisibleSpecimen {
                 focus_result?;
             }
             ContentSlot::Footer => {
-                ui.label(crate::i18n::tr("ui.panel_fixture.footer"));
+                ui.label(solidcraft_ui_text::tr("ui.panel_fixture.footer"));
             }
             ContentSlot::Inline => {
                 self.render_inline(ui, context, services)?;
@@ -466,9 +469,9 @@ impl PanelController for VisibleSpecimen {
             // A real editable synthetic value occupies the same total row as
             // shared actions. This is not a production History timeline.
             ui.horizontal_centered(|ui| {
-                ui.add(egui::Label::new(crate::i18n::tr("ui.panel_fixture.inline")).truncate());
+                ui.add(egui::Label::new(solidcraft_ui_text::tr("ui.panel_fixture.inline")).truncate());
                 let id = egui::Id::unique(("specimen-draft", &context.instance, &context.owner));
-                let response = crate::ui_kit::cell_editor(ui, id, &mut state.draft, crate::i18n::tr("ui.panel_fixture.draft"), false);
+                let response = crate::ui_kit::cell_editor(ui, id, &mut state.draft, solidcraft_ui_text::tr("ui.panel_fixture.draft"), false);
                 focus_result = services.local.register_focus_response(
                     &LocalScope { workspace: context.workspace.clone(), document: context.document.clone(), viewport: context.viewport.clone() },
                     &context.instance,

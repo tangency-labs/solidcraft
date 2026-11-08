@@ -1763,3 +1763,43 @@ fn a_second_placements_face_and_edge_project_where_it_is_placed() {
     check(&s, 15.0);
     check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 15.0);
 }
+
+/// #13142: projected references can start as construction geometry, asked for per call or for
+/// the whole session (a preference, kept for designs started and opened like `auto_project`).
+#[test]
+fn projected_references_can_start_as_construction() {
+    let flags = |s: &mut Session| linked_curves(&inspect(s)).iter().map(|c| c["construction"] == true).collect::<Vec<_>>();
+    let mut s = Session::default();
+    box_part(&mut s);
+    // Off (the default): the face loop is normal geometry and closes a profile.
+    run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
+    let on_face = flags(&mut s);
+    assert!(on_face.len() == 4 && on_face.iter().all(|c| !c), "{on_face:?}");
+    assert_eq!(inspect(&mut s)["profiles"].as_array().map(Vec::len), Some(1));
+    run(&mut s, "sketch.finish", json!({}));
+    // Asked for in the call, and not.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [20, 0, 20]}], "construction": true}));
+    assert_eq!(flags(&mut s), vec![true]);
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [40, 15, 20]}]}));
+    assert_eq!(flags(&mut s), vec![true, false]);
+    run(&mut s, "sketch.intersect", json!({"refs": [{"edge": [0, 0, 10]}], "construction": true}));
+    let e = s.execute("sketch.project", &json!({"refs": [{"edge": [20, 30, 20]}], "construction": 1}));
+    assert!(e.is_err(), "construction must be a boolean");
+    run(&mut s, "sketch.finish", json!({}));
+    // The session's preference: a sketch on a face starts with a construction loop and no
+    // profile, and it holds for the next design; `construction: false` still asks for normal.
+    s.project_construction = true;
+    run(&mut s, "file.new", json!({}));
+    assert!(s.project_construction, "file.new");
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
+    let on_face = flags(&mut s);
+    assert!(on_face.len() == 4 && on_face.iter().all(|c| *c), "{on_face:?}");
+    assert_eq!(inspect(&mut s)["profiles"].as_array().map(Vec::len), Some(0));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [20, 0, 20]}]}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [40, 15, 20]}], "construction": false}));
+    assert_eq!(flags(&mut s), vec![true, false]);
+}

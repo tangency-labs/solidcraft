@@ -126,7 +126,7 @@ impl Product {
                 .collect(),
             Self::Assistant => vec![RuntimeAction {
                 id: ControlId("new-chat".into()),
-                label: crate::i18n::tr("ui.agent_chat_new").into(),
+                label: solidcraft_ui_text::tr("ui.agent_chat_new").into(),
                 enabled: true,
                 disabled_reason: None,
                 pressed: None,
@@ -139,7 +139,7 @@ impl Product {
             .into_iter()
             .map(|(id, key, pressed)| RuntimeAction {
                 id: ControlId(id.into()),
-                label: crate::i18n::tr(key).into(),
+                label: solidcraft_ui_text::tr(key).into(),
                 enabled: true,
                 disabled_reason: None,
                 pressed: Some(pressed),
@@ -151,7 +151,7 @@ impl Product {
     }
     fn empty_presentation(self) -> PanelPresentation {
         PanelPresentation {
-            title: crate::i18n::tr(self.title_key()).into(),
+            title: solidcraft_ui_text::tr(self.title_key()).into(),
             icon: "list".into(),
             status: None,
             attention: false,
@@ -560,7 +560,7 @@ impl PanelController for ProductionController {
         }) {
             Availability::Available
         } else {
-            Availability::Unavailable { reason: crate::i18n::tr("ui.panel_host.rule.availability").into() }
+            Availability::Unavailable { reason: solidcraft_ui_text::tr("ui.panel_host.rule.availability").into() }
         }
     }
     fn update(&mut self, _owner: &ContentOwner, _services: &mut ContentServices<'_>) -> PanelResult<()> {

@@ -27,7 +27,7 @@ fn panel_surface_policy_keeps_disabled_host_storage_small() {
 #[test]
 fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
     use egui::Color32;
-    use solidcraft_engine::geom::srgb::{decode8, encode8};
+    use solidcraft_color::srgb::{decode8, encode8};
     let high_contrast = crate::theme_files::resolve(crate::theme_files::find("high-contrast", &[]).unwrap());
     // Independent stored-premultiplied source-over for both real renderer target
     // formats. This does not call the production contrast/bounds predicate.
@@ -133,7 +133,7 @@ fn panel_contrast_checks_interior_luminance_and_translucent_muted_inks() {
 #[test]
 fn panel_contrast_encloses_actual_premultiplied_gpu_blends() {
     use egui::Color32;
-    use solidcraft_engine::geom::srgb::{decode8, encode8};
+    use solidcraft_color::srgb::{decode8, encode8};
     // Independent physical source-over oracle: read stored premultiplied bytes,
     // never the production readability predicate or unpremultiplication helper.
     let physical = |source: Color32, background: Color32, linear: bool, dither: f64| {
@@ -1273,7 +1273,7 @@ fn allocation_invisible_physical_edges_and_measured_tab_halves_preserve_rtl_and_
 
 #[test]
 fn allocation_shared_shell_gap_controls_allocation_and_keeps_compact_sashes_and_free_origins() {
-    for mode in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for mode in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         for direction in [Direction::Ltr, Direction::Rtl] {
             for zone in [Zone::Left, Zone::Right] {
                 let gap = crate::ui_kit::Container::for_layout(mode, crate::ui_kit::Surface::Panel).gap();
@@ -3191,13 +3191,13 @@ fn raw_host_wider_perimeters_win_over_cards_tabs_and_clear_below_without_fallbac
                     // Exercise both actual shell gaps without multiplying all
                     // selection cases by an unrelated rendering-mode matrix.
                     let mode = if matches!(case, "side-edge" | "bottom-clear" | "empty") {
-                        crate::shell::LayoutMode::Docked
+                        crate::ui_kit::LayoutMode::Docked
                     } else {
-                        crate::shell::LayoutMode::Floating
+                        crate::ui_kit::LayoutMode::Floating
                     };
                     mode.publish(&raw.ctx);
                     let gap = crate::ui_kit::Container::for_layout(mode, crate::ui_kit::Surface::Panel).gap();
-                    assert_eq!(gap, if mode == crate::shell::LayoutMode::Docked { 0.0 } else { 7.0 });
+                    assert_eq!(gap, if mode == crate::ui_kit::LayoutMode::Docked { 0.0 } else { 7.0 });
                     let mut options = priority_host_options();
                     options.metrics.gap = gap;
                     options.metrics.inline_max_height = 0.0;
@@ -3435,7 +3435,7 @@ fn raw_host_perimeter_anchors_survive_source_detach_and_commit_the_exact_preview
 #[test]
 fn raw_host_drag_and_pair_resize_dispatch_once_even_when_egui_repeats_the_release_pass() {
     for (mode, resize) in
-        [(crate::shell::LayoutMode::Floating, false), (crate::shell::LayoutMode::Floating, true), (crate::shell::LayoutMode::Docked, true)]
+        [(crate::ui_kit::LayoutMode::Floating, false), (crate::ui_kit::LayoutMode::Floating, true), (crate::ui_kit::LayoutMode::Docked, true)]
     {
         let h = host_logs(2, Zone::Left);
         let mut raw = RawPanelHost::new(h, 2.0);
@@ -12395,7 +12395,7 @@ fn app_atomic_workspace_replacements_accept_distinct_incoming_contexts_and_match
 
 #[test]
 fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates_owned_geometry() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let (mut h, _, _) = boundary_app();
         h.app.ui.layout = mode;
         h.frames(2);
@@ -12413,7 +12413,7 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
             assert_eq!(card.paint_alpha, Some(255), "Classic's default opaque policy is preserved");
         }
         let gap = crate::ui_kit::Container::for_layout(mode, crate::ui_kit::Surface::Panel).gap();
-        assert_eq!(gap, if mode == crate::shell::LayoutMode::Floating { 7.0 } else { 0.0 });
+        assert_eq!(gap, if mode == crate::ui_kit::LayoutMode::Floating { 7.0 } else { 0.0 });
         assert_eq!(painted.metrics.gap, gap);
         assert_eq!(painted.allocation_environment.gap, gap);
         let domain = egui_rect(painted.render_domain);
@@ -13081,7 +13081,7 @@ fn production_browser_and_history_mount_existing_content_once_and_preserve_combi
             assert_eq!(crate::scenario::handle_at(&format!("timeline:{name}")).is_some(), !combined);
         }
         if combined {
-            assert!(rows.iter().any(|row| row.0 == crate::i18n::tr("ui.history_title")), "combined History keeps its real Browser folder");
+            assert!(rows.iter().any(|row| row.0 == solidcraft_ui_text::tr("ui.history_title")), "combined History keeps its real Browser folder");
         } else {
             let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
             assert!(history.inline, "Bottom History uses the generic one-row composition");

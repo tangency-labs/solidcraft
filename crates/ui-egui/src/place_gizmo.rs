@@ -264,7 +264,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let (hovered, dragging) = (r.hovered(), r.dragged());
     // The tip while pointing, not while dragging: the hand is busy and the footprint says it all.
     if hovered && !dragging {
-        r.clone().backing_on_hover_text(crate::i18n::tr_label(sp.move_tip));
+        r.clone().backing_on_hover_text(solidcraft_ui_text::tr_label(sp.move_tip));
     }
     // The handle not in use steps back while the other one works (the ring's drag is last frame's).
     let turning = ui.data(|m| m.get_temp::<bool>(id("turning"))).unwrap_or(false);
@@ -354,7 +354,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         compass(painter, &on, &dirs, style.active);
     }
     if hovered && !dragging {
-        r.clone().backing_on_hover_text(crate::i18n::tr_label(turn.tip));
+        r.clone().backing_on_hover_text(solidcraft_ui_text::tr_label(turn.tip));
     }
     if hovered || dragging {
         ui.ctx().set_cursor_icon(if dragging { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });

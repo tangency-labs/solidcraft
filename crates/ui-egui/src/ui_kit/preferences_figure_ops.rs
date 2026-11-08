@@ -4,7 +4,7 @@
 //! `Tokens`. Nothing is rasterised and no image is loaded; every figure costs a few dozen shapes.
 //! Any rectangle, including an empty, infinite or enormous one, is safe to paint into.
 use crate::theme::Tokens;
-use egui::{Align2, Color32, CornerRadius, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2, pos2, vec2};
 
 /// Colour roles of the figures. Each reads one `Tokens` field (`docs/design/preferences/tokens.md`).
 #[derive(Clone, Copy, Debug)]
@@ -330,26 +330,33 @@ pub(super) fn paint_colour_vision(p: &Painter, rect: Rect, index: usize, t: &Tok
     paint_with_tokens(p, rect, figure, None, None, t, Palette::ColourVision(index));
 }
 
+/// One signed world axis of the navigator figure, as the caller's camera sees it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct NavigatorAxis {
+    /// The tip's name: `"x"`, `"-x"`, `"y"`, `"-y"`, `"z"` or `"-z"`.
+    pub name: &'static str,
+    /// The axis's world direction.
+    pub direction: [f64; 3],
+    /// The direction on screen per unit length: its parts along the camera's right and down.
+    pub screen: Vec2,
+    /// The direction along the camera's back (toward the viewer): the tips are drawn back to front.
+    pub depth: f64,
+}
+
 /// Canonical navigator geometry with the real navigator palette; no global theme mutation.
-pub(crate) fn paint_navigation_axes(p: &Painter, rect: Rect) {
+/// `axes` are the six signed axes as the caller's camera poses them.
+pub(crate) fn paint_navigation_axes(p: &Painter, rect: Rect, axes: &[NavigatorAxis]) {
     let Some((p, scale)) = navigation_canvas(p, rect) else { return };
     let t = Tokens::get();
     let c = rect.center();
     p.circle(c, 46.0 * scale, t.overlay.gamma_multiply(0.35), Stroke::new(scale, t.border.gamma_multiply(0.75)));
-    let cam = solidcraft_engine::render::Camera::default();
-    let (right, up, back) = cam.basis();
-    use solidcore_record::Vec3;
-    use solidcraft_engine::geom::Vec3Geom;
-    let mut tips: Vec<_> = [("x", Vec3::X), ("-x", -Vec3::X), ("y", Vec3::Y), ("-y", -Vec3::Y), ("z", Vec3::Z), ("-z", -Vec3::Z)]
-        .into_iter()
-        .map(|(name, d)| (name, d, c + vec2(d.dot(right) as f32, -d.dot(up) as f32) * (38.0 * 0.84 * scale), d.dot(back)))
-        .collect();
-    tips.sort_by(|a, b| a.3.total_cmp(&b.3));
-    for (index, (name, direction, at, depth)) in tips.iter().enumerate() {
+    let mut tips: Vec<_> = axes.iter().map(|axis| (axis, c + axis.screen * (38.0 * 0.84 * scale))).collect();
+    tips.sort_by(|a, b| a.0.depth.total_cmp(&b.0.depth));
+    for (index, (axis, at)) in tips.iter().enumerate() {
         if index == 3 {
             p.circle(c, 3.6 * scale, t.text.gamma_multiply(0.9), Stroke::new(1.4 * scale, t.panel));
         }
-        crate::icons::navigation::axis_tip_scaled(&p, c, name, direction, *at, *depth, false, t, scale);
+        crate::icons::navigation::axis_tip_scaled(&p, c, axis.name, &axis.direction.into(), *at, axis.depth, false, t, scale);
     }
 }
 
@@ -580,7 +587,7 @@ fn poly(p: &Painter, ctx: &Ctx, pts: &[Pos2], closed: bool, fill: &Option<P>, gr
             if l.dash[0] > 0.0 && l.dash[1] > 0.0 {
                 let dash = (l.dash[0] * ctx.scale).max(0.5);
                 let gap = (l.dash[1] * ctx.scale).max(0.5);
-                p.extend(crate::viewport::dashed_line(&run, p.clip_rect(), stroke, dash, gap));
+                p.extend(super::dash::dashed_line(&run, p.clip_rect(), stroke, dash, gap));
             } else {
                 p.add(Shape::line(run, stroke));
             }

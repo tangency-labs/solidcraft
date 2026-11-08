@@ -1,5 +1,6 @@
 use super::*;
 use crate::scenario::{Harness, rect_of};
+use crate::toolbar;
 use serde_json::json;
 use solidcraft_engine::panels::ActionSink as _;
 
@@ -2439,7 +2440,7 @@ fn status_bar_names_what_is_edited_and_the_sketch_state_and_replaces_the_views_c
     assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some()));
     assert_eq!(crate::status_bar::contents(&h.app).editing.as_deref(), Some("Editing Extrude1"));
     // In another language the text is translated, and so is a default feature name.
-    let _ja = crate::i18n::scope("ja");
+    let _ja = solidcraft_ui_text::scope("ja");
     assert_eq!(crate::status_bar::contents(&h.app).editing, Some(format!("編集中: {}", crate::i18n::tr_name("Extrude1"))));
     assert_eq!(crate::i18n::tr_name("Sketch1"), "スケッチ1");
 }
@@ -2527,7 +2528,7 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
     assert_eq!(h.app.session.undo.len(), undo);
     // An unknown mapping changes nothing.
     let before = serde_json::to_value(&h.app.preferences).unwrap();
-    let hostile = crate::context_menu::Item::action("ui.navPreset", "Nope", "").with(json!({"preset": "nope"}));
+    let hostile = crate::ui_kit::Item::action("ui.navPreset", "Nope", "").with(json!({"preset": "nope"}));
     crate::context_menu::run_item(&mut h.app, &hostile, egui::pos2(0.0, 0.0));
     assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), before);
     // A second click on the button closes the menu it opened.

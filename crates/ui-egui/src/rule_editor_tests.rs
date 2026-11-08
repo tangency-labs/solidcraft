@@ -143,7 +143,7 @@ fn plastic_rule_editor_contract() {
 
 #[test]
 fn sheet_rule_editor_delete_reloads_and_plastic_has_no_delete() {
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let mut h = scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.set", json!({"layout":layout}));

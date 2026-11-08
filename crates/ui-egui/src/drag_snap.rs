@@ -255,7 +255,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let tk = Tokens::get();
     for (a, b) in &s.guides {
         if let (Some(a), Some(b)) = (to(*a), to(*b)) {
-            painter.extend(crate::viewport::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
+            painter.extend(crate::ui_kit::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
         }
     }
     let Some(sp) = to(s.at) else { return };
