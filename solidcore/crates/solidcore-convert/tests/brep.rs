@@ -556,8 +556,8 @@ fn lumps_and_solids_touching_along_an_edge_go_round() {
 }
 
 /// An analytic body's record: its curved faces are labels on their NURBS forms, its circles
-/// labels on theirs, its lines their two end points over [0, 1]; each pcurve on its edge's
-/// interval.
+/// labels on theirs, its lines as the kernel holds them (its point and unit vector, over the
+/// height); each pcurve on its edge's interval.
 #[test]
 fn analytic_records_carry_labels_on_their_forms() {
     let mut k = kernel();
@@ -576,8 +576,9 @@ fn analytic_records_carry_labels_on_their_forms() {
     for e in &r.edges {
         match &e.curve {
             Curve::Line { start, end } => {
-                assert_eq!(e.interval, [0.0, 1.0]);
-                assert_eq!((start[2], end[2]), (0.0, 5.0));
+                // as the kernel holds the seam: its point and unit vector, over its height
+                assert_eq!(e.interval, [0.0, 5.0]);
+                assert_eq!((start[2], end[2]), (0.0, 1.0));
                 assert!(e.nurbs.is_none());
             }
             Curve::Circle { radius, .. } => {

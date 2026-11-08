@@ -232,10 +232,11 @@ fn a_trim_runs_over_its_edges_kernel_interval() {
     assert_eq!((p.x, p.y), (1.0, 2.0));
 }
 
-/// A kernel line goes to the record by its points at its interval's ends, over [0, 1]: the
-/// same line, its parameter an affine image of the kernel's, and back again unchanged.
+/// A kernel line goes to the record as the kernel holds it, its point and its point plus its
+/// vector, over the STEP parameters of its interval (#3137: as SolidCraft's flat export wrote
+/// it), and back again unchanged.
 #[test]
-fn a_line_goes_back_by_its_two_end_points() {
+fn a_line_goes_back_as_the_kernel_holds_it() {
     let k = k();
     let line = Curve::from(Line::create_canonical(
         Point3::new(1.0, 2.0, 3.0),
@@ -245,11 +246,11 @@ fn a_line_goes_back_by_its_two_end_points() {
     assert_eq!(
         r.curve,
         Record::Line {
-            start: [2.0, 2.0, 3.0],
-            end: [5.0, 2.0, 3.0],
+            start: [1.0, 2.0, 3.0],
+            end: [3.0, 2.0, 3.0],
         }
     );
-    assert_eq!((&r.nurbs, r.interval), (&None, [0.0, 1.0]));
+    assert_eq!((&r.nurbs, r.interval), (&None, [0.5, 2.0]));
     let back = from_parameters(&k, &r.curve, r.interval).unwrap();
     assert_eq!(record_of(&k, &back.curve, &back.interval).unwrap(), r);
 }

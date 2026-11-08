@@ -273,9 +273,11 @@ pub struct RecordCurve {
 /// The record of the kernel's edge curve `c` over `interval` (its kernel parameter), the
 /// inverse of [`from_parameters`] and [`conic_on_form`]:
 ///
-/// - **Line:** the line through the curve's points at the interval's ends, over `[0, 1]`. A
-///   kernel line is affine in its parameter (its point plus the parameter times its vector),
-///   so this is the same line, the record's parameter an affine image of the kernel's.
+/// - **Line:** the line as the kernel holds it, its point and its point plus its vector, over
+///   the STEP parameters of the interval's ends (`ConvertTFromNURBSToSTEP`); where those run
+///   down, the vector and the parameters are negated so the interval increases. This is what
+///   SolidCraft's flat export wrote (`FlatFromBrep`'s line origin and direction, its range in
+///   STEP parameters), so a line comes back as it went in, not reparameterised onto `[0, 1]`.
 /// - **Circle, ellipse:** the label on the conic's own frame (copied, not rebuilt by a cross
 ///   product), its y axis reversed where the conic's NURBS runs against its angle (its own
 ///   `inside_out`, no sampling), with that NURBS as its form, over the kernel's interval.
@@ -298,15 +300,30 @@ pub fn record_of(k: &Kernel, c: &Curve, interval: &Extent1d) -> Result<RecordCur
         return Err(bad("the interval is not finite and increasing"));
     }
     match c.kind() {
-        CurveKind::Line(_) => {
-            let (a, b) = (c.evaluate_point(k, lo)?, c.evaluate_point(k, hi)?);
+        CurveKind::Line(l) => {
+            let can = l.canonical();
+            let (mut s0, mut s1) = (
+                c.convert_t_from_nurbs_to_step(k, lo)?,
+                c.convert_t_from_nurbs_to_step(k, hi)?,
+            );
+            let mut v = can.vector;
+            // a line whose parameter runs against its vector over the edge: the vector
+            // reversed, the parameters negated, so the record's interval increases
+            if s0 > s1 {
+                (s0, s1) = (-s0, -s1);
+                v = -v;
+            }
+            if !(s0.is_finite() && s1.is_finite() && s1 > s0) {
+                return Err(bad("a line's parameters over the edge are not increasing"));
+            }
+            let p = can.point;
             return Ok(RecordCurve {
                 curve: Record::Line {
-                    start: [a.x, a.y, a.z],
-                    end: [b.x, b.y, b.z],
+                    start: [p.x, p.y, p.z],
+                    end: [p.x + v.x, p.y + v.y, p.z + v.z],
                 },
                 nurbs: None,
-                interval: [0.0, 1.0],
+                interval: [s0, s1],
             });
         }
         CurveKind::Ellipse(e) => {

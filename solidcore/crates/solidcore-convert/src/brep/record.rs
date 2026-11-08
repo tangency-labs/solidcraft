@@ -3,7 +3,7 @@
 //! B-rep data, with no arrays between. What is done here is index mapping and field copies:
 //!
 //! - **Geometry:** each edge's curve and each face's surface as the kernel writes its record
-//!   ([`record_of`], [`record_face`]): a line by its two end points, a conic by its own frame and
+//!   ([`record_of`], [`record_face`]): a line as the kernel holds it, a conic by its own frame and
 //!   its NURBS form, proved on each other; an analytic face by its label and its NURBS form,
 //!   proved (`lies_on`); a plane by its placement, its parameters its kernel ones times its
 //!   scales. Nothing is sampled. A curve or surface with no NURBS form (an offset) is refused.
