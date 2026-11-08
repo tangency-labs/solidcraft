@@ -2641,7 +2641,7 @@ mod tests {
                         ui.set_width(width);
                         ui_kit::scope(ui, |ui| {
                             header(&mut app, ui, false);
-                            desktop_body(&mut app, ui);
+                            desktop_body(&mut app, ui, Flow::Tall);
                         });
                     });
                     output.textures_delta.clear();
