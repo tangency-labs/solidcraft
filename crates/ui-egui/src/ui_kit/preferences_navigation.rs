@@ -11,7 +11,7 @@ use egui::{FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 pub(crate) fn settings_mouse_mapping(ui: &mut Ui, bindings: &[(Vec<String>, String)], mapping: impl FnOnce(&mut Ui)) {
     let keys: Vec<Vec<&str>> = bindings.iter().map(|(keys, _)| keys.iter().map(String::as_str).collect()).collect();
     let rows: Vec<(&[&str], &str)> = bindings.iter().zip(&keys).map(|((_, action), keys)| (keys.as_slice(), action.as_str())).collect();
-    if crate::prefs_search::suppress_chrome(ui) {
+    if super::settings_search::suppress_chrome(ui) {
         mapping(ui);
         super::settings_bindings(ui, &rows);
         return;
@@ -59,7 +59,7 @@ fn axis_columns(rect: Rect) -> [Rect; 5] {
 }
 
 pub(crate) fn settings_axis_header(ui: &mut Ui) {
-    if crate::prefs_search::suppress_chrome(ui) {
+    if super::settings_search::suppress_chrome(ui) {
         return;
     }
     let t = Tokens::get();
@@ -173,8 +173,8 @@ pub(crate) fn live_axis_bar_in(ui: &Ui, live_rect: Rect, value: f32, dead_zone: 
 
 /// Compact per-axis gain uses a consistent two-decimal specimen and the real accepted range.
 pub(crate) fn settings_axis_gain(ui: &mut Ui, gain: &mut f32) -> egui::Response {
-    if crate::prefs_search::querying(ui) && (!ui.is_visible() || crate::prefs_search::suppress_chrome(ui)) {
-        return crate::prefs_search::hidden_response(ui);
+    if super::settings_search::querying(ui) && (!ui.is_visible() || super::settings_search::suppress_chrome(ui)) {
+        return super::settings_search::hidden_response(ui);
     }
     let response =
         ui.add(egui::DragValue::new(gain).range(0.0..=3.0).speed(0.05).suffix("×").fixed_decimals(2).custom_parser(crate::prefs::parse_number));

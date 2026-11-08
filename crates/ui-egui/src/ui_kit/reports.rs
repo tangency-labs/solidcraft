@@ -78,10 +78,10 @@ pub(crate) fn path_chip(ui: &mut Ui, path: &str, add: impl FnOnce(&mut Ui)) {
 
 /// Empty-list dashed outline and centred caption. Retains the note rectangle.
 pub(crate) fn empty_box(ui: &mut Ui, key: &str, message: &str) {
-    if crate::prefs_search::querying(ui) {
-        if crate::prefs_search::texts_hit(ui, &[message]) {
-            crate::prefs_search::reveal(ui);
-        } else if !ui.is_visible() || crate::prefs_search::suppress_chrome(ui) {
+    if super::settings_search::querying(ui) {
+        if super::settings_search::texts_hit(ui, &[message]) {
+            super::settings_search::reveal(ui);
+        } else if !ui.is_visible() || super::settings_search::suppress_chrome(ui) {
             return;
         }
     }

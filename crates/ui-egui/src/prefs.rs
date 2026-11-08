@@ -467,11 +467,11 @@ fn search_header(ui: &mut egui::Ui, app: &mut SolveApp) {
     }
     crate::scenario::publish_handle("prefs:search", field.rect.center());
     if field.has_focus() {
-        crate::prefs_search::note_key_sink(ui.ctx());
+        crate::ui_kit::settings_search::note_key_sink(ui.ctx());
     }
     settle_search(app);
-    crate::prefs_search::set_reveal(ui.ctx(), app.prefs_window.reveal.clone());
-    crate::prefs_search::set_force_scroll(ui.ctx(), !app.prefs_window.filter.trim().is_empty());
+    crate::ui_kit::settings_search::set_reveal(ui.ctx(), app.prefs_window.reveal.clone());
+    crate::ui_kit::settings_search::set_force_scroll(ui.ctx(), !app.prefs_window.filter.trim().is_empty());
 }
 
 /// Keys for the search field. Shortcut capture keeps the key for itself.
@@ -484,7 +484,7 @@ fn drive_search(ui: &mut egui::Ui, app: &mut SolveApp) -> bool {
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::F)) {
         ctx.memory_mut(|memory| memory.request_focus(id));
     }
-    let sink = crate::prefs_search::key_sink(&ctx);
+    let sink = crate::ui_kit::settings_search::key_sink(&ctx);
     let mut typed = false;
     if !sink {
         let modifiers = ctx.input(|input| input.modifiers);
@@ -511,20 +511,20 @@ fn drive_search(ui: &mut egui::Ui, app: &mut SolveApp) -> bool {
     if query.is_empty() {
         return typed;
     }
-    let (nav_query, cursor, hits) = crate::prefs_search::nav(&ctx);
+    let (nav_query, cursor, hits) = crate::ui_kit::settings_search::nav(&ctx);
     let fresh = nav_query == query;
     let cursor = if fresh { cursor.min(hits.len().saturating_sub(1)) } else { 0 };
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) && fresh && !hits.is_empty() {
-        crate::prefs_search::set_cursor(&ctx, (cursor + 1).min(hits.len() - 1));
+        crate::ui_kit::settings_search::set_cursor(&ctx, (cursor + 1).min(hits.len() - 1));
     } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) && fresh && !hits.is_empty() {
-        crate::prefs_search::set_cursor(&ctx, cursor.saturating_sub(1));
+        crate::ui_kit::settings_search::set_cursor(&ctx, cursor.saturating_sub(1));
     } else if fresh && !hits.is_empty() && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
         if let Some(hit) = hits.get(cursor) {
             open_result(app, hit.page, &hit.label);
             ctx.memory_mut(|memory| memory.surrender_focus(id));
         }
     } else {
-        crate::prefs_search::set_cursor(&ctx, cursor);
+        crate::ui_kit::settings_search::set_cursor(&ctx, cursor);
     }
     if !app.prefs_window.filter.trim().is_empty() && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         app.prefs_window.filter.clear();
@@ -551,7 +551,7 @@ fn open_result(app: &mut SolveApp, page: usize, label: &str) {
     app.prefs_window.search_from = None;
     app.prefs_window.section = page;
     app.prefs_window.land_on = Some(page);
-    app.prefs_window.reveal = Some(crate::prefs_search::reveal_for(page, label));
+    app.prefs_window.reveal = Some(crate::ui_kit::settings_search::reveal_for(page, label));
 }
 
 /// An empty field returns to the page that was up when the search started.
@@ -1804,7 +1804,7 @@ pub struct PrefsWindow {
     /// Set when a result is chosen, so the page draw does not put the previous tab back.
     land_on: Option<usize>,
     /// The row to scroll to after a result is chosen.
-    reveal: Option<crate::prefs_search::Reveal>,
+    reveal: Option<crate::ui_kit::settings_search::Reveal>,
     /// Where the theme Import tile was drawn last frame: a file dropped there is a theme (#8226).
     import_tile: Option<egui::Rect>,
 }
@@ -2721,7 +2721,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.prefs_window.search_from = None;
         app.prefs_window.land_on = None;
         app.prefs_window.reveal = None;
-        crate::prefs_search::set_reveal(ctx, None);
+        crate::ui_kit::settings_search::set_reveal(ctx, None);
         app.prefs_window.snapshot = None;
         // A question left up when the dialog closed is not still asked when it opens again.
         app.space_mouse.restore_pending = false;
@@ -2739,8 +2739,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     {
         app.prefs_window.reveal = None;
     }
-    let sink = crate::prefs_search::shift_key_sink(ctx);
-    crate::prefs_search::set_key_sink_prev(ctx, sink);
+    let sink = crate::ui_kit::settings_search::shift_key_sink(ctx);
+    crate::ui_kit::settings_search::set_key_sink_prev(ctx, sink);
     let mut button: Option<&str> = None;
     let before = app.preferences.clone();
     let capturing = crate::keymap::capturing(app);
@@ -2916,38 +2916,38 @@ fn panel_restore_banner(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
 
 fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     panel_restore_banner(app, ui, t);
-    let _search = crate::prefs_search::begin(ui, &app.prefs_window.filter);
-    if crate::prefs_search::querying(ui) {
+    let _search = crate::ui_kit::settings_search::begin(ui, &app.prefs_window.filter);
+    if crate::ui_kit::settings_search::querying(ui) {
         // Paint only the pages that match. A first pass is invisible, so the 3D mouse rows and the
         // agent list cannot draw on top of the setting that did match.
         let mut keep = vec![false; WINDOW_PAGES.len()];
         for (index, _) in WINDOW_PAGES.iter().enumerate() {
-            crate::prefs_search::begin_page(ui, index, &page_path(index));
-            let before = crate::prefs_search::hits(ui);
-            let mut probe = crate::prefs_search::detached_child(ui, ("prefs-search-probe", index), true);
+            crate::ui_kit::settings_search::begin_page(ui, index, &page_path(index));
+            let before = crate::ui_kit::settings_search::hits(ui);
+            let mut probe = crate::ui_kit::settings_search::detached_child(ui, ("prefs-search-probe", index), true);
             draw_page(app, &mut probe, index, t);
-            keep[index] = crate::prefs_search::hits(ui) > before;
+            keep[index] = crate::ui_kit::settings_search::hits(ui) > before;
         }
-        crate::prefs_search::rewind_search_layout(ui);
+        crate::ui_kit::settings_search::rewind_search_layout(ui);
         for (index, _) in WINDOW_PAGES.iter().enumerate() {
             if !keep.get(index).copied().unwrap_or(false) {
                 continue;
             }
-            crate::prefs_search::begin_page(ui, index, &page_path(index));
-            let before = crate::prefs_search::hits(ui);
-            let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-page", index), false);
+            crate::ui_kit::settings_search::begin_page(ui, index, &page_path(index));
+            let before = crate::ui_kit::settings_search::hits(ui);
+            let mut child = crate::ui_kit::settings_search::detached_child(ui, ("prefs-search-page", index), false);
             draw_page(app, &mut child, index, t);
-            crate::prefs_search::commit_search_child(ui, &child, before);
+            crate::ui_kit::settings_search::commit_search_child(ui, &child, before);
         }
-        if crate::prefs_search::hits(ui) == 0 {
+        if crate::ui_kit::settings_search::hits(ui) == 0 {
             ui.label(egui::RichText::new(crate::i18n::tr("prefs.search_empty")).size(t.font_body).color(t.form_dim));
         }
     } else {
         let label = page_path(app.prefs_window.section);
-        crate::prefs_search::begin_page(ui, app.prefs_window.section, &label);
+        crate::ui_kit::settings_search::begin_page(ui, app.prefs_window.section, &label);
         draw_page(app, ui, app.prefs_window.section, t);
     }
-    crate::prefs_search::store_nav(ui);
+    crate::ui_kit::settings_search::store_nav(ui);
 }
 
 fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {

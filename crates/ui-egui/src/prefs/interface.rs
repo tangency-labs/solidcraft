@@ -659,7 +659,7 @@ fn browser_visibility(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_form(ui, 0.0, |ui| {
         ui_kit::row(ui, app.tr("prefs.browser_shown"), |ui| {
             ui.spacing_mut().item_spacing.x = Tokens::get().space_6;
-            crate::prefs_search::note_current(ui, app.tr("prefs.layout_page.on_hover"));
+            crate::ui_kit::settings_search::note_current(ui, app.tr("prefs.layout_page.on_hover"));
             ui.add_enabled_ui(!crate::timeline_left::stacked(app), |ui| {
                 let mut selected = usize::from(app.preferences.browser_show == BrowserShow::Hover);
                 if ui_kit::settings_segments(

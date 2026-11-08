@@ -25,7 +25,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
         let controls_width = if available >= figure_width + t.space_14 + labels_width { available - figure_width - t.space_14 } else { available };
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
             ui.spacing_mut().item_spacing.x = t.space_14;
-            if !crate::prefs_search::suppress_chrome(ui) {
+            if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(figure_width.min(available), t.space_24 * 2.0 + t.space_16), egui::Sense::hover());
                 ui_kit::paint_sketch_guides(&ui.painter_at(rect), rect);
             }
@@ -107,7 +107,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             .map(|labels| labels.iter().map(|id| check_width(ui, app.tr(id), true)).fold(0.0, f32::max));
         let available = ui.available_width();
         let gap = t.space_24 + t.space_8;
-        let two_columns = available >= t.space_24 * 20.0 + gap && !crate::prefs_search::suppress_chrome(ui);
+        let two_columns = available >= t.space_24 * 20.0 + gap && !crate::ui_kit::settings_search::suppress_chrome(ui);
         let left = if two_columns { (available - gap) * natural[0] / (natural[0] + natural[1]).max(1.0) } else { available };
         let right = if two_columns { available - gap - left } else { available };
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
@@ -226,8 +226,8 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
         );
         picture_group(ui, app.tr("prefs.sketch_exit_view"), |ui| {
             let label = app.tr("prefs.sketch_exit_view");
-            let mut indexed = crate::prefs_search::texts_hit(ui, &[label]);
-            if !crate::prefs_search::suppress_chrome(ui) {
+            let mut indexed = crate::ui_kit::settings_search::texts_hit(ui, &[label]);
+            if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                 ui_kit::section_heading(ui, label);
             }
             let cards = ui.horizontal_wrapped(|ui| {
@@ -272,19 +272,19 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("dialog:When a sketch ends", response.rect);
                     }
                     let option = app.tr(label_id);
-                    if !indexed && crate::prefs_search::texts_hit(ui, &[option]) {
-                        crate::prefs_search::remember(ui, option, response.rect);
+                    if !indexed && crate::ui_kit::settings_search::texts_hit(ui, &[option]) {
+                        crate::ui_kit::settings_search::remember(ui, option, response.rect);
                         indexed = true;
                     }
-                    crate::prefs_search::follow(ui, option, response.rect);
+                    crate::ui_kit::settings_search::follow(ui, option, response.rect);
                     if response.clicked() {
                         app.preferences.sketch_exit_view = choice;
                     }
                 }
             });
             crate::scenario::publish_rect("prefs:sketch_exit_view:choices", cards.response.rect);
-            crate::prefs_search::remember(ui, label, cards.response.rect);
-            crate::prefs_search::follow(ui, label, cards.response.rect);
+            crate::ui_kit::settings_search::remember(ui, label, cards.response.rect);
+            crate::ui_kit::settings_search::follow(ui, label, cards.response.rect);
         });
     });
 }
@@ -354,8 +354,8 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "selection", app.tr("prefs.selecting"), |ui| {
         picture_group(ui, app.tr("prefs.sketch.click_selects"), |ui| {
             let label = app.tr("prefs.sketch.click_selects");
-            let mut indexed = crate::prefs_search::texts_hit(ui, &[label]);
-            if !crate::prefs_search::suppress_chrome(ui) {
+            let mut indexed = crate::ui_kit::settings_search::texts_hit(ui, &[label]);
+            if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                 ui_kit::section_heading(ui, label);
             }
             let cards = ui.horizontal_wrapped(|ui| {
@@ -385,19 +385,19 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("dialog:Click selects whole bodies", response.rect);
                     }
                     let option = app.tr(label);
-                    if !indexed && crate::prefs_search::texts_hit(ui, &[option]) {
-                        crate::prefs_search::remember(ui, option, response.rect);
+                    if !indexed && crate::ui_kit::settings_search::texts_hit(ui, &[option]) {
+                        crate::ui_kit::settings_search::remember(ui, option, response.rect);
                         indexed = true;
                     }
-                    crate::prefs_search::follow(ui, option, response.rect);
+                    crate::ui_kit::settings_search::follow(ui, option, response.rect);
                     if response.clicked() {
                         app.ui.pick_bodies = bodies;
                     }
                 }
             });
             crate::scenario::publish_rect("prefs:pick_bodies:choices", cards.response.rect);
-            crate::prefs_search::remember(ui, label, cards.response.rect);
-            crate::prefs_search::follow(ui, label, cards.response.rect);
+            crate::ui_kit::settings_search::remember(ui, label, cards.response.rect);
+            crate::ui_kit::settings_search::follow(ui, label, cards.response.rect);
         });
         check(
             ui,
@@ -446,8 +446,8 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 /// Natural-height picture groups own their search entries without allocating a form label column.
 fn picture_group(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
-    let gate = crate::prefs_search::block_gate(ui, label, None);
-    let before = crate::prefs_search::hits(ui);
+    let gate = crate::ui_kit::settings_search::block_gate(ui, label, None);
+    let before = crate::ui_kit::settings_search::hits(ui);
     let show = gate.as_ref().is_none_or(|gate| gate.show);
     let content = |ui: &mut egui::Ui| {
         let group = ui.scope(|ui| ui_kit::named_control(ui, label, add));
@@ -456,10 +456,10 @@ fn picture_group(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)
     if show {
         content(ui);
     } else {
-        crate::prefs_search::run_hidden(ui, label, content);
+        crate::ui_kit::settings_search::run_hidden(ui, label, content);
     }
     if let Some(gate) = &gate {
-        crate::prefs_search::block_finish(ui, gate, show, before);
+        crate::ui_kit::settings_search::block_finish(ui, gate, show, before);
     }
 }
 
@@ -473,7 +473,7 @@ fn check(ui: &mut egui::Ui, key: &str, label: &str, help: Option<&str>, value: &
     let help = help.map(crate::i18n::tr);
     ui.horizontal_top(|ui| {
         let t = Tokens::get();
-        let show_help = help.is_some() && !crate::prefs_search::suppress_chrome(ui);
+        let show_help = help.is_some() && !crate::ui_kit::settings_search::suppress_chrome(ui);
         let width = (ui.available_width() - if show_help { t.space_8 + t.space_12 + 1.0 } else { 0.0 }).max(0.0).min(check_width(
             ui,
             crate::i18n::tr(label),

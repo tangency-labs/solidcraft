@@ -130,7 +130,7 @@ pub(super) fn choose(app: &mut SolveApp, night: bool, id: &str) {
 }
 
 pub(super) fn row(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if crate::prefs_search::suppress_chrome(ui) {
+    if crate::ui_kit::settings_search::suppress_chrome(ui) {
         row_contents(app, ui);
         return;
     }
@@ -152,7 +152,7 @@ pub(super) fn row(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     let key = ui.make_persistent_id("theme_picker_state");
     let mut state = ui.data(|d| d.get_temp::<State>(key)).unwrap_or_default();
-    let search = crate::prefs_search::suppress_chrome(ui);
+    let search = crate::ui_kit::settings_search::suppress_chrome(ui);
     let mut action = None;
     let mut action_theme = None;
     let t = Tokens::get();

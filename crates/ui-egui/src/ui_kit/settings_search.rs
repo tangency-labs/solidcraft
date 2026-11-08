@@ -1,7 +1,8 @@
-//! Search across Preferences. The field is the Keyboard Shortcuts magnifier. A match is the
-//! control's own label, its section, its page, or the value a dropdown is showing, scored the
-//! same way as command search. English counts too, from the message catalog, so a new setting
-//! is found by being drawn — nothing is registered for search.
+//! Search across a settings page the kit draws; the Preferences window is SolidCraft's use of it.
+//! The field is the Keyboard Shortcuts magnifier. A match is the control's own label, its
+//! section, its page, or the value a dropdown is showing, scored the same way as command search.
+//! English counts too, from the message catalog, so a new setting is found by being drawn —
+//! nothing is registered for search.
 
 use std::collections::{HashMap, HashSet};
 
@@ -801,7 +802,7 @@ pub(crate) fn remember(ui: &mut Ui, label: &str, rect: Rect) {
     if scroll {
         ui.scroll_to_rect(rect, Some(egui::Align::Center));
     }
-    crate::scenario::publish_handle("prefs:search:current", rect.center());
+    solidcraft_ui_registry::publish_handle("prefs:search:current", rect.center());
 }
 
 pub(crate) fn set_reveal(ctx: &Context, reveal: Option<Reveal>) {
@@ -815,13 +816,13 @@ pub(crate) fn set_reveal(ctx: &Context, reveal: Option<Reveal>) {
 }
 
 pub(crate) fn reveal_for(page: usize, label: &str) -> Reveal {
-    Reveal { page, label: label.to_string(), until: crate::now_ms() + REVEAL_MS }
+    Reveal { page, label: label.to_string(), until: now_ms() + REVEAL_MS }
 }
 
 /// Scroll the opened setting into view and outline it until [`Reveal::until`].
 pub(crate) fn follow(ui: &Ui, label: &str, rect: Rect) {
     let Some(reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID))) else { return };
-    if crate::now_ms() > reveal.until || fold(label) != fold(&reveal.label) {
+    if now_ms() > reveal.until || fold(label) != fold(&reveal.label) {
         return;
     }
     let page = with(ui, |state| state.page_index);
@@ -831,7 +832,13 @@ pub(crate) fn follow(ui: &Ui, label: &str, rect: Rect) {
     ui.scroll_to_rect(rect, Some(egui::Align::Center));
     let t = Tokens::get();
     ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
-    crate::scenario::publish_handle("prefs:revealed", rect.center());
+    solidcraft_ui_registry::publish_handle("prefs:revealed", rect.center());
+}
+
+/// Wall clock in milliseconds, for how long a reveal stays outlined.
+fn now_ms() -> f64 {
+    use web_time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0)
 }
 
 #[cfg(test)]

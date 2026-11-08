@@ -36,12 +36,12 @@ pub(crate) struct Segments<'a> {
 }
 
 pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Segments<'_>) -> bool {
-    crate::prefs_search::note_unlabelled(ui, options);
-    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, options) {
+    super::settings_search::note_unlabelled(ui, options);
+    if super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, options) {
         return false;
     }
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::shows_all(ui) {
-        crate::prefs_search::reveal(ui);
+    if super::settings_search::querying(ui) && !super::settings_search::shows_all(ui) {
+        super::settings_search::reveal(ui);
     }
     let Segments {
         focus,
@@ -441,9 +441,9 @@ pub(crate) fn list_picker(ui: &mut Ui, key: &str, text: &str, selected: bool) ->
 
 /// Intrinsic-width selection chip for horizontal lists, sharing list-picker styling.
 pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) -> egui::Response {
-    crate::prefs_search::note_unlabelled(ui, &[text]);
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[text]) {
-        return crate::prefs_search::hidden_response(ui);
+    super::settings_search::note_unlabelled(ui, &[text]);
+    if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &[text]) {
+        return super::settings_search::hidden_response(ui);
     }
     let t = Tokens::get();
     if super::settings_page_active(ui) {
@@ -456,8 +456,8 @@ pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) ->
                 .stroke(egui::Stroke::new(1.0, if selected { t.form_primary } else { t.control_border }))
                 .corner_radius(t.radius_xl),
         );
-        crate::prefs_search::remember(ui, text, response.rect);
-        crate::prefs_search::follow(ui, text, response.rect);
+        super::settings_search::remember(ui, text, response.rect);
+        super::settings_search::follow(ui, text, response.rect);
         solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), response.rect);
         return response;
     }

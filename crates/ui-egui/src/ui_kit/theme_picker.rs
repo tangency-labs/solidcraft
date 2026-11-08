@@ -121,8 +121,8 @@ impl<'a> ThemeSegment<'a> {
 
 pub(crate) fn theme_segments(ui: &mut Ui, key: &str, options: &[ThemeSegment<'_>], selected: Option<usize>, icon_only: bool) -> Option<usize> {
     let labels: Vec<_> = options.iter().map(|o| o.label).collect();
-    crate::prefs_search::note_unlabelled(ui, &labels);
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &labels) {
+    super::settings_search::note_unlabelled(ui, &labels);
+    if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &labels) {
         return None;
     }
     let t = Tokens::get();
@@ -188,8 +188,8 @@ pub(crate) fn theme_segments(ui: &mut Ui, key: &str, options: &[ThemeSegment<'_>
             ui.painter().rect_stroke(r.expand(t.space_2), rounding, Stroke::new(t.space_2, t.form_primary), StrokeKind::Outside);
         }
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), on, option.label));
-        crate::prefs_search::remember(ui, option.label, r);
-        crate::prefs_search::follow(ui, option.label, r);
+        super::settings_search::remember(ui, option.label, r);
+        super::settings_search::follow(ui, option.label, r);
         let visible = r.intersect(ui.clip_rect());
         if visible.is_positive() {
             solidcraft_ui_registry::publish_target(&format!("prefs:theme_{key}:{index}"), visible);
@@ -249,9 +249,9 @@ fn bounded_width(ui: &Ui) -> f32 {
 }
 
 pub(crate) fn theme_import_button(ui: &mut Ui, label: &str) -> Response {
-    crate::prefs_search::note_unlabelled(ui, &[label]);
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[label]) {
-        return crate::prefs_search::hidden_response(ui);
+    super::settings_search::note_unlabelled(ui, &[label]);
+    if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &[label]) {
+        return super::settings_search::hidden_response(ui);
     }
     let t = Tokens::get();
     let width = ContentWidth::name(ui, label) + t.space_14 + t.space_6 + t.space_10 * 2.0;
@@ -270,8 +270,8 @@ pub(crate) fn theme_import_button(ui: &mut Ui, label: &str) -> Response {
         ui.painter().rect_stroke(r.expand(t.space_2), t.radius_md, Stroke::new(t.space_2, t.form_primary), StrokeKind::Outside);
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
-    crate::prefs_search::remember(ui, label, r);
-    crate::prefs_search::follow(ui, label, r);
+    super::settings_search::remember(ui, label, r);
+    super::settings_search::follow(ui, label, r);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -286,9 +286,9 @@ pub(crate) struct ThemeSlot<'a> {
 }
 pub(crate) fn theme_slot(ui: &mut Ui, slot: &ThemeSlot<'_>) -> Response {
     let t = Tokens::get();
-    crate::prefs_search::note_unlabelled(ui, &[slot.title, slot.name, slot.hint]);
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[slot.title, slot.name, slot.hint]) {
-        return crate::prefs_search::hidden_response(ui);
+    super::settings_search::note_unlabelled(ui, &[slot.title, slot.name, slot.hint]);
+    if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &[slot.title, slot.name, slot.hint]) {
+        return super::settings_search::hidden_response(ui);
     }
     let (r, response) = ui.allocate_exact_size(vec2(slot.width.max(0.0), t.space_24 * 2.0 + t.space_16), Sense::click());
     ui.painter().rect(
@@ -308,8 +308,8 @@ pub(crate) fn theme_slot(ui: &mut Ui, slot: &ThemeSlot<'_>) -> Response {
     p.text(pos2(x, r.bottom() - t.space_16 - t.space_4), Align2::LEFT_CENTER, slot.name, crate::fonts::semibold(t.font_label), t.form_ink);
     p.text(pos2(r.right() - t.space_10, r.center().y), Align2::RIGHT_CENTER, slot.hint, FontId::proportional(t.font_small), t.form_dim);
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), slot.aimed, slot.title));
-    crate::prefs_search::remember(ui, slot.title, r);
-    crate::prefs_search::follow(ui, slot.title, r);
+    super::settings_search::remember(ui, slot.title, r);
+    super::settings_search::follow(ui, slot.title, r);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 

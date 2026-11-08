@@ -118,7 +118,7 @@ fn workspace_selector(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesV
     let title = app.tr("ui.panel_layout.layout_workspace").to_owned();
     ui_kit::settings_form(ui, 0.0, |ui| {
         ui_kit::sized_row(ui, &title, t.control_height, |ui| {
-            crate::prefs_search::note_choices(ui, &options);
+            crate::ui_kit::settings_search::note_choices(ui, &options);
             ui.horizontal(|ui| {
                 let reset_label = app.tr("ui.panel_layout.reset_short");
                 let reset_width = ui_kit::ContentWidth::name(ui, reset_label) + t.space_24 + t.space_16;
@@ -246,8 +246,8 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
                     Tile::Save => app.tr("ui.panel_layout.save_as_tile"),
                 })
                 .collect();
-            crate::prefs_search::note_choices(ui, &names);
-            crate::prefs_search::note_choices(
+            crate::ui_kit::settings_search::note_choices(ui, &names);
+            crate::ui_kit::settings_search::note_choices(
                 ui,
                 &[app.tr("ui.panel_layout.save"), app.tr("ui.panel_layout.replace"), app.tr("ui.panel_layout.reset")],
             );
@@ -471,7 +471,7 @@ fn tile_menu(app: &SolveApp, ui: &mut Ui, state: &mut State, tile: &Response, en
         },
     );
     if popup.inner.is_some() {
-        crate::prefs_search::note_key_sink(ui.ctx());
+        crate::ui_kit::settings_search::note_key_sink(ui.ctx());
     }
 }
 
@@ -542,8 +542,8 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
                 ui_kit::settings_form(ui, 0.0, |ui| {
                     ui.set_width(width);
                     ui.spacing_mut().item_spacing = vec2(t.space_8, t.space_8);
-                    crate::prefs_search::push_force(ui);
-                    crate::prefs_search::note_key_sink(ui.ctx());
+                    crate::ui_kit::settings_search::push_force(ui);
+                    crate::ui_kit::settings_search::note_key_sink(ui.ctx());
                     match &mut popup.kind {
                         PopoverKind::Save { name, chosen } => {
                             let users: Vec<_> = view.entries.iter().filter(|entry| entry.user).collect();
@@ -616,7 +616,7 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
                         }
                     }
                     trap_focus(ui, &focus_ids);
-                    crate::prefs_search::pop_force(ui);
+                    crate::ui_kit::settings_search::pop_force(ui);
                 })
             })
         });

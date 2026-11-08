@@ -333,7 +333,7 @@ fn searchable_dropdown_with(
     menu: SearchMenu<'_>,
 ) -> Option<String> {
     let SearchMenu { custom, pending, icon } = menu;
-    crate::prefs_search::note_current(ui, current);
+    super::settings_search::note_current(ui, current);
     let mut chosen = None;
     let row = label(ui).to_owned();
     let combo = egui::ComboBox::from_id_salt(id)
@@ -355,7 +355,7 @@ fn searchable_dropdown_with(
         );
         // Preferences types into its own search only while no field has the keyboard.
         if search.has_focus() {
-            crate::prefs_search::note_key_sink(ui.ctx());
+            super::settings_search::note_key_sink(ui.ctx());
         }
         solidcraft_ui_registry::publish_handle(&format!("dialog:{row} search"), search.rect.center());
         if let Some(custom) = custom {
@@ -453,12 +453,12 @@ pub(crate) enum Picked {
 /// list stays cheap. Returns the pick and the control's response.
 /// Tokens: dropdown tokens, field tokens, `space_24`, `font_small`, `text_dim`, `form_card_width`.
 pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResponse<Option<Picked>> {
-    crate::prefs_search::note_current(ui, p.current);
+    super::settings_search::note_current(ui, p.current);
     // As in `dropdown_menu_with_close_behavior`: only a search probe skips the real control.
-    if crate::prefs_search::querying(ui)
-        && (!ui.is_visible() || (crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[p.current])))
+    if super::settings_search::querying(ui)
+        && (!ui.is_visible() || (super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, &[p.current])))
     {
-        return egui::InnerResponse::new(None, crate::prefs_search::hidden_response(ui));
+        return egui::InnerResponse::new(None, super::settings_search::hidden_response(ui));
     }
     let state = egui::Id::unique(p.id);
     let mut picked = None;
@@ -524,7 +524,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
         }
     }
     if search.has_focus() {
-        crate::prefs_search::note_key_sink(ui.ctx());
+        super::settings_search::note_key_sink(ui.ctx());
     }
     if search.changed() {
         ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
@@ -814,7 +814,7 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     }
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     if response.has_focus() {
-        crate::prefs_search::note_key_sink(ui.ctx());
+        super::settings_search::note_key_sink(ui.ctx());
     }
     if completion && ui.is_enabled() {
         ui.ctx().data_mut(|data| {
@@ -936,11 +936,11 @@ pub(crate) fn dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str,
 /// A width-bounded toolbar picker. Long selected values and popup rows truncate;
 /// callers can retain their complete labels in hover text.
 pub(crate) fn bounded_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, width: f32, add: impl FnOnce(&mut Ui)) -> Response {
-    crate::prefs_search::note_current(ui, current);
-    if crate::prefs_search::querying(ui)
-        && (!ui.is_visible() || (crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[current])))
+    super::settings_search::note_current(ui, current);
+    if super::settings_search::querying(ui)
+        && (!ui.is_visible() || (super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, &[current])))
     {
-        return crate::prefs_search::hidden_response(ui);
+        return super::settings_search::hidden_response(ui);
     }
     let width = dimension(width);
     let response = ui
@@ -1005,13 +1005,13 @@ fn dropdown_menu_width(
     close_behavior: egui::PopupCloseBehavior,
     add: impl FnOnce(&mut Ui),
 ) -> Response {
-    crate::prefs_search::note_current(ui, current);
+    super::settings_search::note_current(ui, current);
     // Only a search probe may skip the real control. A dialog's first frame is not visible yet,
     // and a stand-in there makes the next frame too short to show OK.
-    if crate::prefs_search::querying(ui)
-        && (!ui.is_visible() || (crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[current])))
+    if super::settings_search::querying(ui)
+        && (!ui.is_visible() || (super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, &[current])))
     {
-        return crate::prefs_search::hidden_response(ui);
+        return super::settings_search::hidden_response(ui);
     }
     let t = Tokens::get();
     let width = if compact {
@@ -1331,7 +1331,7 @@ pub(crate) fn search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
         info
     });
     if response.has_focus() {
-        crate::prefs_search::note_key_sink(ui.ctx());
+        super::settings_search::note_key_sink(ui.ctx());
     }
     crate::theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
@@ -1424,8 +1424,8 @@ impl Default for Slider {
 /// Native input, keyboard routing, enabled state and accessibility; one token-painted track/thumb.
 /// Tokens: control_height, space_24/8/4/2, dialog_rule, control_fill, form_primary.
 pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>, options: Slider) -> Response {
-    if crate::prefs_search::suppress_chrome(ui) {
-        return crate::prefs_search::hidden_response(ui);
+    if super::settings_search::suppress_chrome(ui) {
+        return super::settings_search::hidden_response(ui);
     }
     // Own form styling even in callers such as the viewport menu which have no kit scope.
     super::scope(ui, |ui| {
@@ -1513,7 +1513,7 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
             ui.ctx().read_response(id).is_some_and(|focused| response.rect.contains(focused.rect.center()))
                 || egui::TextEdit::load_state(ui.ctx(), id).is_some()
         }) {
-            crate::prefs_search::note_key_sink(ui.ctx());
+            super::settings_search::note_key_sink(ui.ctx());
         }
         // Match egui's native input range (handle_radius = thickness / 2.5), so the
         // painted thumb stays under the pointer even at the two ends of the range.
@@ -1733,7 +1733,7 @@ fn bounded_number_field<T: egui::emath::Numeric>(
             .custom_parser(crate::prefs::parse_number),
     );
     if response.has_focus() {
-        crate::prefs_search::note_key_sink(ui.ctx());
+        super::settings_search::note_key_sink(ui.ctx());
     }
     Tokens::get().input_bevel(ui, &response);
     response.widget_info(|| {
