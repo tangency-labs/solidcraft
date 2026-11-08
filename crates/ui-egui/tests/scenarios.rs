@@ -4,6 +4,7 @@
 //! `{"pending": "why"}` step (its test is ignored with that reason). Adding a scenario is adding
 //! its file.
 
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_egui::scenario::Harness;
 
 fn run(name: &str) {
@@ -103,7 +104,7 @@ fn dragging_a_conic_after_the_tool_sets_rho_and_its_apex_stays_separately_dragga
         .expect("the three clicks created a conic");
     assert!((rho - 0.5).abs() < 1e-6, "default rho {rho}");
     let apex_before = sk.point(apex_idx).expect("apex point resolves");
-    assert!(apex_before.dist(solidcraft_engine::geom::Vec2::new(20.0, 20.0)) < 1e-6);
+    assert!(apex_before.dist(solidcore_record::Vec2::new(20.0, 20.0)) < 1e-6);
 
     // Grabbed on the curve itself, at its default-rho midpoint (20, 10): the chord's midpoint
     // is (20, 0), the apex (20, 20), so (20, 14) is 0.7 of the way from one to the other.

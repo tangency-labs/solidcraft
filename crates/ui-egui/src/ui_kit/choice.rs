@@ -5,9 +5,10 @@ use super::{
     metrics::*,
     text::paint_text,
 };
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
-use crate::{scenario, theme::Tokens};
 use egui::{Ui, vec2};
+use solidcraft_theme::Tokens;
 
 /// Text segments retain mixed states and optional compact clipping instead of dropdown fallback.
 #[derive(Default)]
@@ -35,12 +36,12 @@ pub(crate) struct Segments<'a> {
 }
 
 pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Segments<'_>) -> bool {
-    crate::prefs_search::note_unlabelled(ui, options);
-    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, options) {
+    super::settings_search::note_unlabelled(ui, options);
+    if super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, options) {
         return false;
     }
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::shows_all(ui) {
-        crate::prefs_search::reveal(ui);
+    if super::settings_search::querying(ui) && !super::settings_search::shows_all(ui) {
+        super::settings_search::reveal(ui);
     }
     let Segments {
         focus,
@@ -58,13 +59,13 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         intrinsic,
         proportional,
     } = config;
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     let t = Tokens::get();
     let catalog = super::layout::in_catalog(ui);
     let font_size = if small || catalog { t.font_small } else { t.font_label };
     // Callers pass English source labels or text they translated; either way a segment shows it
     // translated, as the dropdown it falls back to does. Handles keep the option as passed.
-    let shown: Vec<&str> = options.iter().map(|option| crate::i18n::tr_label(option)).collect();
+    let shown: Vec<&str> = options.iter().map(|option| solidcraft_ui_text::tr_label(option)).collect();
     let natural: Vec<_> = shown
         .iter()
         .enumerate()
@@ -192,24 +193,30 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
             false,
         );
         t.button_bevel_with_radius(ui, &response, on, rounding);
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, segment_enabled, on, *text));
-        scenario::publish_target(&format!("dialog:{}:{option}", label(ui)), segment);
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, segment_enabled, on, *text));
+        solidcraft_ui_registry::publish_target(&format!("dialog:{}:{option}", label(ui)), segment);
         if let Some(target) = targets.get(index) {
             let visible = segment.intersect(ui.clip_rect());
             if visible.is_positive() {
-                scenario::publish_target(target, visible);
+                solidcraft_ui_registry::publish_target(target, visible);
             }
         }
-        let response = if let Some(reason) = reason { response.on_disabled_hover_text(reason) } else { response.on_hover_text(*text) };
+        let response =
+            if let Some(reason) = reason { response.backing_on_disabled_hover_text(reason) } else { response.backing_on_hover_text(*text) };
         if response.clicked() && segment_enabled {
             *selected = index;
             clicked = true;
         }
     }
     if t.borders.bevel.is_none() {
-        ui.painter().rect_stroke(rect, t.control_radius, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(
+            rect,
+            t.control_radius,
+            t.control_border_stroke(if options.len() == 1 && states.first() == Some(&true) { t.form_primary } else { t.control_border }),
+            egui::StrokeKind::Inside,
+        );
     }
-    scenario::publish_target_as(&format!("dialog:{}", label(ui)), &format!("dialog:segments:{}", label(ui)), rect);
+    solidcraft_ui_registry::publish_target_as(&format!("dialog:{}", label(ui)), &format!("dialog:segments:{}", label(ui)), rect);
     clicked
 }
 
@@ -228,7 +235,7 @@ pub(crate) struct IconSegment {
 pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[IconSegment], states: &[bool]) -> bool {
     let t = Tokens::get();
     let catalog = super::layout::in_catalog(ui);
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     let (rect, _) =
         ui.allocate_exact_size(vec2(dimension(ui.available_width()), if catalog { t.space_24 } else { row_height() }), egui::Sense::hover());
     if !catalog {
@@ -272,10 +279,10 @@ pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[Icon
             crate::icons::paint_icon(ui.painter(), icon_rect, option.icon, f32::from(t.icon.a()) / 255.0);
         }
         t.button_bevel_with_radius(ui, &response, on, rounding);
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), on, option.key));
-        scenario::publish_handle(&format!("dialog:{}:{}", label(ui), option.key), segment.center());
-        scenario::publish_target(option.key, segment);
-        let response = response.on_hover_text(&option.tip);
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), on, option.key));
+        solidcraft_ui_registry::publish_handle(&format!("dialog:{}:{}", label(ui), option.key), segment.center());
+        solidcraft_ui_registry::publish_target(option.key, segment);
+        let response = response.backing_on_hover_text(&option.tip);
         if response.clicked() {
             *selected = index;
             clicked = true;
@@ -284,7 +291,7 @@ pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[Icon
     if !catalog && t.borders.bevel.is_none() {
         ui.painter().rect_stroke(rect, t.control_radius, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
     }
-    scenario::publish_target_as(&format!("dialog:{}", label(ui)), &format!("dialog:segments:{}", label(ui)), rect);
+    solidcraft_ui_registry::publish_target_as(&format!("dialog:{}", label(ui)), &format!("dialog:segments:{}", label(ui)), rect);
     clicked
 }
 
@@ -304,12 +311,12 @@ pub(crate) fn checkbox_grid(ui: &mut Ui, items: &mut [(&str, &mut bool)], column
                 }
                 let square = super::checks::box_at(ui, egui::pos2(rect.left() + t.space_14 / 2.0, rect.center().y));
                 super::checks::paint_box(ui, square, &response, **value, false);
-                let translated = crate::i18n::tr_label(label);
+                let translated = solidcraft_ui_text::tr_label(label);
                 let text = if translated == "Tangent Chain" { "Tangent chain" } else { translated };
                 let text_rect = egui::Rect::from_min_max(egui::pos2((square.right() + t.space_6).min(rect.right()), rect.top()), rect.max);
                 paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_body), t.form_ink, false);
-                response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), **value, translated));
-                scenario::publish_target_as(&format!("dialog:{label}"), &format!("dialog:checkbox:{label}"), rect);
+                response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), **value, translated));
+                solidcraft_ui_registry::publish_target_as(&format!("dialog:{label}"), &format!("dialog:checkbox:{label}"), rect);
             }
         });
     }
@@ -331,14 +338,14 @@ pub(crate) fn checkbox_row(ui: &mut egui::Ui, key: &str, label: &str, on: bool) 
         ui.painter().rect_filled(rect, t.control_radius, t.hover);
     }
     super::checks::paint_box(ui, square, &response, on, false);
-    let label = crate::i18n::tr_label(label);
+    let label = solidcraft_ui_text::tr_label(label);
     let painter = ui
         .painter()
         .with_clip_rect(ui.clip_rect().intersect(egui::Rect::from_min_max(rect.min, egui::pos2(square.left() - t.space_6, rect.bottom()))));
     painter.text(rect.left_center(), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(t.font_label), t.form_ink);
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), on, label));
-    crate::scenario::publish_target(&format!("sketch_palette:toggle:{key}"), rect);
-    response.on_hover_text(label).clicked()
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), on, label));
+    solidcraft_ui_registry::publish_target(&format!("sketch_palette:toggle:{key}"), rect);
+    response.backing_on_hover_text(label).clicked()
 }
 
 /// Compact bold/italic toggles for text. Tokens: scope font/control tokens.
@@ -352,12 +359,12 @@ pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool, bol
         if !enabled {
             *value = false;
         }
-        let mut response = ui.add_enabled_ui(enabled, |ui| ui.toggle_value(value, text).on_hover_text(crate::i18n::tr(id))).inner;
+        let mut response = ui.add_enabled_ui(enabled, |ui| ui.toggle_value(value, text).backing_on_hover_text(solidcraft_ui_text::tr(id))).inner;
         if !enabled {
-            response = response.on_disabled_hover_text(crate::i18n::tr("sketch_text.no_bold"));
+            response = response.backing_on_disabled_hover_text(solidcraft_ui_text::tr("sketch_text.no_bold"));
         }
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled() && enabled, *value, crate::i18n::tr(id)));
-        scenario::publish_target_as(&format!("dialog:{key}"), &format!("dialog:emphasis:{key}"), response.rect);
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled() && enabled, *value, solidcraft_ui_text::tr(id)));
+        solidcraft_ui_registry::publish_target_as(&format!("dialog:{key}"), &format!("dialog:emphasis:{key}"), response.rect);
     }
 }
 
@@ -391,9 +398,9 @@ pub(crate) fn tool_choices<'a>(ui: &mut Ui, label: &str, current: &str, choices:
             );
             crate::icons::paint_icon(ui.painter(), response.rect.shrink(t.space_6), choice.icon, f32::from(t.icon.a()) / 255.0);
             t.button_bevel(ui, &response, on);
-            scenario::publish_target(&format!("sketch_palette:feature:{}", choice.key), response.rect);
-            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, choice.label));
-            if response.on_hover_text(choice.label).clicked() && enabled {
+            solidcraft_ui_registry::publish_target(&format!("sketch_palette:feature:{}", choice.key), response.rect);
+            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, enabled, on, choice.label));
+            if response.backing_on_hover_text(choice.label).clicked() && enabled {
                 start = Some(choice.key);
             }
         }
@@ -409,13 +416,13 @@ pub(crate) fn toggle_icon(ui: &mut Ui, row: &str, label: &str, selected: &mut bo
     let response =
         ui.add(egui::Button::new("").selected(*selected).min_size(vec2(t.space_24 + t.space_4, t.control_height)).sense(egui::Sense::CLICK));
     crate::icons::paint_icon(ui.painter(), response.rect.shrink(t.space_3), icon, f32::from(t.icon.a()) / 255.0);
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, *selected, crate::i18n::tr_label(label)));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, *selected, solidcraft_ui_text::tr_label(label)));
     t.button_bevel(ui, &response, *selected);
-    crate::scenario::publish_handle(&format!("dialog:{row}:{label}"), response.rect.center());
-    if response.clone().on_hover_text(crate::i18n::tr_label(label)).clicked() {
+    solidcraft_ui_registry::publish_handle(&format!("dialog:{row}:{label}"), response.rect.center());
+    if response.clone().backing_on_hover_text(solidcraft_ui_text::tr_label(label)).clicked() {
         *selected = !*selected;
     }
-    scenario::publish_rect(&format!("dialog:{row}:{label}"), response.rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:{row}:{label}"), response.rect);
     response
 }
 
@@ -428,15 +435,34 @@ mod tests;
 pub(crate) fn list_picker(ui: &mut Ui, key: &str, text: &str, selected: bool) -> egui::Response {
     let response =
         ui.add_sized(egui::vec2(super::metrics::dimension(ui.available_width()), super::row_height()), egui::Button::selectable(selected, text));
-    crate::scenario::publish_target(&format!("dialog:list:{key}"), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), response.rect);
     response
 }
 
 /// Intrinsic-width selection chip for horizontal lists, sharing list-picker styling.
 pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) -> egui::Response {
+    super::settings_search::note_unlabelled(ui, &[text]);
+    if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &[text]) {
+        return super::settings_search::hidden_response(ui);
+    }
     let t = Tokens::get();
+    if super::settings_page_active(ui) {
+        let font = if selected { crate::fonts::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
+        let width = ui.painter().layout_no_wrap(text.to_owned(), font.clone(), t.form_ink).size().x + t.space_16;
+        let response = ui.add_sized(
+            vec2(width.min(dimension(ui.max_rect().width())), t.space_24 - t.space_2),
+            egui::Button::selectable(selected, egui::RichText::new(text).font(font).color(if selected { t.selected_ink } else { t.form_ink }))
+                .fill(if selected { t.selected_bg } else { t.control_fill })
+                .stroke(egui::Stroke::new(1.0, if selected { t.form_primary } else { t.control_border }))
+                .corner_radius(t.radius_xl),
+        );
+        super::settings_search::remember(ui, text, response.rect);
+        super::settings_search::follow(ui, text, response.rect);
+        solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), response.rect);
+        return response;
+    }
     if super::layout::in_catalog(ui) {
-        let accent = crate::theme::TabAccent::current(ui.ctx());
+        let accent = solidcraft_theme::TabAccent::current(ui.ctx());
         let width = ui.painter().layout_no_wrap(text.to_string(), crate::fonts::semibold(t.font_small), t.form_ink).size().x + t.space_16;
         let (rect, response) = ui.allocate_exact_size(vec2(width, t.space_16 + t.space_4), egui::Sense::click());
         ui.painter().rect_filled(rect, t.radius_xl, if selected { accent.soft } else { t.control_fill });
@@ -448,15 +474,35 @@ pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) ->
             if selected { accent.ink } else { t.form_ink },
             false,
         );
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, text));
-        crate::scenario::publish_target(&format!("dialog:list:{key}"), rect);
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, text));
+        solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), rect);
         return response;
     }
     let width = (ui.painter().layout_no_wrap(text.to_owned(), crate::fonts::semibold(t.font_label), t.text).size().x + t.space_24)
         .clamp(t.control_height * 2.0, t.form_card_width);
     let response = ui.add_sized(vec2(width, super::row_height()), egui::Button::selectable(selected, text).truncate());
-    crate::scenario::publish_target(&format!("dialog:list:{key}"), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), response.rect);
     response
+}
+
+/// An independently indexed toolbar visibility chip using the standard icon segments.
+pub(crate) fn settings_tab_chip(ui: &mut Ui, key: &str, text: &str, icon: &str, on: bool) -> bool {
+    let t = Tokens::get();
+    let width = (super::ContentWidth::name(ui, text) + t.space_16 + t.space_14 + t.space_6 + t.space_4).min(dimension(ui.available_width()));
+    ui.allocate_ui_with_layout(vec2(width, t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+        super::settings_form(ui, 0.0, |ui| {
+            super::row(ui, text, |ui| {
+                let target = format!("prefs:toolbar_tab:{key}");
+                segmented(
+                    ui,
+                    &mut 0,
+                    &[text],
+                    Segments { states: &[on], icons: &[icon], targets: &[&target], compact: true, intrinsic: true, ..Default::default() },
+                )
+            })
+        })
+    })
+    .inner
 }
 
 /// Thumbnail variant of the shared selection chip. No document or render-job ownership.
@@ -478,7 +524,7 @@ pub(crate) fn thumbnail_choice(ui: &mut Ui, key: &str, text: &str, state: Thumbn
         + t.space_8
         + t.space_14;
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), egui::Sense::click());
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     let ink = if state.selected { accent.ink } else { t.form_ink };
     ui.painter().rect(
         rect,
@@ -512,7 +558,7 @@ pub(crate) fn thumbnail_choice(ui: &mut Ui, key: &str, text: &str, state: Thumbn
     if state.modified {
         let dot = egui::pos2(rect.right() - t.space_6, rect.top() + t.space_6);
         ui.painter().circle_filled(dot, t.space_3, t.warning);
-        crate::scenario::publish_rect(&format!("dialog:list:{key}:modified"), egui::Rect::from_center_size(dot, vec2(t.space_6, t.space_6)));
+        solidcraft_ui_registry::publish_rect(&format!("dialog:list:{key}:modified"), egui::Rect::from_center_size(dot, vec2(t.space_6, t.space_6)));
     }
     if let Some(progress) = state.progress {
         let center = thumb.center();
@@ -527,11 +573,11 @@ pub(crate) fn thumbnail_choice(ui: &mut Ui, key: &str, text: &str, state: Thumbn
             })
             .collect();
         ui.painter().add(egui::Shape::line(points, egui::Stroke::new(t.space_2, accent.ink)));
-        crate::scenario::publish_rect(&format!("dialog:list:{key}:progress"), thumb);
+        solidcraft_ui_registry::publish_rect(&format!("dialog:list:{key}:progress"), thumb);
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), state.selected, text));
-    crate::scenario::publish_target(&format!("dialog:list:{key}"), response.rect);
-    response.on_hover_text(text)
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), state.selected, text));
+    solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), response.rect);
+    response.backing_on_hover_text(text)
 }
 
 /// Dashed add variant for thumbnail strips, sharing control tokens and button semantics.
@@ -549,8 +595,8 @@ pub(crate) fn add_choice(ui: &mut Ui, label: &str) -> egui::Response {
     }
     ui.painter().add(egui::Shape::dashed_line(&outline, egui::Stroke::new(1.0, t.control_border), t.space_3, t.space_3));
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "+", egui::FontId::proportional(t.font_subtitle), t.form_dim);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
-    response.on_hover_text(label)
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
+    response.backing_on_hover_text(label)
 }
 
 /// A reusable draggable document-colour sample; caller supplies the existing domain payload.
@@ -563,7 +609,7 @@ pub(crate) fn color_swatch<T: Send + Sync + 'static>(
     tip: &str,
     payload: T,
 ) -> egui::Response {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let response = ui
         .dnd_drag_source(id, payload, |ui| {
             let side = t.control_height + t.space_6;
@@ -590,7 +636,7 @@ pub(crate) fn color_swatch<T: Send + Sync + 'static>(
             ui.painter().rect(rect, t.control_radius, color, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
         })
         .response;
-    let response = ui.interact(response.rect, id.with("click"), egui::Sense::click()).on_hover_text(tip);
+    let response = ui.interact(response.rect, id.with("click"), egui::Sense::click()).backing_on_hover_text(tip);
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
@@ -637,7 +683,7 @@ pub(crate) fn popup_list(
     options: &[PopupOption<'_>],
     hint: &str,
 ) -> Option<usize> {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let mut chosen = None;
     let mut rows = Vec::with_capacity(options.len());
     // Wide enough for the longest suggestion; still capped so a hostile name cannot fill the screen (#8533).
@@ -647,7 +693,7 @@ pub(crate) fn popup_list(
         .iter()
         .map(|option| {
             let text_w = ctx.fonts_mut(|fonts| fonts.layout_no_wrap(option.text.to_owned(), mono.clone(), option.color)).size().x;
-            let kind = crate::i18n::tr_label(option.kind);
+            let kind = solidcraft_ui_text::tr_label(option.kind);
             let kind_w = ctx.fonts_mut(|fonts| fonts.layout_no_wrap(kind.to_owned(), kind_font.clone(), t.form_dim)).size().x;
             text_w + kind_w + t.space_8 * 3.0
         })
@@ -655,73 +701,65 @@ pub(crate) fn popup_list(
     let width = anchor.width().max(t.form_card_width - t.space_16 * 2.0 - t.space_2).max(content_w).min(t.form_card_width * 2.5);
     let popup = Container::new(ctx, Surface::Popup).area(id);
     let area = popup.order(egui::Order::Tooltip).fixed_pos(anchor.left_bottom() + egui::vec2(0.0, t.space_2)).show(ctx, |ui| {
-        Container::popup_frame(ui.style())
+        let frame = Container::popup_frame(ui.style())
             .fill(t.control_fill)
             .stroke(t.primary_border(t.dialog_border))
             .corner_radius(t.radius_lg)
-            .inner_margin(t.space_4)
-            .show(ui, |ui| {
-                super::scope(ui, |ui| {
-                    ui.set_width(width);
-                    // A long list (every parameter, #9246) scrolls past its first rows and keeps
-                    // the chosen row in view.
-                    let scrolls = options.len() > POPUP_LIST_ROWS;
-                    let followed = id.with("followed");
-                    let follow = scrolls && selected.is_some() && ctx.data(|d| d.get_temp::<Option<usize>>(followed)) != Some(selected);
-                    ctx.data_mut(|d| d.insert_temp(followed, selected));
-                    let scroll = egui::ScrollArea::vertical()
-                        .id_salt(id.with("scroll"))
-                        .max_height(t.control_height * POPUP_LIST_ROWS as f32)
-                        .auto_shrink([false, true])
-                        .vscroll(scrolls);
-                    scroll.show(ui, |ui| {
-                        for (index, option) in options.iter().enumerate() {
-                            let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height), egui::Sense::CLICK);
-                            if follow && selected == Some(index) {
-                                ui.scroll_to_rect_animation(rect, None, egui::style::ScrollAnimation::none());
-                            }
-                            // A row scrolled out of view is not under the pointer.
-                            rows.push(if ui.is_rect_visible(rect) { rect.intersect(ui.clip_rect()) } else { egui::Rect::NOTHING });
-                            let picked = selected == Some(index);
-                            if picked || response.hovered() {
-                                ui.painter().rect_filled(rect, t.control_radius, if picked { t.selected_bg } else { t.hover });
-                            }
-                            let inner = rect.shrink2(vec2(t.space_8, 0.0));
-                            let kind = crate::i18n::tr_label(option.kind);
-                            let kind_width = super::metrics::label_width(ui, kind);
-                            let text_rect = egui::Rect::from_min_max(
-                                inner.min,
-                                egui::pos2((inner.right() - kind_width - t.space_8).max(inner.left()), inner.bottom()),
-                            );
-                            super::text::paint_text(
-                                ui,
-                                text_rect,
-                                option.text,
-                                mono.clone(),
-                                if picked { t.form_primary } else { option.color },
-                                false,
-                            );
-                            ui.painter().text(inner.right_center(), egui::Align2::RIGHT_CENTER, kind, kind_font.clone(), t.form_dim);
-                            response
-                                .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), picked, option.text));
-                            // Tip the full name first: long identifiers still clip inside a capped popup.
-                            let tip = if option.detail.is_empty() { option.text.to_owned() } else { format!("{}\n{}", option.text, option.detail) };
-                            let response = response.on_hover_text(tip);
-                            crate::scenario::publish_handle(&format!("dialog:suggestion:{index}"), response.rect.center());
-                            if response.clicked() {
-                                chosen = Some(index);
-                            }
+            .inner_margin(t.space_4);
+        Container::show_backing(ui, frame, |ui| {
+            super::scope(ui, |ui| {
+                ui.set_width(width);
+                // A long list (every parameter, #9246) scrolls past its first rows and keeps
+                // the chosen row in view.
+                let scrolls = options.len() > POPUP_LIST_ROWS;
+                let followed = id.with("followed");
+                let follow = scrolls && selected.is_some() && ctx.data(|d| d.get_temp::<Option<usize>>(followed)) != Some(selected);
+                ctx.data_mut(|d| d.insert_temp(followed, selected));
+                let scroll = egui::ScrollArea::vertical()
+                    .id_salt(id.with("scroll"))
+                    .max_height(t.control_height * POPUP_LIST_ROWS as f32)
+                    .auto_shrink([false, true])
+                    .vscroll(scrolls);
+                scroll.show(ui, |ui| {
+                    for (index, option) in options.iter().enumerate() {
+                        let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height), egui::Sense::CLICK);
+                        if follow && selected == Some(index) {
+                            ui.scroll_to_rect_animation(rect, None, egui::style::ScrollAnimation::none());
                         }
-                    });
-                    super::divider(ui, "completion_detail");
-                    if let Some(option) = selected.and_then(|index| options.get(index)) {
-                        super::text(ui, option.detail, super::Text::Note("completion_detail"));
+                        // A row scrolled out of view is not under the pointer.
+                        rows.push(if ui.is_rect_visible(rect) { rect.intersect(ui.clip_rect()) } else { egui::Rect::NOTHING });
+                        let picked = selected == Some(index);
+                        if picked || response.hovered() {
+                            ui.painter().rect_filled(rect, t.control_radius, if picked { t.selected_bg } else { t.hover });
+                        }
+                        let inner = rect.shrink2(vec2(t.space_8, 0.0));
+                        let kind = solidcraft_ui_text::tr_label(option.kind);
+                        let kind_width = super::metrics::label_width(ui, kind);
+                        let text_rect = egui::Rect::from_min_max(
+                            inner.min,
+                            egui::pos2((inner.right() - kind_width - t.space_8).max(inner.left()), inner.bottom()),
+                        );
+                        super::text::paint_text(ui, text_rect, option.text, mono.clone(), if picked { t.form_primary } else { option.color }, false);
+                        ui.painter().text(inner.right_center(), egui::Align2::RIGHT_CENTER, kind, kind_font.clone(), t.form_dim);
+                        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), picked, option.text));
+                        // Tip the full name first: long identifiers still clip inside a capped popup.
+                        let tip = if option.detail.is_empty() { option.text.to_owned() } else { format!("{}\n{}", option.text, option.detail) };
+                        let response = response.backing_on_hover_text(tip);
+                        solidcraft_ui_registry::publish_handle(&format!("dialog:suggestion:{index}"), response.rect.center());
+                        if response.clicked() {
+                            chosen = Some(index);
+                        }
                     }
-                    super::text(ui, hint, super::Text::Note("completion_hint"));
-                })
-            });
+                });
+                super::divider(ui, "completion_detail");
+                if let Some(option) = selected.and_then(|index| options.get(index)) {
+                    super::text(ui, option.detail, super::Text::Note("completion_detail"));
+                }
+                super::text(ui, hint, super::Text::Note("completion_hint"));
+            })
+        });
     });
-    crate::scenario::publish_rect("dialog:suggestions", area.response.rect);
+    solidcraft_ui_registry::publish_rect("dialog:suggestions", area.response.rect);
     ctx.data_mut(|d| d.insert_temp(id.with("rows"), rows));
     chosen
 }
@@ -736,5 +774,5 @@ pub(crate) fn color_thumbnail<T: Send + Sync + 'static>(ui: &mut Ui, id: egui::I
         ui.painter().rect(rect, t.radius_sm, color, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     })
     .response
-    .on_hover_text(tip)
+    .backing_on_hover_text(tip)
 }

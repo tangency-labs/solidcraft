@@ -1,8 +1,10 @@
+use std::collections::BTreeSet;
+
 use serde_json::{Value, json};
 
 use super::{
-    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams,
-    ScaleParams, SphereParams, TorusParams,
+    BoundingSolidParams, BoxParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, FilletParams,
+    FilletResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms, sketch_rectangle};
@@ -12,7 +14,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<BoxParams>(),
-        &["body_name", "body_names", "center", "corner", "height", "length", "name", "operation", "participants", "targets", "width"],
+        &["body_name", "body_names", "center", "corner", "height", "length", "name", "operation", "participants", "targets", "touching", "width"],
     );
     assert_keys(
         input_schema_for::<ExtrudeParams>(),
@@ -46,6 +48,7 @@ fn schemas_and_the_key_check_agree() {
             "through_all",
             "to",
             "to_offset",
+            "touching",
         ],
     );
     assert_keys(
@@ -85,7 +88,51 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<BoundingSolidParams>(), &["bodies", "body_name", "body_names", "margin", "name", "participants"]);
     assert_keys(input_schema_for::<ScaleParams>(), &["bodies", "factor", "factors", "name", "origin", "participants"]);
     assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
-    assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "name", "participants"]);
+    assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
+    assert_keys(
+        input_schema_for::<FilletParams>(),
+        &[
+            "body",
+            "body_name",
+            "body_names",
+            "corner",
+            "edges",
+            "fit",
+            "knots",
+            "mid",
+            "name",
+            "participants",
+            "radii",
+            "radius",
+            "radius2",
+            "setbacks",
+            "smooth",
+            "start",
+            "tangent_chain",
+            "turn",
+            "type",
+        ],
+    );
+}
+
+#[test]
+fn combine_schema_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<CombineParams>(),
+        &[
+            "body_name",
+            "body_names",
+            "component_name",
+            "keep_tools",
+            "name",
+            "new_component",
+            "operation",
+            "participants",
+            "target",
+            "tools",
+            "touching",
+        ],
+    );
 }
 
 #[test]
@@ -156,7 +203,95 @@ fn strict_keeps_todays_errors() {
         ("construct.plane.at_angle", json!({"base": "XY", "axis": {"face": "x", "point": [0, 0, 0]}, "angle": 30})),
         ("construct.plane.at_angle", json!({"base": "XY", "axis": {"face": "x"}, "angle": 30})),
         ("construct.plane.at_angle", json!({"base": "XY", "axis": "X", "angle": true})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "turn": "round"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "turn": "ROUND"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "type": "bogus"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "fit": "bogus"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "corner": "round"})),
+        ("solid.fillet", json!({"edges": [], "radius": 1})),
+        ("solid.fillet", json!({"edges": 5, "radius": 1})),
+        // #12917: Combine's keys of the wrong shape; bodies the design lacks stay the handler's
+        // to refuse.
+        ("solid.combine", json!({"target": 5, "tools": ["B"]})),
+        ("solid.combine", json!({"target": null, "tools": ["B"]})),
+        ("solid.combine", json!({"target": "A", "tools": []})),
+        ("solid.combine", json!({"target": "A", "tools": null})),
+        ("solid.combine", json!({"target": "A", "tools": 5})),
+        ("solid.combine", json!({"target": "A", "tools": ["B", 1]})),
+        ("solid.combine", json!({"target": "A", "tools": vec!["B"; 10_001]})),
+        ("solid.combine", json!({"target": "A", "tools": ["B"], "operation": "new"})),
+        ("solid.combine", json!({"target": "A", "tools": ["B"], "operation": "bogus"})),
+        ("solid.combine", json!({"target": "A", "tools": ["B"]})),
     ]);
+}
+
+/// #12917: Combine's contract takes what its input schema allows: each call's check finds no
+/// issue exactly when the call matches the schema. Left out: an operation spelt in capitals,
+/// which the check takes as the handler does and the schema's enum doesn't.
+#[test]
+fn combine_check_takes_what_the_schema_allows() {
+    let schema = input_schema_for::<CombineParams>();
+    let schema = schema.as_value();
+    for (p, takes) in [
+        (json!({"target": "A", "tools": ["B"]}), true),
+        (json!({"target": "A", "tools": "B", "operation": "cut", "keep_tools": true}), true),
+        (
+            json!({"target": "A", "tools": ["B", "C"], "operation": "intersection", "touching": "one_body", "new_component": true, "component_name": "Merged", "name": "C1", "body_name": "X"}),
+            true,
+        ),
+        (json!({"target": "A", "tools": ["B"], "operation": null, "touching": null, "keep_tools": null, "component_name": null}), true),
+        (json!({"target": 5, "tools": ["B"]}), false),
+        (json!({"target": null, "tools": ["B"]}), false),
+        (json!({"target": "A"}), false),
+        (json!({"target": "A", "tools": []}), false),
+        (json!({"target": "A", "tools": null}), false),
+        (json!({"target": "A", "tools": [1]}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "new"}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": 5}), false),
+        (json!({"target": "A", "tools": ["B"], "touching": "glued"}), false),
+        (json!({"target": "A", "tools": ["B"], "keep_tools": "yes"}), false),
+        (json!({"target": "A", "tools": ["B"], "targets": ["A"]}), false),
+    ] {
+        let issues = crate::schema::issues("solid.combine", &p);
+        assert_eq!(issues.is_empty(), takes, "{p}: {issues:?}");
+        assert_eq!(conforms(schema, schema, &p), takes, "{p}");
+    }
+}
+
+/// #12917: Combine replies with `CombineResult`, with the keys it gave before, in each of its
+/// forms: a join, a cut keeping its tool, an intersect, a join into one body, and a join into a
+/// new component (which adds the component's id). In Warn, without warnings, so its contract
+/// takes each call.
+#[test]
+fn combine_replies_with_combine_result() {
+    let schema = output_schema_for::<CombineResult>();
+    let schema = schema.as_value();
+    let before = BTreeSet::from(["feature", "name", "bodies", "created_bodies", "changed_bodies", "removed_bodies", "warning", "ms"]);
+    for p in [
+        json!({"target": "A", "tools": ["B"]}),
+        json!({"target": "A", "tools": "B", "operation": "cut", "keep_tools": true}),
+        json!({"target": "A", "tools": ["B"], "operation": "intersect", "name": "Common"}),
+        json!({"target": "A", "tools": ["B"], "operation": "union", "touching": "one_body"}),
+        json!({"target": "A", "tools": ["B"], "new_component": true, "component_name": "Merged"}),
+    ] {
+        // Two 10 mm cubes, `B` overlapping `A` by 5 mm along each axis; made again for each call.
+        let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+        for (corner, body) in [([0, 0, 0], "A"), ([5, 5, 5], "B")] {
+            let box_ = json!({"length": 10, "width": 10, "height": 10, "corner": corner, "body_name": body});
+            s.execute("solid.box", &box_).unwrap_or_else(|e| panic!("{e}"));
+        }
+        let r = s.execute("solid.combine", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        let keys: BTreeSet<&str> = r.as_object().into_iter().flatten().map(|(k, _)| k.as_str()).collect();
+        let mut expected = before.clone();
+        if p.get("new_component").is_some() {
+            assert!(r["component"].is_u64(), "{p}: {r}");
+            expected.insert("component");
+        }
+        assert_eq!(keys, expected, "{p}: {r}");
+        assert!(r["changed_bodies"].as_array().is_some_and(|changed| changed.contains(&json!("A"))), "{p}: {r}");
+    }
 }
 
 #[test]
@@ -174,6 +309,7 @@ fn feature_result_serializes_like_the_old_reply() {
             warning: warning.clone(),
             ms,
             param_warnings: vec![],
+            notice: None,
         };
         assert_eq!(serde_json::to_value(&new).ok(), Some(old));
     }
@@ -209,6 +345,47 @@ fn replies_match_the_output_schema() {
     let mut bad = ok.clone();
     bad.as_object_mut().map(|o| o.remove("name"));
     assert!(!conforms(schema, schema, &bad), "{bad}");
+}
+
+/// `solid.fillet` replies with `FilletResult` in each of its forms, its contract taking each: a
+/// boss's base rounded with each turn and its options spelled out, a reduced round (with the radii
+/// it used), chord and curvature rounds, a smooth-patch corner with setbacks, and the variable and
+/// spline forms.
+#[test]
+fn fillet_replies_match_its_output_schema() {
+    let schema = output_schema_for::<FilletResult>();
+    let schema = schema.as_value();
+    // A 40 x 30 x 10 plate with a 10 x 10 x 5 boss on it, whose base edges `boss` are.
+    let run = |p: Value| {
+        let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "B"})).unwrap_or_else(|e| panic!("{e}"));
+        s.execute("solid.box", &json!({"corner": [15, 10, 10], "length": 10, "width": 10, "height": 5, "operation": "join"}))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let r = s.execute("solid.fillet", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        r
+    };
+    let boss = json!([[20, 10, 10], [25, 15, 10], [20, 20, 10], [15, 15, 10]]);
+    run(
+        json!({"edges": boss, "radius": 1, "turn": "mitre", "type": "constant", "fit": "exact", "corner": "rolling", "tangent_chain": true, "body": "B", "name": "Round"}),
+    );
+    run(json!({"edges": boss, "radius": "1 mm", "turn": "Swept"}));
+    run(json!({"edges": boss, "radius": 1, "turn": "swept", "fit": "reduce"}));
+    let reduced = run(json!({"edges": [[20, 0, 10]], "radius": 15, "fit": "reduce"}));
+    assert!(reduced.get("radius_applied").is_some_and(Value::is_number) && reduced.get("radii_applied").is_some_and(Value::is_array), "{reduced}");
+    run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "chord"}));
+    run(json!({"edges": [{"body": "B", "index": 0}], "radius": 0.5, "tangent_chain": false}));
+    run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "curvature"}));
+    // Variable and spline radii: solidcore fails a variable round on a box edge at this pin (status
+    // 1001, as `variable_radius_on_a_box_edge`), so their forms are checked against the contract.
+    for p in [
+        json!({"edges": [[20, 0, 10]], "radius": 1, "type": "variable", "radius2": 2, "start": [0, 0, 10], "mid": [[0.5, "1.5 mm"]], "smooth": true}),
+        json!({"edges": [[20, 0, 10]], "radius": 1, "type": "spline", "start": [0, 0, 10], "radii": [2], "knots": [0, 0, 1, 1]}),
+    ] {
+        assert!(crate::schema::Contract::check(&crate::schema::TypedContract::<FilletParams>::new(), &p).is_empty(), "{p}");
+    }
+    run(json!({"edges": [[20, 0, 10], [40, 15, 10], [40, 0, 5]], "radius": 2, "corner": "g2", "setbacks": [{"vertex": [40, 0, 10], "distance": 4}]}));
 }
 
 /// The feature commands converted after box and extrude answer with `FeatureResult` too, and

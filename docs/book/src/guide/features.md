@@ -8,6 +8,46 @@ Each one can be edited (double-click), suppressed, renamed, reordered (if nothin
 moves after it), rolled back to, and deleted. Deleting asks first when other features depend on
 it.
 
+## Step by step
+
+The sketch from [Sketching step by step](sketching.md#step-by-step) becomes an open box: extruded,
+hollowed, its rim rounded, holes added round the tube, then made taller from the timeline. In each dialog, Enter is the same
+as OK.
+
+**1. Extrude.** Click **Extrude**, then the sketch's profile: a preview appears with an arrow.
+Drag the arrow, or type the distance (12) and press Enter.
+
+<video src="../media/features/extrude.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Extruding the sketch's profile: clicking it, dragging the arrow, then typing 12 and pressing Enter"></video>
+
+**2. Shell.** Click **Shell**, then the face to leave open (the top). Keep the 2 mm wall and press
+Enter.
+
+<video src="../media/features/shell.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Shelling the block with its top face removed and a 2 mm wall, then turning the view to look inside"></video>
+
+**3. Fillet.** Click **Fillet**, then the four outer top edges, type the radius (1.5) and press
+Enter. Rounding after the shell keeps it simple: Shell doesn't have to follow the rounds.
+
+<video src="../media/features/fillet.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Rounding the four outer top edges of the box with a 1.5 mm fillet"></video>
+
+**4. Hole.** Click **Hole**, then the box's floor beside the tube: the hole goes where you
+click. Set **Diameter** to 4 and click **OK**. Its distance from two edges can be set too (below).
+
+<video src="../media/features/hole.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Placing a 4 mm hole on the floor of the box beside the tube"></video>
+
+**5. Pattern.** Open the **Arrange** panel and choose **Circular Pattern**. Set **Object Type** to
+Features and click **Hole1** on the timeline; for **Axis**, click the tube's rim. Type 4 for the
+quantity and press Enter: four holes, evenly round the tube.
+
+<video src="../media/features/pattern.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Patterning the hole four times around the tube with Circular Pattern"></video>
+
+**6. Change it.** Double-click **Extrude1** on the timeline: the model rolls back to it and its
+dialog opens. Type 20 and press Enter. Everything after it (shell, fillet, hole and pattern)
+rebuilds on the taller block.
+
+<video src="../media/features/edit.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Double-clicking Extrude1 on the timeline, changing its distance to 20: the shell, fillet, hole and pattern rebuild"></video>
+
+## The features
+
 | Panel | Features |
 |---|---|
 | Create | extrude (one side, two sides, symmetric, taper, start offset, to a distance or through all; new body, join, cut, intersect; thin walls along curves), revolve, sweep, loft, box, cylinder, sphere, torus, coil, pipe, rib, web, emboss, hole (simple, counterbore, countersink, tapped; on faces, at distances from edges, or at sketch points), thread, rectangular/circular/path patterns, mirror |
@@ -48,6 +88,14 @@ again, even off the plane. The extent can still be chosen manually. For a new ex
 start or end offsets or a From Object input, the target also sets the stored distance and
 one-sided direction, so returning to **Distance** keeps that reach. Thin Extrude keeps its
 existing picks. With the setting off, picks only add profiles.
+
+Dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it,
+such as the far side of the block a cut goes into: once the arrow's tip comes within a few
+screen points of such a face, the distance becomes exactly that face's and the face is
+outlined. Elsewhere the distance moves in round steps. Hold Alt or Ctrl for a free drag, which
+stops at neither. **Extrude arrow stops at faces** (Preferences › Tools, on by default) turns
+the face stops off; the arrow then moves in round steps only, as before. The distance stays a number; to follow the face when the model changes, use
+**To Object** or **Through All**.
 
 A positive extrude taper slopes the side walls outward, so the profile grows along the
 extrusion direction and the far end is larger; a negative taper slopes them inward, making
@@ -161,19 +209,15 @@ The Hole dialog draws a section through the hole as its options make it (type, e
 point, tapped) and puts each size in a field beside the dimension it sets; hovering a field, or
 typing in it, lights its dimension.
 
-Tapped holes and **Thread** features have a **Thread direction** choice: **Right-hand**
-(the default) or **Left-hand**. Editing and reopening keep the chosen direction. Tapped
-holes carry a cosmetic thread; the separate Thread feature can also cut a **Modeled**
-left-hand helix. Cosmetic direction is recorded with the thread annotation and does not
-change the body. Scripts use `handedness: "left"` or `"right"` on `solid.hole` (with `thread`)
-and `solid.thread`. Existing designs and omitted values remain right-handed. Changing the
-direction keeps the pitch, thread length and axis; it does not change a hole's drill size.
+The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Both** (a right- and
+a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,
+`"both"`) on `solid.thread`; omitted, a thread is right-handed. Tapped holes are right-handed.
 
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling
 ball). See the roadmap's known limitations for the rest.
 
-**Curvature (G2)** in the Fillet dialog's **Radius Type** blends straight edges between two
+**Curvature continuous** (G2) in the Fillet dialog's **Type** blends straight edges between two
 planar faces with an exact quintic section. The tangent plane and curvature match each side
 face: curvature goes to zero at both contact rails, unlike a circular G1 fillet. Each end
 must meet one planar face; perpendicular and sloped planar ends are supported. Curved
@@ -188,6 +232,14 @@ Scripts and MCP use the same command, for example on a 20 mm box:
 {"command": "solid.fillet", "params": {"edges": [[20, 0, 10]], "radius": 2, "type": "curvature"}}
 ```
 `type: "g2"` is an alias. Existing fillets still default to circular, constant-radius G1 blends.
+
+Where three or more rounded edges meet at a corner, the Fillet dialog shows **Corners**: **Ball**
+(the default, a piece of the rolling ball's sphere, tangent (G1) to each round) or **Smooth
+patch** (`corner: "g2"`: the corner is set back along each edge and filled with a
+curvature-continuous (G2) patch, so reflections run through it without a kink). A smooth patch
+takes **Constant radius** and **Exact** fit. Its **Setback** is how far along each edge from the
+corner the patch starts, one distance for every corner (`setbacks`); left empty, it is 1.5 × the
+radius.
 
 Feature references to faces and edges are stored by name, so an upstream edit that moves geometry
 keeps them on the right face (see [Persistent naming](../dev/naming.md)). When a reference can't
@@ -220,12 +272,15 @@ gives the largest and the mean distance each way. Samples further than `toleranc
 the **regions**: `only_in_a` where `a` has material and `b` has none, `only_in_b` the other way
 round. Each region gives its volume, the deviating surface area, the largest deviation and where
 it is, its centre and box, and the faces of each body it lies on (`faces_a`, `faces_b`, numbered
-as `model.faces` lists them), largest volume first. The volume is integrated along a grid of
-parallel lines through the region (`resolution` gives their spacing), so a thin sliver is
-measured as well as a block. `identical` is true when no region is found, and `verdict` says it in
-one line. `warnings` lists what makes the result less certain: a body whose surface does not
-enclose the volume it measures (open, or with faces that failed to import), and lines left out of
-a region's volume because they crossed a gap. With `color`, the faces that hold a region turn
+as `model.faces` lists them), largest volume first. The volume, centre and box are exact
+(`measured_by: "boolean"`): the pieces of the cut a − b (or b − a) that lie in the region,
+measured as `inspect.measure` measures a body. When the cut cannot be made, the region's volume
+and centre are not measured (`measured_by: "not measured"`, null values, `not_measured` gives the
+cut's error), and never estimated; its deviation, area, faces and box are still given, and the
+side's total is null. `identical` is true when no region is found, and `verdict` says it in one
+line. `warnings` lists what makes the result less certain: a body whose surface does not enclose
+the volume it measures (open, or with faces that failed to import), and a cut that could not be
+made. With `color`, the faces that hold a region turn
 red where only `a` has material and green where only `b` has, on both bodies: the faces mostly
 beyond the tolerance (a small change on a large face leaves the face alone), or, for a region
 with none, the face with the largest share.

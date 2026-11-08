@@ -60,7 +60,46 @@ fn joint_from_two_snaps() {
     assert_eq!(app.session.doc.assembly.joints.len(), 1);
 }
 
-/// A straight edge is the revolute axis, even when both adjacent faces are perpendicular to it.
+/// A joint origin can be the design origin or a sketch point, not just faces, edges and vertices
+/// (#10290). The origin snaps to the world origin with z up; a sketch point snaps to its world
+/// position with the sketch plane's normal as z, and both make a joint.
+#[test]
+fn joint_origin_can_be_the_origin_or_a_sketch_point() {
+    let mut app = two_boxes();
+    // A sketch point on B's top face, at world (35, 5, 10).
+    app.session.execute("component.activate", &json!({"component": "B"})).unwrap();
+    app.session
+        .execute("sketch.create", &json!({"plane": {"origin": [30.0, 0.0, 10.0], "x_dir": [1.0, 0.0, 0.0], "y_dir": [0.0, 1.0, 0.0]}, "name": "S"}))
+        .unwrap();
+    app.session.execute("sketch.point", &json!({"point": [5.0, 5.0], "id": "q"})).unwrap();
+    app.session.execute("sketch.finish", &json!({})).unwrap();
+    let sketch = app.session.doc.find_feature("S").unwrap().id;
+
+    // The two picks a joint origin input now accepts.
+    let origin = Sel::Vertex { body: String::new(), point: Vec3::ZERO };
+    let sketch_point = Sel::SketchPoint { id: format!("{sketch}:q") };
+    let so = |s: &Sel| snap_of(&app.session, s).expect("a snap for the pick");
+    let o = so(&origin);
+    let sp = so(&sketch_point);
+    assert!(o.at.dist(Vec3::ZERO) < 1e-6, "the world origin snaps to the origin: {o:?}");
+    assert!(o.z.dist(Vec3::Z) < 1e-9, "the origin's z is up: {o:?}");
+    assert!(sp.at.dist(Vec3::new(35.0, 5.0, 10.0)) < 1e-6, "the sketch point snaps to its world position: {sp:?}");
+    assert!(sp.z.dist(Vec3::Z) < 1e-9, "the sketch point's z is the plane normal: {sp:?}");
+
+    // And a joint can be made from them.
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, origin);
+    d.pick(&app.session, sketch_point);
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.kind = 1;
+        f.fit_limits(&app.session.doc);
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1, "a joint was made from the origin and the sketch point");
+}
 #[test]
 fn revolute_joint_uses_the_picked_straight_edges() {
     let mut app = two_boxes();
@@ -356,7 +395,16 @@ fn edit_joint_shows_components_for_point_and_frame_origins() {
         assert_eq!((&after.a, &after.b), (&before.a, &before.b), "{command}");
 
         // Replacing just B with a face still edits only B, preserving A's point/frame.
-        let body = app.session.world_state().bodies.iter().find(|body| occurrence_of_body(&app.session, &body.name) == Some(b)).unwrap().name.clone();
+        let body = app
+            .session
+            .world_state()
+            .unwrap()
+            .bodies
+            .iter()
+            .find(|body| occurrence_of_body(&app.session, &body.name) == Some(b))
+            .unwrap()
+            .name
+            .clone();
         let picked = Sel::Face { body, index: 0, point: Vec3::new(40.0, 10.0, 10.0) };
         d.active = 1;
         d.pick(&app.session, picked);
@@ -416,6 +464,67 @@ fn a_hole_side_shows_its_wall_not_the_plate_beside_it() {
     let item = d.inputs[0].items.first().unwrap_or_else(|| panic!("no pre-fill for the hole side"));
     let snap = snap_of(&app.session, item).unwrap();
     assert_eq!(snap.kind, SnapKind::CircleCenter, "the pre-fill is the plate's face, not the hole's wall: {item:?}");
+}
+
+/// The Joint dialog's frames (glyphs, OK's check, preview, rows) reuse each pick's snap: once
+/// measured, they mesh nothing until the world changes, and then the snap follows it.
+#[test]
+fn a_picked_snap_is_measured_once_not_every_frame() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "Plate"})).unwrap();
+    s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0]})).unwrap();
+    s.execute("solid.cylinder", &json!({"diameter": 10, "height": 20, "base": [20, 20, -5], "operation": "cut"})).unwrap();
+    s.execute("component.create", &json!({"name": "Peg"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0]})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app = SolveApp::new(s, Services::default());
+    let (plate, peg) = (occ(&h.app, "Plate"), occ(&h.app, "Peg"));
+    h.app.run("occurrence.ground", json!({"occurrence": plate, "grounded": true})).unwrap();
+    h.app.start("joint.create");
+    let mut d = h.app.dialog.clone().unwrap();
+    let wall = face_sel(&h.app.session, Vec3::new(25.0, 20.0, 5.0)).unwrap();
+    let bottom = face_sel(&h.app.session, Vec3::new(65.0, 5.0, 0.0)).unwrap();
+    d.pick(&h.app.session, wall.clone());
+    d.pick(&h.app.session, bottom.clone());
+    h.app.dialog = Some(d);
+    let settle = |h: &mut crate::scenario::Harness| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        h.frames(2);
+        while h.app.preview.busy {
+            assert!(std::time::Instant::now() < deadline, "the joint preview did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            h.frame();
+        }
+        h.frames(2);
+    };
+    settle(&mut h);
+    assert!(h.app.preview.active && h.app.preview.error.is_none(), "{:?}", h.app.preview.error);
+    let hole = snap_of(&h.app.session, &wall).unwrap();
+    assert_eq!(hole.kind, SnapKind::CircleCenter);
+    assert!(Vec3::new(hole.at.x, hole.at.y, 0.0).dist(Vec3::new(20.0, 20.0, 0.0)) < 1e-6, "{hole:?}");
+    let face = snap_of(&h.app.session, &bottom).unwrap();
+    assert!(face.at.dist(Vec3::new(65.0, 5.0, 0.0)) < 1e-9 && face.z.dist(-Vec3::Z) < 1e-9, "{face:?}");
+    let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let ((), work) = solidcraft_engine::kernel::profile::capture(|| {
+        for _ in 0..3 {
+            h.frame();
+            apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+            preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        }
+    });
+    assert_eq!(work.tessellate_ms, 0.0, "the frames after the picks measured them again: {work:?}");
+    assert_eq!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap(), cmds);
+    for (sel, fresh) in [(&wall, &hole), (&bottom, &face)] {
+        let kept = picked_snap(&h.app, sel).unwrap();
+        assert!(kept.at.dist(fresh.at) < 1e-9 && kept.z.dist(fresh.z) < 1e-9 && kept.param == fresh.param, "{kept:?} {fresh:?}");
+    }
+    // A moved Peg is a new world: its face is measured again where it went.
+    h.app.run("occurrence.move", json!({"occurrence": peg, "translate": [0, 30, 0], "capture": false})).unwrap();
+    settle(&mut h);
+    let moved = picked_snap(&h.app, &bottom).unwrap();
+    assert!(moved.at.dist(Vec3::new(65.0, 35.0, 0.0)) < 1e-9, "{moved:?}");
+    assert!(picked_snap(&h.app, &wall).unwrap().at.dist(hole.at) < 1e-9, "the grounded Plate stays");
 }
 
 #[test]
@@ -511,7 +620,7 @@ fn straight_edge_snap_follows_a_rotated_occurrence() {
     let transform = app.session.doc.occurrence_of(b).unwrap().transform;
     let mid = solidcraft_engine::doc::apply_point(&transform, Vec3::new(30.0, 10.0, 10.0));
     let axis = solidcraft_engine::doc::apply_vector(&transform, Vec3::Y);
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let mesh = st.body("Body2").unwrap().mesh();
     let index = mesh.edges.iter().position(|e| polyline_mid(e).dist(mid) < 1e-6).unwrap();
     let snap = snap_of(&app.session, &Sel::Edge { body: "Body2".into(), index, point: mid }).unwrap();
@@ -631,9 +740,9 @@ fn picks_on_one_component_say_why_and_offer_components() {
         frame(&mut app, vec![]);
     }
     let out = frame(&mut app, vec![]);
-    let why = crate::i18n::format("joint.one_component", &[("bodies", "Body1, Body2")]);
+    let why = solidcraft_ui_text::format("joint.one_component", &[("bodies", "Body1, Body2")]);
     assert!(text_at(&out, &why).is_some(), "the dialog says why");
-    let at = text_at(&out, crate::i18n::tr("cmd.component_from_bodies")).expect("and offers the way out");
+    let at = text_at(&out, solidcraft_ui_text::tr("cmd.component_from_bodies")).expect("and offers the way out");
     let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
     frame(&mut app, vec![egui::Event::PointerMoved(at)]);
     frame(&mut app, vec![button(true)]);
@@ -699,7 +808,7 @@ fn face_snaps_mate_face_to_face() {
     for (id, p) in c {
         app.run(&id, p).unwrap();
     }
-    let st = app.session.world_state();
+    let st = app.session.world_state().unwrap();
     let b = st.body("Body2").unwrap().mesh().bounds();
     assert!((b.min.z - 10.0).abs() < 1e-6 && (b.max.z - 20.0).abs() < 1e-6, "{b:?}");
     // Edit Joint shows the mate unflipped; Flip puts B back into A's volume.
@@ -712,7 +821,7 @@ fn face_snaps_mate_face_to_face() {
     for (id, p) in apply_commands(&app, &e).unwrap() {
         app.run(&id, p).unwrap();
     }
-    let b = app.session.world_state().body("Body2").unwrap().mesh().bounds();
+    let b = app.session.world_state().unwrap().body("Body2").unwrap().mesh().bounds();
     assert!((b.max.z - 10.0).abs() < 1e-6, "{b:?}");
 }
 
@@ -825,7 +934,7 @@ fn slider_drag_does_not_open_suggestions_over_the_slider() {
         .unwrap();
     h.app.start("joint.drive");
     h.frames(4);
-    let editor = egui::Id::new("sc_drive_value");
+    let editor = egui::Id::unique("sc_drive_value");
     let bounds = h
         .output
         .accesskit_update
@@ -879,6 +988,37 @@ fn joint_origins_follow_their_component() {
     m[3][0] += 5.0;
     app.session.pending_moves.insert(b, m);
     assert!(at(&app).dist(Vec3::new(45.0, 10.0, 25.0)) < 1e-6, "{:?}", at(&app));
+}
+
+/// A named joint origin on a hidden occurrence draws no triad; nor does one in a hidden Joints
+/// folder (the design's or the placement's). Showing it again brings the triad back.
+#[test]
+fn joint_origin_triads_follow_occurrence_visibility() {
+    let mut app = two_boxes();
+    app.session.execute("joint.origin", &json!({"name": "Top of B", "face": [40, 10, 10]})).unwrap();
+    assert!(origin_drawn(&app.session, "Top of B"));
+    let b = occ(&app, "B");
+    app.session.execute("browser.visibility", &json!({"paths": [[b]], "visible": false})).unwrap();
+    assert!(!origin_drawn(&app.session, "Top of B"), "a hidden occurrence still draws its origin triad");
+    app.session.execute("browser.visibility", &json!({"paths": [[b]], "visible": true})).unwrap();
+    assert!(origin_drawn(&app.session, "Top of B"));
+    app.session.visibility.hidden_folders.push(format!("o:{b}/joints"));
+    assert!(!origin_drawn(&app.session, "Top of B"), "the placement's hidden Joints folder");
+    app.session.visibility.hidden_folders.clear();
+    app.session.visibility.hidden_folders.push("c0/joints".into());
+    assert!(!origin_drawn(&app.session, "Top of B"), "the design's hidden Joints folder");
+    app.session.visibility.hidden_folders.clear();
+    // On a copy, the triad follows that copy, not the component's first placement.
+    app.session.execute("occurrence.copy", &json!({"component": "B", "translate": [0, 40, 0]})).unwrap();
+    app.session.execute("joint.origin", &json!({"name": "Top of copy", "face": [40, 50, 10]})).unwrap();
+    let copy = app.session.doc.occurrences.iter().find(|o| o.component == app.session.doc.find_component("B").unwrap() && o.id != b).unwrap().id;
+    assert_eq!(app.session.doc.assembly.origins.iter().find(|o| o.name == "Top of copy").unwrap().origin.occurrence, copy);
+    app.session.execute("browser.visibility", &json!({"paths": [[b]], "visible": false})).unwrap();
+    assert!(origin_drawn(&app.session, "Top of copy"), "hiding the first placement hides the copy's triad");
+    app.session.execute("browser.visibility", &json!({"paths": [[b]], "visible": true})).unwrap();
+    app.session.execute("browser.visibility", &json!({"paths": [[copy]], "visible": false})).unwrap();
+    assert!(!origin_drawn(&app.session, "Top of copy"), "a hidden copy still draws its origin triad");
+    assert!(origin_drawn(&app.session, "Top of B"));
 }
 
 /// Edit Feature on a moved component: the dialog shows the feature's picks where the
@@ -1194,7 +1334,7 @@ fn components_from_bodies_dialog_select_all_cancel_and_ok() {
     assert!(matches!(d.kind, Kind::Assembly(Asm::FromBodies)));
     assert!(apply_commands(&h.app, d).is_err(), "OK requires at least one body");
     assert_eq!(h.app.session.doc, before);
-    h.step(&json!({"widget":crate::i18n::tr("ui.select_all")})).unwrap();
+    h.step(&json!({"widget":solidcraft_ui_text::tr("ui.select_all")})).unwrap();
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands, vec![("component.from_bodies".into(), json!({"bodies":names}))]);
     if let Ok(path) = std::env::var("SOLIDCRAFT_COMPONENTS_DIALOG_EVIDENCE") {
@@ -1221,7 +1361,7 @@ fn components_from_bodies_dialog_select_all_cancel_and_ok() {
     h.step(&json!({"start":"component.from_bodies"})).unwrap();
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(d.inputs[0].items.body_names(), vec![names[0].clone()]);
-    h.step(&json!({"widget":crate::i18n::tr("ui.select_all")})).unwrap();
+    h.step(&json!({"widget":solidcraft_ui_text::tr("ui.select_all")})).unwrap();
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none());
     for name in &names {
@@ -1275,8 +1415,8 @@ fn find_limits_fills_the_limits_from_where_the_door_meets_the_block() {
         frame(app, vec![button(true)]);
         frame(app, vec![button(false)]);
     };
-    click(&mut app, &crate::i18n::tr_label("Limits").to_uppercase());
-    click(&mut app, crate::i18n::tr("joint.find_limits"));
+    click(&mut app, &solidcraft_ui_text::tr_label("Limits").to_uppercase());
+    click(&mut app, solidcraft_ui_text::tr("joint.find_limits"));
     assert_eq!(*app.session.doc, *before, "nothing changes until OK");
     let Some(Kind::Assembly(Asm::Joint(f))) = app.dialog.as_ref().map(|d| &d.kind) else { panic!("the dialog stays open") };
     // The door's face 4 mm off its hinge line meets the block's corner (80, 30) opening, and the
@@ -1315,7 +1455,11 @@ fn find_limits_searches_the_joint_as_edited_and_leaves_a_free_side() {
     // from it the other, where nothing is in its way.
     assert_eq!(f.limits[0].0, untouched.0, "one side found: the row stays as it was: {:?}", f.found);
     assert!(f.limits[0].1 == untouched.1 || f.limits[0].2 == untouched.2, "{:?} {:?}", f.limits, f.found);
-    assert!(f.found[0].contains(crate::i18n::tr_label("Minimum")) && f.found[0].contains(crate::i18n::tr_label("Maximum")), "{:?}", f.found);
+    assert!(
+        f.found[0].contains(solidcraft_ui_text::tr_label("Minimum")) && f.found[0].contains(solidcraft_ui_text::tr_label("Maximum")),
+        "{:?}",
+        f.found
+    );
     assert!(f.found_note.is_none(), "{:?}", f.found_note);
     // Edited after the search, the joint is no longer the one searched (its notes then go).
     let searched = f.searched.clone().expect("what was searched");
@@ -1327,4 +1471,235 @@ fn find_limits_searches_the_joint_as_edited_and_leaves_a_free_side() {
     f.offset[2] = "nonsense".into();
     find_limits(&app, f, id, &d.inputs);
     assert!(f.found_note.is_some() && f.found.is_empty(), "{:?}", f.found_note);
+}
+
+/// Compute in Interference intersects and meshes each overlap on the kernel's workers. On the
+/// window thread (a 1 MiB stack on Windows) the kernel ran out of stack and the app closed
+/// (#11483); here the dialog's own thread has 64 KiB.
+#[test]
+fn interference_meshes_each_overlap_on_the_kernels_stack() {
+    let mut s = Session::default();
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 10)], |id, p| s.execute(id, &p).unwrap());
+    let r = s.execute("inspect.clearance", &json!({"clearance": 0, "nearest": 1})).unwrap();
+    assert_eq!(r["overlaps"].as_array().map(Vec::len), Some(1), "{r}");
+    let st = s.world_state().unwrap();
+    let meshes = std::thread::Builder::new().stack_size(64 << 10).spawn(move || overlap_meshes(&st, &r)).unwrap().join().unwrap();
+    // A's 0..20 and B's 10..30 along X share 10..20.
+    let b = meshes.first().map(Mesh::bounds).expect("the shared volume");
+    assert_eq!(meshes.len(), 1);
+    let near = |p: Vec3, q: [f64; 3]| (p.x - q[0]).abs() < 1e-6 && (p.y - q[1]).abs() < 1e-6 && (p.z - q[2]).abs() < 1e-6;
+    assert!(near(b.min, [10.0, 0.0, 0.0]) && near(b.max, [20.0, 20.0, 10.0]), "{b:?}");
+}
+
+/// With the app running commands off the window thread, Compute in Interference checks on a
+/// thread of its own (a slow pair froze the window until the app was closed, #11483): the
+/// overlap and its shared volume arrive in a later frame, and a check of a design changed
+/// meanwhile is dropped.
+#[test]
+fn interference_checks_off_the_window_thread_and_drops_a_check_of_a_changed_design() {
+    let mut s = Session::default();
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 10)], |id, p| s.execute(id, &p).unwrap());
+    let mut app = SolveApp::new(s, Services::default());
+    app.apply_off_thread = Some(std::time::Duration::ZERO);
+    app.start("inspect.interference");
+    let ctx = crate::fonts::test_context();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let state = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
+        Some(Kind::Assembly(Asm::Interference { result, overlaps, check, .. })) => (result.clone(), overlaps.len(), check.is_some()),
+        _ => panic!("the dialog stays open"),
+    };
+    // Compute as its button starts it, then frames until its reply is read.
+    let compute = |app: &mut SolveApp, change: bool| {
+        let c = interference(app, &[], "0");
+        if let Some(Kind::Assembly(Asm::Interference { result, overlaps, check, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) {
+            (*result, *overlaps, *check) = (None, Vec::new(), Some(c));
+        }
+        if change {
+            app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]})).unwrap();
+        }
+        for _ in 0..3000 {
+            let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| crate::dialogs::show(app, ui.ctx()));
+            out.textures_delta.clear();
+            if !state(app).2 {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("the check never came back");
+    };
+    compute(&mut app, false);
+    let (result, overlaps, _) = state(&app);
+    let result = result.expect("the check's reply");
+    assert_eq!(result["overlaps"].as_array().map(Vec::len), Some(1), "{result}");
+    assert_eq!(overlaps, 1, "the shared volume, drawn in red");
+    compute(&mut app, true);
+    assert_eq!(state(&app), (None, 0, false), "a check of the design before the change is dropped");
+}
+
+#[test]
+fn joint_dialog_applies_custom_name_or_falls_back_to_type_default() {
+    // 1. Empty name field: commands() generates payload without "name", backend creates "Rigid Joint1"
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "joint.create");
+    assert!(cmds[0].1.get("name").is_none());
+    for (id, p) in cmds {
+        let r = app.run(&id, p).unwrap();
+        assert_eq!(r["name"], "Rigid Joint1");
+    }
+
+    // 2. Custom name in f.name: reset to fresh boxes so B is at its initial coordinates
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.name = "MyCustomJoint".into();
+    }
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["name"], "MyCustomJoint");
+    for (id, p) in cmds {
+        let r = app.run(&id, p).unwrap();
+        assert_eq!(r["name"], "MyCustomJoint");
+    }
+}
+
+/// An imported assembly makes a joint per placed part: with "Group joints in the History" on, from
+/// the second joint the timeline shows them as one grouped button with their count, and clicking
+/// it shows (and hides) each one.
+#[test]
+fn many_joints_start_grouped_in_the_timeline() {
+    let mut h = crate::scenario::Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
+    for (name, x) in [("A", 0), ("B", 30)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({ "name": name })).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let at = |o: &str| json!({"occurrence": o, "point": [30, 10, 5], "z": [1, 0, 0]});
+    h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Held"})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::handle_at("timeline:joints").is_none(), "one joint shows on its own");
+    let first = h.app.session.doc.assembly.joints[0].clone();
+    for i in 1..=JOINT_GROUP_MIN as u64 {
+        let mut copy = first.clone();
+        copy.id = first.id + i;
+        copy.name = format!("Held {i}");
+        h.app.session.doc_mut().assembly.joints.push(copy);
+    }
+    h.frames(2);
+    assert_eq!(h.app.session.doc.assembly.joints.len(), 2);
+    assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "a second joint starts them grouped");
+    let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
+    assert_eq!(h.call("ui.click", json!({"x": group.x, "y": group.y}))["ok"], true);
+    assert!(joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "clicking the group shows each joint");
+    let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
+    assert_eq!(h.call("ui.click", json!({"x": group.x, "y": group.y}))["ok"], true);
+    assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "clicking it again groups them");
+}
+
+/// With "Group joints in the History" off, as it is by default, the History shows each joint as it
+/// always has: no grouped button, a tile for every joint, and the left History's JOINTS header
+/// without a count. Turned on, the joints group; turned off again, they show one by one.
+#[test]
+fn joints_show_one_by_one_when_their_grouping_is_off() {
+    let mut h = crate::scenario::Harness::new();
+    for (name, x) in [("A", 0), ("B", 30)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({ "name": name })).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let at = |o: &str| json!({"occurrence": o, "point": [30, 10, 5], "z": [1, 0, 0]});
+    for name in ["Held", "Held again"] {
+        h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": name})).unwrap();
+    }
+    h.frames(2);
+    assert!(!h.app.preferences.history_group_joints, "grouping is off by default");
+    assert!(joints_open(&h.app, 2, JointRun::Loose), "each joint shows");
+    assert!(crate::scenario::handle_at("timeline:joints").is_none(), "no grouped button");
+    for name in ["Held", "Held again"] {
+        assert!(crate::scenario::handle_at(&format!("timeline-joint:{name}")).is_some(), "{name} has its own tile");
+    }
+    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
+    h.frames(2);
+    assert!(!joints_open(&h.app, 2, JointRun::Loose), "turned on, the two joints group");
+    assert!(crate::scenario::handle_at("timeline:joints").is_some(), "the grouped button appears");
+    assert!(crate::scenario::handle_at("timeline-joint:Held").is_none());
+    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": false}))["ok"], true);
+    h.frames(2);
+    assert!(joints_open(&h.app, 2, JointRun::Loose), "turned off again, each joint shows");
+    assert!(crate::scenario::handle_at("timeline:joints").is_none(), "and the grouped button goes");
+    assert!(crate::scenario::handle_at("timeline-joint:Held").is_some());
+}
+
+/// The joints after the History bar's features belong to the whole design. Without the bar's
+/// groups, as by default, they stay while the bar shows only the edited component, as they always
+/// have; with the groups, a bar that shows one component leaves them out.
+#[test]
+fn joints_stay_in_the_history_bar_showing_one_component_without_its_groups() {
+    let mut h = crate::scenario::Harness::new();
+    for (name, x) in [("A", 0), ("B", 30)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({ "name": name })).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let at = |o: &str| json!({"occurrence": o, "point": [30, 10, 5], "z": [1, 0, 0]});
+    h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Held"})).unwrap();
+    h.app.run("component.activate", json!({"component": "A"})).unwrap();
+    h.frames(2);
+    assert!(!h.app.preferences.history_bar_groups, "the bar's groups are off by default");
+    assert!(crate::timeline_scope::shown(&h.app).is_some(), "the bar shows the edited component");
+    assert!(crate::scenario::handle_at("timeline-joint:Held").is_some(), "the design's joint still shows");
+    assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+    h.frames(2);
+    assert!(crate::scenario::handle_at("timeline-joint:Held").is_none(), "with the groups, one component's bar leaves it out");
+}
+
+/// The grouped joints' arrow has a well of its own at the button's end: it lights up only under
+/// the pointer, and clicking it shows and hides the joints like the rest of the button.
+#[test]
+fn the_grouped_joints_arrow_lights_up_under_the_pointer() {
+    let mut h = crate::scenario::Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
+    for (name, x) in [("A", 0), ("B", 30)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({ "name": name })).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let at = |o: &str| json!({"occurrence": o, "point": [30, 10, 5], "z": [1, 0, 0]});
+    h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Held"})).unwrap();
+    let first = h.app.session.doc.assembly.joints[0].clone();
+    // Thousands of joints, as an imported assembly makes: the count is four digits wide.
+    for i in 1..=1200u64 {
+        let mut copy = first.clone();
+        copy.id = first.id + i;
+        copy.name = format!("Held {i}");
+        h.app.session.doc_mut().assembly.joints.push(copy);
+    }
+    h.frames(2);
+    let arrow = crate::scenario::rect_of("timeline:joints_arrow").expect("the arrow's well");
+    let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
+    assert!(arrow.left() > group.x, "the arrow sits at the button's right end");
+    let hot = |h: &mut crate::scenario::Harness, x: f32, y: f32| {
+        h.call("ui.move", json!({"x": x, "y": y}));
+        h.frames(1);
+        crate::scenario::count_of("timeline:joints_arrow_hot")
+    };
+    assert_eq!(hot(&mut h, arrow.center().x, arrow.center().y), Some(1.0), "the well lights up under the pointer");
+    let icon_x = arrow.left() - 2.0 * (arrow.left() - group.x) + 6.0;
+    assert_eq!(hot(&mut h, icon_x, arrow.center().y), Some(0.0), "not over the icon or the count");
+    assert_eq!(h.call("ui.click", json!({"x": arrow.center().x, "y": arrow.center().y}))["ok"], true);
+    assert!(joints_open(&h.app, 1201, JointRun::Loose), "clicking the arrow shows each joint");
+    let arrow = crate::scenario::rect_of("timeline:joints_arrow").expect("the arrow's well");
+    assert_eq!(h.call("ui.click", json!({"x": arrow.center().x, "y": arrow.center().y}))["ok"], true);
+    assert!(!joints_open(&h.app, 1201, JointRun::Loose), "and groups them again");
 }

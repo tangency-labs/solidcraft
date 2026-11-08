@@ -1,4 +1,5 @@
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::{EngineError, Session};
 
@@ -197,6 +198,31 @@ fn deleting_a_used_parameter_lists_its_users() {
     assert!(g["edges"].as_array().unwrap().iter().any(|e| e[0] == "Feature:Base" && e[1] == dim.as_str()), "{g}");
 }
 
+/// #12293: a parameter that only a sketch point's coordinate reads lists that sketch in the
+/// parameter list's `used_by`, as `parameters.graph` and `parameters.users` already show it.
+#[test]
+fn a_parameter_read_by_a_sketch_point_lists_the_sketch_as_its_user() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "a", "expression": "20 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "5 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], ["a", 0], ["a", 10], [0, 10]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "distance": "h", "name": "E"}));
+    let g = run(&mut s, "parameters.graph", json!({}));
+    assert!(g["edges"].as_array().unwrap().iter().any(|e| e[0] == "Feature:S" && e[1] == "a"), "{g}");
+    let list = run(&mut s, "parameters.list", json!({"filter": "user"}));
+    assert_eq!(row(&list, "a")["used_by"], json!(["Feature:S"]), "{list}");
+    // `h` is read through the extrude's named input, not by the extrude itself.
+    let h = row(&list, "h")["used_by"].clone();
+    assert_eq!(h.as_array().map(Vec::len), Some(1), "{list}");
+    assert!(h[0].as_str().is_some_and(|n| n.starts_with('d')), "{list}");
+    // The sketch still reads `a` after `a` changes.
+    run(&mut s, "parameters.change", json!({"name": "a", "expression": "30 mm"}));
+    let list = run(&mut s, "parameters.list", json!({"filter": "user"}));
+    assert_eq!(row(&list, "a")["used_by"], json!(["Feature:S"]), "{list}");
+}
+
 /// #4420: sheet metal and plastic rules and the plane of a canvas hold expressions too. Renaming a
 /// parameter they use renames it there, and they count as its users (so it can't be deleted).
 #[test]
@@ -256,6 +282,41 @@ fn rules_and_canvases_follow_a_renamed_parameter() {
     assert_eq!(s.doc.sheet.rules[0].thickness, "gauge");
 }
 
+/// #9623: outside a rule's own `thickness`, `Thickness` is the rule's thickness, not a design
+/// parameter of that name: renaming that parameter leaves it, and it doesn't count as a user.
+#[test]
+fn a_rules_own_thickness_is_not_a_parameter_named_thickness() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Thickness", "expression": "2 mm"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": "Thickness", "bend_radius": "Thickness", "active": true}));
+    run(&mut s, "plastic.manage_rules", json!({"name": "Housing", "thickness": "3 mm", "clearance": "Thickness / 10"}));
+    let u = run(&mut s, "parameters.users", json!({"name": "Thickness"}));
+    let fields: Vec<String> = u["users"].as_array().unwrap().iter().map(|x| x.to_string()).collect();
+    assert_eq!(fields.len(), 1, "only the sheet metal rule's thickness: {u}");
+    run(&mut s, "parameters.rename", json!({"name": "Thickness", "new_name": "Gauge"}));
+    let r = &s.doc.sheet.rules[0];
+    assert_eq!((r.thickness.as_str(), r.bend_radius.as_str(), r.gap.as_str()), ("Gauge", "Thickness", "Thickness"));
+    let housing = s.doc.plastic.rules.iter().find(|r| r.name == "Housing").unwrap();
+    assert_eq!(housing.clearance, "Thickness / 10");
+}
+
+/// #9623: renaming a parameter to `Thickness` is refused while a rule field other than its own
+/// thickness uses it (that field would then read the rule's thickness), and nothing changes.
+#[test]
+fn renaming_to_thickness_is_refused_where_a_rule_would_read_its_own() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Factor", "expression": "0.3", "unit": ""}));
+    run(&mut s, "parameters.add", json!({"name": "Gauge", "expression": "2 mm"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": "Gauge", "k_factor": "Factor", "active": true}));
+    let before = s.doc.clone();
+    let e = err(&mut s, "parameters.rename", json!({"name": "Factor", "new_name": "Thickness"}));
+    assert!(e.contains("sheet metal rule R (k_factor)"), "{e}");
+    assert!(s.doc == before, "a refused rename changes nothing");
+    // Used only by a rule's own thickness, the rename goes through.
+    run(&mut s, "parameters.rename", json!({"name": "Gauge", "new_name": "Thickness"}));
+    assert_eq!((s.doc.sheet.rules[0].thickness.as_str(), s.doc.sheet.rules[0].k_factor.as_str()), ("Thickness", "Factor"));
+}
+
 #[test]
 fn favorites_comments_and_completion() {
     let mut s = Session::default();
@@ -289,6 +350,17 @@ fn completion_matches_parameters_anywhere_in_their_name() {
     let c = run(&mut s, "parameters.complete", json!({"prefix": "THICK"}));
     assert_eq!(texts(&c), ["cab_side_thickness"], "any case: {c}");
     assert!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "xyz"}))).is_empty());
+    // #11978: the starts of the name's words, in order, find it; out of order they don't.
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "2 * cabthi"}));
+    assert_eq!(texts(&c), ["cab_side_thickness"], "{c}");
+    assert_eq!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "doowid"}))), ["door_width"]);
+    assert!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "thicab"}))).is_empty());
+    // A match by word starts alone comes after every name that contains the word, even a
+    // favourite: `inner_diameter` has no `id` in it.
+    run(&mut s, "parameters.add", json!({"name": "inner_diameter", "expression": "6 mm"}));
+    run(&mut s, "parameters.favorite", json!({"name": "inner_diameter", "favorite": true}));
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "id"}));
+    assert_eq!(texts(&c), ["cab_side_thickness", "side", "door_width", "inner_diameter"], "{c}");
     // Functions keep matching from the start: `in` is not `sin(`.
     let c = run(&mut s, "parameters.complete", json!({"prefix": "in"}));
     assert!(!c["suggestions"].as_array().unwrap().iter().any(|x| x["text"] == "sin("), "{c}");
@@ -668,7 +740,7 @@ fn a_failed_auto_constrain_keeps_the_stored_sketch_consistent() {
 }
 
 /// The stored sketch's points, by id.
-fn stored_points(s: &Session, feature: u64) -> Vec<solidcraft_geom::Vec2> {
+fn stored_points(s: &Session, feature: u64) -> Vec<solidcore_record::Vec2> {
     s.doc.sketch(feature).unwrap().points.iter().map(|p| p.pos).collect()
 }
 
@@ -699,7 +771,7 @@ fn an_unsolvable_value_edit_is_refused_and_changes_nothing() {
 fn value_edits_continue_from_the_last_solved_state() {
     // A → B → C, each a small edit solved in one jump; C is solved from B (the stored state),
     // and setting both values back reproduces A (the linkage is fully constrained).
-    let close = |a: &[solidcraft_geom::Vec2], b: &[solidcraft_geom::Vec2], tol: f64| a.iter().zip(b).all(|(p, q)| p.dist(*q) < tol);
+    let close = |a: &[solidcore_record::Vec2], b: &[solidcore_record::Vec2], tol: f64| a.iter().zip(b).all(|(p, q)| p.dist(*q) < tol);
     let (mut s, feature, params) = linkage_session();
     run(&mut s, "sketch.finish", json!({}));
     let a = stored_points(&s, feature);
@@ -1033,6 +1105,38 @@ fn a_refused_definition_changes_nothing() {
     // Text that only looks like a definition, where no value is read, is left alone.
     let r = run(&mut s, "parameters.add", json!({"name": "label", "expression": "a = b", "unit": "text"}));
     assert!(r.get("defined").is_none(), "{r}");
+}
+
+/// Several holes made one command at a time, each with its depth typed as `ScrewDepth = 5`: the
+/// first defines `ScrewDepth`, the later ones name it instead of being refused because it
+/// already exists. Typed again with another value, it is still refused and changes nothing.
+#[test]
+fn the_same_definition_typed_again_uses_the_parameter() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 12}));
+    let r = run(&mut s, "solid.hole", json!({"position": [15, 20, 12], "diameter": 5, "depth": "ScrewDepth = 5"}));
+    assert_eq!(r["definitions"].as_array().map(Vec::len), Some(1), "{r}");
+    let r = run(&mut s, "solid.hole", json!({"position": [45, 20, 12], "diameter": 5, "depth": "ScrewDepth = 5"}));
+    assert!(r.get("definitions").is_none_or(|d| d.as_array().is_some_and(Vec::is_empty)), "nothing new is defined: {r}");
+    assert_eq!(s.doc.params.iter().filter(|p| p.name == "ScrewDepth").count(), 1);
+    assert_eq!(expr_of(&mut s, "ScrewDepth"), "5");
+    let depths: Vec<&str> = s
+        .doc
+        .features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::Hole { depth, .. } => depth.as_ref().map(|d| d.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(depths, ["ScrewDepth", "ScrewDepth"]);
+    run(&mut s, "parameters.change", json!({"changes": {"ScrewDepth": "8"}}));
+    // Another value for the name is still a parameter that already exists.
+    let undo = s.undo.len();
+    let e = err(&mut s, "solid.hole", json!({"position": [30, 30, 12], "diameter": 5, "depth": "ScrewDepth = 6"}));
+    assert!(e.contains("there is already a parameter `ScrewDepth`"), "{e}");
+    assert_eq!(s.undo.len(), undo);
+    assert_eq!(expr_of(&mut s, "ScrewDepth"), "8");
 }
 
 /// Changing a parameter to `name = expression` names it (#4071): the dimension's or feature

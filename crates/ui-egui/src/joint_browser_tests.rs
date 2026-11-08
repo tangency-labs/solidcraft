@@ -22,7 +22,7 @@ fn a_picked_joint_lights_its_parts_and_fades_the_rest() {
     h.frames(2);
     let mut parts: Vec<_> = [a, b].iter().flat_map(|o| h.app.session.occurrence_bodies(&[*o], true).unwrap()).collect();
     parts.sort();
-    assert_eq!(crate::viewport::solid_bodies(&h.app).as_ref(), Some(&parts));
+    assert_eq!(crate::viewport::solid_bodies(&h.app).as_deref(), Some(&parts.iter().cloned().collect()));
     assert!(!parts.iter().any(|p| h.app.session.occurrence_bodies(&[c], true).unwrap().contains(p)));
     assert_eq!(drawn(&h), [(hinge, true)], "the other joints step back");
 
@@ -330,7 +330,7 @@ fn show_joints_draws_only_that_placements_joints() {
     assert!(!solid.is_empty());
     let world = h.app.session.world_state();
     let kept = crate::viewport::solid_bodies(&h.app);
-    assert_eq!(kept.as_ref(), Some(&solid));
+    assert_eq!(kept.as_deref(), Some(&solid.iter().cloned().collect()));
     for b in &world.bodies {
         assert_eq!(crate::viewport::body_faded(&h.app, b, &kept), !solid.contains(&b.name), "{}", b.name);
     }
@@ -665,5 +665,27 @@ mod delete {
         assert_eq!(features(&h), before);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.assembly.joints.len(), 2);
+    }
+}
+
+/// Edit Joint Limits has its own id, so `ui.menuPick` tells it from Edit Joint, and it opens the
+/// joint's dialog on its Limits (#10745).
+#[test]
+fn edit_joint_limits_opens_the_limits_and_has_its_own_id() {
+    let mut h = harness();
+    let hinge = id(&h, "Hinge");
+    let items = context_menu::items(&h.app, &Target::Joint { id: hinge });
+    let ids = |label: &str| items.iter().filter(|i| i.label == label).map(|i| i.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids("Edit Joint"), ["ui.editJoint"]);
+    assert_eq!(ids("Edit Joint Limits"), ["ui.editJointLimits"]);
+
+    for (item, limits) in [("ui.editJoint", false), ("ui.editJointLimits", true)] {
+        crate::dialogs::cancel(&mut h.app);
+        h.frames(2);
+        h.call("ui.menu", json!({"x": 150, "y": 400, "target": {"type": "joint", "id": hinge}}));
+        assert_eq!(h.call("ui.menuPick", json!({"item": item}))["ok"], true, "{item}");
+        h.frames(3);
+        assert!(h.app.dialog.is_some(), "{item} opens the joint's dialog");
+        assert_eq!(h.widget("Angle limits").is_some(), limits, "{item}: the Limits section open");
     }
 }

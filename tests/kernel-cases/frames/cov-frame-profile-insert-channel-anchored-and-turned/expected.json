@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "a channel profile 60x30 (web 5, flanges 6, sharp) inserted at (10,10) by its bottom left corner and turned 90 deg",
+ "source": "analytic",
+ "method": "section 2*30*6 + 5*48 = 600, V = 12000 at 20 deep; bounding box 30 wide, 60 high from its corner, turned 90 deg ccw about it: x 10-60..10, y 10..40",
+ "body_count": 1,
+ "faces": 10,
+ "volume_mm3": 12000.0,
+ "bbox": {
+  "min": [
+   -50,
+   10,
+   0
+  ],
+  "max": [
+   10,
+   40,
+   20
+  ]
+ }
+}

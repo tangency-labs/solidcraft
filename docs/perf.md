@@ -1,3 +1,37 @@
+# Where the time goes: the profiler
+
+Every app is built with the profiler (`crates/profile`, the apps' default `profile` feature).
+It records nothing until switched on: `SOLIDCRAFT_PROFILE=1`, the CLI's `--profile`, the
+**Profile operations** preference (Graphics page) or `diagnostics.profile {"enabled": true}`.
+Off, a span is one relaxed atomic load.
+
+What it records, as nested spans on each thread:
+
+| Category | Spans |
+|---|---|
+| `solidcore` | every call into solidcore, the kernel |
+| `kernel` | booleans, blends, sweeps, lofts, shell/draft/offset, healing, sewing, conversions, meshing, measuring |
+| `import` | the stages of a STEP or IGES import: parse, index, each solid, placement, mesh check, convert batches |
+| `feature` | each feature computed, by its type; `doc evaluate` around them |
+| `command` | each `Session::execute`, by command id |
+| `io` | import, export, design read and write |
+
+Self time is a span's time less the spans inside it; its total counts only its outermost run
+on a thread, so a command run by a command is not counted twice. Work handed to other threads
+shows under their own spans. The report is a table (the most self time first, with self time
+per category) and the individual spans as a Chrome trace-event file for chrome://tracing or
+ui.perfetto.dev (at most 200,000 spans; later ones still count in the table).
+
+```sh
+solidcraft-cli run part.step --profile --profile-out trace.json   # table on stderr
+solidcraft-cli run part.solidcraft --profile --quiet
+solidcraft-cli bench-open part.step --profile
+```
+
+Over the control channel or MCP: `diagnostics.profile {"reset": true, "enabled": true}`, do the
+work, then `diagnostics.profile {"top": 30, "trace": "trace.json"}`. A STEP or IGES import's
+reply carries its own profile while recording.
+
 # Design loading
 
 ## Edges made by booleans: each point evaluated once (2026-10-16)
@@ -978,3 +1012,32 @@ cache. These counting-only hooks/switch are absent from the published source and
 
 [Reproduction code, exact source/executable hashes and per-operation release samples](https://gist.github.com/takuto-NA/cf4c0c9a40f50d44e1b6cda96bba18bd)
 cover both baseline contexts and the independent counting probe.
+
+## Occurrence placements: one children-by-parent index (2026-11-05)
+
+`Document::placements` walks the assembly tree from the root and, for each component it visits,
+scanned every occurrence for that component's children: placements times occurrences. It runs
+for every world placement (`body_frames`), the Browser, the viewport, edit in place, motion and
+export. `OccurrenceTree` (`crates/doc/src/occurrence_tree.rs`) builds the children of each
+component once, in one pass and in document order, and the walk reads them from it. The walk's
+order, its depth and count caps and where it stops are unchanged; a test compares it with the
+scanning walk on 13 shapes and on hostile generated documents. `inside_component` uses the same
+index.
+
+`benchmark_placements_walk` (ignored; `cargo test --release -p solidcraft-doc --lib
+benchmark_placements_walk -- --ignored --nocapture`) times both walks on a generated board-like
+assembly: `top` modules, each holding `parts` parts of 9 pins. It runs each order in turn (the
+scanning walk first in each round, then the tree first), so neither walk always runs on a cache
+the other warmed. Windows x64, AMD Ryzen 7 7800X3D, Rust 1.99.1, release profile; median of 9
+rounds per order, in milliseconds, the tree's time including building it:
+
+| Occurrences | Placements | First | Scanning | Tree |
+| ---: | ---: | --- | ---: | ---: |
+| 1,010 | 10,011 | scanning | 6.118 | 1.645 |
+| 1,010 | 10,011 | tree | 6.022 | 1.643 |
+| 2,539 | 97,540 | scanning | 121.283 | 15.711 |
+| 2,539 | 97,540 | tree | 120.094 | 15.456 |
+
+The order moves either walk by about 1%.
+
+Both walks return the same placements in the same order (the benchmark asserts it).

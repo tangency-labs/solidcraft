@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, Sketch};
 
 use crate::{Sel, Session};
@@ -188,7 +189,7 @@ fn paste_into_another_sketch_lands_on_its_plane() {
     assert!(p[0].dist(Vec2::new(0.0, 0.0)) < 1e-6 && p[1].dist(Vec2::new(20.0, 0.0)) < 1e-6, "{p:?}");
     assert_eq!(sk.constraints.iter().filter(|c| c.kind.is_dimension()).count(), 3);
     assert!(!sk.constraints.iter().any(|c| c.kind.refers_to_point(0)));
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let ss = st.sketch(b).unwrap();
     let w = ss.plane.to_world(Vec2::new(20.0, 10.0));
     assert!(w.y.abs() < 1e-9 && (w.x - 20.0).abs() < 1e-9, "{w:?}");
@@ -292,4 +293,167 @@ fn sketch_geometry_pastes_into_another_design_with_values_not_foreign_parameters
     let again = strs(&run(&mut b, "sketch.paste", json!({}))["curves"]);
     let at = pos(sketch(&b, sb), &again[0]);
     assert!(at.iter().zip(&corner).all(|(p, q)| p.dist(*q) < 1e-6), "{at:?}");
+}
+
+fn volume(s: &Session) -> f64 {
+    s.model.state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum()
+}
+
+/// A design with sketch `Small` (a 10 x 10 square from the origin) extruded 5 mm, then sketch
+/// `Big` (a dimensioned 30 x 20 rectangle tied to the origin) on the same plane.
+fn two_sketches() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Small"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Small", "distance": 5.0, "operation": "new_body"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Big"}));
+    let rect = strs(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}))["curves"]);
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{}.start", rect[0]), "b": "origin"}));
+    run(&mut s, "sketch.dimension", json!({"entities": [rect[0]], "value": 30}));
+    run(&mut s, "sketch.dimension", json!({"entities": [rect[1]], "value": 20}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+/// Replace Sketch (#11125): the sketch keeps its feature, and the extrude built on it now makes
+/// the other sketch's shape (10 x 10 x 5 = 500 mm³ becomes 30 x 20 x 5 = 3000 mm³). The copy's
+/// constraints come along, the one to the origin tied to this sketch's origin, its dimensions
+/// with their own parameters; the source is untouched; one undo step puts it all back.
+#[test]
+fn replace_sketch_gives_a_sketch_another_sketchs_contents_and_keeps_its_features() {
+    let mut s = two_sketches();
+    assert!((volume(&s) - 500.0).abs() < 1e-6, "{}", volume(&s));
+    let small = s.doc.find_feature("Small").unwrap().id;
+    let big = s.doc.find_feature("Big").unwrap().id;
+    let features = s.doc.features.len();
+    let params = s.doc.params.len();
+    let source = s.doc.sketch(big).unwrap().clone();
+    let before = s.doc.to_json();
+
+    let out = run(&mut s, "sketch.replace", json!({"sketch": "Small", "from": "Big"}));
+    assert_eq!(out["sketch_id"], json!(small));
+    assert_eq!(strs(&out["curves"]).len(), 4);
+    assert_eq!(s.doc.features.len(), features, "no feature added or removed");
+    assert_eq!(s.doc.find_feature("Small").map(|f| f.id), Some(small), "the sketch keeps its id and name");
+    assert!((volume(&s) - 3000.0).abs() < 1e-6, "the extrude follows: {}", volume(&s));
+    let sk = sketch(&s, small);
+    assert_eq!(sk.constraints.len(), source.constraints.len(), "every constraint comes along");
+    assert_eq!(sk.points.iter().filter(|q| q.id == "origin").count(), 1, "one origin");
+    let origin = sk.points.iter().position(|q| q.id == "origin").unwrap();
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if p == origin || q == origin)),
+        "the corner stays tied to the origin: {:?}",
+        sk.constraints
+    );
+    let names: Vec<String> = sk.constraints.iter().filter_map(|c| c.param.clone()).collect();
+    let theirs: Vec<String> = source.constraints.iter().filter_map(|c| c.param.clone()).collect();
+    assert_eq!(names.len(), 2);
+    assert!(names.iter().all(|n| !theirs.contains(n)), "its own parameters: {names:?} vs {theirs:?}");
+    assert_eq!(s.doc.params.len(), params + 2);
+    assert_eq!(serde_json::to_value(s.doc.sketch(big).unwrap()).unwrap(), serde_json::to_value(&source).unwrap(), "the source is untouched");
+    // Its dimensions drive it: a new width changes this sketch only.
+    run(&mut s, "parameters.change", json!({"name": names[0], "expression": "40"}));
+    assert!((volume(&s) - 4000.0).abs() < 1e-6, "{}", volume(&s));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before, "one undo step");
+}
+
+/// The old contents' dimension parameters go with them, unless something else uses them; a
+/// parameter the user made stays.
+#[test]
+fn replace_sketch_drops_the_old_dimension_parameters_nothing_else_uses() {
+    let mut s = two_sketches();
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "12"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Third"}));
+    let rect = strs(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [12, 8]}))["curves"]);
+    run(&mut s, "sketch.dimension", json!({"entities": [rect[0]], "value": "w"}));
+    run(&mut s, "sketch.dimension", json!({"entities": [rect[1]], "value": 8}));
+    run(&mut s, "sketch.finish", json!({}));
+    let third = s.doc.find_feature("Third").unwrap().id;
+    let params: Vec<String> = sketch(&s, third).constraints.iter().filter_map(|c| c.param.clone()).collect();
+    assert_eq!(params.len(), 2, "{params:?}");
+    run(&mut s, "sketch.replace", json!({"sketch": third, "from": "Small"}));
+    for name in &params {
+        let kept = s.doc.param(name);
+        assert!(kept.is_none_or(|p| !p.model), "`{name}` went with the old dimension: {kept:?}");
+    }
+    assert!(s.doc.param("w").is_some(), "the user's parameter stays");
+}
+
+/// A feature that names the old contents' curves (here a profile picked by its curve ids) never
+/// takes the new contents' curves that happen to get the same ids: the new ids carry on from the
+/// old ones, so the reference finds nothing and the feature says so, instead of quietly building
+/// from unrelated geometry (30 x 20 x 5 = 3000 mm³ here).
+#[test]
+fn replace_sketch_never_rebinds_a_reference_to_an_old_curve_onto_a_new_one() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Small"}));
+    let square = strs(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}))["curves"]);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Small", "distance": 5.0, "operation": "new_body", "profiles": [{"curves": square}]}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Big"}));
+    let rect = strs(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}))["curves"]);
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(square, rect, "both sketches numbered their curves alike: {square:?} {rect:?}");
+    assert!((volume(&s) - 500.0).abs() < 1e-6, "{}", volume(&s));
+    let before = s.doc.to_json();
+    match s.execute("sketch.replace", &json!({"sketch": "Small", "from": "Big"})) {
+        Ok(out) => {
+            let new = strs(&out["curves"]);
+            assert!(new.iter().all(|id| !square.contains(id)), "new ids, not the old ones again: {new:?} vs {square:?}");
+            assert!(s.model.results.iter().any(|r| r.error.is_some()), "the extrude says its curves are gone");
+        }
+        Err(_) => assert_eq!(s.doc.to_json(), before, "a refused replace changes nothing"),
+    }
+    assert!((volume(&s) - 3000.0).abs() > 1.0, "never built from the unrelated new curves: {}", volume(&s));
+}
+
+/// Sketch contents come from a sketch in another design file, at the same sketch coordinates; a
+/// dimension that named that design's parameter keeps its value, without the parameter.
+#[test]
+fn replace_sketch_takes_a_sketch_from_another_design_file() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-replace-sketch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Other.sc");
+    let mut other = Session::default();
+    run(&mut other, "parameters.change", json!({"name": "w", "expression": "1 in"}));
+    run(&mut other, "sketch.create", json!({"plane": "XZ", "name": "Plate"}));
+    let rect = strs(&run(&mut other, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [25.4, 10]}))["curves"]);
+    run(&mut other, "sketch.dimension", json!({"entities": [rect[0]], "value": "w"}));
+    run(&mut other, "sketch.finish", json!({}));
+    run(&mut other, "file.save_as", json!({"path": path.to_string_lossy()}));
+
+    let mut s = two_sketches();
+    let file = path.to_string_lossy().to_string();
+    let out = run(&mut s, "sketch.replace", json!({"sketch": "Small", "from": "Plate", "file": file}));
+    assert_eq!(out["file"], json!(file));
+    assert!((volume(&s) - 25.4 * 10.0 * 5.0).abs() < 1e-6, "{}", volume(&s));
+    assert!(s.doc.param("w").is_none(), "the other design's parameter is not brought in");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn replace_sketch_refuses_bad_requests_and_leaves_the_design_as_it_was() {
+    let mut s = two_sketches();
+    let before = s.doc.to_json();
+    let extrude = s.doc.features.iter().find(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. })).unwrap().id;
+    for bad in [
+        json!({"sketch": "Small"}),
+        json!({"sketch": "Small", "from": "Small"}),
+        json!({"sketch": "Small", "from": "Nope"}),
+        json!({"sketch": "Small", "from": 1.5}),
+        json!({"sketch": "Small", "from": [1]}),
+        json!({"sketch": "Small", "from": extrude}),
+        json!({"sketch": "Nope", "from": "Big"}),
+        json!({"from": "Big"}),
+        json!({"sketch": "Small", "from": "Big", "file": 3}),
+        json!({"sketch": "Small", "from": "Big", "file": "Z:/no/such/file.solidcraft"}),
+        json!([1, 2]),
+        json!("text"),
+    ] {
+        assert!(s.execute("sketch.replace", &bad).is_err(), "{bad}");
+        assert_eq!(s.doc.to_json(), before, "{bad}");
+    }
 }

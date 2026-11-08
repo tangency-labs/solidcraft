@@ -8,14 +8,18 @@
 //!
 //! The line type is also a drawing mode: with nothing selected, Construction (or X) makes what
 //! is drawn next construction geometry until it is switched back.
+//!
+//! The palette docks at the right edge but its header drags it, like a command dialog's title:
+//! it then stays where it was put for the rest of the session (#8923).
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::cell::Cell;
 
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 thread_local! {
     /// The drawing line type (0 normal, 1 construction, 2 centerline) and the sketch it is for.
@@ -168,7 +172,7 @@ fn selected_linetypes(app: &SolveApp) -> [bool; 4] {
     if curves.is_empty() {
         return types;
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return types };
     for c in curves.iter().filter_map(|id| ss.sketch.curve_index(id).and_then(|i| ss.sketch.curves.get(i))) {
         let k = if c.infinite {
@@ -196,7 +200,7 @@ pub fn set_linetype(app: &mut SolveApp, kind: u8) {
         return;
     }
     let lines: Vec<String> = {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
         curves
             .iter()
@@ -253,7 +257,7 @@ fn viewport(app: &SolveApp, ctx: &egui::Context) -> egui::Rect {
 
 /// Is a sketch being edited? That is the palette's own condition.
 pub fn editing(app: &SolveApp) -> bool {
-    app.session.active_sketch.and_then(|s| app.session.world_state().sketch(s).map(|_| ())).is_some()
+    app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
 }
 
 /// Has the viewport room for the palette and a command dialog side by side? A narrow view has
@@ -261,6 +265,25 @@ pub fn editing(app: &SolveApp) -> bool {
 pub fn fits_beside_a_dialog(app: &SolveApp, ctx: &egui::Context) -> bool {
     let vp = viewport(app, ctx);
     vp.width() >= width(vp) + crate::frame::DIALOG_MIN_W + 40.0
+}
+
+/// The dock offset the palette's header drags.
+const DRAG_KEY: &str = "sketch_palette";
+
+/// Is the palette at its dock against the right edge, i.e. not dragged elsewhere?
+pub fn docked(ctx: &egui::Context) -> bool {
+    crate::frame::dock_offset(ctx, DRAG_KEY) == egui::Vec2::ZERO
+}
+
+/// The width a command dialog docked at the left edge of `vp` may take without covering the
+/// palette. A palette dragged to where it leaves less than a dialog's width gives up its claim:
+/// the dialog then takes the whole viewport and the two may overlap, as the user put them.
+pub fn room_left_of(app: &SolveApp, ctx: &egui::Context, vp: egui::Rect) -> f32 {
+    let space = Tokens::get().space_8;
+    match app.viewport.palette_rect.filter(|r| r.is_finite() && r.is_positive()) {
+        Some(r) if docked(ctx) || r.left() - vp.left() - space >= crate::frame::DIALOG_MIN_W => (r.left() - vp.left() - space).max(0.0),
+        _ => vp.width(),
+    }
 }
 
 /// Is the palette on screen? It stays for as long as a sketch is being edited, a command dialog
@@ -324,12 +347,12 @@ fn constrained_fraction(remaining: usize, total: usize, solved: bool) -> f32 {
 /// Draw the sketch options card, retaining the command paths used by the original palette.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     app.viewport.palette_rect = None;
-    let _language = crate::i18n::scope(&app.preferences.language);
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
     if !visible(app, ctx) {
         return;
     }
     let (opts, name, remaining, solved, total, geometry, open_ends, untied_ends) = {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
         (
             ss.sketch.view.clone(),
@@ -350,7 +373,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let bottom = vp.bottom().min(ctx.content_rect().bottom()) - gap;
     let top = crate::shell::panel_top(app, vp, bottom, crate::frame::Side::Right);
     let frame = crate::ui_kit::Panel::palette_frame(ctx, app.ui.layout);
-    let anchor = egui::pos2(vp.right() - gap - frame.stroke.width, top + frame.stroke.width);
+    let docked = egui::pos2(vp.right() - gap - frame.stroke.width, top + frame.stroke.width);
+    // Dragged, the palette may go wherever a command dialog may: over Browser and History too.
+    let moved = crate::frame::dock_offset(ctx, DRAG_KEY);
+    let (anchor, bounds) = if moved == egui::Vec2::ZERO {
+        (docked, vp)
+    } else {
+        let bounds = crate::shell::tool_drag_rect(app, vp).union(vp);
+        let mut anchor = crate::frame::offset_anchor(docked, moved, bounds, crate::frame::Side::Right);
+        // Never so low that the palette folds into a scrolled sliver: it keeps the height its
+        // dock guarantees (the same 360 pt `shell::panel_top` keeps), so Finish stays in view.
+        anchor.y = anchor.y.min((bottom - 360.0).max(docked.y));
+        (anchor, bounds)
+    };
     let shown = |key: &str| match key {
         "grid" => !opts.hide_grid,
         "snap" => !opts.no_snap,
@@ -376,45 +411,68 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     let panel = crate::ui_kit::Panel::new(
         app.tr_label("ui.palette_sketch_options"),
-        egui::Id::new("sc_sketch_palette"),
+        egui::Id::unique("sc_sketch_palette"),
         anchor,
-        vp,
+        bounds,
         crate::frame::Side::Right,
         frame,
     )
     .width(width(vp));
+    let mut painted = false;
+    let placed = panel.bounded_anchor(ctx);
+    let top = placed.y - frame.stroke.width;
+    let header_height = egui::Id::unique("sc_sketch_palette_header_height");
     let response = panel.window(ctx).show(ctx, |ui| {
+        painted = ui.is_visible() && !ui.is_sizing_pass();
         panel.palette(ui, bottom, top, |ui, part| match part {
             crate::ui_kit::Part::Header => {
+                // The header is the drag handle. It is laid down before the header's labels, as
+                // a dialog's title band is, so their tooltips stay; last frame's height sizes it.
+                if let Some(height) = ui.ctx().data(|d| d.get_temp::<f32>(header_height)).filter(|h| h.is_finite() && *h > 0.0) {
+                    let band = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), height));
+                    // Undragged, it is docked even where a short view squeezes it: that is no move.
+                    let applied = if moved == egui::Vec2::ZERO { moved } else { placed - docked };
+                    crate::frame::drag_dock_named(ui, "sketch_palette:title", band, DRAG_KEY, moved, applied);
+                }
                 let status = if !solved || !geometry || remaining == 0 {
                     crate::i18n::tr_dyn(&dof_text(remaining, solved, geometry))
                 } else {
-                    crate::i18n::format(if remaining == 1 { "sketch.dof_left_one" } else { "sketch.dof_left" }, &[("count", &remaining.to_string())])
+                    solidcraft_ui_text::format(
+                        if remaining == 1 { "sketch.dof_left_one" } else { "sketch.dof_left" },
+                        &[("count", &remaining.to_string())],
+                    )
                 };
-                crate::ui_kit::status_header(
-                    ui,
-                    "sketch_palette",
-                    &name,
-                    crate::ui_kit::StatusHeader {
-                        icon: "sketch",
-                        text: &status,
-                        complete: solved && remaining == 0 && geometry,
-                        fraction: constrained_fraction(remaining, total, solved && geometry),
-                    },
-                );
+                // Selectable text would take the drag from the band beneath it.
+                let header = ui
+                    .scope(|ui| {
+                        ui.style_mut().interaction.selectable_labels = false;
+                        crate::ui_kit::status_header(
+                            ui,
+                            "sketch_palette",
+                            &name,
+                            crate::ui_kit::StatusHeader {
+                                icon: "sketch",
+                                text: &status,
+                                complete: solved && remaining == 0 && geometry,
+                                fraction: constrained_fraction(remaining, total, solved && geometry),
+                            },
+                        )
+                    })
+                    .inner;
+                ui.ctx().data_mut(|d| d.insert_temp(header_height, header.rect.height()));
             }
             crate::ui_kit::Part::Body => {
-                let t = crate::theme::Tokens::get();
+                let t = solidcraft_theme::Tokens::get();
                 if open_ends > 0 {
-                    let text = crate::i18n::format("sketch.open_ends", &[("count", &open_ends.to_string())]);
-                    ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).on_hover_text(app.tr("ui.open_ends_tip"));
+                    let text = solidcraft_ui_text::format("sketch.open_ends", &[("count", &open_ends.to_string())]);
+                    ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.open_ends_tip"));
                 }
                 if untied_ends > 0 {
                     ui.horizontal(|ui| {
-                        let text = crate::i18n::format("sketch.untied_ends", &[("count", &untied_ends.to_string())]);
-                        ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).on_hover_text(app.tr("ui.untied_ends_tip"));
-                        let button =
-                            crate::ui_kit::button(ui, app.tr("ui.tie_ends"), crate::ui_kit::Button::Normal).on_hover_text(app.tr("ui.tie_ends_tip"));
+                        let text = solidcraft_ui_text::format("sketch.untied_ends", &[("count", &untied_ends.to_string())]);
+                        ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.untied_ends_tip"));
+                        let button = crate::ui_kit::button(ui, app.tr("ui.tie_ends"), crate::ui_kit::Button::Normal)
+                            .backing_on_hover_text(app.tr("ui.tie_ends_tip"));
                         crate::scenario::publish_handle("sketch_palette:tie_ends", button.rect.center());
                         tie = button.clicked();
                     });
@@ -446,9 +504,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     let segments = LINE_TYPES.map(|(key, icon, name)| {
                         let name = app.tr_label(name);
                         let tip = if has_curves {
-                            crate::i18n::format("sketch.make_selection", &[("linetype", name)])
+                            solidcraft_ui_text::format("sketch.make_selection", &[("linetype", name)])
                         } else {
-                            crate::i18n::format("sketch.draw_curves", &[("linetype", name)])
+                            solidcraft_ui_text::format("sketch.draw_curves", &[("linetype", name)])
                         };
                         crate::ui_kit::IconSegment { key, icon, tip }
                     });
@@ -507,7 +565,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
     });
-    app.viewport.palette_rect = response.map(|r| r.response.rect.expand(frame.stroke.width));
+    app.viewport.palette_rect =
+        response.filter(|_| !app.universal_panel_host_enabled() || painted).map(|r| r.response.rect.expand(frame.stroke.width));
     if let Some(rect) = app.viewport.palette_rect {
         crate::scenario::publish_rect("sketch_palette:outer", rect);
     }
@@ -537,6 +596,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.set_status(error, true);
     }
     if look {
+        if app.universal_panel_host_enabled() {
+            app.viewport.host_windows = crate::ui_kit::Container::host_window_regions(ctx);
+            crate::viewport::refresh_layout(app, ctx);
+        }
         crate::dialogs::look_at_sketch_again(app);
     }
     if finish {
@@ -597,7 +660,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.run("sketch.circle.center", json!({"center":[10,10],"radius":5})).unwrap();
         h.settle();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         assert_eq!(unconstrained_total(&sketch.sketch), 3);
         assert_eq!(sketch.report.dof, 3);
@@ -660,12 +723,12 @@ mod tests {
             assert_eq!(after.dims.iter().map(|d| &d.value).collect::<Vec<_>>(), before.dims.iter().map(|d| &d.value).collect::<Vec<_>>());
             assert_eq!(h.app.session.undo.len(), history);
             h.step(&json!({"click":{"sketch":[20,10]}})).unwrap();
-            let state = h.app.session.world_state();
+            let state = h.app.session.world_state().unwrap();
             let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
             assert!(!sketch.curves.is_empty(), "{command}");
             assert!(sketch.curves.iter().all(|c| c.construction), "{command}");
             h.app.run("edit.undo", json!({})).unwrap();
-            assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
+            assert!(h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
             set_mode(&mut h.app, 0);
         }
     }
@@ -694,7 +757,7 @@ mod tests {
             let history = h.app.session.undo.len();
             let r = h.app.run("sketch.project", json!({"refs":[{"sketch":1,"curve":"l1"},{"sketch":1,"curve":"c1"}]})).unwrap();
             assert_eq!(r["links"].as_array().map(Vec::len), Some(2), "mode {m}: {r}");
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
             let kind = |line: bool| {
                 sketch
@@ -708,7 +771,10 @@ mod tests {
             assert_eq!(kind(false), circle, "mode {m}: the circle");
             assert_eq!(h.app.session.undo.len(), history + 1, "mode {m}: one undo step");
             h.app.run("edit.undo", json!({})).unwrap();
-            assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty(), "mode {m}");
+            assert!(
+                crate::open_meshing::session_world(&h.app.session).sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty(),
+                "mode {m}"
+            );
             set_mode(&mut h.app, 0);
         }
     }
@@ -739,7 +805,7 @@ mod tests {
             assert!(options.contains(egui::pos2(x as f32, y as f32)), "lower option must be visible after scrolling");
             h.call("ui.click", json!({"x":x,"y":y}));
             h.settle();
-            assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.view.three_d);
+            assert!(h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.view.three_d);
             assert_eq!(h.app.session.undo.len(), undo + 1);
             h.app.run("edit.undo", json!({})).unwrap();
             assert_eq!(h.app.session.doc.to_json(), baseline);
@@ -757,7 +823,7 @@ mod tests {
     /// most visibly docked against the window's edge (#9457).
     #[test]
     fn pane_stays_still_while_the_pointer_moves_at_fractional_scale() {
-        for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for (scale, width, height) in [(1.0, 1600.0, 1000.0), (1.25, 1536.0, 921.6), (1.25, 1522.4, 904.8), (1.5, 1280.0, 800.0)] {
                 let mut h = crate::scenario::Harness::new();
                 h.app.ui.layout = layout;
@@ -807,6 +873,58 @@ mod tests {
                 assert!(!p.intersect(d).is_positive(), "width {width}: palette {p:?} overlaps dialog {d:?}");
             }
             assert!(h.app.dialog.is_some(), "width {width}: the dialog stays open");
+        }
+    }
+
+    /// #8923: the header drags the palette like a dialog's title; it stays on screen, keeps
+    /// working where it is put, keeps its place for the next sketch, and a dialog opened while
+    /// it sits at the left is not squeezed to nothing beside it.
+    #[test]
+    fn the_header_drags_the_palette_and_it_keeps_its_place() {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.set", json!({"layout":mode}));
+            h.call("ui.resize", json!({"width":1400,"height":900}));
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+            h.settle();
+            let rest = h.app.viewport.palette_rect.unwrap();
+            assert!(docked(&h.ctx), "{mode:?}: the palette starts at its dock");
+            let view = h.app.viewport.rect.unwrap();
+            assert!(room_left_of(&h.app, &h.ctx, view) < view.width() - rest.width(), "{mode:?}: docked, the palette keeps its room");
+            let title = crate::scenario::handle_at("sketch_palette:title").expect("the header is a drag handle");
+            assert!(rest.contains(title), "{mode:?}: the handle {title:?} is on the palette {rest:?}");
+            h.call("ui.drag", json!({"x0": title.x, "y0": title.y, "x1": title.x - 600.0, "y1": title.y + 60.0, "steps": 8}));
+            h.frames(4);
+            let moved = h.app.viewport.palette_rect.unwrap();
+            assert!((moved.min - rest.min - egui::vec2(-600.0, 60.0)).length() < 2.0, "{mode:?}: {rest:?} -> {moved:?}");
+            assert!(!docked(&h.ctx), "{mode:?}: dragged, the palette is no longer docked");
+            assert!(h.app.session.active_sketch.is_some(), "{mode:?}: dragging the header keeps the sketch open");
+
+            // Dragged far off, it stays on screen.
+            let title = crate::scenario::handle_at("sketch_palette:title").unwrap();
+            h.call("ui.drag", json!({"x0": title.x, "y0": title.y, "x1": title.x - 3000.0, "y1": title.y + 3000.0, "steps": 8}));
+            h.frames(4);
+            let viewport = h.app.viewport.rect.unwrap();
+            let far = h.app.viewport.palette_rect.unwrap();
+            assert!(viewport.expand(1.0).contains(far.min), "{mode:?}: {far:?} left {viewport:?}");
+            assert!(crate::scenario::handle_at("sketch_palette:title").is_some_and(|t| viewport.contains(t)), "{mode:?}: the handle stays reachable");
+
+            // A palette at the left leaves a wide dialog docked there the whole view, not the
+            // sliver to its left; docked at the right it still keeps its own room.
+            assert_eq!(room_left_of(&h.app, &h.ctx, viewport), viewport.width(), "{mode:?}: {far:?}");
+
+            // Its controls still work where it is, and the next sketch finds it there.
+            let placed = h.app.viewport.palette_rect.unwrap();
+            let finish = crate::scenario::handle_at("sketch_palette:finish").unwrap();
+            assert!(placed.contains(finish), "{mode:?}: Finish {finish:?} rides with the palette {placed:?}");
+            h.call("ui.click", json!({"x": finish.x, "y": finish.y}));
+            h.settle();
+            assert!(h.app.session.active_sketch.is_none(), "{mode:?}: Finish Sketch works from the moved palette");
+            h.app.run("sketch.create", json!({"plane":"XZ"})).unwrap();
+            h.settle();
+            let again = h.app.viewport.palette_rect.unwrap();
+            assert!((again.min - placed.min).length() < 2.0, "{mode:?}: the next sketch keeps the place: {placed:?} -> {again:?}");
         }
     }
 
@@ -915,7 +1033,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.settle();
         let active = h.app.session.active_sketch.unwrap();
-        let slice_on = |h: &mut crate::scenario::Harness| h.app.session.world_state().sketch(active).unwrap().sketch.view.slice;
+        let slice_on = |h: &mut crate::scenario::Harness| h.app.session.world_state().unwrap().sketch(active).unwrap().sketch.view.slice;
         assert!(!slice_on(&mut h));
         // Clicking the row's label (not just the checkbox) toggles the option, same as before
         // the checkbox and the label became separate widgets in their own column.
@@ -1044,7 +1162,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.settle();
         let line = |h: &crate::scenario::Harness| {
-            let st = h.app.session.world_state();
+            let st = h.app.session.world_state().unwrap();
             let ss = h.app.session.active_sketch.and_then(|s| st.sketch(s)).unwrap();
             dof_text(ss.report.dof, ss.report.ok(), has_geometry(&ss.sketch))
         };
@@ -1101,6 +1219,55 @@ mod tests {
         h.step(&json!({"key":"Escape"})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
         assert!(h.app.session.active_sketch.is_none());
+    }
+
+    /// With "Double Esc finishes the sketch" off (#12069), any number of quick presses only cancel
+    /// the tool and the selection, and the sketch stays open, blank or not; Finish Sketch still
+    /// ends it. On (the default) keeps the double press finishing it.
+    #[test]
+    fn escape_never_leaves_the_sketch_when_the_double_press_preference_is_off() {
+        assert!(crate::prefs::Prefs::default().escape_twice_finishes_sketch, "the default keeps today's double Esc");
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"escape_twice_finishes_sketch": false}));
+        assert!(!h.app.preferences.escape_twice_finishes_sketch, "set through the control channel");
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        let sketch = h.app.session.active_sketch;
+        assert!(sketch.is_some());
+        // Blank: a double Esc would take it away when the preference is on.
+        for _ in 0..10 {
+            h.step(&json!({"key":"Escape"})).unwrap();
+        }
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, sketch, "ten quick presses keep the blank sketch open");
+
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+        h.settle();
+        h.step(&json!({"start":"sketch.line"})).unwrap();
+        assert!(h.app.tool.is_some());
+        for _ in 0..4 {
+            h.step(&json!({"key":"Escape"})).unwrap();
+        }
+        h.settle();
+        assert!(h.app.tool.is_none(), "Esc still puts the tool down");
+        assert!(h.app.session.selection.is_empty(), "and clears the selection");
+        assert_eq!(h.app.session.active_sketch, sketch, "the sketch stays open");
+
+        h.app.finish_sketch();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_none(), "Finish Sketch still ends it");
+        assert!(crate::scenario::handle_at("timeline:Sketch1").is_some(), "the sketch is kept");
+
+        // Back on, a quick double press finishes again.
+        h.call("ui.prefs", json!({"escape_twice_finishes_sketch": true}));
+        h.step(&json!({"click": {"handle": "timeline:Sketch1"}, "double": true})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_some());
+        h.frames(60);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_none(), "on: a double Esc finishes the sketch");
     }
 
     /// A double Esc on a sketch left blank takes it away (no empty sketch in the browser or the

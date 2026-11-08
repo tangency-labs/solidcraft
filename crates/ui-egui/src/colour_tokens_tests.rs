@@ -1,4 +1,4 @@
-//! Every colour that carries a meaning comes from `theme::Tokens` (#778): the engine's sketch and
+//! Every colour that carries a meaning comes from `solidcraft_theme::Tokens` (#778): the engine's sketch and
 //! axis tags, the surface analysis colours and every colour an icon draws. These tests hold that
 //! the tokens equal what was drawn before, and that a new colour cannot skip them.
 
@@ -6,7 +6,7 @@ use egui::Color32;
 use solidcraft_engine::render::Rgb;
 use solidcraft_engine::view::colors;
 
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 fn rgb(c: Rgb) -> Color32 {
     Color32::from_rgb(c.0, c.1, c.2)
@@ -69,9 +69,9 @@ fn stroke_colours(shapes: &[egui::epaint::ClippedShape]) -> std::collections::BT
 /// cube's triad, 3D sketch triads and joint origins draw them.
 #[test]
 fn every_axis_is_drawn_in_one_set_of_colours() {
-    use crate::theme::{ColorVision, set_dark, set_vision};
     use egui::{Pos2, Rect, vec2};
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
+    use solidcraft_theme::{ColorVision, set_dark, set_vision};
     let ctx = crate::fonts::test_context();
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
     let cam = solidcraft_engine::render::Camera::default();
@@ -86,7 +86,7 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
 
         let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
             let painter = ui.painter().clone();
-            crate::gizmo::show(ui, &painter, &proj, egui::Id::new("one_set_gizmo"), &triad, 1.0);
+            crate::gizmo::show(ui, &painter, &proj, egui::Id::unique("one_set_gizmo"), &triad, 1.0);
         });
         out.textures_delta.clear();
         let mut gizmo = stroke_colours(&out.shapes);
@@ -139,12 +139,18 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 
 /// The most colour literals each UI file may hold, and why. None of them carries a meaning that a
 /// colour vision mode must change. A file with more fails here: make the new colour a token in
-/// `theme::Tokens` (and `assets/styles/ui/palettes.rs`) instead, or, if it carries no meaning,
+/// `solidcraft_theme::Tokens` (and `crates/theme/src/palettes.rs`) instead, or, if it carries no meaning,
 /// raise the file's count here and give the reason. Fewer is always fine. The icon sources may
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
+    ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
     ("navigation.rs", 1, "the navigation cube's face shading, made from a token"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
+    (
+        "body_gizmo.rs",
+        3,
+        "the custom view navigator's raster: the design's appearance and tokens, shaded, as pixels, drawn with the white image tint",
+    ),
     ("context_menu.rs", 1, "the radial menu's shadow"),
     ("dialogs_appearance.rs", 1, "a design appearance: the colour is the fact"),
     ("dialogs_save_mesh.rs", 1, "an installed slicer's own icon, drawn untinted"),
@@ -211,6 +217,9 @@ fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
                 continue;
             }
             let src = std::fs::read_to_string(&path).unwrap();
+            if src.trim_start().starts_with("#![cfg(test)]") {
+                continue;
+            }
             let code = src.split("#[cfg(test)]").next().unwrap_or(&src);
             let n: usize = COLOUR_LITERALS.iter().map(|p| code.matches(p).count()).sum();
             let allowed = ALLOWED_LITERALS.iter().find(|(f, _, _)| *f == relative).map_or(0, |(_, n, _)| *n);
@@ -222,7 +231,7 @@ fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
     for dir in &dirs {
         scan(dir, "", &mut found);
     }
-    assert!(found.is_empty(), "colour literals outside theme::Tokens: {found:?}");
+    assert!(found.is_empty(), "colour literals outside solidcraft_theme::Tokens: {found:?}");
 }
 
 /// The analysis shader takes its colours from the uniform (and so from the tokens). Only the
@@ -256,7 +265,7 @@ fn analysis_shader_colours_come_from_the_uniform() {
             "vec3<f32>(0.35)",
             "vec3<f32>(1.0)",
         ],
-        "a new colour in the analysis shader must come from `ana_c` (theme::AnalysisColors)"
+        "a new colour in the analysis shader must come from `ana_c` (solidcraft_color::AnalysisColors)"
     );
     assert_eq!(body.matches("u.ana_c[").count(), 9, "every analysis colour reads `ana_c`");
 }
@@ -278,9 +287,10 @@ fn every_engine_colour_tag_is_placed() {
         "AXIS_Y",
         "AXIS_Z",
     ];
-    // Bodies, edges, profiles, the grid and the background: the GPU viewport draws these from
-    // their own tokens; the engine's values are only the headless snapshot's.
-    const NEUTRAL: &[&str] = &["BODY", "BODY_SELECTED", "EDGE", "PROFILE", "GRID", "GRID_MAJOR", "BG_TOP", "BG_BOTTOM", "SECTION_CAP"];
+    // Bodies, edges, profiles, the grid, the background and Isocurve Analysis curves (the accent):
+    // the GPU viewport draws these from their own tokens; the engine's values are only the
+    // headless snapshot's.
+    const NEUTRAL: &[&str] = &["BODY", "BODY_SELECTED", "EDGE", "PROFILE", "GRID", "GRID_MAJOR", "BG_TOP", "BG_BOTTOM", "SECTION_CAP", "ISOCURVE"];
     let src = include_str!("../../engine/src/view.rs");
     let start = src.find("pub mod colors {").unwrap_or(0);
     let block = &src[start..];
@@ -300,7 +310,7 @@ fn the_logo_can_take_the_themes_accent() {
     struct Reset;
     impl Drop for Reset {
         fn drop(&mut self) {
-            crate::theme::set_logo_accent(false);
+            solidcraft_theme::set_logo_accent(false);
         }
     }
     let _reset = Reset;

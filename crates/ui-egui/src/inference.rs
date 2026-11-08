@@ -4,16 +4,17 @@
 //! the centre of a circle or arc). A dashed guide and a label show it; placing the point adds
 //! the matching constraint.
 
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 
 use egui::Stroke;
 use serde_json::json;
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_engine::sketch::{CurveKind, Sketch};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Kind {
@@ -241,12 +242,12 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         return;
     }
     let Some(i) = current() else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let tk = Tokens::get();
     if let (Some(a), Some(b)) = (to(i.guide.0), to(i.guide.1)) {
-        painter.extend(crate::viewport::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
+        painter.extend(crate::ui_kit::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
     }
 }
 
@@ -332,7 +333,7 @@ impl Tracking {
 
     /// Where the horizontal through one reference meets the vertical through the other, when
     /// that point is within a few pixels of the cursor and is not either reference itself.
-    pub(crate) fn meeting(&self, sk: &Sketch, plane: &solidcraft_engine::geom::Plane, proj: &Proj, cursor: egui::Pos2) -> Option<Vec2> {
+    pub(crate) fn meeting(&self, sk: &Sketch, plane: &solidcore_record::Plane, proj: &Proj, cursor: egui::Pos2) -> Option<Vec2> {
         let a = self.anchor.as_ref().and_then(|r| Self::point_of(sk, r))?;
         let b = self.previous.as_ref().and_then(|r| Self::point_of(sk, r))?;
         if a.dist(b) < 1e-6 {
@@ -371,7 +372,7 @@ impl Tracking {
     /// Follow the cursor: remember the reference under it and lay out the guides. With
     /// `points`, sketch points are references too (a drawing tool waits for a point);
     /// without, remembered points are let go.
-    fn update(&mut self, sk: &Sketch, plane: &solidcraft_engine::geom::Plane, proj: &Proj, cursor: egui::Pos2, points: bool) {
+    fn update(&mut self, sk: &Sketch, plane: &solidcore_record::Plane, proj: &Proj, cursor: egui::Pos2, points: bool) {
         self.guide = None;
         self.remembered_guide = None;
         if !points {
@@ -464,7 +465,7 @@ pub(crate) fn track_and_show(app: &mut SolveApp, painter: &egui::Painter, proj: 
     if tracking.sketch != active || !tracking.document.ptr_eq(&document) {
         *tracking = Tracking { sketch: active, document, ..Default::default() };
     }
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let Some((ss, cursor)) = active
         .and_then(|id| state.sketch(id))
         .zip(cursor)
@@ -479,7 +480,7 @@ pub(crate) fn track_and_show(app: &mut SolveApp, painter: &egui::Painter, proj: 
     let tk = Tokens::get();
     let draw = |guide: (Vec2, Vec2)| {
         let (Some(a), Some(b)) = (proj.to_screen(ss.plane.to_world(guide.0)), proj.to_screen(ss.plane.to_world(guide.1))) else { return None };
-        painter.extend(crate::viewport::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
+        painter.extend(crate::ui_kit::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
         painter.circle_stroke(a, 4.0, Stroke::new(1.0, tk.rubber_band));
         Some(b)
     };
@@ -504,7 +505,7 @@ mod tests {
 
     #[test]
     fn tracking_has_pixel_tolerance_and_only_spans_reference_to_cursor() {
-        use solidcraft_engine::geom::Plane;
+        use solidcore_record::Plane;
         let mut app = SolveApp::new(Default::default(), Default::default());
         app.cam.yaw = 0.0;
         app.cam.pitch = std::f64::consts::FRAC_PI_2;
@@ -542,7 +543,7 @@ mod tests {
 
     #[test]
     fn end_points_corners_and_free_points_start_guides_only_while_drawing() {
-        use solidcraft_engine::geom::Plane;
+        use solidcore_record::Plane;
         let mut app = SolveApp::new(Default::default(), Default::default());
         app.cam.yaw = 0.0;
         app.cam.pitch = std::f64::consts::FRAC_PI_2;
@@ -598,7 +599,7 @@ mod tests {
 
     #[test]
     fn two_recent_references_meet_and_a_third_drops_the_oldest() {
-        use solidcraft_engine::geom::Plane;
+        use solidcore_record::Plane;
         let mut app = SolveApp::new(Default::default(), Default::default());
         app.cam.yaw = 0.0;
         app.cam.pitch = std::f64::consts::FRAC_PI_2;

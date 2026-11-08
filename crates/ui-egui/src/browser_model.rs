@@ -23,6 +23,8 @@ pub(super) struct Model {
     placements: HashMap<Vec<u64>, Option<Arc<OccurrencePlacement>>>,
     /// Each placed body's placement path, by the body's world name (built on first use).
     body_paths: Option<HashMap<String, Vec<u64>>>,
+    /// The features that built each body, by its model name (worked out on first use, #11945).
+    body_features: Option<BTreeMap<String, Vec<u64>>>,
     /// The joints that attach each occurrence (built on first use).
     attached_joints: Option<BTreeMap<u64, Vec<AttachedJoint>>>,
 }
@@ -71,7 +73,14 @@ impl Model {
             placements: HashMap::new(),
             body_paths: None,
             attached_joints: None,
+            body_features: None,
         }
+    }
+
+    /// The features that built the body with this model name, in timeline order
+    /// ([`Session::body_features`]), worked out once per model.
+    pub fn body_features(&mut self, session: &Session, body: &str) -> Vec<u64> {
+        self.body_features.get_or_insert_with(|| session.body_features()).get(body).cloned().unwrap_or_default()
     }
 
     /// The joints that attach an occurrence, worked out once per model for all of them: every
@@ -117,5 +126,11 @@ impl Model {
             self.body_paths = Some(paths);
         }
         self.body_paths.as_ref()?.get(body).cloned()
+    }
+
+    /// Whether [`Model::body_path`] has walked the placements for this model.
+    #[cfg(test)]
+    pub fn body_paths_walked(&self) -> bool {
+        self.body_paths.is_some()
     }
 }

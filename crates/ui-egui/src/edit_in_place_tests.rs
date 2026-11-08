@@ -5,6 +5,7 @@ use solidcraft_engine::Session;
 fn volume_of(session: &Session, prefix: &str) -> f64 {
     session
         .world_state()
+        .unwrap()
         .bodies
         .iter()
         .filter(|b| b.name.starts_with(prefix))
@@ -353,6 +354,17 @@ fn double_clicking_a_body_of_this_design_or_with_the_preference_off_does_nothing
     assert!(f.app.edit_in_place.active.is_none() && f.app.edit_in_place.pending.is_none());
 }
 
+/// A linked component's menu starts with what a double-click on its row does.
+#[test]
+fn a_linked_components_menu_starts_with_what_a_double_click_does() {
+    use crate::context_menu::{self, Target};
+    let mut f = assembly("menu-order");
+    let ids = |app: &SolveApp| context_menu::items(app, &Target::Component { id: f.plate }).into_iter().take(3).map(|i| i.id).collect::<Vec<_>>();
+    assert_eq!(ids(&f.app), ["ui.editInPlace", "ui.openLinkedDesign", "ui.activate"]);
+    f.app.preferences.double_click_components = false;
+    assert_eq!(ids(&f.app), ["ui.activate", "ui.editInPlace", "ui.openLinkedDesign"]);
+}
+
 #[test]
 fn activate_only_activates_and_edit_in_place_opens_the_placement_right_clicked() {
     use crate::context_menu::{self, Target};
@@ -389,7 +401,17 @@ fn finish_editing_is_a_model_tab_button_only_while_a_part_is_edited_in_place() {
     settle(&mut h.app);
     h.frames(3);
     assert!(crate::scenario::rect_of("panel:MODEL:FINISH EDITING").is_some(), "the part's MODEL tab ends with Finish Edit");
-    h.app.start("component.finish_edit");
+    // Under a press Finish Edit stays plain, as Finish Sketch does; the release finishes.
+    let button = crate::scenario::rect_of("button:component.finish_edit").unwrap();
+    h.frame_with(crate::test_support::pointer(button.center(), true));
+    let soft = solidcraft_theme::Tokens::get().accent_soft;
+    let lit = h.shapes.iter().any(|s| match &s.shape {
+        egui::Shape::Rect(r) => r.rect == button && r.fill == soft,
+        egui::Shape::Vec(v) => v.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.rect == button && r.fill == soft)),
+        _ => false,
+    });
+    assert!(!lit, "a press does not show Finish Edit pressed");
+    h.frame_with(crate::test_support::pointer(button.center(), false));
     settle(&mut h.app);
     h.frames(3);
     assert!(h.app.edit_in_place.active.is_none());
@@ -567,12 +589,13 @@ fn what_is_done_in_the_assembly_while_it_refreshes_stays() {
 
 #[test]
 fn the_ribbon_button_reads_finish_edit_not_a_surface_finish() {
+    crate::i18n::install();
     // A bare "Finish" is a surface finish in other catalogs (German "Oberfläche")
     let label = crate::workspace::ribbon_button_label(solidcraft_engine::find_command("component.finish_edit").unwrap());
     assert_eq!(label, "Finish Edit");
-    assert_eq!(crate::i18n::Locale::for_language("de").label(label), "Bearbeitung beenden");
+    assert_eq!(solidcraft_ui_text::Locale::for_language("de").label(label), "Bearbeitung beenden");
     for language in ["ar", "he", "ja", "vi", "zh"] {
-        assert_ne!(crate::i18n::Locale::for_language(language).label(label), label, "{language}");
+        assert_ne!(solidcraft_ui_text::Locale::for_language(language).label(label), label, "{language}");
     }
 }
 

@@ -4,14 +4,15 @@
 
 use egui::{Pos2, Stroke, vec2};
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::doc::canvas::Canvas;
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::browser::panel_pos;
-use crate::theme::Tokens;
 use crate::ui_kit;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut m) = app.tree.canvas_panel.clone() else { return };
@@ -21,11 +22,15 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let mut edit: Option<Value> = None;
     let (units, decimals) = (app.session.doc.units.clone(), app.preferences.length_decimals);
-    let title = crate::i18n::format(if m.calibrate { "browser.calibrate_title" } else { "browser.edit_canvas_title" }, &[("name", &c.name)]);
+    let title = solidcraft_ui_text::format(if m.calibrate { "browser.calibrate_title" } else { "browser.edit_canvas_title" }, &[("name", &c.name)]);
     let at = panel_pos(app);
     let (calibrate, name) = (m.calibrate, c.id);
-    let (ok, cancel) = if calibrate { (crate::i18n::tr_label("Calibrate"), crate::i18n::tr("ui.cancel")) } else { ("", crate::i18n::tr("ui.close")) };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_canvas_panel"), "canvas", &title)
+    let (ok, cancel) = if calibrate {
+        (solidcraft_ui_text::tr_label("Calibrate"), solidcraft_ui_text::tr("ui.cancel"))
+    } else {
+        ("", solidcraft_ui_text::tr("ui.close"))
+    };
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_canvas_panel"), "canvas", &title)
         .placed(egui::Align2::LEFT_TOP, at)
         .fields()
         .actions(ok, cancel, None)
@@ -33,11 +38,11 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             if calibrate {
                 ui_kit::text(
                     ui,
-                    crate::i18n::tr(if m.next == 0 { "browser.calibrate_click_a" } else { "browser.calibrate_click_b" }),
+                    solidcraft_ui_text::tr(if m.next == 0 { "browser.calibrate_click_a" } else { "browser.calibrate_click_b" }),
                     ui_kit::Text::Note("calibrate_hint"),
                 );
                 for (label, p) in [("Point A", &mut m.a), ("Point B", &mut m.b)] {
-                    ui_kit::row(ui, crate::i18n::tr_label(label), |ui| {
+                    ui_kit::row(ui, solidcraft_ui_text::tr_label(label), |ui| {
                         let [x, y] = p;
                         ui.horizontal(|ui| {
                             ui_kit::length_field(ui, x, &units, decimals);
@@ -45,18 +50,20 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                         });
                     });
                 }
-                ui_kit::row(ui, crate::i18n::tr_label("Distance"), |ui| ui_kit::length_field(ui, &mut m.distance, &units, decimals));
+                ui_kit::row(ui, solidcraft_ui_text::tr_label("Distance"), |ui| ui_kit::length_field(ui, &mut m.distance, &units, decimals));
                 m.distance = m.distance.clamp(0.001, 1e6);
             } else {
                 let (mut x, mut y, mut w, mut ang, mut op, mut flip) = (c.center.x, c.center.y, c.width, c.angle.to_degrees(), c.opacity, c.flip);
                 let mut changed = false;
-                changed |= ui_kit::row(ui, crate::i18n::tr_label("Center X"), |ui| ui_kit::length_field(ui, &mut x, &units, decimals)).changed();
-                changed |= ui_kit::row(ui, crate::i18n::tr_label("Center Y"), |ui| ui_kit::length_field(ui, &mut y, &units, decimals)).changed();
-                changed |= ui_kit::row(ui, crate::i18n::tr_label("Width"), |ui| ui_kit::length_field(ui, &mut w, &units, decimals)).changed();
-                changed |= ui_kit::row(ui, crate::i18n::tr_label("Angle"), |ui| ui_kit::angle_field(ui, &mut ang)).changed();
                 changed |=
-                    ui_kit::row(ui, crate::i18n::tr_label("Opacity"), |ui| ui_kit::slider(ui, &mut op, 0.0..=1.0, Default::default())).changed();
-                if ui_kit::checkbox_row(ui, "flip", crate::i18n::tr_label("Flip"), flip) {
+                    ui_kit::row(ui, solidcraft_ui_text::tr_label("Center X"), |ui| ui_kit::length_field(ui, &mut x, &units, decimals)).changed();
+                changed |=
+                    ui_kit::row(ui, solidcraft_ui_text::tr_label("Center Y"), |ui| ui_kit::length_field(ui, &mut y, &units, decimals)).changed();
+                changed |= ui_kit::row(ui, solidcraft_ui_text::tr_label("Width"), |ui| ui_kit::length_field(ui, &mut w, &units, decimals)).changed();
+                changed |= ui_kit::row(ui, solidcraft_ui_text::tr_label("Angle"), |ui| ui_kit::angle_field(ui, &mut ang)).changed();
+                changed |= ui_kit::row(ui, solidcraft_ui_text::tr_label("Opacity"), |ui| ui_kit::slider(ui, &mut op, 0.0..=1.0, Default::default()))
+                    .changed();
+                if ui_kit::checkbox_row(ui, "flip", solidcraft_ui_text::tr_label("Flip"), flip) {
                     flip = !flip;
                     changed = true;
                 }
@@ -112,11 +119,11 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
     if panel.next == 0 {
         panel.a = point;
         panel.next = 1;
-        app.set_status(crate::i18n::tr("browser.calibrate_click_b"), false);
+        app.set_status(solidcraft_ui_text::tr("browser.calibrate_click_b"), false);
     } else {
         panel.b = point;
         panel.next = 0;
-        app.set_status(crate::i18n::tr("browser.calibrate_click_a"), false);
+        app.set_status(solidcraft_ui_text::tr("browser.calibrate_click_a"), false);
     }
     app.tree.canvas_panel = Some(panel);
     true
@@ -170,6 +177,7 @@ fn on_image(c: &Canvas, p: Vec2) -> bool {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use solidcraft_engine::geom::prelude::*;
 
     fn canvas(h: &mut crate::scenario::Harness) -> u64 {
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
@@ -236,8 +244,8 @@ mod tests {
         let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
         let ax = c.center.x - 20.0;
         let bx = c.center.x + 20.0;
-        let sa = proj.to_screen(plane.to_world(solidcraft_engine::geom::Vec2::new(ax, c.center.y))).expect("point A on screen");
-        let sb = proj.to_screen(plane.to_world(solidcraft_engine::geom::Vec2::new(bx, c.center.y))).expect("point B on screen");
+        let sa = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(ax, c.center.y))).expect("point A on screen");
+        let sb = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(bx, c.center.y))).expect("point B on screen");
         assert!(super::click(&mut h.app, &proj, sa), "first click sets A");
         let panel = h.app.tree.canvas_panel.as_ref().unwrap();
         assert_eq!(panel.next, 1);
@@ -247,7 +255,7 @@ mod tests {
         assert_eq!(panel.next, 0);
         assert!((panel.b[0] - bx).abs() < 0.5, "{:?}", panel.b);
         let before = panel.a;
-        let miss = plane.to_world(solidcraft_engine::geom::Vec2::new(c.center.x + 500.0, c.center.y));
+        let miss = plane.to_world(solidcore_record::Vec2::new(c.center.x + 500.0, c.center.y));
         if let Some(sm) = proj.to_screen(miss) {
             assert!(!super::click(&mut h.app, &proj, sm));
             assert_eq!(h.app.tree.canvas_panel.as_ref().unwrap().a, before);

@@ -17,6 +17,7 @@
 //! context menu's "Turn Up Axis" fixes it any time.
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::prefs::StandUpUnknown;
@@ -56,7 +57,7 @@ pub enum Upright {
 /// The flat area of `mesh` facing down Z, facing down Y and facing up Y, looking at no more than
 /// `budget` triangles.
 pub fn flat_areas(mesh: &solidcraft_engine::geom::Mesh, budget: usize) -> [f64; 3] {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     struct Face {
         first: Vec3,
         area: f64,
@@ -128,7 +129,7 @@ pub fn upright(z_down: f64, y_either: f64, size: [f64; 3]) -> Upright {
 /// Which axis the bodies named `bodies` in the current design seem to have up. Looks at most
 /// `MAX_BODIES` bodies and `MAX_TRIANGLES` triangles; a body that can't be meshed adds nothing.
 pub fn estimate(app: &SolveApp, bodies: &[String]) -> Upright {
-    let world = app.session.world_state();
+    let world = crate::open_meshing::session_world(&app.session);
     let mut areas = [0.0_f64; 3];
     let mut bounds = solidcraft_engine::geom::Aabb3::EMPTY;
     let mut budget = MAX_TRIANGLES;
@@ -159,7 +160,8 @@ pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&
     if text("system") == Some("SolidCraft") || text("exporter_up") == Some("z") {
         return;
     }
-    let bodies: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|n| !before.contains(n)).collect();
+    let bodies: Vec<String> =
+        crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).filter(|n| !before.contains(n)).collect();
     if bodies.is_empty() {
         return;
     }
@@ -240,7 +242,7 @@ pub(crate) fn note_due(app: &mut SolveApp, ctx: &egui::Context) -> Option<String
         return None;
     }
     let text = if app.stand_up_assembly { "Did this assembly open the wrong way up?" } else { "Did this part open the wrong way up?" };
-    Some(crate::i18n::tr_label(text).to_string())
+    Some(solidcraft_ui_text::tr_label(text).to_string())
 }
 
 /// The handles of the note's buttons, in order: the quarter turn, then turning the offer off. They
@@ -254,7 +256,7 @@ pub const NOTE_CLOSE_HANDLES: [&str; 2] = ["toast:stand_up:close", "stand_up:dis
 
 /// The note's button labels, in the order of `NOTE_HANDLES`.
 pub(crate) fn note_labels() -> [String; 2] {
-    [crate::i18n::tr_label("Stand it up").to_string(), crate::i18n::tr_label("Don't ask again").to_string()]
+    [solidcraft_ui_text::tr_label("Stand it up").to_string(), solidcraft_ui_text::tr_label("Don't ask again").to_string()]
 }
 
 /// The share of the note's time left now, 1 to 0, for the countdown ring around its close (×).
@@ -294,24 +296,28 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let title = if app.stand_up_assembly { "Stand this assembly up?" } else { "Stand this part up?" };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_stand_up"), "move", crate::i18n::tr_label(title))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_stand_up"), "move", solidcraft_ui_text::tr_label(title))
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 140.0))
         .actions("Stand it up", "Leave it", Some("Don't ask again"))
         .show(ctx, true, |ui| {
             ui_kit::text(
                 ui,
-                crate::i18n::tr_label("Files from many CAD programs have Y up, so they open lying on their back here (Z up)."),
+                solidcraft_ui_text::tr_label("Files from many CAD programs have Y up, so they open lying on their back here (Z up)."),
                 ui_kit::Text::Report("why", false),
             );
             if app.stand_up_reason {
-                ui_kit::text(ui, crate::i18n::tr_label("Exported by SolidWorks, which usually saves Y up"), ui_kit::Text::Report("reason", false));
+                ui_kit::text(
+                    ui,
+                    solidcraft_ui_text::tr_label("Exported by SolidWorks, which usually saves Y up"),
+                    ui_kit::Text::Report("reason", false),
+                );
             }
             ui_kit::text(
                 ui,
-                crate::i18n::tr_label("Stand it up: a quarter turn about X, as one Move feature you can undo."),
+                solidcraft_ui_text::tr_label("Stand it up: a quarter turn about X, as one Move feature you can undo."),
                 ui_kit::Text::Report("how", false),
             );
-            ui_kit::text(ui, crate::i18n::tr_label("Preferences › Design turns the offer back on"), ui_kit::Text::Note("never"));
+            ui_kit::text(ui, solidcraft_ui_text::tr_label("Preferences › Design turns the offer back on"), ui_kit::Text::Note("never"));
         });
     for (handle, key) in [("stand_up:stand", "dialog:ok"), ("stand_up:never", "dialog:apply"), ("stand_up:leave", "dialog:cancel")] {
         if let Some(at) = crate::scenario::handle_at(key) {

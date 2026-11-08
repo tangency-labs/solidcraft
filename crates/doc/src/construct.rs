@@ -6,10 +6,11 @@
 //! vertex the names of the edges that meet there, so they follow the model when earlier features
 //! change; the picked point is the fallback.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_kernel::{self as kernel, FaceSurface};
 
 use crate::eval::{ModelBody, ModelState};
@@ -146,16 +147,16 @@ fn construct<'a>(st: &'a ModelState, name: &str) -> Result<&'a ConstructGeom> {
     st.construct.iter().find(|c| c.name == name).map(|c| &c.geom).ok_or_else(|| DocError::Unknown(format!("construction `{name}`")))
 }
 
-/// The face picked: (body, face index, point on it).
+/// The face picked: (body, face index, point on it). A face picked with a name is the face the
+/// name finds, or the reference fails, asking for it to be picked again.
 fn face_of<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&'a ModelBody, usize, Vec3)> {
     // The named face itself: its nearest point to the old pick can lie on an edge it shares
     // (a corner round that a parameter moved away from the pick), where picking again by the
     // point finds the flat face beside it (#1255).
-    if let Some(hit) = name.as_deref().and_then(|n| crate::name_lookup::locate_face(st, n, at))
-        && let Some(b) = st.bodies.get(hit.body).filter(|b| !b.body.is_mesh())
-        && hit.face < b.body.face_count()
-    {
-        return Ok((b, hit.face, hit.point));
+    if let Some(n) = name.as_deref() {
+        return crate::name_lookup::locate_face(st, n, at)
+            .and_then(|hit| st.bodies.get(hit.body).filter(|b| !b.body.is_mesh() && hit.face < b.body.face_count()).map(|b| (b, hit.face, hit.point)))
+            .ok_or_else(|| DocError::reselect(n));
     }
     for b in bodies(st) {
         if let Some(fi) = crate::appearance::face_index_at(b, at) {
@@ -170,16 +171,13 @@ fn edge_points(st: &ModelState, at: Vec3, name: &Option<String>) -> Result<Vec<V
     edge_pick(st, at, name).map(|(_, _, pts)| pts)
 }
 
-/// The edge picked: its body, its index there (as `Body::edges` lists it) and its polyline.
+/// The edge picked: its body, its index there (as `Body::edges` lists it) and its polyline. An
+/// edge picked with a name is the edge the name finds, or the reference fails, asking for it to
+/// be picked again.
 fn edge_pick<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&'a ModelBody, usize, Vec<Vec3>)> {
     let mut at = at;
     if let Some(n) = name {
-        for b in bodies(st) {
-            if let Ok((q, _)) = crate::naming::find_edge(b, n, at) {
-                at = q;
-                break;
-            }
-        }
+        at = bodies(st).find_map(|b| crate::naming::find_edge(b, n, at).ok()).ok_or_else(|| DocError::reselect(n.as_str()))?;
     }
     let mut best: Option<(f64, &ModelBody, usize, Vec<Vec3>)> = None;
     for b in bodies(st) {
@@ -196,6 +194,45 @@ fn edge_pick<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<
         Some((d, b, i, pts)) if pts.len() >= 2 && d <= 1e-3 + 1e-2 * pts.iter().fold(0.0, |m: f64, p| m.max(p.len())).max(1.0) => Ok((b, i, pts)),
         _ => Err(bad(format!("no edge at {at:?}"))),
     }
+}
+
+/// The closest point on a polyline to `target`, projecting onto each segment rather than
+/// choosing only its vertices. This keeps an edge pick on the edge between tessellation points.
+fn closest_point_on_polyline(pts: &[Vec3], target: Vec3) -> Option<Vec3> {
+    let mut best: Option<(f64, Vec3)> = None;
+    for w in pts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let ab = b - a;
+        let len_sq = ab.dot(ab);
+        let q = if len_sq < 1e-18 {
+            a
+        } else {
+            let t = ((target - a).dot(ab) / len_sq).clamp(0.0, 1.0);
+            a + ab * t
+        };
+        let d = target.dist(q);
+        if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+            best = Some((d, q));
+        }
+    }
+    best.map(|(_, q)| q)
+}
+
+/// The point on an edge nearest a pick location, projecting onto exact edge geometry
+/// (such as `kernel::edge_circle`) when available, else onto its drawn polyline segments.
+fn edge_point_at_pick(st: &ModelState, pick: Vec3, name: &Option<String>) -> Option<Vec3> {
+    let (b, i, pts) = edge_pick(st, pick, name).ok()?;
+    if let Some(c) = kernel::edge_circle(&b.body, i) {
+        let v = pick - c.center;
+        let v_perp = v - *c.axis * v.dot(*c.axis);
+        if let Some(dir) = v_perp.normalized() {
+            return Some(c.center + dir * c.radius);
+        }
+    }
+    // Until the kernel can project onto any edge geometry (circles are exact above via
+    // kernel::edge_circle), the fallback projects onto the drawn polyline. This is exact for
+    // straight edges and approximates splines within mesh display tolerance.
+    closest_point_on_polyline(&pts, pick)
 }
 
 /// The circle a picked edge lies on, from its exact curve (`kernel::edge_circle`) when the drawn
@@ -442,31 +479,66 @@ fn centre(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
     }
 }
 
-/// Point and unit tangent at fraction `t` along a polyline.
-fn along(pts: &[Vec3], t: f64) -> Option<(Vec3, Vec3)> {
-    let total: f64 = pts.windows(2).map(|w| (w[1] - w[0]).len()).sum();
-    if !(total > 0.0) {
-        return None;
-    }
-    let mut left = t.clamp(0.0, 1.0) * total;
-    for w in pts.windows(2) {
-        let l = (w[1] - w[0]).len();
-        if l <= 0.0 {
-            continue;
-        }
-        if left <= l {
-            return Some((w[0] + (w[1] - w[0]) * (left / l), (w[1] - w[0]) * (1.0 / l)));
-        }
-        left -= l;
-    }
-    let (a, b) = (pts.get(pts.len() - 2)?, pts.last()?);
-    Some((*b, (*b - *a).normalized()?))
+/// The point a fraction `t` (0…1) of the way along a picked edge or sketch curve by arc length,
+/// and the unit direction of travel there ([`kernel::along_path`]): exact on the curve itself.
+fn along(ctx: &Ctx, g: &GeoRef, t: f64) -> Result<(Vec3, Vec3)> {
+    Ok(kernel::along_path(&path_segs(ctx, g)?, t)?)
 }
 
-fn path_points(ctx: &Ctx, g: &GeoRef) -> Result<Vec<Vec3>> {
+/// A picked edge or sketch curve as the path segments that are its curve exactly, from the end
+/// the drawn curve starts at: a body edge's record curve ([`kernel::edge_path`]), a planar sketch
+/// curve's exact pieces, a 3D sketch curve's arc, spline, line or linked exact curves. Only a
+/// curve that exists as points alone runs along them: an intersection edge (its record holds no
+/// exact curve, only the surfaces and a leader near it), a 3D curve known only as its points
+/// (projected onto a face, iso curves), a spline above the exact pieces' degree.
+fn path_segs(ctx: &Ctx, g: &GeoRef) -> Result<Vec<kernel::PathSeg>> {
+    let lines = |pts: &[Vec3]| -> Vec<kernel::PathSeg> {
+        pts.windows(2).filter(|w| w[0].dist(w[1]) > 0.0).map(|w| kernel::PathSeg::Line { a: w[0], b: w[1] }).collect()
+    };
     match g {
-        GeoRef::Edge { at, name } => edge_points(ctx.st, *at, name),
-        GeoRef::SketchCurve { sketch, curve } => sketch_curve_points(ctx, *sketch, curve),
+        GeoRef::Edge { at, name } => {
+            let (b, i, pts) = edge_pick(ctx.st, *at, name)?;
+            let procedural =
+                b.body.record().edges.get(i).is_some_and(|e| matches!(e.parameters(), solidcore_record::brep::Curve::SurfaceIntersection { .. }));
+            if procedural {
+                return Ok(lines(&pts));
+            }
+            let segs = kernel::edge_path(&b.body, i)?;
+            // The drawn edge sets which way t runs, as the picked edge's polyline has it.
+            let (Some(first), Some(start)) = (pts.first(), segs.first().map(kernel::PathSeg::start)) else { return Ok(segs) };
+            let end = segs.last().map(kernel::PathSeg::end).unwrap_or(start);
+            Ok(if end.dist(*first) < start.dist(*first) { segs.iter().rev().map(kernel::PathSeg::reversed).collect() } else { segs })
+        }
+        GeoRef::SketchCurve { sketch, curve } => {
+            let ss = ctx.st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
+            // Evaluation has already mapped wires into this component's frame: their coordinates
+            // are independent of the sketch plane.
+            if let Some(wire) = ss.sketch.wires.iter().find(|wire| wire.id == *curve) {
+                if let Some(arc) = &wire.arc {
+                    let angle = solidcraft_sketch::arc_sweep(arc);
+                    return Ok(vec![kernel::PathSeg::Arc { a: arc.start, center: arc.center, axis: arc.normal, angle }]);
+                }
+                if wire.fit.len() >= 3 {
+                    let spline = kernel::PathPiece::Spline { fit: wire.fit.clone(), reversed: false };
+                    if let Some(spans) = spline.spans()? {
+                        return Ok(spans);
+                    }
+                }
+                if let [a, b] = wire.fit.as_slice() {
+                    return Ok(vec![kernel::PathSeg::Line { a: *a, b: *b }]);
+                }
+                if !wire.exact.is_empty() {
+                    let mut segs = Vec::new();
+                    for c in &wire.exact {
+                        segs.extend(kernel::curve_path(&c.curve, c.interval)?);
+                    }
+                    return Ok(segs);
+                }
+                return Ok(lines(&wire.pts));
+            }
+            let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("curve `{curve}`")))?;
+            Ok(ss.sketch.exact_pieces(ci).iter().map(|s| kernel::PathSeg::of_sketch(&ss.plane, s)).collect())
+        }
         _ => Err(bad("pick an edge or sketch curve as the path")),
     }
 }
@@ -667,7 +739,7 @@ pub(crate) fn resolve_point(ctx: &Ctx, d: &PointDef) -> Result<Vec3> {
         }
         PointDef::AlongPath { path, t } => {
             let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
-            along(&path_points(ctx, path)?, t).map(|(p, _)| p).ok_or_else(|| bad("the path has no length"))
+            along(ctx, path, t).map(|(p, _)| p)
         }
     }
 }
@@ -710,7 +782,29 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
         PlaneRef::AxisPoint { axis, point: at } => {
             let (origin, dir) = line(ctx, axis)?;
             let dir = dir.normalized().ok_or_else(|| bad("the axis has no direction"))?;
-            let delta = point(ctx, at)? - origin;
+            let p = match point(ctx, at) {
+                Ok(p) => {
+                    let delta = p - origin;
+                    let across = delta - dir * delta.dot(dir);
+                    if across.len().is_finite() && across.len() >= 1e-9 {
+                        p
+                    } else if let GeoRef::Edge { at: pick, name } = at.as_ref() {
+                        // When the centre of a circular edge lies on the axis, resolve to the picked point on the edge.
+                        edge_point_at_pick(ctx.st, *pick, name).unwrap_or(p)
+                    } else {
+                        p
+                    }
+                }
+                Err(e) => {
+                    // Non-circular edges are not converted to centres by `point`; resolve to the picked edge point.
+                    if let GeoRef::Edge { at: pick, name } = at.as_ref() {
+                        edge_point_at_pick(ctx.st, *pick, name).ok_or(e)?
+                    } else {
+                        return Err(e);
+                    }
+                }
+            };
+            let delta = p - origin;
             let across = delta - dir * delta.dot(dir);
             if !across.len().is_finite() || across.len() < 1e-9 {
                 return Err(bad("the point is on the axis: pick a point off the axis to define a unique plane"));
@@ -748,7 +842,7 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
         }
         PlaneRef::AlongPath { path, t } => {
             let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
-            let (p, tan) = along(&path_points(ctx, path)?, t).ok_or_else(|| bad("the path has no length"))?;
+            let (p, tan) = along(ctx, path, t)?;
             Plane::from_normal(p, tan).ok_or_else(degenerate)
         }
         PlaneRef::ThroughPoint { base, point: at } => {
@@ -762,12 +856,15 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
 
 impl GeoRef {
     /// Where a picked edge or face is now, found the way evaluation finds it (by its persistent
-    /// name, else at the picked point): a point on it. `None` for other references and for an
+    /// name when it has one, else at the picked point): a point on it. `None` for other references and for an
     /// edge or face that is gone.
     pub fn picked_point(&self, st: &ModelState) -> Option<Vec3> {
         match self {
             GeoRef::Edge { at, name } => {
-                let on = name.as_deref().and_then(|n| bodies(st).find_map(|b| crate::naming::find_edge(b, n, *at).ok())).map_or(*at, |(q, _)| q);
+                let on = match name.as_deref() {
+                    Some(n) => bodies(st).find_map(|b| crate::naming::find_edge(b, n, *at).ok())?,
+                    None => *at,
+                };
                 edge_pick(st, on, &None).ok().map(|_| on)
             }
             GeoRef::Face { at, name } => face_of(st, *at, name).ok().map(|(_, _, p)| p),
@@ -887,9 +984,10 @@ impl PlaneRef {
                 refs.push(point.as_mut());
                 refs
             }
-            PlaneRef::AtAngle { base, line, .. } => {
+            PlaneRef::AtAngle { base, line, pivot, .. } => {
                 let mut v = base.refs_mut();
                 v.extend(line.as_deref_mut());
+                v.extend(pivot.as_deref_mut());
                 v
             }
             PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => base.refs_mut(),

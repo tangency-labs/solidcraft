@@ -97,7 +97,7 @@ pub(super) struct RowPlan {
     pub contents: Vec<Vec<u64>>,
     /// By folder index: its own and nested folders' joints.
     pub joints: Vec<Vec<u64>>,
-    /// Each folder and parent id, with its fold key in the tree state.
+    /// Each folder and parent id, with its fold key in `history_folds`.
     fold_keys: Vec<(u64, String)>,
     /// Features with sketches listed under them, and their fold keys.
     host_keys: Vec<(u64, String)>,
@@ -106,7 +106,7 @@ pub(super) struct RowPlan {
 impl RowPlan {
     /// The plan for the design as it is, kept until it changes.
     pub(super) fn cached(app: &SolveApp, ui: &egui::Ui, under_feature: bool) -> Arc<Self> {
-        let id = egui::Id::new("sc_history_row_plan");
+        let id = egui::Id::unique("sc_history_row_plan");
         let key = PlanKey::of(app, under_feature);
         if let Some(plan) = ui.data(|data| data.get_temp::<Arc<Self>>(id)).filter(|plan| plan.key == key) {
             return plan;
@@ -184,7 +184,7 @@ impl RowPlan {
             trailing: Vec::new(),
             contents: Vec::new(),
             joints: Vec::new(),
-            fold_keys: fold_ids.into_iter().map(|id| (id, format!("timeline_group:{id}"))).collect(),
+            fold_keys: fold_ids.into_iter().map(|id| (id, format!("{}{id}", crate::timeline_folders::KEY))).collect(),
             host_keys: rows.rows.iter().filter(|row| !row.listed.is_empty()).map(|row| (row.feature, sketches_key(row.feature))).collect(),
             features,
             groups,
@@ -367,7 +367,8 @@ impl RowPlan {
 
     /// Which folders and folds are open now.
     pub(super) fn folds(&self, app: &SolveApp) -> Folds {
-        let closed = self.fold_keys.iter().filter(|(_, key)| app.tree.collapsed.contains(key)).map(|(id, _)| *id).collect();
+        // A folder shows open here until it is folded (`timeline_folders::is_open`).
+        let closed = self.fold_keys.iter().filter(|(_, key)| !crate::history_folds::is_open(app, key, true)).map(|(id, _)| *id).collect();
         let open_hosts = self.host_keys.iter().filter(|(_, key)| crate::browser::is_open(app, key, false)).map(|(feature, _)| *feature).collect();
         Folds { closed, open_hosts }
     }
@@ -376,7 +377,7 @@ impl RowPlan {
     /// closes.
     pub(super) fn order(&self, ui: &egui::Ui, folds: &Folds) -> Arc<Vec<TimelineItem>> {
         type Kept = (PlanKey, Folds, Arc<Vec<TimelineItem>>);
-        let id = egui::Id::new("sc_history_row_order");
+        let id = egui::Id::unique("sc_history_row_order");
         if let Some(kept) = ui.data(|data| data.get_temp::<Arc<Kept>>(id)).filter(|kept| kept.0 == self.key && kept.1 == *folds) {
             return kept.2.clone();
         }
@@ -447,6 +448,6 @@ impl RowPlan {
 
     /// The plan the History drew with last, from the egui context.
     pub(super) fn kept(ctx: &egui::Context) -> Option<Arc<Self>> {
-        ctx.data(|data| data.get_temp::<Arc<Self>>(egui::Id::new("sc_history_row_plan")))
+        ctx.data(|data| data.get_temp::<Arc<Self>>(egui::Id::unique("sc_history_row_plan")))
     }
 }

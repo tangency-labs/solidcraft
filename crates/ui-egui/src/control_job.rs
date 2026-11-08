@@ -132,7 +132,20 @@ fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
 
 /// Requests that change the design: they wait while one computes.
 pub(crate) fn changes_the_design(method: &str) -> bool {
-    matches!(method, "engine.execute" | "command" | "engine.script" | "engine.batch")
+    matches!(method, "engine.execute" | "command" | "engine.script" | "engine.batch" | "document.import" | "document.saved")
+}
+
+/// Whether `doc` is the design `session` shows, as it is or edited since (an undo step away).
+fn shows_design(session: &solidcraft_engine::Session, doc: &Arc<solidcraft_engine::doc::Document>) -> bool {
+    Arc::ptr_eq(&session.doc, doc) || session.undo.iter().chain(&session.redo).any(|snap| Arc::ptr_eq(&snap.doc, doc))
+}
+
+/// The reply to a request whose design left the window while it computed.
+fn design_replaced(label: &str) -> Value {
+    json!({
+        "ok": false,
+        "error": format!("the design was replaced (another tab, or a file opened) while `{label}` computed; nothing was applied"),
+    })
 }
 
 /// What a request computes off the window thread.
@@ -169,7 +182,7 @@ impl ControlJob {
 }
 
 fn label(app: &SolveApp, command: &str) -> String {
-    let language = crate::i18n::Locale::for_language(&app.preferences.language);
+    let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     language.label(solidcraft_engine::find_command(command).map_or(command, |c| c.label)).to_string()
 }
 
@@ -460,7 +473,7 @@ impl SolveApp {
         let reply = reply.unwrap_or_else(|| json!({"ok": false, "error": format!("`{}` ended without a reply", job.label)}));
         let export = executed(&job.req.params).and_then(|(command, _)| spec_id(command)).is_some_and(|id| ANSWERED_ON_A_COPY.contains(&id));
         if reply["ok"] == true && export {
-            let language = crate::i18n::Locale::for_language(&self.preferences.language);
+            let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
             self.session.echo(language.format("ui.command_done", &[("command", job.label.as_str())]));
         }
         let _ = job.req.reply.send(reply);
@@ -490,6 +503,16 @@ impl SolveApp {
             self.control_job = None;
             return;
         }
+        // The design it computes for has left the window (closed, another tab, a file opened):
+        // refused now, however long its computation has left, so the requests behind it, which
+        // are for the design shown, don't wait for it.
+        let left = matches!(&job.work, Work::Ahead { doc, .. } if !shows_design(&self.session, doc));
+        if left {
+            if let Some(job) = self.control_job.take() {
+                let _ = job.req.reply.send(design_replaced(&job.label));
+            }
+            return;
+        }
         if job.poll().is_none() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
             return;
@@ -503,13 +526,8 @@ impl SolveApp {
         let Work::Ahead { commands, doc, revision, tries, kept } = job.work else { return };
         let s = &self.session;
         let same = Arc::ptr_eq(&s.doc, &doc);
-        // The design it was computed for is still this one, edited since (an undo step away).
-        let edited = !same && s.undo.iter().chain(&s.redo).any(|snap| Arc::ptr_eq(&snap.doc, &doc));
-        if !same && !edited {
-            let _ = job.req.reply.send(json!({
-                "ok": false,
-                "error": format!("the design was replaced (another tab, or a file opened) while `{}` computed; nothing was applied", job.label),
-            }));
+        if !shows_design(s, &doc) {
+            let _ = job.req.reply.send(design_replaced(&job.label));
             return;
         }
         if (!same || s.revision != revision) && tries < MAX_TRIES {

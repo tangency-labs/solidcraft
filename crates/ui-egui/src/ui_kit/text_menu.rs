@@ -154,7 +154,7 @@ const OPEN: &str = "sc_text_menu_open";
 /// meanwhile, rather than cover the menu.
 pub(crate) fn menu_open(ctx: &egui::Context, field: egui::Id) -> bool {
     let pass = ctx.cumulative_pass_nr();
-    ctx.data(|d| d.get_temp::<(egui::Id, u64)>(egui::Id::new(OPEN))).is_some_and(|(id, drawn)| id == field && drawn == pass)
+    ctx.data(|d| d.get_temp::<(egui::Id, u64)>(egui::Id::unique(OPEN))).is_some_and(|(id, drawn)| id == field && drawn == pass)
 }
 
 #[cfg(test)]
@@ -198,16 +198,20 @@ fn keep_selection(ui: &Ui, response: &Response, len: usize) -> Option<CCursorRan
     if !down {
         kept = None;
     }
+    // Read before `data_mut`: both lock the context's memory.
+    let focused = response.has_focus();
     let range = match kept {
         Some(keep) => {
             state.cursor.set_char_range(Some(keep));
             state.store(ctx, id);
             Some(keep)
         }
+        // The click on a menu row took the focus before the field drew, and egui 0.37 drops an
+        // unfocused field's selection: the row acts on the selection of the last focused frame.
+        // Drop once emilk/egui#8763 is fixed.
+        None if !focused => last.or(now),
         None => now,
     };
-    // Read before `data_mut`: both lock the context's memory.
-    let focused = response.has_focus();
     ctx.data_mut(|d| {
         match kept {
             Some(keep) => {
@@ -245,11 +249,11 @@ pub(crate) fn menu(ui: &Ui, response: &mut Response, text: &mut dyn TextBuffer, 
     };
     let mut picked = None;
     let open = super::Menu::context(response, |ui| {
-        super::Menu::show(ui, crate::context_menu::LIST_W, |ui| {
+        super::Menu::show(ui, super::LIST_W, |ui| {
             for edit in Edit::ALL {
                 let (row, message, icon, key) = edit.row();
                 let shortcut = crate::keymap::display(key);
-                let mut item = super::MenuItem::new(row, crate::i18n::tr(message), icon);
+                let mut item = super::MenuItem::new(row, solidcraft_ui_text::tr(message), icon);
                 item.shortcut = &shortcut;
                 item.enabled = enabled(edit, state);
                 if item.show(ui).clicked() && item.enabled {
@@ -262,7 +266,7 @@ pub(crate) fn menu(ui: &Ui, response: &mut Response, text: &mut dyn TextBuffer, 
     .is_some();
     if open {
         let pass = ui.ctx().cumulative_pass_nr();
-        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(OPEN), (id, pass)));
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique(OPEN), (id, pass)));
     }
     if open && ui.ctx().input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         // Esc closes the menu alone: the field keeps its focus, and its owner (a dimension's box,

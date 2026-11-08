@@ -2,14 +2,69 @@
 //! control points) and conics (rational quadratic Béziers). Evaluation works on positions so
 //! the solver can use it with trial values.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 /// Polyline samples per spline span / conic / ellipse quarter.
 const SPAN_SAMPLES: usize = 24;
 /// Most points a spline may have.
 pub const MAX_SPLINE_POINTS: usize = 500;
+
+/// Chords per curved piece when [`point_along`] measures its length.
+const ALONG_SAMPLES: usize = 64;
+
+/// The point at share `at` (0 to 1) of the length of the pieces `segs`, measured along them from
+/// the first one's start. Lines and arcs are measured exactly; other pieces over
+/// [`ALONG_SAMPLES`] chords each. The point is evaluated on its piece, so it lies on the curve.
+/// `None` without pieces or for a share that is not a number.
+pub fn point_along(segs: &[solidcore_record::Seg2], at: f64) -> Option<Vec2> {
+    use solidcore_record::Seg2;
+    let first = segs.first()?;
+    if !at.is_finite() {
+        return None;
+    }
+    // Per piece: its cumulative lengths at t = i / n.
+    let tables: Vec<Vec<f64>> = segs
+        .iter()
+        .map(|s| match *s {
+            Seg2::Line { a, b } => vec![0.0, a.dist(b)],
+            Seg2::Arc { radius, sweep, .. } => vec![0.0, (radius * sweep).abs()],
+            _ => {
+                let mut acc = 0.0;
+                let mut prev = s.point_at(0.0);
+                let mut t = Vec::with_capacity(ALONG_SAMPLES + 1);
+                t.push(0.0);
+                for i in 1..=ALONG_SAMPLES {
+                    let q = s.point_at(i as f64 / ALONG_SAMPLES as f64);
+                    acc += prev.dist(q);
+                    prev = q;
+                    t.push(acc);
+                }
+                t
+            }
+        })
+        .collect();
+    let total: f64 = tables.iter().filter_map(|t| t.last()).sum();
+    if !(total.is_finite() && total > 1e-12) {
+        return Some(first.start());
+    }
+    let mut left = at.clamp(0.0, 1.0) * total;
+    for (seg, table) in segs.iter().zip(&tables) {
+        let len = table.last().copied().unwrap_or(0.0);
+        if left > len && !std::ptr::eq(seg, segs.last()?) {
+            left -= len;
+            continue;
+        }
+        let n = table.len().saturating_sub(1).max(1);
+        let i = table.windows(2).position(|w| matches!(w, [_, b] if left <= *b)).unwrap_or(n - 1);
+        let (lo, hi) = (table.get(i).copied().unwrap_or(0.0), table.get(i + 1).copied().unwrap_or(len));
+        let frac = if hi - lo > 1e-300 { ((left - lo) / (hi - lo)).clamp(0.0, 1.0) } else { 0.0 };
+        return Some(seg.point_at((i as f64 + frac) / n as f64));
+    }
+    segs.last().map(|s| s.end())
+}
 
 /// Point on an ellipse with centre `c`, major-axis end `m` and minor radius `r` at angle `t`.
 pub fn ellipse_point(c: Vec2, m: Vec2, r: f64, t: f64) -> Vec2 {
@@ -153,7 +208,7 @@ pub fn spline_point(p: &[Vec2], control: bool, degree: u8, t: f64) -> Vec2 {
         return p.first().copied().unwrap_or_default();
     }
     if control {
-        return bspline_at(p, degree.clamp(1, solidcraft_geom::MAX_BEZIER_DEGREE as u8) as usize, t);
+        return bspline_at(p, degree.clamp(1, solidcore_record::MAX_BEZIER_DEGREE as u8) as usize, t);
     }
     let spans = fit_spans(p);
     let n = spans.len().max(1);
@@ -190,7 +245,12 @@ pub fn fit_beziers(p: &[Vec2]) -> Vec<[Vec2; 4]> {
 pub fn fit_beziers_mode(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<[Vec2; 4]>> {
     if periodic { crate::periodic_beziers(p) } else { Ok(fit_beziers(p)) }
 }
-pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, t: f64) -> Vec2 {
+/// Point of a spline at `t` in [0, 1]: through its points, over them as a clamped uniform
+/// B-spline, or with its own knots and weights (`nurbs`).
+pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, nurbs: Option<&crate::Nurbs>, t: f64) -> Vec2 {
+    if let Some(nurbs) = nurbs {
+        return nurbs.point(p, degree, t).unwrap_or_else(|| p.first().copied().unwrap_or_default());
+    }
     if !periodic {
         return spline_point(p, control, degree, t);
     }
@@ -211,7 +271,11 @@ pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, 
     let t = (remaining / lengths[i]).clamp(0.0, 1.0);
     a * (1.0 - t).powi(3) + b * (3.0 * t * (1.0 - t).powi(2)) + c * (3.0 * t * t * (1.0 - t)) + d * t.powi(3)
 }
-pub fn spline_polyline_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool) -> Vec<Vec2> {
+/// Polyline of a spline, as [`spline_point_mode`] reads it.
+pub fn spline_polyline_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, nurbs: Option<&crate::Nurbs>) -> Vec<Vec2> {
+    if let Some(nurbs) = nurbs {
+        return nurbs.polyline(p, degree);
+    }
     if !periodic {
         return spline_polyline(p, control, degree);
     }
@@ -292,7 +356,7 @@ pub fn spline_polyline(p: &[Vec2], control: bool, degree: u8) -> Vec<Vec2> {
         return p.to_vec();
     }
     if control {
-        return bspline_polyline(p, degree.clamp(1, solidcraft_geom::MAX_BEZIER_DEGREE as u8) as usize);
+        return bspline_polyline(p, degree.clamp(1, solidcore_record::MAX_BEZIER_DEGREE as u8) as usize);
     }
     let mut out = Vec::new();
     for (p0, p1, t0, t1) in fit_spans(p) {
@@ -307,6 +371,7 @@ pub fn spline_polyline(p: &[Vec2], control: bool, degree: u8) -> Vec<Vec2> {
 }
 
 /// Unit tangent of a spline at its start (`at_end == false`) or end, pointing along the curve.
+/// A control spline's runs along its end leg whatever its knots and (positive) weights.
 pub fn spline_end_tangent(p: &[Vec2], control: bool, at_end: bool) -> Option<Vec2> {
     let n = p.len();
     if n < 2 {

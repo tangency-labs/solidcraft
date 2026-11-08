@@ -63,7 +63,7 @@ fn editing_a_move_in_a_turned_component_keeps_world_distances() {
     h.app.run("occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg", "translate": [50, 10, 20]})).unwrap();
     h.app.run("component.activate", json!({"component": "root"})).unwrap();
     let moved = h.app.run("solid.move", json!({"bodies": ["Body1"], "translate": ["0 mm", "-travel", "0 mm"]})).unwrap()["feature"].as_u64().unwrap();
-    let bounds = |h: &crate::scenario::Harness| h.app.session.world_state().body("Body1").unwrap().mesh().bounds();
+    let bounds = |h: &crate::scenario::Harness| crate::open_meshing::session_world(&h.app.session).body("Body1").unwrap().mesh().bounds();
     let before = bounds(&h);
     let mut d = crate::dialogs::for_feature(&h.app, moved, None).unwrap();
     let Kind::Move { x, y, z, .. } = &d.kind else { panic!("not a move") };
@@ -504,7 +504,7 @@ fn translated_box() -> crate::scenario::Harness {
 fn changing_the_move_type_keeps_the_move_made_so_far() {
     let mut h = translated_box();
     let corners = |b: solidcraft_engine::geom::Aabb3| [b.min, b.max];
-    let before = corners(h.app.session.world_state().body("Body1").unwrap().mesh().bounds());
+    let before = corners(crate::open_meshing::session_world(&h.app.session).body("Body1").unwrap().mesh().bounds());
     let mut d = h.app.dialog.take().unwrap();
     switch_type(&h.app, &mut d, ROTATE);
     // No axis yet: the translation alone is made.
@@ -519,7 +519,7 @@ fn changing_the_move_type_keeps_the_move_made_so_far() {
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
-    let after = h.app.session.world_state().body("Body1").unwrap().mesh().bounds();
+    let after = crate::open_meshing::session_world(&h.app.session).body("Body1").unwrap().mesh().bounds();
     let turn = |p: Vec3| Vec3::new(-p.y, p.x + 10.0, p.z);
     let mut want = solidcraft_engine::geom::Aabb3::EMPTY;
     for c in before {
@@ -587,7 +587,7 @@ fn editing_a_free_move_shows_the_values_it_was_made_with() {
         .unwrap()["feature"]
         .as_u64()
         .unwrap();
-    let bounds = |h: &crate::scenario::Harness| h.app.session.world_state().body("Body1").unwrap().mesh().bounds();
+    let bounds = |h: &crate::scenario::Harness| crate::open_meshing::session_world(&h.app.session).body("Body1").unwrap().mesh().bounds();
     let before = bounds(&h);
     let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
     let Kind::Move { x, y, z, rx, ry, rz, .. } = &d.kind else { panic!("not a move") };

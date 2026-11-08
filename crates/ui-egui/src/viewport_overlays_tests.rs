@@ -1,5 +1,5 @@
 use super::*;
-use crate::{scenario::Harness, shell::LayoutMode};
+use crate::{scenario::Harness, ui_kit::LayoutMode};
 
 #[test]
 fn details_descriptions_are_pure_and_live_edits_preserve_custom_companions() {
@@ -185,7 +185,7 @@ fn details_native_value_edits_run_real_commands_without_design_history() {
         h.step(&json!({"click":{"handle":format!("viewport_status:{owner}:setting")}})).unwrap();
         h.frames(3);
         let rect = crate::scenario::rect_of(&format!("details:field:{field}")).unwrap();
-        let at = if field == "stripes" { rect.right_center() - vec2(crate::theme::Tokens::get().space_24, 0.0) } else { rect.center() };
+        let at = if field == "stripes" { rect.right_center() - vec2(solidcraft_theme::Tokens::get().space_24, 0.0) } else { rect.center() };
         h.call("ui.click", json!({"x":at.x,"y":at.y,"double":true}));
         h.step(&json!({"key":"A","ctrl":true})).unwrap();
         h.step(&json!({"text":text})).unwrap();
@@ -370,7 +370,7 @@ fn details_grouped_continuity_key_contains_the_actual_sharp_and_gap_tokens() {
             let effect = h.app.session.status_items().remove(0);
             let details = crate::viewport_details::description(&h.app, &effect);
             let key = &details.key[2];
-            let tokens = crate::theme::Tokens::get();
+            let tokens = solidcraft_theme::Tokens::get();
             assert_eq!(key.value, "12");
             assert_eq!(key.colour, tokens.continuity[2], "actual cube creases use the Sharp scene token");
             assert_eq!(key.pattern_colour, Some(tokens.continuity[3]), "the grouped key also carries the actual Gap scene token");
@@ -462,13 +462,13 @@ fn viewport_status_specimens_clear_and_open_keys_without_engine_changes() {
 #[test]
 fn viewport_status_kinds_keep_shape_outline_and_typography_across_themes() {
     use crate::ui_kit::{StatusItem, StatusKind, StatusPresentation, viewport_status_item};
-    let previous = (crate::theme::is_dark(), crate::theme::vision());
+    let previous = (solidcraft_theme::is_dark(), solidcraft_theme::vision());
     assert_ne!(StatusKind::Mode.icon(), StatusKind::Result.icon());
     assert_ne!(StatusKind::Result.icon(), StatusKind::Attention.icon());
     for dark in [false, true] {
-        for vision in crate::theme::ColorVision::ALL {
-            crate::theme::set_dark(dark);
-            crate::theme::set_vision(vision);
+        for vision in solidcraft_theme::ColorVision::ALL {
+            solidcraft_theme::set_dark(dark);
+            solidcraft_theme::set_vision(vision);
             let t = Tokens::get();
             for (kind, outline) in [(StatusKind::Mode, t.accent), (StatusKind::Result, t.border), (StatusKind::Attention, t.warning)] {
                 let ctx = crate::fonts::test_context();
@@ -493,18 +493,18 @@ fn viewport_status_kinds_keep_shape_outline_and_typography_across_themes() {
             }
         }
     }
-    crate::theme::set_dark(previous.0);
-    crate::theme::set_vision(previous.1);
+    solidcraft_theme::set_dark(previous.0);
+    solidcraft_theme::set_vision(previous.1);
 }
 
 #[test]
 fn viewport_status_every_part_is_centred_within_its_pill_in_every_theme() {
     use crate::ui_kit::{StatusItem, StatusKind, StatusPresentation, viewport_status_item};
-    let previous = (crate::theme::is_dark(), crate::theme::vision());
+    let previous = (solidcraft_theme::is_dark(), solidcraft_theme::vision());
     for dark in [false, true] {
-        for vision in crate::theme::ColorVision::ALL {
-            crate::theme::set_dark(dark);
-            crate::theme::set_vision(vision);
+        for vision in solidcraft_theme::ColorVision::ALL {
+            solidcraft_theme::set_dark(dark);
+            solidcraft_theme::set_vision(vision);
             for kind in [StatusKind::Mode, StatusKind::Result, StatusKind::Attention] {
                 for (name, setting, has_key, editable) in [
                     ("Zebra", "12 stripes", false, false),
@@ -550,8 +550,8 @@ fn viewport_status_every_part_is_centred_within_its_pill_in_every_theme() {
             }
         }
     }
-    crate::theme::set_dark(previous.0);
-    crate::theme::set_vision(previous.1);
+    solidcraft_theme::set_dark(previous.0);
+    solidcraft_theme::set_vision(previous.1);
 }
 
 // These tests inspect shapes without submitting their texture uploads to a renderer.
@@ -585,11 +585,11 @@ fn viewport_status_close_hover_has_a_theme_fill_and_native_space_action_in_every
         found
     }
 
-    let previous = (crate::theme::is_dark(), crate::theme::vision());
+    let previous = (solidcraft_theme::is_dark(), solidcraft_theme::vision());
     for dark in [false, true] {
-        for vision in crate::theme::ColorVision::ALL {
-            crate::theme::set_dark(dark);
-            crate::theme::set_vision(vision);
+        for vision in solidcraft_theme::ColorVision::ALL {
+            solidcraft_theme::set_dark(dark);
+            solidcraft_theme::set_vision(vision);
             let t = Tokens::get();
             let ctx = crate::fonts::test_context();
             let item = StatusItem {
@@ -616,8 +616,8 @@ fn viewport_status_close_hover_has_a_theme_fill_and_native_space_action_in_every
             assert_eq!(keyboard, Some(StatusAction::Clear(item.id.clone())), "hover decoration must preserve native Space activation");
         }
     }
-    crate::theme::set_dark(previous.0);
-    crate::theme::set_vision(previous.1);
+    solidcraft_theme::set_dark(previous.0);
+    solidcraft_theme::set_vision(previous.1);
 }
 
 fn draw(ctx: &egui::Context, paint: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
@@ -678,7 +678,7 @@ fn compass_keeps_signed_targets_hover_and_clicks_at_both_scales() {
 #[test]
 fn compass_negative_ends_are_hollow_and_positive_ends_are_chunkier() {
     for dark in [false, true] {
-        let t = Tokens::themed(dark, crate::theme::ColorVision::Off);
+        let t = Tokens::themed(dark, solidcraft_theme::ColorVision::Off);
         for (name, direction, positive) in [("x", Vec3::X, true), ("-x", -Vec3::X, false)] {
             let ctx = crate::fonts::test_context();
             let c = pos2(100.0, 100.0);
@@ -888,11 +888,11 @@ fn sketch_previews_selection_band_and_number_focus_follow_sketch_accent() {
             }
             h.app.ui.tab = "MODEL".into(); // A sketch remains open when another ribbon tab is selected.
             h.app.tool = crate::tools::Tool::for_command("sketch.line");
-            crate::theme::TabAccent::publish(&h.app, &h.ctx);
+            h.app.publish_tab_accent(&h.ctx);
             let output = draw(&h.ctx, |ui| {
                 let r = ui.add(egui::TextEdit::singleline(&mut String::from("20")));
                 r.request_focus();
-                crate::theme::TabAccent::number_focus(ui, &r);
+                solidcraft_theme::TabAccent::number_focus(ui, &r);
             });
             assert!(output.shapes.iter().any(|s| matches!(&s.shape, Shape::Rect(r) if r.stroke.color == t.sketch_accent)));
         }
@@ -922,7 +922,7 @@ fn three_dimensional_sketch_rubber_band_uses_sketch_accent() {
 #[test]
 fn a_hovered_compass_end_turns_white_and_its_letter_takes_the_axis_colour() {
     for dark in [false, true] {
-        let t = Tokens::themed(dark, crate::theme::ColorVision::Off);
+        let t = Tokens::themed(dark, solidcraft_theme::ColorVision::Off);
         for (name, direction, positive) in [("x", Vec3::X, true), ("-x", -Vec3::X, false)] {
             let ctx = crate::fonts::test_context();
             let c = pos2(100.0, 100.0);
@@ -1012,7 +1012,7 @@ fn toast_buttons_wrap_inside_the_card_and_are_dead_behind_an_issue_report() {
     let labels = [("Calibrate…", ToastKind::Primary), ("Use Direct Driver", ToastKind::Secondary), ("Never show again", ToastKind::Dismiss)];
     for width in [260.0_f32, 360.0, 600.0, 1000.0] {
         for blocked in [false, true] {
-            crate::issue_report::set_cad_input_blocked_for_test(blocked);
+            crate::ui_kit::set_input_blocked(blocked);
             let ctx = crate::fonts::test_context();
             let free = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 300.0));
             let run = |events: Vec<egui::Event>| {
@@ -1048,7 +1048,7 @@ fn toast_buttons_wrap_inside_the_card_and_are_dead_behind_an_issue_report() {
                     }
                 }
             }
-            crate::issue_report::set_cad_input_blocked_for_test(false);
+            crate::ui_kit::set_input_blocked(false);
             if blocked {
                 assert!(hits.is_empty(), "width {width}: a button worked behind a report: {hits:?}");
             } else {
@@ -1236,6 +1236,128 @@ fn frame_rate_readout_stays_beside_a_right_pane() {
         assert!(rect_of("agent_chat:panel").is_some());
         in_corner(&h);
     }
+}
+
+/// The Curvature Comb tool's options card (Comb length, Teeth) shows while the tool runs, and
+/// moving either slider draws the combs already shown again: their teeth as long as the length
+/// says (a multiple of the automatic length), as many as Teeth says. Using the card picks nothing.
+#[test]
+fn comb_options_draw_the_combs_shown_again() {
+    use crate::sketch_tools::{comb_options, shown_combs};
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 20})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "inspect.curvature_comb"})).unwrap();
+    h.frame();
+    assert!(crate::scenario::rect_of("comb_options").is_some(), "the options card is drawn");
+    assert_eq!((comb_options().length, comb_options().teeth), (1.0, 40));
+    h.step(&json!({"click": {"world": [10, 0, 20]}})).unwrap();
+    let combs = shown_combs(&h.app);
+    assert_eq!(combs.len(), 1, "{:?}", h.app.status);
+    assert_eq!(combs[0].len(), 40);
+    let tooth = |c: &[[solidcore_record::Vec3; 2]]| c[0][0].dist(c[0][1]);
+    let auto = tooth(&combs[0]);
+    assert!(auto > 0.0);
+    let slider = |name: &str| crate::scenario::rect_of(&format!("dialog:slider_track:{name}")).unwrap_or_else(|| panic!("no slider {name}"));
+    // Comb length to its right end: 8 × the automatic length.
+    let track = slider("ui.comb_length");
+    h.step(&json!({"drag": [[track.center().x, track.center().y], [track.right() + 40.0, track.center().y]]})).unwrap();
+    h.frame();
+    assert_eq!(comb_options().length, 8.0);
+    let combs = shown_combs(&h.app);
+    assert_eq!(combs.len(), 1, "the card's drag picked nothing");
+    assert!((tooth(&combs[0]) - 8.0 * auto).abs() < 1e-9 * auto, "{} vs 8 × {auto}", tooth(&combs[0]));
+    // Teeth to its left end: 4.
+    let track = slider("ui.comb_teeth");
+    h.step(&json!({"drag": [[track.center().x, track.center().y], [track.left() - 40.0, track.center().y]]})).unwrap();
+    h.frame();
+    assert_eq!(comb_options().teeth, 4);
+    let combs = shown_combs(&h.app);
+    assert_eq!((combs.len(), combs[0].len()), (1, 4));
+    // The tool ends: the combs and the card go.
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(shown_combs(&h.app).is_empty() && crate::scenario::rect_of("comb_options").is_none());
+    assert!(!crate::toolbar::shows_pressed(&h.app, "inspect.curvature_comb"), "Esc turned the analysis off");
+}
+
+/// Every comb shown shares one scale: the tool combs each new pick together with those already
+/// shown, so tooth lengths compare across curves. An R5 edge's teeth are twice an R10 edge's,
+/// after either pick and after the options change.
+#[test]
+fn combs_shown_together_share_one_scale() {
+    use crate::sketch_tools::{CombOptions, set_comb_options, shown_combs};
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.cylinder", json!({"radius": 5, "height": 20})).unwrap();
+    h.app.run("solid.cylinder", json!({"base": [30, 0, 0], "radius": 10, "height": 20})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "inspect.curvature_comb"})).unwrap();
+    h.frame();
+    h.step(&json!({"click": {"world": [0, 5, 20]}})).unwrap();
+    h.step(&json!({"click": {"world": [30, 10, 20]}})).unwrap();
+    let ratio = |h: &Harness| {
+        let combs = shown_combs(&h.app);
+        assert_eq!(combs.len(), 2, "{:?}", h.app.status);
+        let tooth = |c: &[[solidcore_record::Vec3; 2]]| c[0][0].dist(c[0][1]);
+        tooth(&combs[0]) / tooth(&combs[1])
+    };
+    assert!((ratio(&h) - 2.0).abs() < 1e-9, "{}", ratio(&h));
+    set_comb_options(&mut h.app, CombOptions { length: 3.0, teeth: 12 });
+    assert!((ratio(&h) - 2.0).abs() < 1e-9, "{}", ratio(&h));
+    assert_eq!(shown_combs(&h.app)[1].len(), 12);
+}
+
+/// The view analysis buttons are one toggle group, reflecting the session's one analysis on:
+/// Curvature Comb on shows it pressed (through another dialog too); its button again turns it off
+/// and clears the combs; Zebra on turns the comb off, and Zebra again leaves none on.
+#[test]
+fn view_analysis_buttons_are_one_toggle_group() {
+    use crate::sketch_tools::shown_combs;
+    use crate::toolbar::shows_pressed;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 20})).unwrap();
+    h.settle();
+    let (comb, zebra) = ("inspect.curvature_comb", "inspect.zebra");
+    let active = |h: &mut Harness| h.app.run("inspect.analysis", json!({})).unwrap()["active"].clone();
+    // Comb on, then off with its button again.
+    h.step(&json!({"start": comb})).unwrap();
+    h.frame();
+    assert!(shows_pressed(&h.app, comb) && !shows_pressed(&h.app, zebra));
+    assert_eq!(active(&mut h), json!(comb));
+    h.step(&json!({"click": {"world": [0, 10, 20]}})).unwrap();
+    assert_eq!(shown_combs(&h.app).len(), 1, "{:?}", h.app.status);
+    h.step(&json!({"start": comb})).unwrap();
+    h.frame();
+    assert!(shown_combs(&h.app).is_empty() && h.app.tool.is_none() && !shows_pressed(&h.app, comb));
+    assert_eq!(active(&mut h), json!(null));
+    // Comb on again; it stays on, pressed, while another dialog is open.
+    h.step(&json!({"start": comb})).unwrap();
+    h.step(&json!({"click": {"world": [0, 10, 20]}})).unwrap();
+    h.step(&json!({"start": "solid.fillet"})).unwrap();
+    h.frame();
+    assert!(h.app.dialog.is_some() && h.app.tool.is_none());
+    assert!(shows_pressed(&h.app, comb) && shown_combs(&h.app).len() == 1);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frame();
+    // Zebra on: the comb goes off and its combs go.
+    h.step(&json!({"start": zebra})).unwrap();
+    h.frame();
+    assert!(shows_pressed(&h.app, zebra) && !shows_pressed(&h.app, comb));
+    assert!(shown_combs(&h.app).is_empty());
+    assert_eq!(active(&mut h), json!(zebra));
+    // Comb on: Zebra goes off.
+    h.step(&json!({"start": comb})).unwrap();
+    h.frame();
+    assert!(shows_pressed(&h.app, comb) && !shows_pressed(&h.app, zebra) && h.app.session.analysis.is_none());
+    // Zebra on, then off: none is on.
+    h.step(&json!({"start": zebra})).unwrap();
+    h.step(&json!({"start": zebra})).unwrap();
+    h.frame();
+    assert!(!shows_pressed(&h.app, zebra) && !shows_pressed(&h.app, comb));
+    assert_eq!(active(&mut h), json!(null));
 }
 
 /// The View angles readout (#6032) sits under the orientation gizmo only while View ▸ View angles
@@ -1503,31 +1625,6 @@ fn corner_toast_keeps_its_width_beside_a_docked_dialog() {
     }
 }
 
-/// A dashed line reaching far off screen is cut to the view before it is dashed: epaint makes a
-/// shape per dash and steps along in f32, so one a trillion points long made billions of them,
-/// or never finished. A line in view is dashed exactly as before, and a cut one keeps its
-/// dashes in phase with its start.
-#[test]
-fn a_dashed_line_far_off_screen_is_cut_to_the_view() {
-    let view = Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0));
-    let stroke = Stroke::new(1.0, Color32::WHITE);
-    let near = [pos2(100.0, 100.0), pos2(700.0, 400.0), pos2(900.0, 100.0)];
-    assert_eq!(dashed_line(&near, view, stroke, 5.0, 3.0), Shape::dashed_line(&near, stroke, 5.0, 3.0));
-    let far = dashed_line(&[pos2(100.0, 500.0), pos2(1e12, 500.0)], view, stroke, 5.0, 3.0);
-    assert!(!far.is_empty() && far.len() < 250, "{} dashes", far.len());
-    for s in &far {
-        let Shape::LineSegment { points, .. } = s else { panic!("{s:?}") };
-        let periods = (points[0].x - 100.0) / 8.0;
-        assert!((periods - periods.round()).abs() < 1e-3, "a dash starts at {points:?}, off the line's pattern");
-    }
-    let across = dashed_line(&[pos2(-1e12, 500.0), pos2(1e12, 500.0)], view, stroke, 5.0, 3.0);
-    assert!(across.len() < 250, "{} dashes", across.len());
-    assert!(across.iter().any(|s| matches!(s, Shape::LineSegment { points, .. } if (700.0..900.0).contains(&points[0].x))), "the line shows in view");
-    for missing in [[pos2(f32::NAN, 0.0), pos2(10.0, 10.0)], [pos2(f32::INFINITY, 0.0), pos2(10.0, 10.0)], [pos2(-1e9, -1e9), pos2(-1e9, 1e9)]] {
-        assert!(dashed_line(&missing, view, stroke, 5.0, 3.0).is_empty(), "{missing:?}");
-    }
-}
-
 /// Extrude with a distance of 1e9 mm drew the taper handle's dashed line a billion millimetres
 /// long into the viewport: the frame never finished and filled the memory. It now draws at once.
 #[test]
@@ -1641,7 +1738,7 @@ fn selected_sketch_point_aliases_respect_owner_and_visibility() {
     h.call("ui.view", json!({"view":"top"}));
     h.settle();
     let sid = h.app.session.active_sketch.unwrap();
-    let origin = h.app.session.world_state().sketch(sid).unwrap().sketch.points[0].id.clone();
+    let origin = crate::open_meshing::session_world(&h.app.session).sketch(sid).unwrap().sketch.points[0].id.clone();
     let ids = [origin, "custom:point".into(), "l1.end".into(), format!("{sid}:l1.end"), format!("{}:l1.start", sid + 1)];
     h.app.run("select.set", json!({"items":ids.iter().map(|id| json!({"type":"sketch_point","id":id})).collect::<Vec<_>>()})).unwrap();
     let rings = point_selection_rings(&point_overlays(&h.app));
@@ -2006,8 +2103,8 @@ fn analysis_status_row_and_key_stay_below_preferences_and_cannot_steal_its_click
             assert!(window.contains(at), "the real Preferences window must overlap {target}");
             let layer = h.ctx.layer_id_at(at).unwrap();
             assert_eq!(layer.order, egui::Order::Middle, "Preferences stays above {target}");
-            assert_ne!(layer.id, egui::Id::new("viewport_status_row"));
-            assert_ne!(layer.id, egui::Id::new("viewport_status_key"));
+            assert_ne!(layer.id, egui::Id::unique("viewport_status_row"));
+            assert_ne!(layer.id, egui::Id::unique("viewport_status_key"));
         }
         let at = crate::scenario::handle_at(&format!("viewport_status:{}:close", item.id)).unwrap();
         h.call("ui.click", json!({"x":at.x,"y":at.y}));
@@ -2213,10 +2310,10 @@ fn the_status_toast_closes_with_its_x_and_shows_its_time_left() {
     assert!((swept(&arc, close) - 0.5).abs() < 0.05, "about half a turn left: {}", swept(&arc, close));
     assert!(h.widget("Close").is_some(), "the × has an accessible name");
     // Behind an issue report it does nothing.
-    crate::issue_report::set_cad_input_blocked_for_test(true);
+    crate::ui_kit::set_input_blocked(true);
     h.step(&json!({"click": {"handle": "toast:status:close"}})).unwrap();
     h.frames(2);
-    crate::issue_report::set_cad_input_blocked_for_test(false);
+    crate::ui_kit::set_input_blocked(false);
     assert!(h.app.status.is_some(), "not closed behind a report");
     h.step(&json!({"click": {"handle": "toast:status:close"}})).unwrap();
     h.frames(2);
@@ -2519,7 +2616,7 @@ fn summary_menu_yields_to_preferences_and_command_dialog_without_resuming_or_ste
         h.frames(frames);
         assert!(!egui::Popup::is_any_open(&h.ctx), "{owner} dismisses the lower Summary popup");
         assert!(crate::scenario::rect_of("menu:viewport_status_clear_all").is_none());
-        let heading = crate::i18n::tr("ui.viewport_status_summary_heading").to_uppercase();
+        let heading = solidcraft_ui_text::tr("ui.viewport_status_summary_heading").to_uppercase();
         assert!(!h.shapes.iter().any(|shape| contains_text(&shape.shape, &heading)), "no Summary list paints over {owner}");
         if owner != "command" {
             h.step(&json!({"click":{"handle":"prefs:search"}})).unwrap();

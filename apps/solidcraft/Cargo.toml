@@ -8,9 +8,12 @@ publish = false
 default-run = "solidcraft"
 
 [features]
-default = ["raytrace-cpu", "bundled-render-library"]
+default = ["raytrace-cpu", "bundled-render-library", "profile"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
+# The profiler, compiled in so any build can say where its time goes (the Profile operations
+# preference, SOLIDCRAFT_PROFILE=1, diagnostics.profile); it records nothing until asked.
+profile = ["solidcraft-engine/profile"]
 
 # The workspace lints, except unsafe_code: denied, not forbidden, so that src/open_documents.rs
 # (macOS file-open events), src/native_crash.rs (Windows exception filter), src/native_crash_macos.rs
@@ -31,6 +34,8 @@ solidcraft-engine = { workspace = true }
 # The D3D12 shader compiler the window starts with (#6756).
 solidcraft-gpu = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
+solidcraft-ui-text = { workspace = true }
+solidcraft-theme = { workspace = true }
 solidcraft-space-mouse = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
 egui = { workspace = true }
@@ -78,6 +83,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging",
 ] }
+winreg = "0.56"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.21.2", default-features = false }
@@ -89,7 +95,7 @@ hidapi = { version = "2.6.7", default-features = false, features = ["macos-share
 # Files opened from Finder and the Dock (src/open_documents.rs), and the fullscreen title-bar
 # inset (src/main.rs); all already come with eframe and rfd.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSWindow"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSResponder", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSArray", "NSNotification", "NSOperation", "NSProcessInfo", "NSString", "NSURL"] }
 block2 = "0.6"
 # Native crash capture (src/native_crash_macos.rs): the signal handler, the faulting module

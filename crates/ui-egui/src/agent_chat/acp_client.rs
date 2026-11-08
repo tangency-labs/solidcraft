@@ -35,6 +35,8 @@ pub struct AcpBackend {
     bridge: Option<acp::McpBridge>,
     /// The agent's `initialize` reply: which routes the system note can take into a session.
     init: Value,
+    /// The system note the next session gets ([`acp::system_note`]).
+    note: String,
     next_id: u64,
     pending: HashMap<u64, Pending>,
     session: Option<String>,
@@ -64,6 +66,7 @@ impl AcpBackend {
             cwd,
             bridge,
             init: Value::Null,
+            note: acp::SYSTEM_NOTE.to_string(),
             next_id: 0,
             pending: HashMap::new(),
             session: None,
@@ -91,7 +94,7 @@ impl AcpBackend {
     fn new_session(&mut self) {
         self.config_pending = None;
         self.pending.retain(|_, request| *request != Pending::SetConfig);
-        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init);
+        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note);
         self.request(Pending::SessionNew, "session/new", params);
     }
 
@@ -245,7 +248,7 @@ impl AcpBackend {
         // Drain replies first: an acknowledgement already waiting must keep the connection.
         if self.cancelling.is_some_and(|(_, started)| now.saturating_duration_since(started) >= CANCEL_GRACE) {
             self.proc.shutdown(false);
-            out.push(self.finish_exit(vec![crate::i18n::tr("ui.agent_chat_cancel_timeout").to_string()]));
+            out.push(self.finish_exit(vec![solidcraft_ui_text::tr("ui.agent_chat_cancel_timeout").to_string()]));
         }
         out
     }
@@ -286,6 +289,10 @@ impl ChatBackend for AcpBackend {
         self.config_pending = None;
         self.pending.retain(|_, request| *request != Pending::SetConfig);
         self.new_session();
+    }
+
+    fn set_instructions(&mut self, text: &str) {
+        self.note = acp::system_note(text);
     }
 
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
@@ -352,9 +359,9 @@ pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, Test
                     }
                 }
                 Ok(FromAgent::Exited(tail)) => {
-                    return Err(TestError::Other(tail.last().cloned().unwrap_or_else(|| crate::i18n::tr("ui.agent_chat_exited").to_string())));
+                    return Err(TestError::Other(tail.last().cloned().unwrap_or_else(|| solidcraft_ui_text::tr("ui.agent_chat_exited").to_string())));
                 }
-                Err(_) => return Err(TestError::Other(crate::i18n::tr("ui.ai_no_answer").to_string())),
+                Err(_) => return Err(TestError::Other(solidcraft_ui_text::tr("ui.ai_no_answer").to_string())),
             }
         }
     };
@@ -362,10 +369,10 @@ pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, Test
     let init = wait_for(&p, 1);
     let session_cwd = if acp::runs_in_wsl(argv) { acp::wsl_path(cwd) } else { cwd.to_path_buf() };
     let result = init.and_then(|v| {
-        p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None, &v)));
+        p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None, &v, acp::SYSTEM_NOTE)));
         wait_for(&p, 2).map(|_| {
             let who = acp::agent_info(&v);
-            crate::i18n::format("ui.ai_test_acp_ok", &[("agent", if who.is_empty() { "?" } else { &who })])
+            solidcraft_ui_text::format("ui.ai_test_acp_ok", &[("agent", if who.is_empty() { "?" } else { &who })])
         })
     });
     p.shutdown(true);

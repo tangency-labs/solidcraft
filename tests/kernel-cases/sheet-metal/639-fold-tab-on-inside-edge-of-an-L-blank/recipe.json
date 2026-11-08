@@ -1,0 +1,106 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Steel 0.8",
+    "thickness": "0.8 mm",
+    "active": true,
+    "bend_radius": "0.8 mm",
+    "k_factor": 0.44
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Blank"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      100,
+      0
+     ],
+     [
+      100,
+      100
+     ],
+     [
+      60,
+      100
+     ],
+     [
+      60,
+      90
+     ],
+     [
+      45,
+      90
+     ],
+     [
+      45,
+      60
+     ],
+     [
+      60,
+      60
+     ],
+     [
+      60,
+      50
+     ],
+     [
+      0,
+      50
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Blank"
+   }
+  },
+  {
+   "command": "sheet.fold",
+   "params": {
+    "points": [
+     [
+      59,
+      60,
+      0.8
+     ],
+     [
+      59,
+      90,
+      0.8
+     ]
+    ],
+    "fixed": [
+     40,
+     30,
+     0.8
+    ]
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

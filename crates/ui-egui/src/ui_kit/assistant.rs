@@ -1,6 +1,8 @@
 //! Assistant presentation primitives; protocol state and action dispatch stay with callers.
-use crate::theme::Tokens;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{InnerResponse, Response, Ui, vec2};
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Copy)]
 pub(crate) enum AssistantTone {
@@ -32,7 +34,7 @@ pub(crate) fn assistant_badge(ui: &mut Ui, label: &str, tone: AssistantTone) -> 
 
 /// A compact informational chip in the active workspace colours.
 pub(crate) fn workspace_chip(ui: &mut Ui, label: &str) -> Response {
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     badge(ui, label, accent.ink, accent.soft)
 }
 
@@ -43,7 +45,7 @@ fn badge(ui: &mut Ui, label: &str, ink: egui::Color32, fill: egui::Color32) -> R
     let (rect, response) = ui.allocate_exact_size(vec2(width, t.form_close_size - t.space_4), egui::Sense::hover());
     ui.painter().rect_filled(rect, t.radius_xl, fill);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, font, ink);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
     response
 }
 
@@ -85,11 +87,13 @@ pub(crate) fn assistant_bubble<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(width - bubble_width);
-        egui::Frame::NONE
-            .fill(t.accent_soft)
-            .corner_radius(egui::CornerRadius { nw: t.radius_xl, ne: t.radius_xl, sw: t.radius_xl, se: t.radius_sm.saturating_sub(1) })
-            .inner_margin(egui::Margin::symmetric((t.space_8 + t.space_3) as i8, t.space_8 as i8))
-            .show(ui, |ui| {
+        crate::ui_kit::Container::show_backing(
+            ui,
+            egui::Frame::NONE
+                .fill(t.accent_soft)
+                .corner_radius(egui::CornerRadius { nw: t.radius_xl, ne: t.radius_xl, sw: t.radius_xl, se: t.radius_sm.saturating_sub(1) })
+                .inner_margin(egui::Margin::symmetric((t.space_8 + t.space_3) as i8, t.space_8 as i8)),
+            |ui| {
                 let content_width = (bubble_width - (t.space_8 + t.space_3) * 2.0).max(0.0);
                 ui.set_width(content_width);
                 ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
@@ -100,7 +104,8 @@ pub(crate) fn assistant_bubble<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -
                     add(ui)
                 })
                 .inner
-            })
+            },
+        )
     })
     .inner
 }
@@ -165,65 +170,82 @@ pub(crate) fn assistant_tool_status(ui: &mut Ui, state: AssistantToolState) -> R
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn assistant_tool_frame<R>(ui: &mut Ui, failed: bool, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
     let t = Tokens::get();
-    egui::Frame::NONE
-        .fill(if failed { t.form_error_fill } else { t.dialog_body })
-        .stroke(t.container_border(t.dialog_rule))
-        .corner_radius(t.radius_lg)
-        .inner_margin(t.space_3)
-        .show(ui, |ui| {
+    crate::ui_kit::Container::show_backing(
+        ui,
+        egui::Frame::NONE
+            .fill(if failed { t.form_error_fill } else { t.dialog_body })
+            .stroke(t.container_border(t.dialog_rule))
+            .corner_radius(t.radius_lg)
+            .inner_margin(t.space_3),
+        |ui| {
             ui.set_min_width(ui.available_width().max(0.0));
             add(ui)
-        })
+        },
+    )
 }
 
 /// Individual tool-row surface, retaining a failed row's tint inside a shared group.
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn assistant_tool_row<R>(ui: &mut Ui, failed: bool, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
     let t = Tokens::get();
-    egui::Frame::NONE.fill(if failed { t.form_error_fill } else { t.dialog_body }).corner_radius(t.control_radius).show(ui, add)
+    crate::ui_kit::Container::show_backing(
+        ui,
+        egui::Frame::NONE.fill(if failed { t.form_error_fill } else { t.dialog_body }).corner_radius(t.control_radius),
+        add,
+    )
 }
 
 /// Indented detail box using the same field surface as inline command parameters.
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn assistant_tool_detail<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
     let t = Tokens::get();
-    egui::Frame::NONE
-        .fill(t.control_fill)
-        .stroke(t.container_border(t.dialog_rule))
-        .corner_radius(t.control_radius)
-        .inner_margin(egui::Margin::symmetric((t.space_6 + t.space_3) as i8, t.space_6 as i8))
-        .show(ui, add)
+    crate::ui_kit::Container::show_backing(
+        ui,
+        egui::Frame::NONE
+            .fill(t.control_fill)
+            .stroke(t.container_border(t.dialog_rule))
+            .corner_radius(t.control_radius)
+            .inner_margin(egui::Margin::symmetric((t.space_6 + t.space_3) as i8, t.space_6 as i8)),
+        add,
+    )
 }
 
 /// Approval frame with a tinted heading. Permission choices remain entirely caller-owned.
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn assistant_approval<R>(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
     let t = Tokens::get();
-    let output = egui::Frame::NONE.fill(t.dialog_body).stroke(egui::Stroke::new(1.0, t.form_primary)).corner_radius(t.radius_xl).show(ui, |ui| {
-        ui.set_min_width(ui.available_width().max(0.0));
-        ui.spacing_mut().item_spacing.y = 0.0;
-        egui::Frame::NONE
-            .fill(t.accent_soft)
-            .corner_radius(egui::CornerRadius { nw: t.radius_xl.saturating_sub(1), ne: t.radius_xl.saturating_sub(1), sw: 0, se: 0 })
-            .inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_8 as i8))
-            .show(ui, |ui| {
-                ui.set_min_width(ui.available_width().max(0.0));
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = t.space_6;
-                    let (icon, _) = ui.allocate_exact_size(vec2(t.space_16, t.space_16), egui::Sense::hover());
-                    crate::icons::paint_ink(ui.painter(), icon, "shield", t.selected_ink);
-                    ui.add(egui::Label::new(egui::RichText::new(title).font(crate::fonts::semibold(t.font_label)).color(t.form_ink)).wrap());
-                });
-            });
-        egui::Frame::NONE
-            .inner_margin(t.space_10)
-            .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = t.space_8;
-                body(ui)
-            })
-            .inner
-    });
-    crate::scenario::publish_rect("assistant:approval", output.response.rect);
+    let output = crate::ui_kit::Container::show_backing(
+        ui,
+        egui::Frame::NONE.fill(t.dialog_body).stroke(egui::Stroke::new(1.0, t.form_primary)).corner_radius(t.radius_xl),
+        |ui| {
+            ui.set_min_width(ui.available_width().max(0.0));
+            ui.spacing_mut().item_spacing.y = 0.0;
+            crate::ui_kit::Container::show_backing(
+                ui,
+                egui::Frame::NONE
+                    .fill(t.accent_soft)
+                    .corner_radius(egui::CornerRadius { nw: t.radius_xl.saturating_sub(1), ne: t.radius_xl.saturating_sub(1), sw: 0, se: 0 })
+                    .inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_8 as i8)),
+                |ui| {
+                    ui.set_min_width(ui.available_width().max(0.0));
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = t.space_6;
+                        let (icon, _) = ui.allocate_exact_size(vec2(t.space_16, t.space_16), egui::Sense::hover());
+                        crate::icons::paint_ink(ui.painter(), icon, "shield", t.selected_ink);
+                        ui.add(egui::Label::new(egui::RichText::new(title).font(crate::fonts::semibold(t.font_label)).color(t.form_ink)).wrap());
+                    });
+                },
+            );
+            egui::Frame::NONE
+                .inner_margin(t.space_10)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = t.space_8;
+                    body(ui)
+                })
+                .inner
+        },
+    );
+    solidcraft_ui_registry::publish_rect("assistant:approval", output.response.rect);
     output
 }
 
@@ -285,16 +307,19 @@ fn composer_corners(t: &Tokens) -> egui::CornerRadius {
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn assistant_composer<R>(ui: &mut Ui, focused: bool, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
     let t = Tokens::get();
-    egui::Frame::NONE
-        .fill(t.control_fill)
-        .stroke(if focused { egui::Stroke::new(1.0, t.form_primary) } else { t.control_border_stroke(t.control_border) })
-        .corner_radius(composer_corners(&t))
-        .inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_8 as i8))
-        .show(ui, |ui| {
+    crate::ui_kit::Container::show_backing(
+        ui,
+        egui::Frame::NONE
+            .fill(t.control_fill)
+            .stroke(if focused { egui::Stroke::new(1.0, t.form_primary) } else { t.control_border_stroke(t.control_border) })
+            .corner_radius(composer_corners(&t))
+            .inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_8 as i8)),
+        |ui| {
             ui.set_min_width(ui.available_width().max(0.0));
             ui.spacing_mut().item_spacing.y = t.space_6;
             add(ui)
-        })
+        },
+    )
 }
 
 /// Circular primary send or stop action. The caller retains queue and cancellation dispatch.
@@ -306,7 +331,7 @@ pub(crate) fn assistant_send(ui: &mut Ui, enabled: bool, busy: bool, label: &str
         let (rect, response) = ui.allocate_exact_size(vec2(size, size), egui::Sense::click());
         let fill = if response.hovered() { t.form_primary.gamma_multiply(0.9) } else { t.form_primary };
         ui.painter().circle_filled(rect.center(), size / 2.0, fill);
-        let ink = if crate::theme::contrast_ratio(t.on_accent, fill) >= 4.5 { t.on_accent } else { t.tab_on_fill_dark };
+        let ink = if solidcraft_theme::contrast_ratio(t.on_accent, fill) >= 4.5 { t.on_accent } else { t.tab_on_fill_dark };
         crate::icons::paint_ink(ui.painter(), rect.shrink(t.space_6), if busy { "stop" } else { "send" }, ink);
         if response.has_focus() {
             ui.painter().circle_stroke(rect.center(), size / 2.0 + t.space_2, egui::Stroke::new(1.0, t.form_primary));
@@ -314,8 +339,8 @@ pub(crate) fn assistant_send(ui: &mut Ui, enabled: bool, busy: bool, label: &str
         if response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
-        response.on_hover_text(label)
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
+        response.backing_on_hover_text(label)
     })
     .inner
 }
@@ -324,13 +349,16 @@ pub(crate) fn assistant_send(ui: &mut Ui, enabled: bool, busy: bool, label: &str
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn assistant_composer_footer<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
     let t = Tokens::get();
-    let output = egui::Frame::NONE
-        .fill(t.dialog_footer)
-        .corner_radius(composer_corners(&t))
-        // No margin: the composer box inside fills this footer edge to edge. The text padding
-        // lives on the box itself, so there is one inset, not two.
-        .inner_margin(0)
-        .show(ui, add);
+    let output = crate::ui_kit::Container::show_backing(
+        ui,
+        egui::Frame::NONE
+            .fill(t.dialog_footer)
+            .corner_radius(composer_corners(&t))
+            // No margin: the composer box inside fills this footer edge to edge. The text padding
+            // lives on the box itself, so there is one inset, not two.
+            .inner_margin(0),
+        add,
+    );
     t.secondary_hline(ui.painter(), output.response.rect.x_range(), output.response.rect.top(), t.dialog_rule);
     output
 }
@@ -364,11 +392,15 @@ pub(crate) fn assistant_banner<R>(ui: &mut Ui, tone: AssistantTone, add: impl Fn
 pub(crate) fn banner<R>(ui: &mut Ui, tone: AssistantTone, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
     let t = Tokens::get();
     let (_, fill) = tone.colors(&t);
-    egui::Frame::NONE.fill(fill).stroke(t.container_border(t.dialog_rule)).corner_radius(t.radius_lg).inner_margin(t.space_10).show(ui, |ui| {
-        ui.set_min_width(ui.available_width().max(0.0));
-        ui.spacing_mut().item_spacing.y = t.space_8;
-        add(ui)
-    })
+    crate::ui_kit::Container::show_backing(
+        ui,
+        egui::Frame::NONE.fill(fill).stroke(t.container_border(t.dialog_rule)).corner_radius(t.radius_lg).inner_margin(t.space_10),
+        |ui| {
+            ui.set_min_width(ui.available_width().max(0.0));
+            ui.spacing_mut().item_spacing.y = t.space_8;
+            add(ui)
+        },
+    )
 }
 
 #[cfg(test)]

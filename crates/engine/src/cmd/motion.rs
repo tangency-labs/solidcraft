@@ -1,18 +1,29 @@
 //! Contact Sets, Motion Study and Exploded views.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::Mat;
 use solidcraft_doc::joints::{self, JointKind};
 use solidcraft_doc::motion::{ContactSet, ExplodedView, MotionStudy, StudyKey};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcraft_geom::Aabb3;
 use solidcraft_kernel::Body;
 
 use super::CommandSpec;
 use super::joints::{cannot_move, effective_values, joint_id, occurrence_id, place_holding, value};
 use crate::params::{bad, bool_, str_, vec3};
-use crate::schema::motion::{FindLimitsParams, FindLimitsResult};
+use crate::schema::motion::{
+    ContactCheck, ContactCollision, ContactCreateParams, ContactEditParams, ContactEnableParams, ContactNoParams, ContactSetChange,
+    ContactSetCreated, ContactSetEdited, ContactSetInfo, ContactSets, ContactSwitch, ExplodeCreateParams, ExplodeCreated, ExplodeDeleteParams,
+    ExplodeDeleted, ExplodeListParams, ExplodeMoveInfo, ExplodeShowParams, ExplodeShown, ExplodeViews, ExplodedViewInfo, FindLimitsParams,
+    FindLimitsResult, MotionListParams, MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted, MotionStudyInfo, MotionStudyKeyInfo,
+    MotionStudyParams, MotionStudySaved,
+};
+use crate::schema::motion_play::{
+    DriveReport, ExportParams, PartPose, PlayParams, Pose, StudyExport, StudyExported, StudyPlayed, StudySample, UnmovedJoint,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -37,40 +48,89 @@ macro_rules! trace_doc {
     };
 }
 
+const CONTACT_ENABLE_CONTRACT: TypedContract<ContactEnableParams> = TypedContract::new();
+const CONTACT_NONE_CONTRACT: TypedContract<ContactNoParams> = TypedContract::new();
+const CONTACT_CREATE_CONTRACT: TypedContract<ContactCreateParams> = TypedContract::new();
+const CONTACT_EDIT_CONTRACT: TypedContract<ContactEditParams> = TypedContract::new();
+const STUDY_CONTRACT: TypedContract<MotionStudyParams> = TypedContract::new();
+const STUDY_DELETE_CONTRACT: TypedContract<MotionStudyDeleteParams> = TypedContract::new();
+const STUDY_LIST_CONTRACT: TypedContract<MotionListParams> = TypedContract::new();
+const EXPLODE_CREATE_CONTRACT: TypedContract<ExplodeCreateParams> = TypedContract::new();
+const EXPLODE_SHOW_CONTRACT: TypedContract<ExplodeShowParams> = TypedContract::new();
+const EXPLODE_LIST_CONTRACT: TypedContract<ExplodeListParams> = TypedContract::new();
+const EXPLODE_DELETE_CONTRACT: TypedContract<ExplodeDeleteParams> = TypedContract::new();
+const PLAY_CONTRACT: TypedContract<PlayParams> = TypedContract::new();
+const EXPORT_CONTRACT: TypedContract<ExportParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("contact.enable_sets", "Enable Contact Sets", enable_sets).at("SOLID", "ASSEMBLE").icon("contact_sets").params(
-        "enabled?: bool (default true) — driving joints and motion studies stop where bodies in one contact set would pass through each other",
-    ),
-    CommandSpec::new("contact.enable_all", "Enable All Contact", enable_all)
+    CommandSpec::new("contact.enable_sets", "Enable Contact Sets", crate::checked!("contact.enable_sets", enable_sets))
+        .at("SOLID", "ASSEMBLE")
+        .icon("contact_sets")
+        .contract(&CONTACT_ENABLE_CONTRACT)
+        .output(output_schema_for::<ContactSwitch>)
+        .params(
+            "enabled?: bool (default true) — driving joints and motion studies stop where bodies in one contact set would pass through each other",
+        ),
+    CommandSpec::new("contact.enable_all", "Enable All Contact", crate::checked!("contact.enable_all", enable_all))
         .at("SOLID", "ASSEMBLE")
         .icon("contact_all")
+        .contract(&CONTACT_NONE_CONTRACT)
+        .output(output_schema_for::<ContactSwitch>)
         .params("every occurrence takes part in contact (one set of all)"),
-    CommandSpec::new("contact.disable_all", "Disable Contact", disable_all).at("SOLID", "ASSEMBLE").icon("contact_off").params("contact off"),
-    CommandSpec::new("contact.create", "New Contact Set", new_set)
+    CommandSpec::new("contact.disable_all", "Disable Contact", crate::checked!("contact.disable_all", disable_all))
+        .at("SOLID", "ASSEMBLE")
+        .icon("contact_off")
+        .contract(&CONTACT_NONE_CONTRACT)
+        .output(output_schema_for::<ContactSwitch>)
+        .params("contact off"),
+    CommandSpec::new("contact.create", "New Contact Set", crate::checked!("contact.create", new_set))
         .at("SOLID", "ASSEMBLE")
         .icon("contact_new")
+        .contract(&CONTACT_CREATE_CONTRACT)
+        .output(output_schema_for::<ContactSetCreated>)
         .params("occurrences: [ids or names] (two or more); name?"),
-    CommandSpec::new("contact.edit", "Edit Contact Set", edit_set)
+    CommandSpec::new("contact.edit", "Edit Contact Set", crate::checked!("contact.edit", edit_set))
         .icon("edit")
+        .contract(&CONTACT_EDIT_CONTRACT)
+        .output(output_schema_for::<ContactSetEdited>)
         .params("set: id|name; occurrences?; name?; suppressed?: bool; delete?: bool"),
-    CommandSpec::new("contact.list", "List Contact Sets", list_sets).icon("list").noundo().doc_only().params("→ sets, enabled, all"),
-    CommandSpec::new("contact.check", "Check Contact", check)
+    CommandSpec::new("contact.list", "List Contact Sets", crate::checked!("contact.list", list_sets))
+        .icon("list")
+        .noundo()
+        .doc_only()
+        .contract(&CONTACT_NONE_CONTRACT)
+        .output(output_schema_for::<ContactSets>)
+        .params("→ sets, enabled, all"),
+    CommandSpec::new("contact.check", "Check Contact", crate::checked!("contact.check", check))
         .icon("interference")
         .noundo()
+        .contract(&CONTACT_NONE_CONTRACT)
+        .output(output_schema_for::<ContactCheck>)
         .params("→ pairs in contact sets that pass through each other now"),
-    CommandSpec::new("motion.study", "Motion Study", study).at("SOLID", "ASSEMBLE").icon("play").params(
-        "name?; study? (edit an existing one); steps? (timeline length, default 100); keys: [{joint, index?, points: [[step, value], …]}] \
+    CommandSpec::new("motion.study", "Motion Study", crate::checked!("motion.study", study))
+        .at("SOLID", "ASSEMBLE")
+        .icon("play")
+        .contract(&STUDY_CONTRACT)
+        .output(output_schema_for::<MotionStudySaved>)
+        .params(
+            "name?; study? (edit an existing one); steps? (timeline length, default 100); keys: [{joint, index?, points: [[step, value], …]}] \
          (values: degrees for angles, mm for distances, or expressions)",
-    ),
-    CommandSpec::new("motion.play", "Play Motion Study", play).icon("play").params(
-        "study: id|name; step (0…steps) — sets the joints to the study's values there (contact sets stop them); quiet?: bool \
+        ),
+    CommandSpec::new("motion.play", "Play Motion Study", crate::checked!("motion.play", play))
+        .icon("play")
+        .contract(&PLAY_CONTRACT)
+        .output(output_schema_for::<StudyPlayed>)
+        .params(
+            "study: id|name; step (0…steps) — sets the joints to the study's values there (contact sets stop them); quiet?: bool \
          (positions of only the occurrences that moved) → values: [{joint, values: [{name, value, unit}]}], positions, moved: whether \
          any occurrence moved, unmoved: [{joint, name, reason}] (keyed joints that can move nothing, such as a chain joined to \
          nothing grounded)",
-    ),
-    CommandSpec::new("motion.export", "Export Motion Study", export)
+        ),
+    CommandSpec::new("motion.export", "Export Motion Study", crate::checked!("motion.export", export))
         .icon("export")
         .noundo()
+        .contract(&EXPORT_CONTRACT)
+        .output(output_schema_for::<StudyExported>)
         .params("study; samples? (default steps + 1); path? (.json or .csv) → occurrence positions per step (the design is not changed)"),
     CommandSpec::new("motion.export_animation", "Export Motion Animation", animation::export).icon("export").noundo().params(
         "study: id|name, or joint: id|name with from and to (degrees for angles, mm for distances, or expressions) and index?, or \
@@ -111,18 +171,42 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FIND_LIMITS_CONTRACT)
         .output(output_schema_for::<FindLimitsResult>)
         .params(sweep::FIND_LIMITS_DOC),
-    CommandSpec::new("motion.list", "List Motion Studies", list_studies).icon("list").noundo(),
-    CommandSpec::new("motion.delete", "Delete Motion Study", delete_study).icon("delete").params("study"),
-    CommandSpec::new("explode.create", "Exploded View", explode_create).at("SOLID", "ASSEMBLE").icon("explode").enabled(has_parts_to_explode).params(
-        "name?; scale? (automatic: each occurrence pushed away from the assembly's centre by scale × its offset, default 1); \
-         moves?: [{occurrence, translate: [x,y,z]}] (instead of automatic)",
-    ),
-    CommandSpec::new("explode.show", "Show Exploded View", explode_show)
+    CommandSpec::new("motion.list", "List Motion Studies", crate::checked!("motion.list", list_studies))
+        .icon("list")
+        .noundo()
+        .contract(&STUDY_LIST_CONTRACT)
+        .output(output_schema_for::<MotionStudies>),
+    CommandSpec::new("motion.delete", "Delete Motion Study", crate::checked!("motion.delete", delete_study))
+        .icon("delete")
+        .contract(&STUDY_DELETE_CONTRACT)
+        .output(output_schema_for::<MotionStudyDeleted>)
+        .params("study"),
+    CommandSpec::new("explode.create", "Exploded View", crate::checked!("explode.create", explode_create))
+        .at("SOLID", "ASSEMBLE")
+        .icon("explode")
+        .enabled(has_parts_to_explode)
+        .contract(&EXPLODE_CREATE_CONTRACT)
+        .output(output_schema_for::<ExplodeCreated>)
+        .params(
+            "name?; scale? (automatic: each occurrence pushed away from the assembly's centre by scale × its offset, default 1); \
+             moves?: [{occurrence, translate: [x,y,z]}] (instead of automatic)",
+        ),
+    CommandSpec::new("explode.show", "Show Exploded View", crate::checked!("explode.show", explode_show))
         .icon("explode")
         .noundo()
+        .contract(&EXPLODE_SHOW_CONTRACT)
+        .output(output_schema_for::<ExplodeShown>)
         .params("view: id|name (or none: back to the assembled placement) — shown only; the design keeps its placements"),
-    CommandSpec::new("explode.list", "List Exploded Views", explode_list).icon("list").noundo(),
-    CommandSpec::new("explode.delete", "Delete Exploded View", explode_delete).icon("delete").params("view"),
+    CommandSpec::new("explode.list", "List Exploded Views", crate::checked!("explode.list", explode_list))
+        .icon("list")
+        .noundo()
+        .contract(&EXPLODE_LIST_CONTRACT)
+        .output(output_schema_for::<ExplodeViews>),
+    CommandSpec::new("explode.delete", "Delete Exploded View", crate::checked!("explode.delete", explode_delete))
+        .icon("delete")
+        .contract(&EXPLODE_DELETE_CONTRACT)
+        .output(output_schema_for::<ExplodeDeleted>)
+        .params("view"),
 ];
 
 const MAX_ITEMS: usize = 10_000;
@@ -213,7 +297,10 @@ pub fn collisions(s: &Session) -> Vec<(String, String, f64)> {
 /// Edges are tested for crossing the other's surface too: plates crossing face to face have
 /// no sample point inside (#3323).
 fn overlap(a: &Body, b: &Body) -> Option<f64> {
-    let (ma, mb) = (a.tessellate((a.size() * 1e-3).max(1e-3)).ok()?, b.tessellate((b.size() * 1e-3).max(1e-3)).ok()?);
+    let (ma, mb) = (
+        a.mesh(&solidcraft_kernel::MeshTolerance::chord((a.size() * 1e-3).max(1e-3))).ok()?,
+        b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-3).max(1e-3))).ok()?,
+    );
     mesh_overlap(&ma, &mb, 1e-4 * a.size().max(b.size()).max(1.0))
 }
 
@@ -419,30 +506,62 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
         let mut end = s.scratch();
         set(&mut end, 1.0);
         let samples = cache.samples(s, &end)?;
-        let mut work = 0;
+        let mut intersections = 0;
         set(s, 0.0);
         // Keep the existing recovery behaviour: an initially overlapping assembly may move
         // out of its invalid placement. Sweeps constrain motions that start collision-free.
-        if cache.first_hit(s, &mut work)?.is_none() {
+        if cache.overlaps(s, &mut intersections, false)?.is_empty() {
             let mut lo = 0.0;
             let mut bracket = None;
             for sample in 1..=samples {
                 let hi = sample as f64 / samples as f64;
                 set(s, hi);
-                if let Some(hit) = cache.first_hit(s, &mut work)? {
-                    bracket = Some((lo, hi, hit));
+                let hits = cache.overlaps(s, &mut intersections, true)?;
+                if !hits.is_empty() {
+                    bracket = Some((lo, hi, hits));
                     break;
                 }
                 lo = hi;
             }
-            if let Some((mut lo, mut hi, hit)) = bracket {
-                for _ in 0..14 {
-                    let mid = (lo + hi) / 2.0;
-                    set(s, mid);
-                    if cache.first_hit(s, &mut work)?.is_none() { lo = mid } else { hi = mid }
+            // Where the bodies found passing into each other first touch, closed in on from the
+            // clear side (conservative advancement): from a clear placement, a move in which no
+            // point of a pair goes further than the pair's gap keeps it clear. Only clear
+            // placements are measured, so no intersection is asked to tell touching bodies from
+            // overlapping ones within its tolerance.
+            if let Some((lo, hi, hits)) = bracket {
+                let touch = 1e-9 * cache.scale();
+                let mut t = lo;
+                set(s, t);
+                for _ in 0..MAX_ADVANCES {
+                    let gap = cache.gap(s, &hits)?;
+                    if gap <= touch {
+                        break;
+                    }
+                    let from = cache.frames(s)?;
+                    // The furthest step whose move stays within the gap: guessed from the move to
+                    // `hi` (nearly proportional over a sample), then halved until it does.
+                    set(s, hi);
+                    let whole = cache.pair_travel(&from, s, &hits)?;
+                    let mut step = if whole > 0.0 { (hi - t) * (0.5 * gap / whole).min(1.0) } else { hi - t };
+                    let mut next = None;
+                    for _ in 0..64 {
+                        set(s, t + step);
+                        if cache.pair_travel(&from, s, &hits)? < gap {
+                            next = Some(t + step);
+                            break;
+                        }
+                        step *= 0.5;
+                    }
+                    match next {
+                        Some(n) if n > t => t = n,
+                        _ => break,
+                    }
+                    set(s, t);
                 }
+                let lo = t;
                 sol = set(s, lo);
-                stopped = Some(json!({"a": hit.0, "b": hit.1, "fraction": lo}));
+                let (a, b) = hits.first().map(|h| (h.a.clone(), h.b.clone())).unwrap_or_default();
+                stopped = Some(json!({"a": a, "b": b, "fraction": lo}));
             } else {
                 sol = set(s, 1.0);
             }
@@ -473,6 +592,10 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
     Ok((out, sol))
 }
 
+/// Most steps a joint drive takes closing in on a contact. Each moves the pair by up to half its
+/// gap; past the last, the drive stops at the last clear placement, short of the touch.
+const MAX_ADVANCES: usize = 200;
+
 /// Drive one joint (joint.drive), honouring contact sets.
 pub fn drive_joint(s: &mut Session, id: u64, q: Vec<f64>, given: usize) -> Result<Value> {
     let given = (0..given.min(q.len())).map(|i| (id, i)).collect();
@@ -484,24 +607,30 @@ pub fn drive_joint_index(s: &mut Session, id: u64, q: Vec<f64>, index: usize) ->
     Ok(drive_with_contact(s, &[(id, q)], &[(id, index)].into_iter().collect())?.0)
 }
 
+/// A command's reply as JSON: the contact and motion study commands build their replies from the
+/// types their output schemas describe, so the two can't drift apart.
+fn typed_reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
 fn enable_sets(s: &mut Session, p: &Value) -> Result<Value> {
-    let on = bool_(p, "enabled").unwrap_or(true);
-    s.doc_mut().assembly.contact_enabled = on;
-    Ok(json!({"enabled": on}))
+    let enabled = bool_(p, "enabled").unwrap_or(true);
+    s.doc_mut().assembly.contact_enabled = enabled;
+    typed_reply("contact.enable_sets", ContactSwitch { enabled, all: None, param_warnings: Vec::new() })
 }
 
 fn enable_all(s: &mut Session, _p: &Value) -> Result<Value> {
     let a = &mut s.doc_mut().assembly;
     a.contact_enabled = true;
     a.contact_all = true;
-    Ok(json!({"enabled": true, "all": true}))
+    typed_reply("contact.enable_all", ContactSwitch { enabled: true, all: Some(true), param_warnings: Vec::new() })
 }
 
 fn disable_all(s: &mut Session, _p: &Value) -> Result<Value> {
     let a = &mut s.doc_mut().assembly;
     a.contact_enabled = false;
     a.contact_all = false;
-    Ok(json!({"enabled": false}))
+    typed_reply("contact.disable_all", ContactSwitch { enabled: false, all: None, param_warnings: Vec::new() })
 }
 
 fn new_set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -519,7 +648,7 @@ fn new_set(s: &mut Session, p: &Value) -> Result<Value> {
     let a = &mut s.doc_mut().assembly;
     a.contact_sets.push(ContactSet { id, name: name.clone(), occurrences: occ, suppressed: false });
     a.contact_enabled = true;
-    Ok(json!({"set": id, "name": name}))
+    typed_reply(cmd, ContactSetCreated { set: id, name, param_warnings: Vec::new() })
 }
 
 fn set_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
@@ -541,7 +670,7 @@ fn edit_set(s: &mut Session, p: &Value) -> Result<Value> {
     let i = set_index(s, p, cmd)?;
     if bool_(p, "delete").unwrap_or(false) {
         s.doc_mut().assembly.contact_sets.remove(i);
-        return Ok(json!({"deleted": true}));
+        return typed_reply(cmd, ContactSetEdited { change: ContactSetChange::Deleted { deleted: true }, param_warnings: Vec::new() });
     }
     let occ = if p.get("occurrences").is_some() { Some(occurrences(s, p, cmd)?) } else { None };
     if occ.as_ref().is_some_and(|o| o.len() < 2) {
@@ -557,17 +686,19 @@ fn edit_set(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(x) = bool_(p, "suppressed") {
         c.suppressed = x;
     }
-    Ok(json!({"set": c.id}))
+    let set = c.id;
+    typed_reply(cmd, ContactSetEdited { change: ContactSetChange::Changed { set }, param_warnings: Vec::new() })
 }
 
 fn list_sets(s: &mut Session, _p: &Value) -> Result<Value> {
     let a = &s.doc.assembly;
-    Ok(json!({"enabled": a.contact_enabled, "all": a.contact_all, "sets": a.contact_sets}))
+    let sets = a.contact_sets.iter().map(ContactSetInfo::from).collect();
+    typed_reply("contact.list", ContactSets { enabled: a.contact_enabled, all: a.contact_all, sets, param_warnings: Vec::new() })
 }
 
 fn check(s: &mut Session, _p: &Value) -> Result<Value> {
-    let c = collisions(s);
-    Ok(json!({"collisions": c.iter().map(|(a, b, d)| json!({"a": a, "b": b, "depth_mm": d})).collect::<Vec<_>>()}))
+    let collisions = collisions(s).into_iter().map(|(a, b, depth_mm)| ContactCollision { a, b, depth_mm }).collect();
+    typed_reply("contact.check", ContactCheck { collisions, param_warnings: Vec::new() })
 }
 
 // ---- Motion studies ----
@@ -656,7 +787,7 @@ fn study(s: &mut Session, p: &Value) -> Result<Value> {
             m
         }
     };
-    Ok(json!({"study": out.id, "name": out.name, "steps": out.steps, "keys": out.keys.len()}))
+    typed_reply(cmd, MotionStudySaved { study: out.id, name: out.name, steps: out.steps, keys: out.keys.len(), param_warnings: Vec::new() })
 }
 
 /// Joint values of a study at a step: (joint, full value vector).
@@ -700,8 +831,15 @@ pub(super) fn moved<'a>(before: &'a [(String, Mat)], after: &'a [(String, Mat)])
     after.iter().zip(before).filter(|((_, a), (_, b))| a.iter().flatten().zip(b.iter().flatten()).any(|(x, y)| (x - y).abs() > 1e-9)).map(|(a, _)| a)
 }
 
-fn pose_json(m: &Mat) -> Value {
-    json!({"origin": [m[3][0], m[3][1], m[3][2]], "x": [m[0][0], m[0][1], m[0][2]], "y": [m[1][0], m[1][1], m[1][2]], "z": [m[2][0], m[2][1], m[2][2]]})
+/// Where occurrence `name` is placed by `m`: its origin and axes.
+fn part_pose(name: &str, m: &Mat) -> PartPose {
+    let row = |i: usize| m.get(i).map_or([0.0; 3], |r| [r[0], r[1], r[2]]);
+    PartPose { occurrence: name.to_string(), pose: Pose { origin: row(3), x: row(0), y: row(1), z: row(2) } }
+}
+
+/// `drive_with_contact`'s report, typed. Its other callers read it as JSON, so it stays JSON there.
+fn drive_report(cmd: &str, out: Value) -> Result<DriveReport> {
+    serde_json::from_value(out).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn play(s: &mut Session, p: &Value) -> Result<Value> {
@@ -711,22 +849,23 @@ fn play(s: &mut Session, p: &Value) -> Result<Value> {
     let step = p.get("step").and_then(Value::as_f64).filter(|x| x.is_finite()).ok_or_else(|| bad(cmd, "`step` must be a number"))?;
     let want = values_at(s, &m, step.clamp(0.0, f64::from(m.steps)));
     let before = positions(s);
-    let (mut out, sol) = drive_with_contact(s, &want, &keyed(&m))?;
+    let (out, sol) = drive_with_contact(s, &want, &keyed(&m))?;
+    let drive = drive_report(cmd, out)?;
     let after = positions(s);
     let moved: Vec<&(String, Mat)> = moved(&before, &after).collect();
-    out["moved"] = json!(!moved.is_empty());
+    let any_moved = !moved.is_empty();
     let shown: Vec<&(String, Mat)> = if bool_(p, "quiet").unwrap_or(false) { moved } else { after.iter().collect() };
-    out["positions"] = shown.iter().map(|(n, t)| json!({"occurrence": n, "pose": pose_json(t)})).collect();
+    let positions = shown.iter().map(|(n, t)| part_pose(n, t)).collect();
     let joints: BTreeSet<u64> = m.keys.iter().map(|k| k.joint).collect();
-    out["unmoved"] = joints
+    let unmoved = joints
         .iter()
         .filter_map(|id| {
-            let (why, _) = cannot_move(s, &sol, *id)?;
+            let (reason, _) = cannot_move(s, &sol, *id)?;
             let name = s.doc.assembly.joints.iter().find(|j| j.id == *id).map(|j| j.name.clone());
-            Some(json!({"joint": id, "name": name, "reason": why}))
+            Some(UnmovedJoint { joint: *id, name, reason })
         })
         .collect();
-    Ok(out)
+    typed_reply(cmd, StudyPlayed { drive, moved: any_moved, positions, unmoved, param_warnings: Vec::new() })
 }
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
@@ -744,49 +883,55 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         let step = f64::from(m.steps) * k as f64 / (samples - 1) as f64;
         let want = values_at(&t, &m, step);
         let (r, _) = drive_with_contact(&mut t, &want, &keyed(&m))?;
-        rows.push(json!({
-            "step": step,
-            "stopped_by_contact": r["stopped_by_contact"],
-            "stopped_by_loop": r["stopped_by_loop"],
-            "positions": positions(&t).iter().map(|(n, x)| json!({"occurrence": n, "pose": pose_json(x)})).collect::<Vec<_>>(),
-        }));
+        let r = drive_report(cmd, r)?;
+        rows.push(StudySample {
+            step,
+            stopped_by_contact: r.stopped_by_contact,
+            stopped_by_loop: r.stopped_by_loop,
+            positions: positions(&t).iter().map(|(n, x)| part_pose(n, x)).collect(),
+        });
     }
-    let out = json!({"study": m.name, "steps": m.steps, "samples": rows});
     if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096) {
+        let count = rows.len();
         let text = if path.to_ascii_lowercase().ends_with(".csv") {
             let mut c = String::from("step,occurrence,x,y,z,xx,xy,xz,yx,yy,yz,zx,zy,zz\n");
             for r in &rows {
-                for p in r["positions"].as_array().into_iter().flatten() {
-                    let pose = &p["pose"];
-                    let n = |k: &str, i: usize| pose[k][i].as_f64().unwrap_or(0.0);
+                for at in &r.positions {
+                    let [o, x, y, z] = [at.pose.origin, at.pose.x, at.pose.y, at.pose.z];
+                    // The step as JSON writes it (`0.0`, not `0`), as the file always had it.
                     c += &format!(
                         "{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
-                        r["step"],
-                        p["occurrence"].as_str().unwrap_or_default().replace(',', " "),
-                        n("origin", 0),
-                        n("origin", 1),
-                        n("origin", 2),
-                        n("x", 0),
-                        n("x", 1),
-                        n("x", 2),
-                        n("y", 0),
-                        n("y", 1),
-                        n("y", 2),
-                        n("z", 0),
-                        n("z", 1),
-                        n("z", 2)
+                        Value::from(r.step),
+                        at.occurrence.replace(',', " "),
+                        o[0],
+                        o[1],
+                        o[2],
+                        x[0],
+                        x[1],
+                        x[2],
+                        y[0],
+                        y[1],
+                        y[2],
+                        z[0],
+                        z[1],
+                        z[2]
                     );
                 }
             }
             c
         } else {
-            serde_json::to_string_pretty(&out).unwrap_or_default()
+            // Through a `Value`, whose keys are sorted, so the file reads as it always did.
+            let samples = StudyExport::Samples { study: m.name, steps: m.steps, samples: rows };
+            serde_json::to_value(&samples).and_then(|v| serde_json::to_string_pretty(&v)).unwrap_or_default()
         };
         solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
         solidcraft_io::write_atomic(std::path::Path::new(path), text.as_bytes(), false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-        return Ok(json!({"path": path, "samples": rows.len()}));
+        return typed_reply(
+            cmd,
+            StudyExported { export: StudyExport::Written { path: path.to_string(), samples: count }, param_warnings: Vec::new() },
+        );
     }
-    Ok(out)
+    typed_reply(cmd, StudyExported { export: StudyExport::Samples { study: m.name, steps: m.steps, samples: rows }, param_warnings: Vec::new() })
 }
 
 /// Most samples of a motion trace: each is a solve, and a kept trace keeps every one as a fit
@@ -998,36 +1143,37 @@ fn keep_sampled_trace(
 }
 
 fn list_studies(s: &mut Session, _p: &Value) -> Result<Value> {
-    let studies: Vec<Value> = s.doc.assembly.studies.iter().map(|m| study_json(s, m)).collect();
-    Ok(json!({"studies": studies, "traces": associative::list(s)}))
+    let studies = s.doc.assembly.studies.iter().map(|m| study_info(s, m)).collect();
+    typed_reply("motion.list", MotionStudies { studies, traces: associative::list(s), param_warnings: Vec::new() })
 }
 
 /// A study as `motion.list` gives it: key values in the units `motion.study` takes — degrees
 /// for angles, mm for distances, like `joint.list`'s values — each key with its joint's name,
 /// so a listed study can be fed back to `motion.study` unchanged.
-fn study_json(s: &Session, m: &MotionStudy) -> Value {
-    let keys: Vec<Value> = m
+fn study_info(s: &Session, m: &MotionStudy) -> MotionStudyInfo {
+    let keys = m
         .keys
         .iter()
         .map(|k| {
             let joint = s.doc.assembly.joints.iter().find(|j| j.id == k.joint);
             let angle = joint.is_some_and(|j| j.kind.is_angle(k.index));
-            json!({
-                "joint": k.joint,
-                "joint_name": joint.map(|j| j.name.clone()).unwrap_or_else(|| k.joint.to_string()),
-                "index": k.index,
-                "unit": if angle { "deg" } else { "mm" },
-                "points": k.points.iter().map(|(step, v)| json!([step, if angle { v.to_degrees() } else { *v }])).collect::<Vec<_>>(),
-            })
+            MotionStudyKeyInfo {
+                joint: k.joint,
+                joint_name: joint.map(|j| j.name.clone()).unwrap_or_else(|| k.joint.to_string()),
+                index: k.index,
+                unit: if angle { "deg" } else { "mm" }.into(),
+                points: k.points.iter().map(|(step, v)| [*step, if angle { v.to_degrees() } else { *v }]).collect(),
+            }
         })
         .collect();
-    json!({"id": m.id, "name": m.name, "steps": m.steps, "keys": keys})
+    MotionStudyInfo { id: m.id, name: m.name.clone(), steps: m.steps, keys }
 }
 
 fn delete_study(s: &mut Session, p: &Value) -> Result<Value> {
-    let i = study_index(s, p, "motion.delete")?;
+    let cmd = "motion.delete";
+    let i = study_index(s, p, cmd)?;
     let m = s.doc_mut().assembly.studies.remove(i);
-    Ok(json!({"deleted": m.name}))
+    typed_reply(cmd, MotionStudyDeleted { deleted: m.name, param_warnings: Vec::new() })
 }
 
 // ---- Exploded views ----
@@ -1058,7 +1204,7 @@ fn centres(s: &Session) -> Vec<(u64, Vec3)> {
     for o in s.doc.occurrences.iter().filter(|o| o.parent == 0) {
         let mut bounds = Aabb3::EMPTY;
         for (_, b) in bodies.iter().filter(|(path, _)| path.first() == Some(&o.id)) {
-            if let Ok(m) = b.tessellate((b.size() * 1e-2).max(1e-2)) {
+            if let Ok(m) = b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-2).max(1e-2))) {
                 bounds = bounds.union(&m.bounds());
             }
         }
@@ -1109,21 +1255,35 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
     let name =
         str_(p, "name").map(str::to_string).unwrap_or_else(|| free_name("Exploded View", s.doc.assembly.exploded.iter().map(|v| v.name.as_str())));
     s.doc_mut().assembly.exploded.push(ExplodedView { id, name: name.clone(), moves: moves.clone() });
-    Ok(json!({"view": id, "name": name, "moves": moves.iter().map(|(o, t)| json!({"occurrence": o, "translate": t})).collect::<Vec<_>>()}))
+    let moves = moves.iter().map(ExplodeMoveInfo::from).collect();
+    typed_reply(cmd, ExplodeCreated { view: id, name, moves, param_warnings: Vec::new() })
 }
 
 fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "explode.show";
     if p.get("view").is_none_or(|v| v.is_null() || v.as_str().is_some_and(|x| x.eq_ignore_ascii_case("none"))) {
         s.pending_moves.clear();
+        s.exploded.clear();
         s.revision += 1;
-        return Ok(json!({"view": null}));
+        return typed_reply(cmd, ExplodeShown { view: None, name: None, param_warnings: Vec::new() });
     }
     let i = view_index(s, p, cmd)?;
     let v = s.doc.assembly.exploded.get(i).cloned().ok_or_else(|| bad(cmd, "view"))?;
-    s.pending_moves = exploded_at(&explode_moves(s, &v), 1.0);
+    let moves = exploded_at(&explode_moves(s, &v), 1.0);
+    if !moves.values().all(solidcraft_doc::is_placement) {
+        return Err(bad(cmd, format!("exploded view `{}` moves an occurrence out of range", v.name)));
+    }
+    // Shown only: `exploded` marks these as the view's, so the design's placements leave them out.
+    s.exploded.clone_from(&moves);
+    s.pending_moves = moves;
     s.revision += 1;
-    Ok(json!({"view": v.id, "name": v.name}))
+    typed_reply(cmd, ExplodeShown { view: Some(v.id), name: Some(v.name), param_warnings: Vec::new() })
+}
+
+/// Whether the pending moves are an exploded view shown (`explode.show`), which places the
+/// occurrences only while it is shown: not a move to capture or save (#9736).
+pub(crate) fn shows_exploded_view(s: &Session) -> bool {
+    s.doc.assembly.exploded.iter().any(|v| exploded_at(&explode_moves(s, v), 1.0) == s.pending_moves)
 }
 
 /// What exploded view `v` moves: (occurrence, its placement, the translation the view adds). Moves
@@ -1150,13 +1310,14 @@ fn exploded_at(moves: &[(u64, Mat, Vec3)], amount: f64) -> std::collections::BTr
 }
 
 fn explode_list(s: &mut Session, _p: &Value) -> Result<Value> {
-    Ok(json!({"views": s.doc.assembly.exploded}))
+    let views = s.doc.assembly.exploded.iter().map(ExplodedViewInfo::from).collect();
+    typed_reply("explode.list", ExplodeViews { views, param_warnings: Vec::new() })
 }
 
 fn explode_delete(s: &mut Session, p: &Value) -> Result<Value> {
     let i = view_index(s, p, "explode.delete")?;
     let v = s.doc_mut().assembly.exploded.remove(i);
-    Ok(json!({"deleted": v.name}))
+    typed_reply("explode.delete", ExplodeDeleted { deleted: v.name, param_warnings: Vec::new() })
 }
 
 /// World position of a point of an occurrence (tests).

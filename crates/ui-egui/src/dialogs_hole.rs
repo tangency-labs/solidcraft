@@ -8,8 +8,8 @@ use egui::{Color32, Pos2, Rect, Shape, Stroke, pos2, vec2};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 
 use crate::dialogs::{HoleOpts, Kind};
-use crate::theme::Tokens;
 use crate::ui_kit::FigureSlot;
+use solidcraft_theme::Tokens;
 
 /// A size the section shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,7 +71,10 @@ fn bore_diameter(diameter: &str, opts: &HoleOpts, eval: &dyn Fn(&str, ValueKind)
         if opts.custom_thread.as_ref().is_some_and(|draft| draft.error.is_some()) {
             return None;
         }
-        solidcraft_engine::doc::parse_tapped_thread(&opts.thread).map(|size| size.tap_drill)
+        match opts.drill.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+            Some(drill) => eval(drill, ValueKind::Length).filter(|v| v.is_finite() && *v > 0.0),
+            None => solidcraft_engine::doc::parse_tapped_thread(&opts.thread).map(|size| size.tap_drill),
+        }
     } else {
         eval(diameter, ValueKind::Length).filter(|v| v.is_finite() && *v > 0.0)
     }
@@ -463,7 +466,8 @@ mod tests {
                         (Dim::ThreadDepth, 145.0),
                     ]
                     .map(|(dim, y)| (dim, Rect::from_min_size(pos2(150.0, y), vec2(100.0, 20.0)), false));
-                    let output = ctx.run_ui(egui::RawInput::default(), |ui| paint(ui.painter(), pic, &section, &slots));
+                    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| paint(ui.painter(), pic, &section, &slots));
+                    output.textures_delta.clear();
                     let mut dimensions: Vec<_> = output
                         .shapes
                         .iter()
@@ -492,7 +496,7 @@ mod tests {
     fn tapped_section_uses_the_current_nominal_size_and_pitch() {
         let mut opts = HoleOpts { tapped: true, thread: "M8".into(), ..HoleOpts::default() };
         let stale_diameter = |_: &str, _: ValueKind| Some(4.0);
-        assert_eq!(bore_diameter("4 mm", &opts, &stale_diameter), Some(6.75));
+        assert_eq!(bore_diameter("4 mm", &opts, &stale_diameter), Some(6.8));
         opts.thread = "M8x1.2".into();
         assert_eq!(bore_diameter("4 mm", &opts, &stale_diameter), Some(6.8));
         for (designation, drill) in [("G 1/4", 11.75), ("Rp 1/4", 11.4), ("1/4-20 UNC", 5.1054)] {
@@ -530,11 +534,12 @@ mod tests {
         let ctx = crate::fonts::test_context();
         let drawn = |choice: Choice| {
             let mut size = egui::Vec2::ZERO;
-            let output = ctx.run_ui(Default::default(), |ui| {
+            let mut output = ctx.run_ui(Default::default(), |ui| {
                 let before = ui.min_rect();
                 preview(ui, &form, false, choice, &|_, _| Some(10.0));
                 size = ui.min_rect().size() - before.size();
             });
+            output.textures_delta.clear();
             assert!(size.x > 0.0 && size.y > 0.0, "{choice:?} drew nothing");
             output.shapes.into_iter().map(|c| c.shape).collect::<Vec<_>>()
         };

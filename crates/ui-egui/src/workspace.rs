@@ -28,8 +28,8 @@ pub fn word_cased(name: &str) -> String {
 /// A ribbon tab's name as the ribbon shows it, in the current language: "SHEET METAL" reads
 /// "Sheet Metal", or "Blech" in German. A partial catalog may translate only the word-cased name.
 pub fn tab_name(tab: &str) -> String {
-    let cased = word_cased(crate::i18n::tr_label(tab_label(tab)));
-    crate::i18n::tr_label(&cased).to_string()
+    let cased = word_cased(solidcraft_ui_text::tr_label(tab_label(tab)));
+    solidcraft_ui_text::tr_label(&cased).to_string()
 }
 
 pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"];
@@ -247,6 +247,7 @@ pub const SECTIONS: &[Section] = &[
             "view.grid",
             "view.ground_shadow",
             "view.navigation_bar",
+            "view.ribbon_tabs_only",
         ],
     },
     Section { tab: "VIEW", panel: "SELECT", promoted: 0, ids: &[] },
@@ -1353,16 +1354,16 @@ mod tests {
         h.frames(3);
         let links = h.app.session.execute("component.links", &json!({})).unwrap();
         assert_eq!(links["links"][0]["name"], "part1", "{links}");
-        assert_eq!(h.app.session.world_state().bodies.len(), 1);
+        assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
         h.step(&json!({"choose_file": "part2.step"})).unwrap();
         h.step(&json!({"start": "component.insert_design"})).unwrap();
         for _ in 0..600 {
-            if h.app.session.world_state().bodies.len() == 2 {
+            if h.app.session.world_state().unwrap().bodies.len() == 2 {
                 break;
             }
             h.frames(1);
         }
-        assert_eq!(h.app.session.world_state().bodies.len(), 2, "the STEP file's body is inserted");
+        assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 2, "the STEP file's body is inserted");
     }
 
     /// Every way into a sketch (New Sketch on the ribbon then a plane, a double-click in the

@@ -4,15 +4,70 @@ use super::{
     metrics::*,
     text::paint_text,
 };
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
-use crate::{scenario, theme::Tokens};
 use egui::{Response, RichText, Ui, vec2};
+use solidcraft_theme::Tokens;
+use std::sync::Arc;
 
 /// One alignment policy for every kit text input. Align the galley itself rather than
 /// approximating font metrics with integer margins (Plex Mono and Sans differ).
 pub(super) fn text_input(edit: egui::TextEdit<'_>) -> egui::TextEdit<'_> {
     let t = Tokens::get();
-    edit.vertical_align(egui::Align::Center).margin(vec2(t.form_inset, 0.0)).min_size(vec2(0.0, t.control_height))
+    edit.align(egui::Align2::LEFT_CENTER).margin(vec2(t.form_inset, 0.0)).min_size(vec2(0.0, t.control_height))
+}
+
+/// The host's expression language, as the kit's value fields use it. The kit draws and edits the
+/// text; it never parses expressions itself. The host installs one per context with
+/// [`install_expressions`]. Without one, a field's label drag changes nothing (no text is a
+/// literal), an editor offers no completion or stepping, and a length field edits plain
+/// millimetres: scale 1.0 and suffix "mm", shown with `decimals` places and read back as a
+/// plain number.
+pub trait Expressions: Send + Sync {
+    /// Whether the trimmed `text` is a plain literal: a number with an optional unit ("20 mm",
+    /// "-1.5 in"), not a parameter or a formula. Only a literal can be changed by a label drag.
+    fn is_literal(&self, text: &str) -> bool;
+    /// Whether `unit`, the text after a literal's number as written (" mm", "in", ""), is a unit
+    /// of the language. An empty unit is a unit-less number.
+    fn is_unit(&self, unit: &str) -> bool;
+    /// Offer completion and stepping for this frame under the editor `response` over `text`.
+    /// Returns true when either changed the text; that frame's Enter then accepts the change
+    /// instead of submitting.
+    fn complete(&self, ui: &mut Ui, response: &Response, text: &mut String) -> bool;
+    /// The display unit for the design unit name `units`: units per millimetre and the unit's
+    /// name, as a length field's suffix shows it.
+    fn unit_scale(&self, units: &str) -> (f64, &'static str);
+    /// The millimetre length `mm` as a number in the display unit `unit`, without the unit,
+    /// with `decimals` places (the language may show more where the unit needs them).
+    fn length_number(&self, mm: f64, unit: &str, decimals: u8) -> String;
+    /// The length typed as `text` in millimetres: a bare number is in the display unit (`scale`
+    /// units per millimetre), an explicit unit is honoured. None when `text` is not a length.
+    fn parse_length_mm(&self, text: &str, scale: f64) -> Option<f64>;
+}
+
+/// Where a context keeps its installed [`Expressions`].
+fn expressions_id() -> egui::Id {
+    egui::Id::unique("sc_kit_expressions")
+}
+
+/// Give every kit value field in `ctx` the host's expression language. Installing again replaces it.
+pub fn install_expressions(ctx: &egui::Context, expressions: Arc<dyn Expressions>) {
+    ctx.data_mut(|data| data.insert_temp(expressions_id(), expressions));
+}
+
+/// The expression language installed in `ctx`, if any.
+pub(crate) fn expressions(ctx: &egui::Context) -> Option<Arc<dyn Expressions>> {
+    ctx.data(|data| data.get_temp::<Arc<dyn Expressions>>(expressions_id()))
+}
+
+/// A plain number typed into a field, with a decimal point or a decimal comma (#1347): "2.5"
+/// and "2,5" are both 2.5, as a numeric keypad types either depending on the locale. Spaces are
+/// ignored and "−" is a minus, as in egui's own parser. A comma beside a point ("1.234,5") or a
+/// second comma is not guessed at: the text is not a number.
+pub(crate) fn parse_number(text: &str) -> Option<f64> {
+    let t: String = text.chars().filter(|c| !c.is_whitespace()).map(|c| if c == '\u{2212}' { '-' } else { c }).collect();
+    let t = if !t.contains('.') && t.matches(',').count() == 1 { t.replacen(',', ".", 1) } else { t };
+    t.parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 /// Expression editor with the application's existing completion and number-focus behaviour.
@@ -25,6 +80,18 @@ pub(crate) fn field(ui: &mut Ui, value: &mut String) -> bool {
 /// Expression editor with empty-value hint. Tokens: `same as field`.
 pub(crate) fn hint_field(ui: &mut Ui, value: &mut String, hint: &str) -> bool {
     editor(ui, value, hint, true).0
+}
+
+/// [`hint_field`] for a value the form checks before it runs: `flagged`, it is outlined in the
+/// warning colour (the caller says why in words under it, [`super::warning_caption`]). Returns
+/// accepted Enter and the editor's response. Tokens: `same as field, warning`.
+pub(crate) fn checked_field(ui: &mut Ui, value: &mut String, hint: &str, flagged: bool) -> (bool, Response) {
+    let (enter, _, response) = editor(ui, value, hint, true);
+    if flagged {
+        let t = Tokens::get();
+        ui.painter().rect_stroke(response.rect, t.control_radius, egui::Stroke::new(1.5, t.warning), egui::StrokeKind::Inside);
+    }
+    (enter, response)
 }
 
 /// The whole numbers a count field may hold, and how its text evaluates (parameters and
@@ -51,7 +118,7 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
     let row = label(ui).to_owned();
     for (delta, half, name) in [(1, column.split_top_bottom_at_fraction(0.5).0, "up"), (-1, column.split_top_bottom_at_fraction(0.5).1, "down")] {
         let next = step_count(value, delta, limits);
-        let arrow = ui.interact(half, ui.id().with(("sc_count_step", &row, name)), egui::Sense::click());
+        let arrow = ui.interact(half, ui.scope_id().with(("sc_count_step", &row, name)), egui::Sense::click());
         let enabled = ui.is_enabled() && next.is_some();
         // The arrows stand inside the editor, which claims the text cursor across its whole
         // rect: they are not text, so each one takes the ordinary cursor back after it. The
@@ -72,8 +139,8 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
             egui::Stroke::NONE,
         ));
         let sign = if delta > 0 { "+1" } else { "−1" };
-        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, format!("{} {sign}", crate::i18n::tr_label(&row))));
-        scenario::publish_handle(&format!("dialog:{row} {name}"), half.center());
+        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, format!("{} {sign}", solidcraft_ui_text::tr_label(&row))));
+        solidcraft_ui_registry::publish_handle(&format!("dialog:{row} {name}"), half.center());
         if let (true, true, Some(next)) = (enabled, arrow.clicked(), next) {
             *value = next;
         }
@@ -115,10 +182,138 @@ fn step_count(text: &str, delta: i64, limits: &Count<'_>) -> Option<String> {
     candidates.into_iter().flatten().find(|c| (limits.eval)(c).is_some_and(|v| (v - target as f64).abs() < 1e-9))
 }
 
+/// A value a label drag can change: a number with an optional unit ("20 mm", "1,5 in", "45°").
+#[derive(Clone, Debug, PartialEq)]
+struct Literal {
+    number: f64,
+    /// The text after the number, as written (" mm").
+    unit: String,
+    comma: bool,
+}
+
+/// The largest value a label drag reads or writes.
+const LITERAL_CAP: f64 = 1e12;
+
+/// `text` as a [`Literal`] of the `expressions` language, or None for anything else: a parameter,
+/// a formula, an empty field. Dragging never rewrites an expression, so a driving parameter stays driving.
+fn literal(expressions: &dyn Expressions, text: &str) -> Option<Literal> {
+    let text = text.trim();
+    if !expressions.is_literal(text) {
+        return None;
+    }
+    let sign = usize::from(text.starts_with(['-', '+']));
+    let end = text.char_indices().skip(sign).find(|(_, c)| !(c.is_ascii_digit() || *c == '.' || *c == ',')).map_or(text.len(), |(at, _)| at);
+    let (number, unit) = (text.get(..end)?, text.get(end..)?);
+    // An exponent ("1e3") or anything else that is not a unit is left alone.
+    if !expressions.is_unit(unit) {
+        return None;
+    }
+    let comma = number.contains(',');
+    let number: f64 = number.replace(',', ".").parse().ok().filter(|n: &f64| n.is_finite() && n.abs() < LITERAL_CAP)?;
+    Some(Literal { number, unit: unit.to_owned(), comma })
+}
+
+/// How much one point of drag changes a value of this size, before Shift or Ctrl: about a
+/// hundredth of it, as a power of ten, so 20 mm moves by 0.1 mm and 250 mm by 1 mm.
+fn scrub_step(number: f64) -> f64 {
+    let decade = number.abs().max(1.0).log10().floor().clamp(0.0, 8.0);
+    10f64.powf(decade - 2.0)
+}
+
+/// `anchor` moved by `points` of drag at `step` per point, on the step's grid. A value that
+/// starts at zero or above stays there: a drag never turns a size negative.
+fn scrubbed(anchor: f64, points: f32, step: f64) -> f64 {
+    let moved = ((anchor + f64::from(points) * step) / step).round() * step;
+    let moved = if anchor >= 0.0 { moved.max(0.0) } else { moved };
+    // Literal values are capped where `literal` reads them; a drag never leaves that range.
+    if moved.is_finite() && moved.abs() < LITERAL_CAP { moved } else { anchor }
+}
+
+/// The scrubbed text: as many decimals as the step needs, the unit and decimal mark as typed.
+fn scrub_text(number: f64, step: f64, literal: &Literal) -> String {
+    let decimals = (-step.log10()).ceil().clamp(0.0, 6.0) as usize;
+    let mut text = format!("{number:.decimals$}");
+    if text.starts_with('-') && text.trim_start_matches(['-', '0', '.']).is_empty() {
+        text.remove(0);
+    }
+    if literal.comma {
+        text = text.replace('.', ",");
+    }
+    text + &literal.unit
+}
+
+/// An ongoing label drag: the value and pointer x it is measured from, and the speed in use.
+#[derive(Clone)]
+struct Scrub {
+    anchor: f64,
+    origin: f32,
+    step: f64,
+}
+
+/// Dragging a row's label sideways changes the literal value in its field: Shift for a tenth of
+/// the speed, Ctrl (Cmd on a Mac) for ten times. The text changes as if typed, so previews
+/// follow, and the dialog's OK still makes the one command (and the one undo step). A field
+/// holding an expression or a parameter is left alone. Returns whether the text changed.
+pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
+    let id = label.id.with("sc_scrub");
+    let Some(now) = expressions(ui.ctx()).and_then(|e| literal(e.as_ref(), value)).filter(|_| ui.is_enabled()) else {
+        ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+        return false;
+    };
+    if label.hovered() || label.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+    if !label.dragged() {
+        ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+        return false;
+    }
+    let factor = ui.input(|i| {
+        if i.modifiers.shift {
+            0.1
+        } else if i.modifiers.command {
+            10.0
+        } else {
+            1.0
+        }
+    });
+    // Measured from where the pointer is, not summed per frame, so no frame's jump is lost or doubled.
+    let (Some(x), Some(pressed)) = ui.input(|i| (i.pointer.latest_pos().map(|p| p.x), i.pointer.press_origin().map(|p| p.x))) else {
+        return false;
+    };
+    let base = ui.ctx().data(|data| data.get_temp::<Scrub>(id));
+    // A new drag starts from where it was pressed; a changed modifier starts over from here.
+    let state = match base {
+        Some(state) if (state.step - scrub_step(state.anchor) * factor).abs() <= state.step * 1e-9 => state,
+        Some(_) => Scrub { anchor: now.number, origin: x, step: scrub_step(now.number) * factor },
+        None => Scrub { anchor: now.number, origin: pressed, step: scrub_step(now.number) * factor },
+    };
+    let points = x - state.origin;
+    let text = scrub_text(scrubbed(state.anchor, if points.is_finite() { points } else { 0.0 }, state.step), state.step, &now);
+    ui.ctx().data_mut(|data| data.insert_temp(id, state));
+    if text == *value {
+        return false;
+    }
+    *value = text;
+    true
+}
+
 /// Names, thread designations and plain numeric counts do not accept expression completion.
 /// Plain text editor without expression completion; returns (Enter, changed). Tokens: `same as field`.
 pub(crate) fn text_field(ui: &mut Ui, value: &mut String, hint: &str) -> (bool, bool) {
     let (enter, changed, _) = editor(ui, value, hint, false);
+    (enter, changed)
+}
+
+/// Plain field reserving trailing space for an in-field value such as a counter.
+pub(crate) fn text_field_reserving(ui: &mut Ui, value: &mut String, hint: &str, reserve: f32) -> (bool, Response) {
+    let (enter, _, response) = editor_reserving(ui, value, hint, false, reserve);
+    (enter, response)
+}
+
+/// [`text_field`] with a tooltip; returns (Enter, changed). Tokens: `same as field`.
+pub(crate) fn text_field_tip(ui: &mut Ui, value: &mut String, hint: &str, tip: &str) -> (bool, bool) {
+    let (enter, changed, response) = editor(ui, value, hint, false);
+    response.backing_on_hover_text(tip);
     (enter, changed)
 }
 
@@ -152,7 +347,7 @@ pub(crate) fn multiline_text_field(ui: &mut Ui, label: &str, id: egui::Id, value
                 .background_color(t.input_fill()),
         );
         super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINES);
-        publish(ui, &response, egui::WidgetType::TextEdit);
+        publish(ui, &response, egui::Role::TextInput);
         response
     })
 }
@@ -194,7 +389,7 @@ fn searchable_dropdown_with(
     menu: SearchMenu<'_>,
 ) -> Option<String> {
     let SearchMenu { custom, pending, icon } = menu;
-    crate::prefs_search::note_current(ui, current);
+    super::settings_search::note_current(ui, current);
     let mut chosen = None;
     let row = label(ui).to_owned();
     let combo = egui::ComboBox::from_id_salt(id)
@@ -207,52 +402,54 @@ fn searchable_dropdown_with(
     } else {
         combo.icon(dropdown_arrow)
     };
-    let response = combo
-        .show_ui(ui, |ui| {
-            let search = ui.add(
-                text_input(egui::TextEdit::singleline(filter))
-                    .id_salt(format!("{id}_search"))
-                    .hint_text(crate::i18n::tr_label("Search"))
-                    .desired_width(f32::INFINITY),
-            );
-            // Preferences types into its own search only while no field has the keyboard.
-            if search.has_focus() {
-                crate::prefs_search::note_key_sink(ui.ctx());
+    let popup = super::container::show_combo(ui, ui.make_persistent_id(egui::IdSalt::new(id)), combo, |ui| {
+        let search = ui.add(
+            text_input(egui::TextEdit::singleline(filter))
+                .id_salt(format!("{id}_search"))
+                .hint_text(solidcraft_ui_text::tr_label("Search"))
+                .desired_width(f32::INFINITY),
+        );
+        // Preferences types into its own search only while no field has the keyboard.
+        if search.has_focus() {
+            super::settings_search::note_key_sink(ui.ctx());
+        }
+        solidcraft_ui_registry::publish_handle(&format!("dialog:{row} search"), search.rect.center());
+        if let Some(custom) = custom {
+            let response = ui.selectable_label(false, custom);
+            solidcraft_ui_registry::publish_handle(&format!("dialog:{row} file"), response.rect.center());
+            if response.clicked() {
+                chosen = Some(filter.trim().to_owned());
+                ui.close();
             }
-            scenario::publish_handle(&format!("dialog:{row} search"), search.rect.center());
-            if let Some(custom) = custom {
-                let response = ui.selectable_label(false, custom);
-                scenario::publish_handle(&format!("dialog:{row} file"), response.rect.center());
-                if response.clicked() {
-                    chosen = Some(filter.trim().to_owned());
-                    ui.close();
+            return;
+        }
+        let query = filter.to_lowercase();
+        egui::ScrollArea::vertical()
+            .id_salt(format!("{id}_list"))
+            .max_height(Tokens::get().space_24 * 10.0)
+            .min_scrolled_height(Tokens::get().space_24 * 10.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
+                    let response = ui.selectable_label(current == option.label, option.label);
+                    if let Some(handle) = option.handle {
+                        solidcraft_ui_registry::publish_handle(handle, response.rect.center());
+                    }
+                    if response.clicked() {
+                        chosen = Some(option.value.to_owned());
+                        ui.close();
+                    }
                 }
-                return;
-            }
-            let query = filter.to_lowercase();
-            egui::ScrollArea::vertical()
-                .id_salt(format!("{id}_list"))
-                .max_height(Tokens::get().space_24 * 10.0)
-                .min_scrolled_height(Tokens::get().space_24 * 10.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
-                        let response = ui.selectable_label(current == option.label, option.label);
-                        if let Some(handle) = option.handle {
-                            scenario::publish_handle(handle, response.rect.center());
-                        }
-                        if response.clicked() {
-                            chosen = Some(option.value.to_owned());
-                            ui.close();
-                        }
-                    }
-                    if let Some(pending) = pending {
-                        ui.label(pending);
-                    }
-                });
-        })
-        .response;
-    publish(ui, &response, egui::WidgetType::ComboBox);
+                if let Some(pending) = pending {
+                    ui.label(pending);
+                }
+            });
+    });
+    let response = popup.response;
+    if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        response.request_focus();
+    }
+    publish(ui, &response, egui::Role::ComboBox);
     chosen
 }
 
@@ -312,25 +509,27 @@ pub(crate) enum Picked {
 /// list stays cheap. Returns the pick and the control's response.
 /// Tokens: dropdown tokens, field tokens, `space_24`, `font_small`, `text_dim`, `form_card_width`.
 pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResponse<Option<Picked>> {
-    crate::prefs_search::note_current(ui, p.current);
+    super::settings_search::note_current(ui, p.current);
     // As in `dropdown_menu_with_close_behavior`: only a search probe skips the real control.
-    if crate::prefs_search::querying(ui)
-        && (!ui.is_visible() || (crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[p.current])))
+    if super::settings_search::querying(ui)
+        && (!ui.is_visible() || (super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, &[p.current])))
     {
-        return egui::InnerResponse::new(None, crate::prefs_search::hidden_response(ui));
+        return egui::InnerResponse::new(None, super::settings_search::hidden_response(ui));
     }
-    let state = egui::Id::new(p.id);
+    let state = egui::Id::unique(p.id);
     let mut picked = None;
     let response = ui
         .add_enabled_ui(p.enabled, |ui| {
-            let response = egui::ComboBox::from_id_salt(p.id)
+            let combo = egui::ComboBox::from_id_salt(p.id)
                 .width(dimension(ui.available_width()))
                 .height(Tokens::get().space_24 * 20.0)
                 .selected_text(p.current)
                 .icon(dropdown_arrow)
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .show_ui(ui, |ui| picked = search_picker_popup(ui, &p, state))
-                .response;
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+            let response = super::container::show_combo(ui, ui.make_persistent_id(egui::IdSalt::new(p.id)), combo, |ui| {
+                picked = search_picker_popup(ui, &p, state)
+            })
+            .response;
             // Closed: the next opening starts with an empty box that has the focus.
             if !egui::ComboBox::is_open(ui.ctx(), response.id) {
                 ui.data_mut(|data| {
@@ -343,8 +542,8 @@ pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResp
             response
         })
         .inner;
-    publish(ui, &response, egui::WidgetType::ComboBox);
-    scenario::publish_target(p.handles, response.rect);
+    publish(ui, &response, egui::Role::ComboBox);
+    solidcraft_ui_registry::publish_target(p.handles, response.rect);
     egui::InnerResponse::new(picked, response)
 }
 
@@ -370,7 +569,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
             .desired_width(f32::INFINITY),
     );
     t.input_bevel(ui, &search);
-    scenario::publish_target(&format!("{}:search", p.handles), search.rect);
+    solidcraft_ui_registry::publish_target(&format!("{}:search", p.handles), search.rect);
     // Asked until it has it: over a modal window egui drops the request of the opening's first frame.
     if !ui.data(|data| data.get_temp::<bool>(focused_id)).unwrap_or(false) {
         if search.has_focus() {
@@ -381,7 +580,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
         }
     }
     if search.has_focus() {
-        crate::prefs_search::note_key_sink(ui.ctx());
+        super::settings_search::note_key_sink(ui.ctx());
     }
     if search.changed() {
         ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
@@ -455,16 +654,16 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
     ui.allocate_ui(vec2(dimension(width), height), |ui| {
         ui.set_min_height(height);
         if let Some(model) = custom {
-            search_heading(ui, crate::i18n::tr("ui.agent_chat_custom_heading"), t.space_16);
-            let text = crate::i18n::format("ui.agent_chat_model_custom", &[("model", &compact(model, SEARCH_LABEL_CAP))]);
+            search_heading(ui, solidcraft_ui_text::tr("ui.agent_chat_custom_heading"), t.space_16);
+            let text = solidcraft_ui_text::format("ui.agent_chat_model_custom", &[("model", &compact(model, SEARCH_LABEL_CAP))]);
             let row = search_row(ui, &text, false);
-            scenario::publish_target(&format!("{}:custom", p.handles), row.rect);
+            solidcraft_ui_registry::publish_target(&format!("{}:custom", p.handles), row.rect);
             if row.clicked() {
                 picked = Some(Picked::Custom(model.to_owned()));
             }
         }
         if !visible.is_empty() {
-            search_heading(ui, crate::i18n::tr("ui.agent_chat_models_heading"), t.space_16);
+            search_heading(ui, solidcraft_ui_text::tr("ui.agent_chat_models_heading"), t.space_16);
             // Rows of one height, group headings too: only those in view are laid out.
             let list = (ui.available_height() - note_height).max(row_height);
             egui::ScrollArea::vertical()
@@ -478,16 +677,19 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
                             SearchRow::Heading(group) => search_heading(ui, group, row_height),
                             SearchRow::Group { name, count, open } => {
                                 let response = search_group_row(ui, name, *count, *open);
-                                scenario::publish_target(&format!("{}:group:{}", p.handles, name), response.rect);
+                                solidcraft_ui_registry::publish_target(&format!("{}:group:{}", p.handles, name), response.rect);
                                 if response.clicked() {
                                     toggled = Some(((*name).to_owned(), !*open));
                                 }
                             }
                             SearchRow::Choice(choice) => {
                                 let response = search_row(ui, &compact(choice.label, SEARCH_LABEL_CAP), choice.value == p.current_value);
-                                scenario::publish_target(&format!("{}:{}", p.handles, choice.value), response.rect);
-                                let response =
-                                    if choice.tip.is_empty() { response } else { response.on_hover_text(compact(choice.tip, SEARCH_NOTE_CAP)) };
+                                solidcraft_ui_registry::publish_target(&format!("{}:{}", p.handles, choice.value), response.rect);
+                                let response = if choice.tip.is_empty() {
+                                    response
+                                } else {
+                                    response.backing_on_hover_text(compact(choice.tip, SEARCH_NOTE_CAP))
+                                };
                                 if response.clicked() {
                                     picked = Some(Picked::Listed(choice.value.to_owned()));
                                 }
@@ -506,7 +708,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
         if let Some(note) = note {
             let response = ui.add(egui::Label::new(note));
             if let Some(whole) = p.note.filter(|whole| whole.chars().count() > SEARCH_NOTE_SHOWN) {
-                response.on_hover_text(compact(whole, SEARCH_NOTE_CAP));
+                response.backing_on_hover_text(compact(whole, SEARCH_NOTE_CAP));
             }
         }
     });
@@ -604,7 +806,7 @@ fn search_group_row(ui: &mut Ui, name: &str, count: usize, open: bool) -> Respon
     if rule_from < rule_to {
         painter.hline(rule_from..=rule_to, y, egui::Stroke::new(1.0, t.border));
     }
-    response.on_hover_text(crate::i18n::format("ui.agent_chat_provider_models", &[("count", &count.to_string())]))
+    response.backing_on_hover_text(solidcraft_ui_text::format("ui.agent_chat_provider_models", &[("count", &count.to_string())]))
 }
 
 /// A `search_picker` row: as `list_picker`, but read from the left, as a list of ids is.
@@ -625,7 +827,7 @@ fn search_heading(ui: &mut Ui, text: &str, height: f32) {
         false,
     );
     if text.chars().count() > SEARCH_LABEL_CAP {
-        response.on_hover_text(compact(text, SEARCH_NOTE_CAP));
+        response.backing_on_hover_text(compact(text, SEARCH_NOTE_CAP));
     }
 }
 
@@ -664,31 +866,31 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     }
     let mut response = ui.add_sized(vec2(width, row_height()), edit);
     if response.has_focus() {
-        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("sc_focused_editor"), response.id));
+        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_focused_editor"), response.id));
     }
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     if response.has_focus() {
-        crate::prefs_search::note_key_sink(ui.ctx());
+        super::settings_search::note_key_sink(ui.ctx());
     }
     if completion && ui.is_enabled() {
         ui.ctx().data_mut(|data| {
-            let id = egui::Id::new("sc_value_fields");
+            let id = egui::Id::unique("sc_value_fields");
             if data.get_temp::<Vec<(egui::Id, usize)>>(id).is_some() {
                 data.get_temp_mut_or_default::<Vec<(egui::Id, usize)>>(id).push((response.id, value.chars().count()));
             }
         });
     }
-    crate::theme::TabAccent::number_focus(ui, &response);
+    solidcraft_theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
-    let label = crate::i18n::tr_label(label(ui));
+    let label = solidcraft_ui_text::tr_label(label(ui));
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), label);
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), label);
         info.current_text_value = Some(value.clone());
         info
     });
     super::layout::publish_geometry(ui, &response);
     // A completion's Enter accepts the suggestion, rather than submitting the dialog.
-    let completed = completion && crate::params_dialog::complete(ui, &response, value);
+    let completed = completion && expressions(ui.ctx()).is_some_and(|e| e.complete(ui, &response, value));
     (!completed && response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)), response.changed(), response)
 }
 
@@ -699,29 +901,67 @@ fn dropdown_arrow(ui: &Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisua
 
 /// Native dropdown with kit arrow and scenario option handles. Tokens: `text_dim; scope control/font tokens`.
 pub(crate) fn dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> Response {
-    let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
+    let text = options.get(*selected).copied().map(solidcraft_ui_text::tr_label).unwrap_or("");
     let row = label(ui).to_string();
     dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
-            let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
-            scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
+            let response = ui.selectable_value(selected, index, solidcraft_ui_text::tr_label(option));
+            solidcraft_ui_registry::publish_target(&format!("dialog:{row}:{option}"), response.rect);
         }
     })
+}
+
+/// The standard dropdown with a leading application icon on the current value and each option.
+/// The text job reserves the icon's space; the native combo and selectable items own interaction.
+pub(crate) fn dropdown_icons(ui: &mut Ui, id: &str, selected: &mut usize, options: &[(&str, &str)]) -> Response {
+    let (text, icon) = options.get(*selected).copied().unwrap_or(("", ""));
+    let row = label(ui).to_owned();
+    dropdown_menu_width(ui, id, text, Some(icon), false, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+        for (index, (text, icon)) in options.iter().enumerate() {
+            let response = ui.selectable_label(*selected == index, dropdown_icon_text(text));
+            paint_dropdown_icon(ui, response.rect, icon);
+            solidcraft_ui_registry::publish_target(&format!("dialog:{row}:{text}"), response.rect);
+            if response.clicked() {
+                *selected = index;
+            }
+        }
+    })
+}
+
+fn dropdown_icon_text(text: &str) -> egui::text::LayoutJob {
+    let t = Tokens::get();
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        text,
+        t.space_16 + t.space_6,
+        egui::TextFormat { font_id: egui::FontId::proportional(t.font_label), color: t.form_ink, ..Default::default() },
+    );
+    job
+}
+
+fn paint_dropdown_icon(ui: &Ui, rect: egui::Rect, icon: &str) {
+    let t = Tokens::get();
+    let rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + ui.spacing().button_padding.x + t.space_8, rect.center().y),
+        vec2(t.space_16, t.space_16),
+    );
+    crate::icons::paint_ink(ui.painter(), rect, icon, t.form_ink);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:dropdown_icon:{icon}"), rect);
 }
 
 /// [`dropdown`] whose options each show a picture beside them while hovered, painted by `preview`
 /// for that option's index, so a choice can be seen before it is picked. Tokens: dropdown tokens,
 /// the tooltip frame.
 pub(crate) fn dropdown_previews(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str], preview: impl Fn(&mut Ui, usize)) -> Response {
-    let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
+    let text = options.get(*selected).copied().map(solidcraft_ui_text::tr_label).unwrap_or("");
     let row = label(ui).to_string();
     dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
-            let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
-            scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
+            let response = ui.selectable_value(selected, index, solidcraft_ui_text::tr_label(option));
+            solidcraft_ui_registry::publish_target(&format!("dialog:{row}:{option}"), response.rect);
             Container::tooltip_ui(&response, |ui| {
                 preview(ui, index);
-                scenario::publish_rect(&format!("dialog:preview:{row}:{option}"), ui.min_rect());
+                solidcraft_ui_registry::publish_rect(&format!("dialog:preview:{row}:{option}"), ui.min_rect());
             });
         }
     })
@@ -730,14 +970,14 @@ pub(crate) fn dropdown_previews(ui: &mut Ui, id: &str, selected: &mut usize, opt
 /// [`dropdown`] that also says whether an option was clicked, the one already shown included (a
 /// pick of the shown option changes nothing, yet it is a choice).
 pub(crate) fn dropdown_picked(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> bool {
-    let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
+    let text = options.get(*selected).copied().map(solidcraft_ui_text::tr_label).unwrap_or("");
     let row = label(ui).to_string();
     let mut picked = false;
     dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
-            let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
+            let response = ui.selectable_value(selected, index, solidcraft_ui_text::tr_label(option));
             picked |= response.clicked();
-            scenario::publish_handle(&format!("dialog:{row}:{option}"), response.rect.center());
+            solidcraft_ui_registry::publish_handle(&format!("dialog:{row}:{option}"), response.rect.center());
         }
     });
     picked
@@ -749,6 +989,52 @@ pub(crate) fn dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str,
     dropdown_menu_with_close_behavior(ui, id, current, egui::PopupCloseBehavior::CloseOnClick, add)
 }
 
+/// A width-bounded toolbar picker. Long selected values and popup rows truncate;
+/// callers can retain their complete labels in hover text.
+pub(crate) fn bounded_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, width: f32, add: impl FnOnce(&mut Ui)) -> Response {
+    super::settings_search::note_current(ui, current);
+    if super::settings_search::querying(ui)
+        && (!ui.is_visible() || (super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, &[current])))
+    {
+        return super::settings_search::hidden_response(ui);
+    }
+    let width = dimension(width);
+    let response = ui
+        .allocate_ui_with_layout(vec2(width, row_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.set_width(width);
+            let widget = ui.make_persistent_id(egui::IdSalt::new(&id));
+            let combo = egui::ComboBox::from_id_salt(id)
+                .width(width)
+                .height(Tokens::get().space_24 * 14.0)
+                .selected_text(current)
+                .truncate()
+                .icon(dropdown_arrow);
+            let popup = super::container::show_combo(ui, widget, combo, |ui| {
+                ui.set_max_width(width);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                add(ui);
+            });
+            let response = popup.response;
+            if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                response.request_focus();
+            }
+            response
+        })
+        .inner;
+    publish(ui, &response, egui::Role::ComboBox);
+    // The shared kit publication supplies chrome and row metadata, but omits
+    // the selected value. Restore both for the final focus/click announcement;
+    // visual truncation must not truncate the accessible captured-source name.
+    response.widget_info(|| {
+        let row_label = label(ui);
+        let name = if row_label.trim().is_empty() { current } else { solidcraft_ui_text::tr_label(row_label) };
+        let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), name);
+        info.current_text_value = Some(current.to_owned());
+        info
+    });
+    response
+}
+
 /// Dropdown with explicit dismissal behavior. For editable content use `CloseOnClickOutside`
 /// and close the popup when a choice is accepted.
 pub(crate) fn dropdown_menu_with_close_behavior(
@@ -758,29 +1044,30 @@ pub(crate) fn dropdown_menu_with_close_behavior(
     close_behavior: egui::PopupCloseBehavior,
     add: impl FnOnce(&mut Ui),
 ) -> Response {
-    dropdown_menu_width(ui, id, current, false, close_behavior, add)
+    dropdown_menu_width(ui, id, current, None, false, close_behavior, add)
 }
 
 /// Intrinsic-width variant for horizontal toolbars and bottom strips.
 pub(crate) fn compact_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, add: impl FnOnce(&mut Ui)) -> Response {
-    dropdown_menu_width(ui, id, current, true, egui::PopupCloseBehavior::CloseOnClick, add)
+    dropdown_menu_width(ui, id, current, None, true, egui::PopupCloseBehavior::CloseOnClick, add)
 }
 
 fn dropdown_menu_width(
     ui: &mut Ui,
     id: impl egui::AsIdSalt,
     current: &str,
+    leading_icon: Option<&str>,
     compact: bool,
     close_behavior: egui::PopupCloseBehavior,
     add: impl FnOnce(&mut Ui),
 ) -> Response {
-    crate::prefs_search::note_current(ui, current);
+    super::settings_search::note_current(ui, current);
     // Only a search probe may skip the real control. A dialog's first frame is not visible yet,
     // and a stand-in there makes the next frame too short to show OK.
-    if crate::prefs_search::querying(ui)
-        && (!ui.is_visible() || (crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[current])))
+    if super::settings_search::querying(ui)
+        && (!ui.is_visible() || (super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, &[current])))
     {
-        return crate::prefs_search::hidden_response(ui);
+        return super::settings_search::hidden_response(ui);
     }
     let t = Tokens::get();
     let width = if compact {
@@ -788,15 +1075,35 @@ fn dropdown_menu_width(
     } else {
         dimension(ui.available_width())
     };
-    let response = egui::ComboBox::from_id_salt(id)
+    let selected_text = if leading_icon.is_some() { egui::WidgetText::from(dropdown_icon_text(current)) } else { current.into() };
+    let widget = ui.make_persistent_id(egui::IdSalt::new(&id));
+    let combo = egui::ComboBox::from_id_salt(id)
         .width(width)
         .height(Tokens::get().space_24 * 14.0)
-        .selected_text(current)
+        .selected_text(selected_text)
         .icon(dropdown_arrow)
-        .close_behavior(close_behavior)
-        .show_ui(ui, add)
-        .response;
-    publish(ui, &response, egui::WidgetType::ComboBox);
+        .close_behavior(close_behavior);
+    let popup = super::container::show_combo(ui, widget, combo, add);
+    let response = popup.response;
+    // The native popup closes on Escape; keep the same key from reaching the enclosing window.
+    // Only this dropdown's shown popup owns the key, and its trigger regains keyboard focus.
+    if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        response.request_focus();
+    }
+    if let Some(icon) = leading_icon {
+        paint_dropdown_icon(ui, response.rect, icon);
+    }
+    publish(ui, &response, egui::Role::ComboBox);
+    // Kit chrome publishes the row label after egui's selected-text metadata.
+    // Keep that label when present, and the visible action/value for a bare
+    // dropdown, without losing its full current value in the final announcement.
+    response.widget_info(|| {
+        let row_label = label(ui);
+        let name = if row_label.trim().is_empty() { current } else { solidcraft_ui_text::tr_label(row_label) };
+        let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), name);
+        info.current_text_value = Some(current.to_owned());
+        info
+    });
     response
 }
 
@@ -854,10 +1161,10 @@ pub(crate) fn selection_field(ui: &mut Ui, text: &str, options: Selection) -> Re
         },
         false,
     );
-    publish(ui, &response, egui::WidgetType::Button);
-    scenario::publish_rect(&format!("dialog:field:{}", label(ui)), rect);
-    scenario::publish_count(&format!("dialog:selection:{}:filled", label(ui)), f64::from(filled));
-    scenario::publish_count(&format!("dialog:selection:{}:active", label(ui)), f64::from(active));
+    publish(ui, &response, egui::Role::Button);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:field:{}", label(ui)), rect);
+    solidcraft_ui_registry::publish_count(&format!("dialog:selection:{}:filled", label(ui)), f64::from(filled));
+    solidcraft_ui_registry::publish_count(&format!("dialog:selection:{}:active", label(ui)), f64::from(active));
     response
 }
 
@@ -907,8 +1214,8 @@ pub(crate) fn number_pair<T: egui::emath::Numeric>(
 /// Retains the established 0.01 step, fractional range and locale parser.
 /// Locale-aware variable-radius position editor. Tokens: `scope control/font tokens`.
 pub(crate) fn fraction_field(ui: &mut Ui, value: &mut f64) -> Response {
-    let response = ui.add(egui::DragValue::new(value).speed(0.01).range(0.01..=0.99).fixed_decimals(2).custom_parser(crate::prefs::parse_number));
-    scenario::publish_target(&format!("dialog:fraction:{}", label(ui)), response.rect);
+    let response = ui.add(egui::DragValue::new(value).speed(0.01).range(0.01..=0.99).fixed_decimals(2).custom_parser(parse_number));
+    solidcraft_ui_registry::publish_target(&format!("dialog:fraction:{}", label(ui)), response.rect);
     response
 }
 
@@ -932,7 +1239,7 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
     let editor = text_input(egui::TextEdit::singleline(value))
         .char_limit(limit)
         .id(id)
-        .hint_text(crate::i18n::tr_label(hint))
+        .hint_text(solidcraft_ui_text::tr_label(hint))
         .font(if frame { egui::FontId::monospace(t.font_label) } else { egui::FontId::proportional(t.font_label) })
         .background_color(if invalid { t.form_error_fill } else { t.input_fill() })
         .text_color(if invalid { t.form_error } else { t.form_ink })
@@ -953,16 +1260,16 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
     let mut response = ui.add_sized(vec2(dimension(ui.available_width()), row_height()), editor);
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE.limited(limit));
     if frame {
-        publish(ui, &response, egui::WidgetType::TextEdit);
+        publish(ui, &response, egui::Role::TextInput);
     } else {
         super::layout::publish_geometry(ui, &response);
     }
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), crate::i18n::tr_label(label(ui)));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), solidcraft_ui_text::tr_label(label(ui)));
         info.current_text_value = Some(value.clone());
         info
     });
-    crate::theme::TabAccent::number_focus(ui, &response);
+    solidcraft_theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
     response
 }
@@ -1007,7 +1314,7 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                     .return_key(None)
                     .desired_rows(1)
                     .desired_width(width)
-                    .hint_text(crate::i18n::tr_label(hint))
+                    .hint_text(solidcraft_ui_text::tr_label(hint))
                     .font(font)
                     .background_color(if invalid { t.form_error_fill } else { t.input_fill() })
                     .text_color(if invalid { t.form_error } else { t.form_ink });
@@ -1028,8 +1335,8 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                     response.surrender_focus();
                 }
                 super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
-                publish(ui, &response, egui::WidgetType::TextEdit);
-                crate::theme::TabAccent::number_focus(ui, &response);
+                publish(ui, &response, egui::Role::TextInput);
+                solidcraft_theme::TabAccent::number_focus(ui, &response);
                 t.input_bevel(ui, &response);
                 let (text, error) = note;
                 if !text.is_empty() {
@@ -1046,7 +1353,7 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
     });
     let response = shown.inner;
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, enabled, crate::i18n::tr_label(hint));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, enabled, solidcraft_ui_text::tr_label(hint));
         info.current_text_value = Some(value.clone());
         info
     });
@@ -1055,23 +1362,35 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
 
 /// Search input with native accessibility and a stable caller ID. Tokens: cell_editor tokens.
 pub(crate) fn search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
-    if !super::layout::in_catalog(ui) {
-        return cell_editor(ui, id, value, hint, false);
-    }
     let t = Tokens::get();
+    let catalog = super::layout::in_catalog(ui);
+    let height = if catalog { t.space_16 + t.space_2 } else { t.control_height };
+    let limit = if catalog { 128 } else { usize::MAX };
     let editor = text_input(egui::TextEdit::singleline(value))
         .id(id)
-        .char_limit(128)
+        .char_limit(limit)
         .hint_text(hint)
-        .min_size(vec2(0.0, t.space_16 + t.space_2))
+        .min_size(vec2(0.0, height))
         .margin(egui::Margin { left: t.space_24 as i8, right: t.space_8 as i8, top: 0, bottom: 0 })
         .font(egui::FontId::proportional(t.font_small))
+        .background_color(t.input_fill())
+        .clip_text(true)
         .text_color(t.form_ink);
-    let mut response = ui.add_sized(vec2(dimension(ui.available_width()), t.space_16 + t.space_2), editor);
-    super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE.limited(128));
+    let mut response = ui.add_sized(vec2(dimension(ui.available_width()), height), editor);
+    super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE.limited(limit));
     let icon = egui::Rect::from_center_size(egui::pos2(response.rect.left() + t.space_12, response.rect.center().y), vec2(t.space_12, t.space_12));
     crate::icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
     super::layout::publish_geometry(ui, &response);
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), hint);
+        info.current_text_value = Some(value.clone());
+        info
+    });
+    if response.has_focus() {
+        super::settings_search::note_key_sink(ui.ctx());
+    }
+    solidcraft_theme::TabAccent::number_focus(ui, &response);
+    t.input_bevel(ui, &response);
     response
 }
 
@@ -1095,7 +1414,7 @@ pub(crate) fn menu_filter(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &
     let glyph = egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_8 + t.space_16 / 2.0, rect.center().y), vec2(t.space_16, t.space_16));
     crate::icons::paint_ink(ui.painter(), glyph, "zoom", t.form_dim);
     let field = egui::Rect::from_min_max(egui::pos2((glyph.right() + t.space_8).min(rect.right()), rect.top()), rect.max);
-    let hint_text = crate::i18n::tr_label(hint);
+    let hint_text = solidcraft_ui_text::tr_label(hint);
     let response = ui
         .scope_builder(egui::UiBuilder::new().max_rect(field).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(field));
@@ -1113,7 +1432,7 @@ pub(crate) fn menu_filter(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &
         })
         .inner;
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), hint_text);
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), hint_text);
         info.current_text_value = Some(value.clone());
         info
     });
@@ -1133,6 +1452,8 @@ pub(crate) struct Slider {
     pub show_value: bool,
     pub integer: bool,
     pub workspace_accent: bool,
+    /// Blur's off endpoint uses a muted hollow thumb; positive values use solid accent.
+    pub off_endpoint: bool,
 }
 
 /// Bounded read-only code box for diagnostic payloads. Native selection and copying
@@ -1151,22 +1472,22 @@ pub(crate) fn read_only_text(ui: &mut Ui, text: &str) -> Response {
 
 impl Default for Slider {
     fn default() -> Self {
-        Self { step: None, format: |v| format!("{v:.2}"), show_value: true, integer: false, workspace_accent: false }
+        Self { step: None, format: |v| format!("{v:.2}"), show_value: true, integer: false, workspace_accent: false, off_endpoint: false }
     }
 }
 
 /// The only slider element, including stepped preferences and editor-free timeline controls.
 /// Native input, keyboard routing, enabled state and accessibility; one token-painted track/thumb.
-/// Tokens: control_height, space_24/8/4/2, dialog_body/rule, control_fill, form_primary.
+/// Tokens: control_height, space_24/8/4/2, dialog_rule, control_fill, form_primary.
 pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>, options: Slider) -> Response {
-    if crate::prefs_search::suppress_chrome(ui) {
-        return crate::prefs_search::hidden_response(ui);
+    if super::settings_search::suppress_chrome(ui) {
+        return super::settings_search::hidden_response(ui);
     }
     // Own form styling even in callers such as the viewport menu which have no kit scope.
     super::scope(ui, |ui| {
         let t = Tokens::get();
         ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
-        let primary = if options.workspace_accent { crate::theme::TabAccent::current(ui.ctx()).ink } else { t.form_primary };
+        let primary = if options.workspace_accent { solidcraft_theme::TabAccent::current(ui.ctx()).ink } else { t.form_primary };
         let limits = (range.start().to_f64(), range.end().to_f64());
         let reserved = if options.show_value {
             // Reserve the actual formatted editor, including suffixes and localized Instant.
@@ -1182,7 +1503,12 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
             t.space_4
         };
         ui.spacing_mut().slider_width = dimension(ui.available_width() - reserved);
-        let mut widget = egui::Slider::new(value, range).show_value(options.show_value).handle_shape(egui::style::HandleShape::Circle);
+        let mut widget =
+            egui::Slider::new(value, range).show_value(options.show_value).handle_shape(egui::style::HandleShape::Circle).trailing_fill(false);
+        if options.off_endpoint {
+            // Blur's step is an editing affordance, not a persisted/API quantisation rule.
+            widget = widget.clamping(egui::SliderClamping::Edits);
+        }
         if options.show_value {
             widget = widget.custom_formatter(move |v, _| (options.format)(v));
         }
@@ -1192,20 +1518,59 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
         if options.integer {
             widget = widget.integer();
         }
+        let layer = ui.layer_id();
+        let paint_start = ui.ctx().graphics(|graphics| graphics.get(layer).map_or(egui::layers::ShapeIdx(0), |list| list.next_idx()));
         let response = ui.add(widget);
+        let slider = egui::Rect::from_min_size(response.rect.min, vec2(ui.spacing().slider_width, response.rect.height()));
+        // egui 0.36.2 paints the rail, then the circular handle, then the value editor.
+        // Suppress only a positively identified pair added by this widget. A backing
+        // rectangle would flatten translucent/blurred parents. Unexpected painting
+        // (including an invisible or clipped widget) keeps the native shapes intact.
+        ui.ctx().graphics_mut(|graphics| {
+            let Some(list) = graphics.get_mut(layer) else { return };
+            let paint_end = list.next_idx();
+            if paint_end.0.saturating_sub(paint_start.0) < 2 {
+                return;
+            }
+            let handle_idx = egui::layers::ShapeIdx(paint_start.0 + 1);
+            let rail_height = ui.spacing().slider_rail_height.max(0.0);
+            let native_radius = slider.height() / 2.5;
+            let native_range = slider.x_range().shrink(native_radius);
+            let mut rail_matches = false;
+            let mut handle_matches = false;
+            // Indexed reads via mutate_shape are bounded and allocate nothing; do not
+            // scan the layer's earlier parent/sibling paints looking for a match.
+            list.mutate_shape(paint_start, |entry| {
+                if let egui::Shape::Rect(rail) = &entry.shape {
+                    let expected = egui::Rect::from_center_size(slider.center(), vec2(slider.width(), rail_height));
+                    rail_matches = entry.clip_rect == ui.clip_rect()
+                        && (rail.rect.min - expected.min).length_sq() < 0.0001
+                        && (rail.rect.max - expected.max).length_sq() < 0.0001
+                        && rail.stroke == egui::Stroke::NONE;
+                }
+            });
+            list.mutate_shape(handle_idx, |entry| {
+                if let egui::Shape::Circle(handle) = &entry.shape {
+                    handle_matches = entry.clip_rect == ui.clip_rect()
+                        && (handle.center.y - slider.center().y).abs() < 0.01
+                        // egui's handle range reverses when the control is narrower
+                        // than its diameter; either endpoint still belongs to it.
+                        && handle.center.x >= native_range.min.min(native_range.max) - 0.01
+                        && handle.center.x <= native_range.min.max(native_range.max) + 0.01
+                        && (handle.radius - native_radius).abs() < 0.01;
+                }
+            });
+            if rail_matches && handle_matches {
+                list.mutate_shape(paint_start, |entry| entry.shape = egui::Shape::Noop);
+                list.mutate_shape(handle_idx, |entry| entry.shape = egui::Shape::Noop);
+            }
+        });
         if ui.ctx().memory(|memory| memory.focused()).is_some_and(|id| {
             ui.ctx().read_response(id).is_some_and(|focused| response.rect.contains(focused.rect.center()))
                 || egui::TextEdit::load_state(ui.ctx(), id).is_some()
         }) {
-            crate::prefs_search::note_key_sink(ui.ctx());
+            super::settings_search::note_key_sink(ui.ctx());
         }
-        let slider = egui::Rect::from_min_size(response.rect.min, vec2(ui.spacing().slider_width, response.rect.height()));
-        let mut background = ui.painter().clone();
-        background.set_opacity(if ui.is_visible() { 1.0 } else { 0.0 });
-        // At the top of the range egui's own handle reaches `slider.right()` exactly, and a fill
-        // that stops there leaves its last column showing beside the editor (#5708). The gap
-        // before the editor is `item_spacing.x`, so a pixel past the edge covers nothing else.
-        background.rect_filled(slider.with_max_x(slider.right() + 1.0), 0.0, t.dialog_body);
         // Match egui's native input range (handle_radius = thickness / 2.5), so the
         // painted thumb stays under the pointer even at the two ends of the range.
         let input_radius = ui.text_style_height(&egui::TextStyle::Body).max(ui.spacing().interact_size.y) / 2.5;
@@ -1214,11 +1579,19 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
         let center = egui::pos2(egui::lerp(track.x_range(), fraction), track.center().y);
         ui.painter().rect_filled(track, t.control_radius, t.dialog_rule);
         ui.painter().rect_filled(egui::Rect::from_min_max(track.min, egui::pos2(center.x, track.bottom())), t.control_radius, primary);
-        ui.painter().circle(center, t.space_8, t.control_fill, egui::Stroke::new(t.space_2, primary));
-        publish(ui, &response, egui::WidgetType::Slider);
-        response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), value.to_f64(), crate::i18n::tr_label(label(ui))));
-        scenario::publish_rect(&format!("dialog:slider_track:{}", label(ui)), slider);
-        scenario::publish_target(&format!("dialog:slider:{}", label(ui)), response.rect);
+        let off = options.off_endpoint && value.to_f64() == 0.0;
+        let fill = if off {
+            egui::Color32::TRANSPARENT
+        } else if options.off_endpoint {
+            primary
+        } else {
+            t.control_fill
+        };
+        ui.painter().circle(center, t.space_8, fill, egui::Stroke::new(t.space_2, if off { t.form_dim } else { primary }));
+        publish(ui, &response, egui::Role::Slider);
+        response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), value.to_f64(), solidcraft_ui_text::tr_label(label(ui))));
+        solidcraft_ui_registry::publish_rect(&format!("dialog:slider_track:{}", label(ui)), slider);
+        solidcraft_ui_registry::publish_target(&format!("dialog:slider:{}", label(ui)), response.rect);
         response
     })
 }
@@ -1264,7 +1637,7 @@ fn scalar_field_impl(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusi
     let before = *value;
     let parsed = std::cell::Cell::new(false);
     let field = egui::DragValue::new(value).range(range).speed(0.01).custom_parser(|text| {
-        let value = crate::prefs::parse_number(text);
+        let value = parse_number(text);
         parsed.set(value.is_some());
         value
     });
@@ -1285,16 +1658,16 @@ fn scalar_field_impl(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusi
     if !plain {
         Tokens::get().input_bevel(ui, &response);
     }
-    scenario::publish_target(&format!("dialog:scalar:{}", label(ui)), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("dialog:scalar:{}", label(ui)), response.rect);
     response
 }
 
 /// Length held in millimetres, dragged or typed in the design's units ("0.5 in", "2 cm + 3 mm" parse).
 /// Tokens: control_height, scope control/font tokens.
 pub(crate) fn length_field(ui: &mut Ui, value: &mut f64, units: &str, decimals: u8) -> Response {
-    let response = ui.add(length_drag(value, units, decimals));
+    let response = ui.add(length_drag(ui, value, units, decimals));
     Tokens::get().input_bevel(ui, &response);
-    scenario::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
     response
 }
 
@@ -1307,8 +1680,8 @@ pub(crate) fn bounded_length_field(
     range: std::ops::RangeInclusive<f64>,
     speed: f64,
 ) -> Response {
-    let response = ui.add(length_drag(value, units, decimals).range(range).speed(speed));
-    scenario::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
+    let response = ui.add(length_drag(ui, value, units, decimals).range(range).speed(speed));
+    solidcraft_ui_registry::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
     response
 }
 
@@ -1323,13 +1696,13 @@ pub(crate) fn angle_field(ui: &mut Ui, value: &mut f64) -> Response {
     if let Some(last) = ui.data(|d| d.get_temp::<f64>(set)).filter(|last| (last - shown).abs() <= 1e-9 * last.abs().max(1.0)) {
         shown = last;
     }
-    let response = ui.add(egui::DragValue::new(&mut shown).speed(1.0).suffix(" deg").custom_parser(crate::prefs::parse_number));
+    let response = ui.add(egui::DragValue::new(&mut shown).speed(1.0).suffix(" deg").custom_parser(parse_number));
     if response.changed() {
         *value = shown;
         ui.data_mut(|d| d.insert_temp(set, shown));
     }
     Tokens::get().input_bevel(ui, &response);
-    scenario::publish_target(&format!("dialog:angle:{}", label(ui)), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("dialog:angle:{}", label(ui)), response.rect);
     response
 }
 
@@ -1349,7 +1722,7 @@ pub(crate) fn text_area(ui: &mut Ui, label: &str, id: egui::Id, value: &mut Stri
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINES.limited(limit));
     t.input_bevel(ui, &response);
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), label);
+        let mut info = egui::WidgetInfo::labeled(egui::Role::MultilineTextInput, ui.is_enabled(), label);
         info.current_text_value = Some(value.clone());
         info
     });
@@ -1370,7 +1743,7 @@ pub(crate) fn password_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint
             .background_color(t.input_fill()),
     );
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field { secret: true, ..super::text_menu::Field::LINE });
-    publish(ui, &response, egui::WidgetType::TextEdit);
+    publish(ui, &response, egui::Role::TextInput);
     response
 }
 
@@ -1383,14 +1756,40 @@ pub(crate) fn number_field<T: egui::emath::Numeric>(
     speed: f64,
     suffix: &str,
 ) -> Response {
-    let response = ui.add(egui::DragValue::new(value).range(range).speed(speed).suffix(suffix).custom_parser(crate::prefs::parse_number));
+    bounded_number_field(ui, value, range, speed, suffix, true)
+}
+
+/// A bounded editor that preserves an existing out-of-range value until the person edits it.
+/// Useful when a selected resource profile changes the admissible range: revealing the field
+/// must not silently lower saved intent. Typing and dragging still respect the current limits.
+pub(crate) fn number_field_preserving<T: egui::emath::Numeric>(
+    ui: &mut Ui,
+    value: &mut T,
+    range: std::ops::RangeInclusive<T>,
+    speed: f64,
+    suffix: &str,
+) -> Response {
+    bounded_number_field(ui, value, range, speed, suffix, false)
+}
+
+fn bounded_number_field<T: egui::emath::Numeric>(
+    ui: &mut Ui,
+    value: &mut T,
+    range: std::ops::RangeInclusive<T>,
+    speed: f64,
+    suffix: &str,
+    clamp_existing: bool,
+) -> Response {
+    let response = ui.add(
+        egui::DragValue::new(value).range(range).clamp_existing_to_range(clamp_existing).speed(speed).suffix(suffix).custom_parser(parse_number),
+    );
     if response.has_focus() {
-        crate::prefs_search::note_key_sink(ui.ctx());
+        super::settings_search::note_key_sink(ui.ctx());
     }
     Tokens::get().input_bevel(ui, &response);
     response.widget_info(|| {
         let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), value.to_f64());
-        info.label = Some(crate::i18n::tr_label(label(ui)).to_string());
+        info.label = Some(solidcraft_ui_text::tr_label(label(ui)).to_string());
         info
     });
     super::layout::publish_geometry(ui, &response);
@@ -1410,7 +1809,7 @@ pub(crate) fn vector3_field(ui: &mut Ui, values: &mut [f64; 3], range: std::ops:
             ui.spacing_mut().interact_size.x = width;
             ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
             let response = number_field(ui, value, range.clone(), 0.01, suffix);
-            scenario::publish_target(&format!("dialog:vector:{label}:{axis}"), response.rect);
+            solidcraft_ui_registry::publish_target(&format!("dialog:vector:{label}:{axis}"), response.rect);
             changed |= response.changed();
         }
     });
@@ -1456,7 +1855,7 @@ pub(crate) fn track_number(ui: &mut Ui, value: &mut f64, speed: f64, decimals: u
     response
 }
 
-/// A value typed as a sum of numbers (`crate::prefs::parse_number` each), added to `now` when it
+/// A value typed as a sum of numbers (`parse_number` each), added to `now` when it
 /// starts with a sign: "+30" moves the value by 30, "0-5" is −5.
 fn relative_number(text: &str, now: f64) -> Option<f64> {
     let text: String = text.chars().filter(|c| !c.is_whitespace()).map(|c| if c == '\u{2212}' { '-' } else { c }).collect();
@@ -1465,13 +1864,13 @@ fn relative_number(text: &str, now: f64) -> Option<f64> {
     let mut prev = ' ';
     for c in text.chars() {
         if (c == '+' || c == '-') && !term.is_empty() && !matches!(prev, 'e' | 'E') {
-            total += crate::prefs::parse_number(&term)?;
+            total += parse_number(&term)?;
             term.clear();
         }
         term.push(c);
         prev = c;
     }
-    total += crate::prefs::parse_number(&term)?;
+    total += parse_number(&term)?;
     total.is_finite().then_some(total)
 }
 
@@ -1496,13 +1895,18 @@ pub(crate) fn message_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint:
 
 /// Edit a millimetre value through a control expressed in the current design units.
 /// Keep the stored value untouched unless the user actually changes the field.
-fn length_drag<'a>(value: &'a mut f64, units: &str, decimals: u8) -> egui::DragValue<'a> {
-    let (scale, unit) = crate::prefs::unit_scale(units);
-    egui::DragValue::new(value)
-        .speed(0.5)
-        .suffix(format!(" {unit}"))
-        .custom_formatter(move |mm, _| crate::prefs::length_number(mm, unit, decimals))
-        .custom_parser(move |text| crate::prefs::parse_length_mm(text, scale))
+/// The units, formatting and parsing come from the host's [`Expressions`]; without one the
+/// field edits plain millimetres.
+fn length_drag<'a>(ui: &Ui, value: &'a mut f64, units: &str, decimals: u8) -> egui::DragValue<'a> {
+    let drag = egui::DragValue::new(value).speed(0.5);
+    let Some(host) = expressions(ui.ctx()) else {
+        return drag.suffix(" mm").custom_formatter(move |mm, _| format!("{mm:.*}", usize::from(decimals.min(8)))).custom_parser(parse_number);
+    };
+    let (scale, unit) = host.unit_scale(units);
+    let parser = Arc::clone(&host);
+    drag.suffix(format!(" {unit}"))
+        .custom_formatter(move |mm, _| host.length_number(mm, unit, decimals))
+        .custom_parser(move |text| parser.parse_length_mm(text, scale))
 }
 
 /// Small model-anchored value editor. Retains its focus ID and native hit height so it does
@@ -1521,7 +1925,7 @@ pub(crate) fn canvas_value_field(ui: &mut Ui, id: egui::Id, value: &mut String, 
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     t.input_bevel(ui, &response);
     let field = (ui.ctx().cumulative_pass_nr(), response.id, value.chars().count());
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("sc_canvas_value_focus"), field));
+    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_canvas_value_focus"), field));
     response
 }
 
@@ -1539,6 +1943,8 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_body);
     let size = placement_field_content_size(ui, value);
+    // egui 0.37 floors a text edit's height at the theme's interact height: lower it for this one.
+    let interact = std::mem::replace(&mut ui.spacing_mut().interact_size.y, size.y);
     let mut response = ui.add(
         text_input(egui::TextEdit::singleline(value))
             .id(id)
@@ -1551,16 +1957,17 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
             .text_color(t.form_ink)
             .clip_text(true),
     );
+    ui.spacing_mut().interact_size.y = interact;
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
-    publish(ui, &response, egui::WidgetType::TextEdit);
+    publish(ui, &response, egui::Role::TextInput);
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), crate::i18n::tr_label(hint));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), solidcraft_ui_text::tr_label(hint));
         info.current_text_value = Some(value.clone());
         info
     });
-    crate::theme::TabAccent::number_focus(ui, &response);
+    solidcraft_theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
-    response.on_hover_text(crate::i18n::tr_label(hint))
+    response.backing_on_hover_text(solidcraft_ui_text::tr_label(hint))
 }
 
 /// Attached Library dropdown and text editor inside one bordered control.
@@ -1580,24 +1987,22 @@ pub(crate) fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     let button = egui::Rect::from_min_max(egui::pos2(split, rect.top()), rect.max);
     t.secondary_vline(ui.painter(), split, rect.y_range(), t.dialog_rule);
     let library = super::icon_button_at(ui, button, "chevron", "Library");
-    scenario::publish_handle("dialog:menu:Library", button.center());
-    scenario::publish_rect("dialog:menu:Library", button);
+    solidcraft_ui_registry::publish_handle("dialog:menu:Library", button.center());
+    solidcraft_ui_registry::publish_rect("dialog:menu:Library", button);
     let popup = Container::new(ui.ctx(), Surface::Popup).menu(&library);
     let open = popup.is_open();
     popup.show(|ui| super::scope(ui, menu));
     if open {
         ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     }
-    if value.is_empty() { response.on_hover_text(crate::i18n::tr_label(hint)) } else { response }
+    if value.is_empty() { response.backing_on_hover_text(solidcraft_ui_text::tr_label(hint)) } else { response }
 }
 
 /// Inline tree-name editor in caller-owned geometry; preserves its native focus and selection ID.
 /// Tokens: text. The caller retains commit/cancel and select-all behavior.
 pub(crate) fn inline_name(ui: &mut Ui, rect: egui::Rect, id: egui::Id, value: &mut String) -> Response {
-    let mut response = ui.put(
-        rect,
-        egui::TextEdit::singleline(value).id(id).frame(egui::Frame::NONE).text_color(Tokens::get().text).vertical_align(egui::Align::Center),
-    );
+    let mut response = ui
+        .put(rect, egui::TextEdit::singleline(value).id(id).frame(egui::Frame::NONE).text_color(Tokens::get().text).align(egui::Align2::LEFT_CENTER));
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     response
 }

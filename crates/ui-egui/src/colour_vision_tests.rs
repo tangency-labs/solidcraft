@@ -5,15 +5,15 @@
 //! with their paper, Brettel on white and its own anchors.
 //!
 //! When a token edit breaks a mode here, adjust its measured variant. Shared icon accents live
-//! in `assets/icons/ui/design/palette.toml`; `assets/styles/ui/palettes.rs` links those generated
-//! values to UI tokens and owns the remaining UI-only colour-vision adjustments.
+//! in `assets/icons/ui/design/palette.toml`; `crates/theme/src/palettes.rs` holds the primary
+//! strokes the UI tokens share with them (`icon_strokes`, held equal by an icon test) and owns the remaining UI-only colour-vision adjustments.
 
 use std::collections::BTreeSet;
 
 use egui::Color32;
 use serde_json::json;
 
-use crate::theme::{ColorVision, Tokens};
+use solidcraft_theme::{ColorVision, Tokens};
 
 type Rgb8 = [u8; 3];
 type V3 = [f64; 3];
@@ -320,7 +320,7 @@ fn groups(t: &Tokens) -> Vec<Group> {
             &[("figure_ground", t.figure_ground), ("figure_face_top", t.figure_face_top)],
         ),
         // Badge text and selected-card marks use these exact pairs; WCAG ratios are also
-        // guarded by theme::tests::preferences_foreground_pairs_hold_small_text_contrast.
+        // guarded by solidcraft_theme's preferences_foreground_pairs_hold_small_text_contrast.
         group("Preferences warning badge", &[("pref_note", t.pref_note)], &[("pref_note_fill", t.pref_note_fill)]),
         group("Preferences success badge", &[("pref_ok", t.pref_ok)], &[("pref_ok_fill", t.pref_ok_fill)]),
         group("Preferences selected marks", &[("pref_on_accent", t.pref_on_accent)], &[("figure_accent", t.figure_accent)]),
@@ -348,6 +348,7 @@ fn groups(t: &Tokens) -> Vec<Group> {
             ],
         ),
         group("bend lines", &[("bend_up", t.bend_up), ("bend_down", t.bend_down)], &[("viewport_top", t.viewport_top)]),
+        group("curvature comb", &[("comb_envelope", t.comb_envelope), ("comb_teeth", t.comb_teeth)], &[("viewport_top", t.viewport_top)]),
         group("box select", &[("box_window", t.box_window), ("box_crossing", t.box_crossing)], &[("viewport_top", t.viewport_top)]),
         // Sketch dimensions (#7861): their lines and values, driving and driven, apart from the
         // curves they measure, the construction lines and the conflict red (each its own group:
@@ -375,7 +376,11 @@ fn groups(t: &Tokens) -> Vec<Group> {
             ],
             &[],
         ),
-        group("section", &[("section_cap", t.section_cap)], &[("body", t.body)]),
+        group(
+            "section",
+            &[("section_cap", t.section_cap), ("section_hatch[0]", t.section_hatch[0]), ("section_hatch[1]", t.section_hatch[1])],
+            &[("body", t.body)],
+        ),
         group("interference", &[("interference", t.interference)], &[("body", t.body)]),
         group(
             "continuity seams",
@@ -392,9 +397,9 @@ fn groups(t: &Tokens) -> Vec<Group> {
         group(
             "curvature map",
             &[
-                ("analysis.curvature[0]", crate::theme::srgb(a.curvature[0])),
-                ("analysis.curvature[1]", crate::theme::srgb(a.curvature[1])),
-                ("analysis.curvature[2]", crate::theme::srgb(a.curvature[2])),
+                ("analysis.curvature[0]", solidcraft_theme::srgb(a.curvature[0])),
+                ("analysis.curvature[1]", solidcraft_theme::srgb(a.curvature[1])),
+                ("analysis.curvature[2]", solidcraft_theme::srgb(a.curvature[2])),
             ],
             &[],
         ),
@@ -412,7 +417,7 @@ fn groups(t: &Tokens) -> Vec<Group> {
     ];
     // Tab fills and small-text inks have distinct jobs: compare each with its actual
     // grounds, rather than with the same-hue fill/ink. WCAG text ratios are also guarded
-    // in theme::tests::tab_accents_hold_wcag_small_text_contrast_in_both_themes.
+    // in solidcraft_theme's tab_accents_hold_wcag_small_text_contrast_in_both_themes.
     for (name, ink_name, ink, soft_name, soft) in [
         ("sketch tab text", "sketch_ink", t.sketch_ink, "sketch_soft", t.sketch_soft),
         ("surface tab text", "surface_ink", t.surface_ink, "surface_soft", t.surface_soft),
@@ -497,7 +502,6 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("borders.control", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.primary_inset", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.bevel", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
-    ("icon_palette", "optional SVG palette; actual roles and theme contrast are guarded in icon and theme tests"),
     ("file_dim", "File view secondary text, WCAG guarded in theme tests"),
     ("form_primary_fill", "ground under a filled primary field; form_primary carries the meaning, contrast guarded in theme tests"),
     ("file_recovery_well", "decorative recovery icon ground"),
@@ -978,7 +982,7 @@ fn validation_badges_are_distinct_and_readable_in_every_mode() {
             if distance < FLOOR {
                 failures.push(format!("{mode:?} dark={dark} validation fills: {distance:.2}"));
             }
-            let contrast = crate::theme::contrast_ratio(t.form_success, t.form_success_fill);
+            let contrast = solidcraft_theme::contrast_ratio(t.form_success, t.form_success_fill);
             if contrast < 4.5 {
                 failures.push(format!("{mode:?} dark={dark} success contrast: {contrast:.2}"));
             }
@@ -993,8 +997,8 @@ fn validation_badges_are_distinct_and_readable_in_every_mode() {
 /// two-colour themes (1-bit) tell them apart by shape alone.
 #[test]
 fn shipped_themes_draw_dimensions_in_their_own_readable_colour() {
-    use crate::theme::contrast_ratio;
     use crate::theme_files::{builtin, is_two_colour, resolve};
+    use solidcraft_theme::contrast_ratio;
     let themes = [("light", Tokens::light()), ("dark", Tokens::dark())]
         .into_iter()
         .map(|(id, t)| (id.to_string(), t))
@@ -1030,6 +1034,27 @@ fn shipped_themes_draw_dimensions_in_their_own_readable_colour() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn onyx_keeps_gold_dimensions_distinct_from_grey_construction_lines() {
+    use crate::theme_files::{OptionValue, builtin, resolve_with};
+    let onyx = builtin().iter().find(|theme| theme.id == "onyx").unwrap();
+    for (foreground, gold, driven) in [("muted", [199, 178, 139], [165, 148, 116]), ("vibrant", [255, 209, 102], [255, 177, 102])] {
+        let values = std::collections::BTreeMap::from([("foreground_colours".into(), OptionValue::Choice(foreground.into()))]);
+        let t = resolve_with(onyx, &values);
+        assert_eq!(rgb(t.dimension), gold, "{foreground}: retain authored dimensions");
+        assert_eq!(rgb(t.dimension_driven), driven, "{foreground}: retain authored driven dimensions");
+        for construction in [t.sketch_construction, t.sketch_centerline] {
+            assert_eq!(rgb(construction), [181, 183, 184], "{foreground}: construction stays grey");
+            for dimension in [t.dimension, t.dimension_driven] {
+                assert!(normal(rgb(dimension), rgb(construction)) >= FLOOR, "{foreground}: dimensions remain distinct");
+            }
+            for ground in [t.viewport_top, t.viewport_bottom] {
+                assert!(solidcraft_theme::contrast_ratio(construction, ground) >= 3.0, "{foreground}: readable construction lines");
+            }
+        }
+    }
 }
 
 #[test]
@@ -1147,33 +1172,86 @@ fn ui_prefs_sets_each_mode_and_refuses_anything_else() {
 /// colours. The status chips beside it keep theirs in every mode.
 #[test]
 fn the_sample_previews_the_mode_being_chosen() {
-    let mut h = crate::scenario::Harness::new();
-    crate::prefs::control(&mut h.app, &json!({"open": "Interface"})).unwrap();
-    let lines = |h: &crate::scenario::Harness| {
-        let mut out = BTreeSet::new();
-        for s in &h.shapes {
-            crate::test_support::each_shape(&s.shape, &mut |shape| {
-                if let egui::Shape::LineSegment { stroke, .. } = shape {
-                    out.insert(stroke.color.to_array());
-                }
-            });
+    for base in ["light", "dark"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::control(&mut h.app, &json!({"theme":base,"language":"en","open":"Interface"})).unwrap();
+        h.frames(3);
+        for mode in ColorVision::ALL {
+            let handle = format!("prefs:color_vision:{}", mode.id());
+            crate::prefs::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.preferences.color_vision, mode, "the real Appearance segments edit the preference");
+            crate::prefs::reveal_preference(&mut h, "prefs:colour_vision_samples");
+            let (want, off) = (Tokens::get_in(mode), Tokens::get_in(ColorVision::Off));
+            if mode != ColorVision::Off {
+                assert!(
+                    want.axis_x != off.axis_x || want.sketch_locked != off.sketch_locked,
+                    "{base} {mode:?}: axis X or locked sketch geometry must differ from Off"
+                );
+            }
+            // The shared painter clips each figure to its fitted cell. Isolate those actual
+            // page shapes by that clip, preserving their order and geometry. Cropping the whole
+            // page still tessellates unrelated atlas content, which requires its real textures.
+            // Rounded vector shapes also use atlas-backed discs, so retain the rendered page's atlas.
+            let textures = std::collections::HashMap::from([(egui::TextureId::default(), h.ctx.fonts(|fonts| fonts.image()))]);
+            let images: Vec<_> = (0..6)
+                .map(|i| {
+                    let cell = crate::scenario::rect_of(&format!("prefs:colour_vision_sample:{i}")).unwrap();
+                    let artwork: Vec<_> = h
+                        .shapes
+                        .iter()
+                        .filter(|shape| shape.clip_rect.min.distance(cell.min) < 0.01 && shape.clip_rect.max.distance(cell.max) < 0.01)
+                        .cloned()
+                        .collect();
+                    assert!(!artwork.is_empty(), "{base} {mode:?}: sample {i} has actual cell-clipped artwork");
+                    crate::ui_kit::raster_test_shapes(&h.ctx, artwork, 1.0, cell, &textures)
+                })
+                .collect();
+            let near = |actual: [u8; 4], expected: egui::Color32| actual.into_iter().zip(expected.to_array()).all(|(a, b)| a.abs_diff(b) <= 2);
+            let pixel = |i: usize, x, y, colour| {
+                assert!(
+                    near(images[i].get_pixel(x, y).0, colour),
+                    "{base} {mode:?}: sample {i} pixel {x},{y} must be {colour:?}, got {:?}",
+                    images[i].get_pixel(x, y)
+                );
+            };
+            pixel(0, 42, 22, want.sketch_locked);
+            pixel(1, 42, 22, want.sketch_projected);
+            pixel(2, 40, 34, want.axis_x);
+            pixel(2, 14, 20, want.axis_y);
+            // The canonical bends are dashed. Require visible runs in each semantic colour.
+            for (colour, y) in [(want.bend_up, 14), (want.bend_down, 30)] {
+                assert!((12..72).any(|x| near(images[3].get_pixel(x, y).0, colour)), "{base} {mode:?}: bend stroke {colour:?}");
+            }
+            pixel(4, 18, 18, solidcraft_theme::srgb(want.analysis.draft[0]));
+            pixel(4, 40, 18, solidcraft_theme::srgb(want.analysis.draft[1]));
+            pixel(4, 2, 2, want.figure_ground);
+            let negative = solidcraft_theme::srgb(want.analysis.draft[2]);
+            let hatch = solidcraft_theme::srgb(want.analysis.draft[2].map(|c| c * 0.6));
+            let draft = &images[4];
+            let band: Vec<_> = (54..74).flat_map(|x| (24..34).map(move |y| draft.get_pixel(x, y).0)).collect();
+            assert!(band.iter().any(|p| near(*p, negative)), "{base} {mode:?}: Draft retains its negative analysis colour");
+            assert!(band.iter().any(|p| near(*p, hatch)), "{base} {mode:?}: Draft hatching is visible, including Off");
+            // Both diagonals must be visible inside the error box; a blank rounded box fails.
+            for (x, y) in [(38, 19), (46, 18), (38, 25), (46, 25)] {
+                pixel(5, x, y, want.error);
+            }
+            pixel(5, 24, 22, want.timeline_item_error);
+            let area = crate::scenario::rect_of("prefs:colour_vision_samples").unwrap();
+            let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+            assert!(page.expand(1.0).contains_rect(area));
+            for i in 0..6 {
+                let cell = crate::scenario::rect_of(&format!("prefs:colour_vision_sample:{i}")).unwrap();
+                assert!(area.contains_rect(cell));
+                assert_eq!(cell.size(), egui::vec2(84.0, 44.0));
+            }
+            assert_eq!(crate::scenario::rects("prefs:status_sample:").len(), 4);
         }
-        out
-    };
-    for mode in [ColorVision::Protan, ColorVision::Tritan, ColorVision::Off] {
-        crate::prefs::control(&mut h.app, &json!({"color_vision": mode.id()})).unwrap();
-        h.frames(2);
-        let (want, off) = (Tokens::get_in(mode), Tokens::get_in(ColorVision::Off));
-        let painted = lines(&h);
-        for (name, c) in [("axis_x", want.axis_x), ("axis_y", want.axis_y), ("sketch_locked", want.sketch_locked)] {
-            assert!(painted.contains(&c.to_array()), "{mode:?}: the sample draws {name} {c:?}");
-        }
-        if mode != ColorVision::Off {
-            let changed = [(want.axis_x, off.axis_x), (want.sketch_locked, off.sketch_locked)];
-            assert!(changed.iter().any(|(a, b)| a != b), "{mode:?} recolours what the sample shows");
-        }
+        crate::prefs::control(&mut h.app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(h.app.preferences.color_vision, ColorVision::Off);
     }
-    crate::prefs::control(&mut h.app, &json!({"button": "cancel"})).unwrap();
 }
 
 #[test]

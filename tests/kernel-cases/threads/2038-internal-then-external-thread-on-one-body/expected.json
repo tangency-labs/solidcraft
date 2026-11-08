@@ -1,0 +1,26 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2038"
+ ],
+ "what": "two modelled threads on one body, an internal one then an external one (the second was refused: no cylindrical face there to thread)",
+ "source": "analytic",
+ "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Internal groove: P/8 wide at the major radius d/2, widening to 3P/4 at the minor radius, cut only where there is material (r >= hole radius). Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. Cylinder A R=16 h=12 with a 12.163 mm blind hole 10 deep from the bottom (rho=6.0815), M13.5x1.337 over 8 mm from the open mouth ending inside the wall: V_A = pi 16^2 12 - pi rho^2 10 - (8/1.337) x V_turn_int = 8400.9644. A boss R=13.05 h=14 joined on top, M26.1x1.814 over 10 mm from its free top end: V = V_A + pi 13.05^2 14 - (10/1.814) x 79.63016 = 15452.2840 mm3. Tolerance 1%: a modelled thread is a faceted helical solid (radial chord error up to 1% of the pitch on every wall, i.e. a volume deficit of about 4/3 x sag/R).",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 15452.284,
+ "tolerance": {
+  "rel": 0.01
+ },
+ "bbox": {
+  "min": [
+   -16,
+   -16,
+   0
+  ],
+  "max": [
+   16,
+   16,
+   26
+  ]
+ }
+}

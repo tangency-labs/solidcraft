@@ -1,0 +1,62 @@
+{
+ "sources": [],
+ "what": "an arm built in its component extracted to a design file, then that file inserted again 50 mm along y",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5), Arm's box built inside Arm; extract keeps Arm where it is (now linked to the file: centre (20,0,5)); the file inserted with translate (0,50,0) holds the same 40x10x10 bar: centre (20,50,5)",
+ "body_count": 3,
+ "volume_mm3": 12000.0,
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "bodies": [
+     "ArmBox"
+    ]
+   }
+  },
+  {
+   "step": 9,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ],
+     "volume_mm3": 4000.0
+    }
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "name": "Arm copy"
+   }
+  },
+  {
+   "step": 11,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      50.0,
+      5.0
+     ],
+     "bbox": {
+      "min": [
+       0.0,
+       45.0,
+       0.0
+      ],
+      "max": [
+       40.0,
+       55.0,
+       10.0
+      ]
+     },
+     "volume_mm3": 4000.0
+    }
+   }
+  }
+ ]
+}

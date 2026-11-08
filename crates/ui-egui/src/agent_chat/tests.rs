@@ -1,7 +1,7 @@
 use super::*;
 use std::sync::mpsc::channel;
 
-fn transcript_clipboard_harness(layout: crate::shell::LayoutMode) -> crate::scenario::Harness {
+fn transcript_clipboard_harness(layout: crate::ui_kit::LayoutMode) -> crate::scenario::Harness {
     let mut h = narrow_chat();
     h.app.ui.layout = layout;
     h.app.preferences.agent_chat_width = 500.0;
@@ -36,7 +36,7 @@ fn transcript_click(h: &mut crate::scenario::Harness, pos: egui::Pos2) {
 
 #[test]
 fn transcript_copy_and_cut_do_not_touch_the_cad_clipboard() {
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let mut h = transcript_clipboard_harness(layout);
         let at = transcript_text_position(&h);
         transcript_click(&mut h, at);
@@ -57,7 +57,7 @@ fn transcript_copy_and_cut_do_not_touch_the_cad_clipboard() {
 
 #[test]
 fn transcript_paste_does_not_insert_a_previously_copied_body() {
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let mut h = transcript_clipboard_harness(layout);
         h.frame_with(vec![egui::Event::Copy]);
         assert!(!h.app.copied_bodies.is_empty(), "prime the real CAD clipboard");
@@ -77,7 +77,7 @@ fn transcript_paste_does_not_insert_a_previously_copied_body() {
 
 #[test]
 fn transcript_key_events_do_not_run_cad_shortcuts() {
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let mut h = transcript_clipboard_harness(layout);
         let at = transcript_text_position(&h);
         transcript_click(&mut h, at);
@@ -106,7 +106,7 @@ fn transcript_key_events_do_not_run_cad_shortcuts() {
 #[test]
 fn transcript_shortcut_ownership_ends_when_the_panel_is_hidden() {
     for hidden in ["closed", "minimized", "disabled"] {
-        let mut h = transcript_clipboard_harness(crate::shell::LayoutMode::Floating);
+        let mut h = transcript_clipboard_harness(crate::ui_kit::LayoutMode::Floating);
         h.frame_with(vec![egui::Event::Copy]);
         let at = transcript_text_position(&h);
         transcript_click(&mut h, at);
@@ -1386,6 +1386,77 @@ fn an_interrupted_turns_changes_undo_as_one_step() {
     assert!(Arc::ptr_eq(&app.session.doc, &before));
 }
 
+/// What the user changes by hand between two messages is told to the agent before the next one,
+/// with the parameters and features it touched (#10854): the agent built a hole on a parameter,
+/// the user changed it, and the agent picked the old rim. Its own changes, and a design it has not
+/// seen yet (a new chat), bring no note.
+#[test]
+fn a_change_by_hand_between_messages_is_told_to_the_agent() {
+    use solidcraft_engine::doc::Param;
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.agent_chat.attach_selection = false;
+    let expr = |app: &SolveApp| app.session.doc.params.iter().find(|p| p.name == "w").map(|p| p.expr.clone()).unwrap();
+
+    send(&mut app, &ctx, "a box and a parameter w".into());
+    let replies = [
+        ask(&tx, "engine.execute", json!({"command": "parameters.add", "params": {"name": "w", "expression": "10", "unit": "mm"}})),
+        ask(&tx, "engine.execute", boxed(0.0)),
+    ];
+    frame(&mut app);
+    for r in replies {
+        assert_eq!(r.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    }
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    send(&mut app, &ctx, "thanks".into());
+    assert_eq!(script.calls().last().map(String::as_str), Some("prompt: thanks"), "the agent made those changes itself");
+    ended(&script, "");
+    poll(&mut app, &ctx);
+
+    let old = expr(&app);
+    app.run("parameters.change", json!({"name": "w", "expression": "25"})).unwrap();
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]})).unwrap();
+    let added = app.session.doc.features.last().map(|f| f.name.clone()).unwrap();
+    send(&mut app, &ctx, "chamfer it".into());
+    let sent = text_of(script.prompts().last().unwrap());
+    // The new box may bring parameters of its own after `w`.
+    let new = expr(&app);
+    assert!(sent.starts_with(&format!("[The user changed the design by hand since your last reply (parameters: w {old} -> {new}")), "{sent}");
+    assert!(sent.contains(&format!("; features: {added} (new)). Read it again before")), "{sent}");
+    assert!(sent.ends_with("chat.]\n\nchamfer it"), "{sent}");
+    assert!(
+        matches!(app.agent_chat.items.iter().rev().find(|i| matches!(i, Item::User { .. })), Some(Item::User { text, .. }) if text == "chamfer it")
+    );
+    script.report(Event::Text { thought: false, text: "done".into() });
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    send(&mut app, &ctx, "and again".into());
+    assert_eq!(script.calls().last().map(String::as_str), Some("prompt: and again"), "told once");
+    ended(&script, "");
+    poll(&mut app, &ctx);
+
+    // The note's other parts, and its bound on what it lists.
+    let seen = app.session.doc.as_ref().clone();
+    assert!(changed_note(&seen, &seen.clone()).is_none());
+    let mut rolled = seen.clone();
+    rolled.marker = Some(0);
+    let first = seen.features.first().map(|f| f.name.clone()).unwrap();
+    assert!(changed_note(&seen, &rolled).unwrap().contains(&format!("(the History marker is now before {first}, so it")));
+    let mut many = seen.clone();
+    let w = seen.params.iter().find(|p| p.name == "w").cloned().unwrap();
+    many.params.extend((0..20).map(|i| Param { name: format!("p{i}"), ..w.clone() }));
+    assert!(changed_note(&seen, &many).unwrap().contains(&format!(", p11 = {} (new) and 8 more)", w.expr)));
+
+    // A new chat starts a session that has seen nothing.
+    app.run("parameters.change", json!({"name": "w", "expression": "30"})).unwrap();
+    new_chat(&mut app);
+    app.agent_chat.state = Some(State::Ready);
+    send(&mut app, &ctx, "hello".into());
+    assert_eq!(script.calls().last().map(String::as_str), Some("prompt: hello"));
+}
+
 /// The same with a real agent process speaking ACP: `session/cancel` goes out, the agent answers
 /// the held prompt with the cancelled stop reason, and only then does the queued text go as a new
 /// `session/prompt`.
@@ -1543,7 +1614,7 @@ done
 }
 
 /// #9811: an agent that offers the standard `systemPrompt` field gets the note in it, on the first
-/// session and on the one New chat opens.
+/// session and on the one New chat opens, with the custom instructions set before it (#8220).
 #[cfg(unix)]
 #[test]
 fn an_acp_agent_offering_the_standard_field_gets_the_system_note_in_every_session() {
@@ -1576,6 +1647,7 @@ done
         }
     };
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    app.preferences.agent_instructions = "Print flat side down.".into();
     new_chat(&mut app);
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
     let sessions: Vec<Value> = std::fs::read_to_string(&log)
@@ -1585,11 +1657,86 @@ done
         .filter(|v| v["method"] == "session/new")
         .collect();
     assert_eq!(sessions.len(), 2);
-    for session in &sessions {
-        assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(acp::SYSTEM_NOTE));
+    let notes = [acp::SYSTEM_NOTE.to_string(), acp::system_note("Print flat side down.")];
+    for (session, note) in sessions.iter().zip(&notes) {
+        assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(note.as_str()));
     }
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #8220: Preferences → AI shows the Custom instructions field; `ui.agent_chat` sets them (cut at
+/// the limit) and reports them; Connect sends them in the endpoint's system note, and an edit
+/// reaches the conversation New chat opens.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn custom_instructions_reach_the_system_note_of_each_new_session() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let log = seen.clone();
+    let http: backend::HttpFn = Arc::new(move |r: &backend::HttpRequest| {
+        if r.url.ends_with("/chat/completions") {
+            log.lock().unwrap().push(serde_json::from_slice(r.body.as_deref().unwrap_or(b"null")).unwrap());
+            return Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": "ok"}}]}).to_string().into_bytes()));
+        }
+        Ok((200, b"{\"data\":[]}".to_vec()))
+    });
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.services.agent_http = Some(http);
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_ASSISTANT);
+    h.frames(4);
+    assert!(crate::scenario::rect_of("prefs:agent_instructions").is_some(), "the field is on the AI page");
+    h.app.preferences.ai_features = true;
+    h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("prefs_agent_instructions")));
+    h.frames(2);
+    h.step(&json!({"text": "M3"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.preferences.agent_instructions, "M3", "typed text lands in the field");
+    assert!(h.app.prefs_window.filter.is_empty(), "Preferences search does not take the typing");
+    let long = "x".repeat(acp::INSTRUCTIONS_LIMIT + 5);
+    assert_eq!(
+        h.call("ui.agent_chat", json!({"instructions": long}))["result"]["instructions"].as_str().map(str::len),
+        Some(acp::INSTRUCTIONS_LIMIT)
+    );
+    assert!(!h.call("ui.agent_chat", json!({"instructions": 3}))["error"].is_null());
+    assert_eq!(h.call("ui.agent_chat", json!({"instructions": "Use M3 screws."}))["result"]["instructions"], "Use M3 screws.");
+
+    h.app.preferences.agents.push(agents::AgentConfig {
+        id: "api-1".into(),
+        kind: agents::Kind::Api,
+        base_url: "http://localhost:11434/v1".into(),
+        model: "m".into(),
+        ..Default::default()
+    });
+    h.app.agent_chat.agent_id = Some("api-1".into());
+    let ctx = crate::fonts::test_context();
+    let until = |app: &mut SolveApp, done: &dyn Fn(&SolveApp) -> bool| {
+        let t = std::time::Instant::now();
+        while !done(app) {
+            assert!(t.elapsed() < std::time::Duration::from_secs(20), "timed out");
+            poll(app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+    let sent = |n: usize| {
+        let seen = seen.clone();
+        move |a: &SolveApp| a.agent_chat.state() == State::Ready && seen.lock().unwrap().len() == n
+    };
+    connect(&mut h.app, &ctx);
+    until(&mut h.app, &|a| a.agent_chat.state() == State::Ready);
+    send(&mut h.app, &ctx, "one".into());
+    until(&mut h.app, &sent(1));
+    // Editing the field leaves the running conversation's note alone.
+    h.app.preferences.agent_instructions = "Print flat side down.".into();
+    send(&mut h.app, &ctx, "two".into());
+    until(&mut h.app, &sent(2));
+    new_chat(&mut h.app);
+    until(&mut h.app, &|a| a.agent_chat.state() == State::Ready);
+    send(&mut h.app, &ctx, "three".into());
+    until(&mut h.app, &sent(3));
+    let notes: Vec<Value> = seen.lock().unwrap().iter().map(|body| body["messages"][0]["content"].clone()).collect();
+    assert_eq!(notes, [acp::system_note("Use M3 screws."), acp::system_note("Use M3 screws."), acp::system_note("Print flat side down.")]);
+    disconnect(&mut h.app);
 }
 
 fn models_reply(current: &str) -> Event {
@@ -2013,6 +2160,17 @@ fn the_card_of_a_running_endpoint_changes_the_chats_model() {
     script.report(models_reply("fast"));
     h.step(&json!({"call": "ui.prefs", "params": {"open": "AI"}})).unwrap();
     h.frames(4);
+    // The permission cards put endpoint controls below the fixed page's viewport.
+    for _ in 0..32 {
+        let at = handle_at("prefs:ai_model:api-1").unwrap();
+        let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+        if body.contains(at) {
+            break;
+        }
+        h.call("ui.scroll", json!({"x":body.center().x,"y":body.center().y,"delta":if at.y < body.top() {100} else {-100}}));
+        h.frames(30);
+    }
+    assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains(handle_at("prefs:ai_model:api-1").unwrap()));
     h.step(&json!({"click": {"handle": "prefs:ai_model:api-1"}})).unwrap();
     h.frames(3);
     assert!(handle_at("prefs:ai_model:api-1:smart").is_some());
@@ -2748,7 +2906,7 @@ fn pictures_are_read_off_the_window_thread() {
     send(&mut app, &ctx, words);
     assert_eq!(script.prompts().len(), 1);
     {
-        let _ja = crate::i18n::scope("ja");
+        let _ja = solidcraft_ui_text::scope("ja");
         control(&mut app, &ctx, &json!({"attach": at(&d, "fake.png")})).unwrap();
     }
     settle_files(&mut app, &ctx);
@@ -2894,12 +3052,139 @@ fn narrow_chat() -> crate::scenario::Harness {
     h
 }
 
+/// The rows `a_selection_held_at_the_edge_scrolls_and_keeps_its_start` draws that are in view:
+/// each row's number, where its text is, and the conversation's view.
+fn rows_in_view(h: &crate::scenario::Harness) -> Vec<(usize, egui::Rect, egui::Rect)> {
+    let mut rows = Vec::new();
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(text) = shape
+                && let Some(n) = text.galley.text().strip_prefix("Parts list row ").and_then(|n| n.parse::<usize>().ok())
+            {
+                let at = egui::Rect::from_min_size(text.pos, text.galley.size());
+                if clipped.clip_rect.intersects(at) {
+                    rows.push((n, at, clipped.clip_rect));
+                }
+            }
+        });
+    }
+    rows.sort_by_key(|r| r.0);
+    rows
+}
+
+/// #11527: a text selection held at the conversation's edge scrolls it, and keeps its start once
+/// that has scrolled out of view, so Copy takes the hidden rows too. Resting there with no button
+/// down, or after letting go, scrolls nothing.
+#[test]
+fn a_selection_held_at_the_edge_scrolls_and_keeps_its_start() {
+    let mut h = narrow_chat();
+    for n in 0..80 {
+        h.app.agent_chat.items.push(Item::Agent { thought: false, text: format!("Parts list row {n}") });
+    }
+    h.frames(4);
+    let rows = rows_in_view(&h);
+    let (&(top, _, view), &(last, last_at, _)) = (rows.first().expect("rows in view"), rows.last().expect("rows in view"));
+    assert_eq!(last, 79, "the conversation shows its end");
+    let edge = egui::pos2(last_at.left() + 10.0, view.top() + 4.0);
+    let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    h.frame_with(vec![egui::Event::PointerMoved(edge)]);
+    h.frames(20);
+    assert_eq!(rows_in_view(&h)[0].0, top, "no button down: the pointer at the edge scrolls nothing");
+
+    // Start the selection at the end of the last row and hold it at the top edge.
+    let start = last_at.right_center() - egui::vec2(1.0, 0.0);
+    h.frame_with(vec![egui::Event::PointerMoved(start), press(start, true)]);
+    h.frame_with(vec![egui::Event::PointerMoved(edge)]);
+    for _ in 0..600 {
+        if !rows_in_view(&h).iter().any(|r| r.0 == last) {
+            break;
+        }
+        h.frame();
+    }
+    let rows = rows_in_view(&h);
+    assert!(!rows.iter().any(|r| r.0 == last), "holding the selection at the top scrolls the last row out of view");
+    let reached = rows[0].0;
+    assert!(reached < top, "row {reached} is in view, it was {top}");
+    h.frame_with(vec![press(edge, false)]);
+    let after = rows_in_view(&h)[0].0;
+    h.frames(20);
+    assert_eq!(rows_in_view(&h)[0].0, after, "letting go stops the scrolling");
+    assert!(h.ctx.plugin::<egui::text_selection::LabelSelectionState>().lock().has_selection(), "the selection keeps its start out of view");
+
+    h.frame_with(vec![egui::Event::Copy]);
+    let copied = h
+        .output
+        .commands
+        .iter()
+        .find_map(|c| if let egui::OutputCommand::CopyText(text) = c { Some(text.clone()) } else { None })
+        .expect("Copy takes the selection");
+    // The selection's moving end is under the pointer, in the first row or two in view.
+    for n in [reached + 2, 78] {
+        assert!(copied.contains(&format!("Parts list row {n}\n")), "row {n} is copied whole: {copied:?}");
+    }
+    assert!(copied.trim_end().ends_with("Parts list row 79"), "the selection ends where it started, out of view: {copied:?}");
+}
+
+/// #11527: only a drag towards the edge scrolls. Holding a press on the line at the top edge, a
+/// double click there, or a drag from there into the conversation leaves it where it is.
+#[test]
+fn a_press_at_the_edge_without_a_drag_towards_it_scrolls_nothing() {
+    let mut h = narrow_chat();
+    // One paragraph taller than the conversation: every point in view is on its text.
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Bill of materials ".repeat(400) });
+    h.frames(4);
+    // Where the answer's text starts, the conversation's view, and the first line wholly in view
+    // (egui itself scrolls a pressed line that is cut off at the edge into view).
+    let answer = |h: &crate::scenario::Harness| {
+        let mut found = None;
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Text(text) = shape
+                    && text.galley.text().starts_with("Bill of materials")
+                    && clipped.clip_rect.intersects(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                {
+                    let line = text.galley.rows.iter().map(|r| r.rect().translate(text.pos.to_vec2())).find(|r| r.top() >= clipped.clip_rect.top());
+                    found = Some((text.pos.y, clipped.clip_rect, line.expect("a line wholly in view")));
+                }
+            });
+        }
+        found.expect("the answer is in view")
+    };
+    let (rest, view, line) = answer(&h);
+    let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    let edge = egui::pos2(view.left() + 40.0, line.center().y);
+    assert!(edge.y < view.top() + 32.0, "the first line in view is by the edge");
+    h.frame_with(vec![egui::Event::PointerMoved(edge), press(edge, true)]);
+    h.frames(30);
+    assert_eq!(answer(&h).0, rest, "a press held at the edge scrolls nothing");
+    h.frame_with(vec![press(edge, false)]);
+    for _ in 0..2 {
+        h.frame_with(vec![press(edge, true)]);
+        h.frame_with(vec![press(edge, false)]);
+    }
+    h.frames(10);
+    assert_eq!(answer(&h).0, rest, "a double click at the edge scrolls nothing");
+    let inside = edge + egui::vec2(0.0, 20.0);
+    h.frame_with(vec![egui::Event::PointerMoved(edge), press(edge, true)]);
+    h.frame_with(vec![egui::Event::PointerMoved(inside)]);
+    h.frames(30);
+    assert_eq!(answer(&h).0, rest, "a drag from the edge into the conversation scrolls nothing");
+    h.frame_with(vec![press(inside, false)]);
+    // Towards the edge it does.
+    let middle = view.center();
+    h.frame_with(vec![egui::Event::PointerMoved(middle), press(middle, true)]);
+    h.frame_with(vec![egui::Event::PointerMoved(edge)]);
+    h.frames(30);
+    assert!(answer(&h).0 > rest, "a drag to the top edge scrolls the answer down");
+    h.frame_with(vec![press(edge, false)]);
+}
+
 /// #10172: before a connection, what the panel draws under the agent switcher (the Agent row
 /// with Add agent and Refresh) keeps the panel's side margin, docked and floating: nothing starts
 /// at the panel's edge or is cut off at the other one.
 #[test]
 fn the_agent_list_keeps_the_panels_side_margin() {
-    use crate::shell::LayoutMode;
+    use crate::ui_kit::LayoutMode;
     for layout in [LayoutMode::Docked, LayoutMode::Floating] {
         let mut h = narrow_chat();
         h.app.ui.layout = layout;
@@ -2915,7 +3200,7 @@ fn the_agent_list_keeps_the_panels_side_margin() {
             });
         }
         let at = |label: &str| texts.iter().find(|(text, r)| text == label && panel.contains(r.center())).map(|(_, r)| *r);
-        let margin = crate::theme::Tokens::get().space_12 - 0.5;
+        let margin = solidcraft_theme::Tokens::get().space_12 - 0.5;
         let agent = at(tr("ui.agent_chat_pick")).expect("the Agent row");
         assert!(agent.left() >= panel.left() + margin, "{layout:?}: Agent at {agent:?} in {panel:?}");
         let refresh = at(tr("ui.agent_chat_refresh")).expect("Refresh");
@@ -3120,6 +3405,7 @@ fn a_cad_file_joins_the_message_once_its_import_is_in() {
 /// says so; any other file's × just takes it off.
 #[test]
 fn an_imported_parts_chip_says_the_part_stays() {
+    crate::i18n::install();
     assert_eq!(panel::remove_tip(&attach::Attachment::imported("motor.step".into())), tr("ui.agent_chat_remove_imported"));
     assert!(tr("ui.agent_chat_remove_imported").contains("stays in the design"));
     let picture = attach::from_rgba("a.png".into(), 2, 2, &[9; 16]).unwrap();
@@ -3239,7 +3525,7 @@ fn box_selection(app: &mut SolveApp) -> Vec<solidcraft_engine::Sel> {
     app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).expect("a box");
     let face = app.session.execute("model.faces", &json!({"body": "Body1"})).expect("faces")["faces"][0].clone();
     let edge = app.session.execute("model.edges", &json!({"body": "Body1"})).expect("edges")["edges"][0].clone();
-    let at = |v: &Value| solidcraft_engine::geom::Vec3::new(v[0].as_f64().unwrap_or(0.0), v[1].as_f64().unwrap_or(0.0), v[2].as_f64().unwrap_or(0.0));
+    let at = |v: &Value| solidcore_record::Vec3::new(v[0].as_f64().unwrap_or(0.0), v[1].as_f64().unwrap_or(0.0), v[2].as_f64().unwrap_or(0.0));
     vec![
         Sel::Face { body: "Body1".into(), index: face["index"].as_u64().unwrap_or(0) as usize, point: at(&face["point"]) },
         Sel::Edge { body: "Body1".into(), index: edge["index"].as_u64().unwrap_or(0) as usize, point: at(&edge["mid"]) },
@@ -3317,8 +3603,8 @@ fn a_huge_selection_is_counted_not_dropped_silently() {
     assert_eq!((both.items.len(), both.total()), (context::MAX_ITEMS, 200));
     // Unknown bodies, faces and features are described by what is known, without panicking.
     let odd = [
-        Sel::Face { body: "Nope".into(), index: usize::MAX, point: solidcraft_engine::geom::Vec3::new(f64::NAN, f64::INFINITY, 0.0) },
-        Sel::Edge { body: "Nope".into(), index: 7, point: solidcraft_engine::geom::Vec3::new(0.0, 0.0, 0.0) },
+        Sel::Face { body: "Nope".into(), index: usize::MAX, point: solidcore_record::Vec3::new(f64::NAN, f64::INFINITY, 0.0) },
+        Sel::Edge { body: "Nope".into(), index: 7, point: solidcore_record::Vec3::new(0.0, 0.0, 0.0) },
         Sel::Feature { id: u64::MAX },
         Sel::Plane { name: "XY".into() },
         Sel::SketchCurve { id: "c1".into(), sketch: None },
@@ -3811,15 +4097,19 @@ fn the_picks_go_with_the_next_message_once() {
     assert_eq!(script.calls().pop().as_deref(), Some("prompt: and now?"));
 }
 
-/// Two clicks on two rims are two things, not four edges (a click on a rim selects both halves for
-/// the commands; the chat counts and describes what was clicked).
+/// Two clicks on two rims are two things (the chat counts and describes what was clicked). The
+/// cylinder is a circle drawn as two half arcs, extruded: one wall, each rim one closed edge.
 #[test]
 fn a_rim_clicked_once_is_one_item_not_its_pieces() {
     use solidcraft_engine::Sel;
     let (mut app, script, ctx) = app_with_script();
-    app.run("solid.cylinder", json!({"radius": 10, "height": 20})).expect("a cylinder");
+    app.run("sketch.create", json!({"plane": "XY"})).expect("a sketch");
+    app.run("sketch.arc.three_point", json!({"start": [10, 0], "end": [-10, 0], "through": [0, 10]})).expect("an arc");
+    app.run("sketch.arc.three_point", json!({"start": [-10, 0], "end": [10, 0], "through": [0, -10]})).expect("an arc");
+    app.run("sketch.finish", json!({})).expect("the sketch");
+    app.run("solid.extrude", json!({"distance": 20})).expect("a cylinder");
     let (name, top, bottom, mid_top, mid_bottom) = {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let body = &st.bodies[0];
         let mesh = body.mesh();
         let rim_at = |z: f64| mesh.edges.iter().position(|e| e.len() > 3 && e.iter().all(|p| (p.z - z).abs() < 1e-6)).expect("a rim");
@@ -3828,21 +4118,22 @@ fn a_rim_clicked_once_is_one_item_not_its_pieces() {
     };
     crate::viewport::select(&mut app, Some(Sel::Edge { body: name.clone(), index: top, point: mid_top }), false, false);
     crate::viewport::select(&mut app, Some(Sel::Edge { body: name, index: bottom, point: mid_bottom }), true, false);
-    assert_eq!(app.session.selection.len(), 4, "two clicks selected four halves");
+    assert_eq!(app.session.selection.len(), 2, "two clicks selected the two rims");
     assert_eq!(selected_count(&mut app), 2, "the checkbox counts the two clicks");
 
     app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "these two rims".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.contains("2 item(s)"), "{prompt}");
-    assert_eq!(prompt.matches("(2 pieces)").count(), 2, "{prompt}");
-    // A rim of radius 10 is about 62.8 mm round (the kernel's own figure), both halves together.
-    assert!(prompt.contains("Edge 62.") && prompt.contains("mm (2 pieces)"), "{prompt}");
+    assert!(!prompt.contains("pieces)"), "{prompt}");
+    // A rim of radius 10 is about 62.8 mm round (the kernel's own figure), the whole circle.
+    assert_eq!(prompt.matches("Edge 62.").count(), 2, "{prompt}");
     let Some(Item::User { context, .. }) = app.agent_chat.items.last() else { panic!("a sent message") };
     assert_eq!(context.items.len(), 2);
     assert_eq!(context.total(), 2);
-    // The detail still names the piece indices the tools take.
-    assert!(context.items.iter().all(|i| i.detail.contains("indices [")), "{:?}", context.items);
+    // The detail names the index the tools take.
+    let indices = [top, bottom].map(|i| format!("index {i}, "));
+    assert!(context.items.iter().zip(&indices).all(|(item, index)| item.detail.contains(index)), "{:?}", context.items);
 }
 
 /// The same for a surface the kernel splits at a seam: one click on the cylinder's wall is one item.
@@ -3856,7 +4147,7 @@ fn a_split_wall_clicked_once_is_one_item() {
         .and_then(|faces| faces.iter().find(|f| f["cylinder"]["radius"].is_number()).cloned())
         .expect("the wall");
     let at = &wall["point"];
-    let point = solidcraft_engine::geom::Vec3::new(at[0].as_f64().unwrap_or(0.0), at[1].as_f64().unwrap_or(0.0), at[2].as_f64().unwrap_or(0.0));
+    let point = solidcore_record::Vec3::new(at[0].as_f64().unwrap_or(0.0), at[1].as_f64().unwrap_or(0.0), at[2].as_f64().unwrap_or(0.0));
     crate::viewport::select(
         &mut app,
         Some(Sel::Face { body: "Body1".into(), index: wall["index"].as_u64().unwrap_or(0) as usize, point }),
@@ -4107,6 +4398,7 @@ fn said(title: &str, input: Value, output: Option<&str>) -> Option<String> {
 /// parameters and what it returned.
 #[test]
 fn tool_calls_read_as_what_they_did() {
+    crate::i18n::install();
     let extrude = json!({"command": "solid.extrude", "params": {"sketch": "Sketch1", "distance": 10}});
     assert_eq!(said("execute: solid.extrude", extrude.clone(), None).as_deref(), Some("Extrude Sketch1 by 10 mm"));
     // As an ACP agent names the bridged tool, with the body the result made.
@@ -4140,6 +4432,7 @@ fn tool_calls_read_as_what_they_did() {
 /// Details and the tooltip.
 #[test]
 fn tool_cards_show_file_names_never_paths() {
+    crate::i18n::install();
     let shot = r"ui.screenshot: C:\Users\bherbruck\AppData\Local\Temp\solidcraft-mcp-8608-b4c7b64\shot-0.png";
     assert_eq!(said(shot, json!({}), None).as_deref(), Some("Screenshot"));
     assert_eq!(said("mcp__solidcraft-app__ui.screenshot", json!({}), None).as_deref(), Some("Screenshot"));
@@ -4324,12 +4617,12 @@ fn the_composer_hint_stays_on_one_row_at_the_narrowest_width() {
             continue;
         }
         let language = path.file_stem().unwrap().to_string_lossy().into_owned();
-        let _scope = crate::i18n::scope(&language);
+        let _scope = solidcraft_ui_text::scope(&language);
         for key in ["ui.agent_chat_placeholder", "ui.agent_chat_placeholder_busy"] {
-            let hint = crate::i18n::tr(key).to_owned();
+            let hint = solidcraft_ui_text::tr(key).to_owned();
             let mut rows = 0;
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                rows = crate::ui_kit::assistant_hint_galley(ui, &hint, width - 2.0 * crate::theme::Tokens::get().form_inset).rows.len();
+                rows = crate::ui_kit::assistant_hint_galley(ui, &hint, width - 2.0 * solidcraft_theme::Tokens::get().form_inset).rows.len();
             });
             output.textures_delta.clear();
             assert_eq!(rows, 1, "{language} {key} at {width} wide: {hint}");
@@ -4344,7 +4637,7 @@ fn the_composer_hint_stays_on_one_row_at_the_narrowest_width() {
 #[test]
 fn tool_room_beside_the_docked_assistant_survives_an_inside_out_view() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-    app.ui.layout = crate::shell::LayoutMode::Floating;
+    app.ui.layout = crate::ui_kit::LayoutMode::Floating;
     app.preferences.ai_features = true;
     app.agent_chat.open = true;
     app.preferences.agent_chat_popped = false;
@@ -4397,6 +4690,21 @@ fn the_copy_message_button_copies_the_prompt_as_entered() {
     let at = crate::scenario::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
     click_at(&mut h, at, egui::PointerButton::Primary);
     assert_eq!(copied_text(&h).as_deref(), Some("make a plate\n\nwith two holes:\n- 6 mm\n- 8 mm"), "the whole prompt, paragraphs and list items");
+}
+
+/// A prompt at the top of a short conversation is as tall as its text and its Copy message
+/// button: the button sits at the bubble's foot and the reply follows straight after, instead of
+/// the bubble stretching over the empty view below it.
+#[test]
+fn a_prompt_at_the_top_of_the_conversation_is_as_tall_as_its_content() {
+    // Kept to the end: the published handles and rects are its last frame's.
+    let _h = chat_with_copiable_messages();
+    let button = crate::scenario::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
+    let prompt = crate::scenario::rect_of("agent_chat:msg:0").expect("the prompt's message area");
+    let reply = crate::scenario::rect_of("agent_chat:msg:1").expect("the reply's message area");
+    let row = solidcraft_theme::Tokens::get().control_height;
+    assert!(prompt.bottom() - button.y < row, "the bubble ends {} below its button", prompt.bottom() - button.y);
+    assert!(reply.top() - button.y < 2.0 * row, "the reply starts {} below the prompt's button", reply.top() - button.y);
 }
 
 /// The visible button on a reply copies its original Markdown: heading, paragraphs, list and

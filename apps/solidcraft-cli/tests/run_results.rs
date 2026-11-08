@@ -67,6 +67,9 @@ fn run_rejects_invalid_options_before_script_execution_or_output_writes() {
         (&["--out", "--quiet"][..], "--out needs a value"),
         (&["--ouut", "part.step"][..], "doesn't take --ouut"),
         (&["--unknown"][..], "doesn't take --unknown"),
+        (&["--quality"][..], "--quality needs a value"),
+        (&["--quality", "best"][..], "--quality must be standard, fine or finest, not `best`"),
+        (&["--quality", "standard", "--quality", "best"][..], "--quality is given more than once"),
     ];
     for existing in [false, true] {
         let saved = dir.0.join(format!("{existing}.solidcraft"));
@@ -159,7 +162,7 @@ fn cli_loads_both_design_encodings_by_contents() {
 }
 
 /// #1369: a pending concept that did not land in the numbered release must not be silently
-/// dropped on open/resave, in either encoding or before replacing an existing destination.
+/// dropped on open/resave, in either encoding: it opens with a warning, and saving keeps it.
 #[test]
 fn unknown_pending_concepts_preserve_the_open_design_and_output_files() {
     use solidcraft_engine::{Session, doc, io};
@@ -173,38 +176,70 @@ fn unknown_pending_concepts_preserve_the_open_design_and_output_files() {
             let source = dir.0.join(format!("experimental-{version}.{extension}"));
             std::fs::write(&source, &bytes).unwrap();
             let mut session = Session::default();
-            session.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
-            let original = session.doc.clone();
-            let original_path = session.path.clone();
-            let undo = session.undo.len();
-            let dirty = session.is_dirty();
-            let err = session.execute("doc.open", &json!({"path": source})).unwrap_err().to_string();
-            assert!(err.contains("experimental-card") && err.contains("update SolidCraft"), "{err}");
-            assert_eq!(session.doc, original);
-            assert_eq!(session.path, original_path);
-            assert_eq!(session.undo.len(), undo);
-            assert_eq!(session.is_dirty(), dirty);
+            // It opens, and the reply says what it is.
+            let reply = session.execute("doc.open", &json!({"path": source})).unwrap();
+            let notice = reply["newer_file"]["notice"].as_str().unwrap().to_string();
+            assert!(notice.contains("experimental-card") && notice.starts_with("Saved by a newer SolidCraft"), "{notice}");
+            assert_eq!(reply["warnings"][0], notice.as_str());
+            assert_eq!(session.doc.name, "Experimental");
 
             for existing in [false, true] {
                 let destination = dir.0.join(format!("output-{version}-{extension}-{existing}.{extension}"));
                 let backup = io::backup_path(&destination);
                 if existing {
                     std::fs::write(&destination, b"existing design").unwrap();
-                    std::fs::write(&backup, b"existing backup").unwrap();
                 }
                 let output = cli().args(["run", "--in"]).arg(&source).arg("--save").arg(&destination).output().unwrap();
-                assert_eq!(output.status.code(), Some(1));
                 let error = String::from_utf8_lossy(&output.stderr);
-                assert!(error.contains("experimental-card") && error.contains("update SolidCraft"), "{error}");
+                assert_eq!(output.status.code(), Some(0), "{error}");
+                assert!(error.contains("warning: Saved by a newer SolidCraft") && error.contains("experimental-card"), "{error}");
+                // Saved, it still says it has the change, and opens the same way.
+                let saved = io::read_design(&std::fs::read(&destination).unwrap()).unwrap();
+                assert!(saved.format_pending.iter().any(|name| name == "experimental-card"));
+                assert!(saved.newer_file.is_some());
                 if existing {
-                    assert_eq!(std::fs::read(&destination).unwrap(), b"existing design");
-                    assert_eq!(std::fs::read(&backup).unwrap(), b"existing backup");
-                } else {
-                    assert!(!destination.exists() && !backup.exists());
+                    assert_eq!(std::fs::read(&backup).unwrap(), b"existing design");
                 }
                 assert_eq!(std::fs::read(&source).unwrap(), bytes);
             }
         }
+    }
+}
+
+/// `eval` and `run` on a design one format newer, with a feature kind this version doesn't have:
+/// the rest builds, the reply names it, and the saved file still holds it, under the file's number.
+#[test]
+fn the_cli_opens_a_newer_design_and_saving_keeps_what_it_cant_read() {
+    use solidcraft_engine::{Session, doc, io};
+
+    let dir = Scratch::new();
+    let mut session = Session::default();
+    session.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+    let mut file: Value = serde_json::from_slice(&io::write_design(&session.doc)).unwrap();
+    let newer = doc::format::format_string(doc::format::FORMAT + 1);
+    file["format"] = json!(newer);
+    let future = json!({"id": 900, "name": "Lattice1", "type": "gyroid_lattice", "cell": 2.5});
+    file["features"].as_array_mut().unwrap().push(future.clone());
+    let source = dir.0.join("newer.json");
+    std::fs::write(&source, file.to_string()).unwrap();
+
+    let output = cli().args(["eval"]).arg(&source).output().unwrap();
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{error}");
+    assert!(error.contains("warning: Saved by a newer SolidCraft") && error.contains("Lattice1"), "{error}");
+    let reply: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(reply["body_count"], 1);
+    assert!(reply["newer_file"]["not_understood"][0].as_str().unwrap().contains("gyroid_lattice"), "{reply}");
+    assert!(reply["warnings"][0].as_str().unwrap().starts_with("Saved by a newer SolidCraft"), "{reply}");
+
+    for extension in ["json", "sc"] {
+        let destination = dir.0.join(format!("saved.{extension}"));
+        let output = cli().args(["run", "--in"]).arg(&source).arg("--save").arg(&destination).output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        let saved = io::read_design(&std::fs::read(&destination).unwrap()).unwrap();
+        assert_eq!(saved.format, newer, "never a lower number");
+        let again: Value = serde_json::from_slice(&io::write_design(&saved)).unwrap();
+        assert_eq!(again["features"].as_array().unwrap().last().unwrap(), &future);
     }
 }
 
@@ -254,6 +289,38 @@ fn results_still_save_and_export_the_script_once() {
         assert!(std::fs::metadata(exported).unwrap().len() > 0);
         assert_eq!(body_count(exported), 1);
     }
+}
+
+/// The triangles of a binary STL: the count after its 80-byte header.
+fn stl_triangles(path: &Path) -> u32 {
+    let bytes = std::fs::read(path).unwrap();
+    u32::from_le_bytes(bytes[80..84].try_into().unwrap())
+}
+
+/// #12270: `run --out part.stl --quality fine` writes the mesh at that quality, as
+/// `file.export`'s `quality` does, without a script to say so.
+#[test]
+fn run_exports_meshes_at_the_quality_asked_for() {
+    let dir = Scratch::new();
+    let script = dir.0.join("cylinder.json");
+    std::fs::write(&script, json!({"commands": [{"command": "solid.cylinder", "params": {"diameter": 40, "height": 10}}]}).to_string()).unwrap();
+    let export = |name: &str, quality: Option<&str>| {
+        let stl = dir.0.join(name);
+        let mut command = cli();
+        command.arg("run").arg(&script).arg("--quiet").arg("--out").arg(&stl);
+        if let Some(q) = quality {
+            command.args(["--quality", q]);
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{quality:?}: {}", String::from_utf8_lossy(&output.stderr));
+        stl_triangles(&stl)
+    };
+    let default = export("default.stl", None);
+    let standard = export("standard.stl", Some("standard"));
+    let fine = export("fine.stl", Some("fine"));
+    let finest = export("finest.stl", Some("finest"));
+    assert_eq!(default, standard);
+    assert!(standard < fine && fine < finest, "standard {standard}, fine {fine}, finest {finest}");
 }
 
 #[test]
@@ -465,7 +532,11 @@ fn snapshot_runs_its_script_on_the_in_design() {
 fn unknown_command_suggests_the_closest_id() {
     let output = cli().args(["exec", "file.open"]).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open`?"), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open` or `panel.open`?"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// #1833: `--timings` reports each command's time instead of the measurement, `--profile` adds

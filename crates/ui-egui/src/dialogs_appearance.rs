@@ -3,6 +3,7 @@
 //! body or face in the viewport, or onto a body's row in the Browser, applies at once; Apply
 //! (and OK) gives the picked objects the current look.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::Color32;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
@@ -199,7 +200,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == "appearance.assign").then(|| {
         let faces = app.session.selection.iter().any(|s| matches!(s, Sel::Face { .. }))
             && !app.session.selection.iter().any(|s| matches!(s, Sel::Body { .. }));
-        let state = app.session.world_state();
+        let state = crate::open_meshing::session_world(&app.session);
         let body_look = |body: &solidcraft_engine::doc::ModelBody| {
             app.session.doc.model_body_look(body).or_else(|| {
                 (body.body.paint().is_some() || body.imported.is_some() || body.body.color().is_some()).then(|| {
@@ -384,7 +385,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
     // Apply To: bodies or faces (the input follows).
     if let Some(component) = &k.component {
         ui_kit::row(ui, "Apply To", |ui| ui_kit::text(ui, &format!("Component: {component}"), ui_kit::Text::Cell));
-        if ui_kit::row(ui, "", |ui| ui_kit::button(ui, crate::i18n::tr_label("Select bodies or faces instead"), ui_kit::Button::Normal)).clicked() {
+        if ui_kit::row(ui, "", |ui| ui_kit::button(ui, solidcraft_ui_text::tr_label("Select bodies or faces instead"), ui_kit::Button::Normal))
+            .clicked()
+        {
             k.component = None;
         }
     } else {
@@ -415,7 +418,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
     });
     let mut enabled = k.pbr.is_some();
     let toggle = ui_kit::row(ui, app.tr("appearance.surface_response"), |ui| ui_kit::checkbox(ui, app.tr("appearance.pbr_opaque"), &mut enabled))
-        .on_hover_text(app.tr("appearance.pbr_help"));
+        .backing_on_hover_text(app.tr("appearance.pbr_help"));
     crate::scenario::publish_handle("appearance:pbr", toggle.rect.center());
     if toggle.changed() {
         detach_preset(k);
@@ -461,7 +464,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
             });
         }
         if ui_kit::button(ui, "Remove override", ui_kit::Button::Enabled(has_target))
-            .on_hover_text(crate::i18n::tr_label("Restore the inherited component or physical material appearance"))
+            .backing_on_hover_text(solidcraft_ui_text::tr_label("Restore the inherited component or physical material appearance"))
             .clicked()
             && let Some(p) = clear_params(k, &picked)
         {
@@ -484,7 +487,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
             ui_kit::swatch_grid(ui, &items, |ui, (i, (look, n))| {
                 if ui_kit::color_swatch(
                     ui,
-                    egui::Id::new(("ap_used", *i)),
+                    egui::Id::unique(("ap_used", *i)),
                     c32(look.color, look.opacity),
                     k.color == look.color && k.opacity == look.opacity && k.pbr == look.pbr,
                     &format!("{} · {n} item(s)", look.name),
@@ -522,7 +525,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
         .filter(|(_, l)| matches_library_filter(l, (k.category != 0).then_some(want.as_str()), &query, k.only_available))
         .collect();
     if shown.is_empty() {
-        ui_kit::text(ui, crate::i18n::tr_label("No matching appearances"), ui_kit::Text::Note("appearances_empty"));
+        ui_kit::text(ui, solidcraft_ui_text::tr_label("No matching appearances"), ui_kit::Text::Note("appearances_empty"));
     }
     ui_kit::swatch_grid(ui, &shown, |ui, (i, l)| {
         let picked_look = k.look.as_deref() == Some(l.name.as_str()) && k.pbr == l.pbr;
@@ -532,7 +535,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
             |p| format!("{}\n{}\n{}", l.name, p.preview_note, p.requirements.join(", ")),
         );
         ui.add_enabled_ui(available, |ui| {
-            let response = ui_kit::color_swatch(ui, egui::Id::new(("ap_lib", *i)), c32(l.color, l.opacity), picked_look, &tip, (*l).clone());
+            let response = ui_kit::color_swatch(ui, egui::Id::unique(("ap_lib", *i)), c32(l.color, l.opacity), picked_look, &tip, (*l).clone());
             if let Some(preset) = &l.preset {
                 crate::scenario::publish_handle(&format!("appearance:preset:{}", preset.id), response.rect.center());
             }
@@ -543,7 +546,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
             }
         })
         .response
-        .on_hover_text(tip);
+        .backing_on_hover_text(tip);
     });
     // A swatch dropped on the model or the Browser.
     let released = ui.input(|i| i.pointer.any_released());
@@ -592,8 +595,8 @@ fn target_names(targets: &[Sel]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use solidcore_record::Vec3;
     use solidcraft_engine::Session;
-    use solidcraft_engine::geom::Vec3;
 
     use super::*;
     use crate::Services;

@@ -1,5 +1,6 @@
-use crate::{icon_svg, scenario, theme::Tokens, ui_kit::*};
+use crate::{icon_svg, scenario, ui_kit::*};
 use egui::{ColorImage, Pos2, Rect, vec2};
+use solidcraft_theme::Tokens;
 
 fn assert_glyph(
     ctx: &egui::Context,
@@ -18,7 +19,7 @@ fn assert_glyph(
     let master = icon_svg::resolve(id).master;
     let image = icon_svg::render(
         icon_svg::doc_for(master, px).unwrap(),
-        icon_svg::Look { dark: true, accent: None, vision: crate::theme::vision(), palette: None },
+        icon_svg::Look { dark: true, accent: None, vision: solidcraft_theme::vision(), palette: None },
         px,
     )
     .unwrap();
@@ -44,9 +45,9 @@ fn assert_glyph(
 
 #[test]
 fn section_card_and_floating_window_folds_render_down_when_open_right_when_closed() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for open in [false, true] {
             for surface in ["section", "card", "window"] {
                 let ctx = crate::fonts::test_context();
@@ -64,7 +65,7 @@ fn section_card_and_floating_window_folds_render_down_when_open_right_when_close
                         } else {
                             Panel::new(
                                 "Fillet",
-                                egui::Id::new("window"),
+                                egui::Id::unique("window"),
                                 egui::pos2(20.0, 20.0),
                                 viewport,
                                 crate::frame::Side::Left,
@@ -97,7 +98,7 @@ fn section_card_and_floating_window_folds_render_down_when_open_right_when_close
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -113,7 +114,7 @@ fn strip_fold_and_restore_share_the_chevron_texture_with_opposite_orientation() 
         let size = icon.width().round() as u32;
         let expected = icon_svg::render(
             icon_svg::doc_for(icon_svg::resolve("chevron").master, size).unwrap(),
-            icon_svg::Look { dark: true, accent: None, vision: crate::theme::vision(), palette: None },
+            icon_svg::Look { dark: true, accent: None, vision: solidcraft_theme::vision(), palette: None },
             size,
         )
         .unwrap();

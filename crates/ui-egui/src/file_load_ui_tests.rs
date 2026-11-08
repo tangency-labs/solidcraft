@@ -4,6 +4,7 @@
 use egui::{Event, PointerButton, Pos2, RawInput, Rect, ViewportCommand, ViewportId, pos2, vec2};
 use serde_json::json;
 use solidcraft_engine::Session;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 
@@ -79,10 +80,10 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 /// What two sessions must agree on after opening the same file.
 fn fingerprint(s: &Session) -> serde_json::Value {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let bodies: Vec<_> = world.bodies.iter().map(|b| (b.name.clone(), b.mesh().triangles.len())).collect();
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
-    let b = solidcraft_engine::view::bounds(s);
+    let b = solidcraft_engine::view::bounds(s).unwrap();
     json!({
         "name": s.doc.name,
         "path": s.path,
@@ -254,6 +255,126 @@ fn update_links_names_the_design_it_reads_while_the_window_draws() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Reload from file reads beside the window, as an insert does: the design waits, Cancel changes
+/// nothing, and a file that is gone is said in the status line.
+#[test]
+fn reloading_a_point_cloud_runs_off_the_window_thread() {
+    let dir = scratch("reload-cloud");
+    let path = dir.join("scan.xyz");
+    std::fs::write(&path, "0 0 0\n1 0 0\n").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let id = h.app.run("pointcloud.insert", json!({"path": path})).unwrap()["cloud"].as_u64().unwrap();
+    h.app.tree.cloud_panel = Some(crate::browser::CloudPanel::new(&h.app, id));
+    h.frames(4);
+    std::fs::write(&path, "0 0 0\n1 0 0\n2 0 0\n").unwrap();
+    let points = |app: &SolveApp| app.session.doc.point_clouds[0].len();
+    let until_idle = |h: &mut crate::scenario::Harness| {
+        let began = std::time::Instant::now();
+        while !h.app.file_load.idle() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(120), "the reload went on");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(3);
+    };
+    let hold = |h: &mut crate::scenario::Harness| {
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        h.app.file_load.worker_gate = Some((started_tx, release_rx));
+        (started_rx, release_tx)
+    };
+
+    // The card's button: held on its worker, the window draws and the design waits.
+    let design = h.app.session.doc.clone();
+    let (started, release) = hold(&mut h);
+    // Frame by frame: a scenario step would wait for the file operation it starts.
+    let [x, y] = h.widget(solidcraft_ui_text::tr("ui.point_cloud_reload")).expect("the card offers a reload");
+    let at = pos2(x as f32, y as f32);
+    let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Default::default() };
+    for event in [Event::PointerMoved(at), button(true), button(false)] {
+        h.frame_with(vec![event]);
+    }
+    let worker = started.recv_timeout(std::time::Duration::from_secs(60)).expect("the worker started");
+    assert_ne!(worker, std::thread::current().id());
+    h.frames(3);
+    assert!(h.widget("Reloading point cloud").is_some(), "the overlay says what runs");
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design), "the design waits");
+    // Cancel keeps it as it was.
+    h.app.file_load.cancel();
+    drop(release);
+    until_idle(&mut h);
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design), "a cancelled reload changes nothing");
+
+    // Run through, it brings the new points in, and says it is done, in one undo step.
+    let r = crate::file_load::begin_request(&mut h.app, {
+        let mut request = crate::file_load::Request::new("", crate::file_load::Kind::ReloadCloud);
+        request.options.insert("cloud".into(), json!(id));
+        request
+    });
+    assert!(r.is_ok() && h.app.file_load.busy());
+    until_idle(&mut h);
+    assert_eq!(points(&h.app), 3);
+    assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some("Reload Point Cloud done"));
+    // The open card folds its edits from here on, so an edit does not take the reload with it.
+    assert_eq!(h.app.tree.cloud_panel.as_ref().map(|p| p.depth), Some(h.app.session.undo.len()));
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(points(&h.app), 2);
+
+    // A file that is gone: said, and the design is as it was.
+    std::fs::remove_file(&path).unwrap();
+    let design = h.app.session.doc.clone();
+    let mut request = crate::file_load::Request::new("", crate::file_load::Kind::ReloadCloud);
+    request.options.insert("cloud".into(), json!(id));
+    crate::file_load::begin_request(&mut h.app, request).unwrap();
+    until_idle(&mut h);
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design));
+    let status = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+    assert!(status.contains("scan.xyz"), "{status}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A request's own `param_check` (#9184) holds on a command the file loader runs, which never
+/// reaches `control::handle`: a word that is no level is refused, `strict` refuses a broken call
+/// before the file is read, `warn` reads it and says what it found, and every reply says the level.
+/// Any spelling the engine takes goes to the file loader too.
+#[test]
+fn a_file_load_is_checked_at_the_requests_own_level() {
+    let dir = scratch("reload-check");
+    let path = dir.join("scan.xyz");
+    std::fs::write(&path, "0 0 0\n1 0 0\n").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let id = h.app.run("pointcloud.insert", json!({"path": path})).unwrap()["cloud"].as_u64().unwrap();
+    std::fs::write(&path, "0 0 0\n1 0 0\n2 0 0\n").unwrap();
+    let points = |app: &SolveApp| app.session.doc.point_clouds[0].len();
+    let misspelt = |level: &str| json!({"command": "pointcloud.reload", "params": {"cloud": id, "clowd": 1}, "param_check": level});
+
+    let (v, _) = h.call_queued("engine.execute", misspelt("loud"));
+    assert!(v["ok"] == false && v["error"].as_str().is_some_and(|e| e.contains("`param_check` must be off, warn or strict")), "{v}");
+    let (v, _) = h.call_queued("engine.execute", misspelt("strict"));
+    assert_eq!((&v["ok"], &v["param_check"]), (&json!(false), &json!("strict")), "{v}");
+    assert!(v["error"].as_str().is_some_and(|e| e.contains("clowd")), "{v}");
+    assert_eq!(points(&h.app), 2, "refused unread");
+
+    let (v, _) = h.call_queued("engine.execute", misspelt("warn"));
+    assert_eq!((&v["ok"], &v["param_check"]), (&json!(true), &json!("warn")), "{v}");
+    assert!(v["result"]["param_warnings"][0].as_str().is_some_and(|w| w.contains("clowd")), "{v}");
+    assert_eq!(points(&h.app), 3);
+
+    // Asked nothing, told nothing; the worker's thread shows the file loader took this spelling.
+    std::fs::write(&path, "0 0 0\n1 0 0\n2 0 0\n3 0 0\n").unwrap();
+    let (started_tx, started) = std::sync::mpsc::channel();
+    let (release, release_rx) = std::sync::mpsc::channel();
+    release.send(()).unwrap();
+    h.app.file_load.worker_gate = Some((started_tx, release_rx));
+    let (v, _) = h.call_queued("engine.execute", json!({"command": "POINTCLOUD.RELOAD", "params": {"cloud": id}}));
+    assert_eq!((&v["ok"], v.get("param_check")), (&json!(true), None), "{v}");
+    assert_ne!(started.try_recv().expect("the file loader ran it"), std::thread::current().id());
+    assert_eq!(points(&h.app), 4);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A design may link to a file on another computer (`\\host\share\…`); on Windows reading it, or
 /// only asking whether it is there, connects to that computer and may send it the user's sign-in.
 /// Update Links and Open Linked Design ask first, naming the server: Cancel reads nothing, Allow
@@ -328,6 +449,58 @@ fn update_links_and_open_linked_design_ask_before_a_network_location() {
     until_idle(&mut h);
     h.app.preferences.network_hosts.clear();
     crate::prefs::apply_network(&h.app.preferences);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Reload from file on a cloud whose file a design names on another computer asks first, naming
+/// the server; Cancel reads nothing, and a local file does not ask.
+#[test]
+fn reloading_a_point_cloud_on_a_network_location_asks_first() {
+    use crate::network_prompt::{Answer, NetworkPrompt, Then, answer, reload_cloud};
+    let dir = scratch("reload-cloud-network");
+    let path = dir.join("scan.xyz");
+    std::fs::write(&path, "0 0 0\n1 0 0\n").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let id = h.app.run("pointcloud.insert", json!({"path": path})).unwrap()["cloud"].as_u64().unwrap();
+    let local = h.app.session.doc.point_clouds[0].source.clone();
+    let until_idle = |h: &mut crate::scenario::Harness| {
+        let began = std::time::Instant::now();
+        while !h.app.file_load.idle() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(120), "the reload went on");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(3);
+    };
+
+    let crafted = r"\\evil.example\share\scan.xyz";
+    h.app.session.doc_mut().point_clouds[0].source = crafted.into();
+    let design = h.app.session.doc.clone();
+    reload_cloud(&mut h.app, id, crafted);
+    assert_eq!(h.app.network_prompt, Some(NetworkPrompt { hosts: vec!["evil.example".into()], then: Then::ReloadCloud(id) }));
+    assert!(h.app.file_load.idle(), "nothing is read while it asks");
+    answer(&mut h.app, Answer::Cancel);
+    h.frames(2);
+    assert!(h.app.network_prompt.is_none() && h.app.file_load.idle());
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design), "Cancel changes nothing");
+
+    // Allow once holds for that reload alone, and the preferences keep nothing.
+    reload_cloud(&mut h.app, id, crafted);
+    answer(&mut h.app, Answer::Once);
+    assert!(!h.app.file_load.idle(), "the file operation runs");
+    until_idle(&mut h);
+    assert!(h.app.preferences.network_hosts.is_empty());
+    let refused = h.app.session.execute("pointcloud.reload", &json!({"cloud": id})).unwrap_err().to_string();
+    assert!(refused.contains("evil.example") && refused.contains("Reload from file"), "{refused}");
+
+    // A local file does not ask.
+    h.app.session.doc_mut().point_clouds[0].source = local.clone();
+    std::fs::write(&path, "0 0 0\n1 0 0\n2 0 0\n").unwrap();
+    reload_cloud(&mut h.app, id, &local);
+    assert!(h.app.network_prompt.is_none());
+    until_idle(&mut h);
+    assert_eq!(h.app.session.doc.point_clouds[0].len(), 3);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -410,7 +583,7 @@ fn a_control_import_passes_up_and_names_on() {
         assert_eq!(reply["ok"], true, "{params}: {reply}");
         let mut sync = Session::default();
         assert_eq!(reply["result"], sync.execute("file.insert_step", &params).unwrap(), "the window's reply is the session's");
-        let b = solidcraft_engine::view::bounds(&w.app.session);
+        let b = solidcraft_engine::view::bounds(&w.app.session).unwrap();
         (reply, [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z], w.app.stand_up.is_some())
     };
 
@@ -454,7 +627,7 @@ fn a_control_import_passes_its_matrix_and_name_on() {
     assert_eq!(reply["ok"], true, "{reply}");
     let mut sync = Session::default();
     assert_eq!(reply["result"], sync.execute("file.insert_step", &params).unwrap(), "the window's reply is the session's");
-    let b = solidcraft_engine::view::bounds(&w.app.session);
+    let b = solidcraft_engine::view::bounds(&w.app.session).unwrap();
     assert!((b.min.x - 100.0).abs() < 1e-6 && (b.max.x - 160.0).abs() < 1e-6, "moved by the matrix: {b:?}");
     assert!(w.app.session.doc.components.iter().any(|c| c.name == "Bracket"), "named as asked");
     let _ = std::fs::remove_dir_all(&dir);
@@ -486,7 +659,7 @@ fn an_opened_design_is_drawn_whole_when_meshing_has_no_thread() {
         }
     });
     assert!(!crate::open_meshing::active(&w.app), "the parts are in: {:?}", crate::open_meshing::progress(&w.app));
-    let world = w.app.session.world_state();
+    let world = w.app.session.world_state().unwrap();
     assert!(!world.bodies.is_empty());
     assert_eq!(crate::open_meshing::shown_world(&w.app).bodies.len(), world.bodies.len(), "the whole design is drawn");
 }
@@ -513,12 +686,12 @@ fn an_opened_design_shows_its_bodies_as_they_are_meshed() {
         let shown = crate::open_meshing::shown_world(&w.app);
         assert!(shown.bodies.iter().all(|b| b.cached_mesh().is_some()), "only meshed bodies are drawn");
         let (done, total) = crate::open_meshing::progress(&w.app).unwrap();
-        assert!(done <= total && total == w.app.session.world_state().bodies.len(), "Loading parts {done}/{total}");
+        assert!(done <= total && total == w.app.session.world_state().unwrap().bodies.len(), "Loading parts {done}/{total}");
         seen.push(shown.bodies.len());
         w.frame(vec![]);
     }
     assert!(seen.windows(2).all(|p| p[0] <= p[1]), "the picture only grows: {seen:?}");
-    let world = w.app.session.world_state();
+    let world = w.app.session.world_state().unwrap();
     // Then the whole design (in the order its bodies came, kept until the design changes).
     let names = |st: &solidcraft_engine::doc::ModelState| {
         let mut n: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
@@ -541,7 +714,7 @@ fn an_opened_design_shows_its_bodies_as_they_are_meshed() {
     // An edit after that: the viewport draws the session's world again.
     w.app.session.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "operation": "new"})).unwrap();
     w.frame(vec![]);
-    assert!(std::sync::Arc::ptr_eq(&crate::open_meshing::shown_world(&w.app), &w.app.session.world_state()));
+    assert!(std::sync::Arc::ptr_eq(&crate::open_meshing::shown_world(&w.app), &w.app.session.world_state().unwrap()));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -624,7 +797,7 @@ fn open_timed(path: &str) -> (Win, (f64, &'static str)) {
         assert!(std::time::Instant::now() < deadline, "{path} opens");
     }
     let slowest = w.app.frame_watch.slowest;
-    eprintln!("{path}: slowest frame {:.1} ms while {}, {} bodies", slowest.0, slowest.1, w.app.session.world_state().bodies.len());
+    eprintln!("{path}: slowest frame {:.1} ms while {}, {} bodies", slowest.0, slowest.1, w.app.session.world_state().unwrap().bodies.len());
     (w, slowest)
 }
 
@@ -645,7 +818,7 @@ fn opening_a_large_design_never_stalls_the_window() {
     let step = step_assembly(&dir);
     let (mut w, (ms, phase)) = open_timed(&step);
     assert!(ms < BUDGET_MS, "STEP import: a {ms:.0} ms frame while {phase}");
-    assert!(w.app.session.world_state().bodies.len() >= 200);
+    assert!(w.app.session.world_state().unwrap().bodies.len() >= 200);
     for (name, cache) in [("cached.solidcraft", true), ("plain.solidcraft", false)] {
         let path = dir.join(name).to_string_lossy().to_string();
         w.app.session.execute("file.save_as", &json!({"path": path, "cache": cache})).unwrap();
@@ -725,7 +898,7 @@ fn an_opened_design_comes_up_at_the_home_view() {
     // The view the design before it was left at: straight down, zoomed right in.
     w.app.cam.set_view(StandardView::Top);
     w.app.cam.distance = 12.0;
-    w.app.cam.target = solidcraft_engine::geom::Vec3::new(50.0, -70.0, 3.0);
+    w.app.cam.target = solidcore_record::Vec3::new(50.0, -70.0, 3.0);
     // Opened from the Home screen, which covers the viewport while the design goes in: the
     // viewport is not drawn, so the layout a fit would be framed into is the one left over from
     // what was there before, which cannot frame anything.
@@ -778,5 +951,35 @@ fn an_opened_design_comes_up_at_the_home_view() {
     }
     assert_eq!((w.app.cam.yaw, w.app.cam.pitch, w.app.cam.roll), home_angles, "a synchronous open too");
     let _ = std::fs::remove_dir_all(&other);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A design a newer SolidCraft saved opens in the window: the status line says so without a
+/// dialog, Messages names what wasn't read, and editing that feature says why it can't be edited.
+#[test]
+fn a_newer_design_opens_with_a_notice_and_no_dialog() {
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    let dir = scratch("newer_design");
+    let mut design = Session::default();
+    design.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+    let mut file: serde_json::Value = serde_json::from_str(&design.doc.to_json()).unwrap();
+    let (reads, newer) = (solidcraft_engine::doc::format::FORMAT, solidcraft_engine::doc::format::FORMAT + 1);
+    file["format"] = json!(solidcraft_engine::doc::format::format_string(newer));
+    file["features"].as_array_mut().unwrap().push(json!({"id": 900, "name": "Lattice1", "type": "gyroid_lattice"}));
+    let path = dir.join("newer.json");
+    std::fs::write(&path, file.to_string()).unwrap();
+
+    app.open_path(&path.to_string_lossy());
+
+    let (text, _, error) = app.status.clone().unwrap();
+    assert_eq!(text, format!("Saved by a newer SolidCraft (format {newer}, this version reads up to {reads}). If something's missing, update."));
+    assert!(!error);
+    assert!(app.dialog.is_none());
+    assert!(app.messages.iter().any(|m| m.text.contains("Lattice1") && m.text.contains("Saving keeps it")));
+    assert_eq!(app.session.model.state().bodies.len(), 1);
+    app.edit_feature(900);
+    let (text, _, error) = app.status.clone().unwrap();
+    assert!(error && text.contains("gyroid_lattice"), "{text}");
+    assert!(app.dialog.is_none() && !app.ui.palette_open);
     let _ = std::fs::remove_dir_all(&dir);
 }

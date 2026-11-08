@@ -70,7 +70,7 @@ fn a_piece_of_a_body_inside_another_is_still_found() {
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "Block"}));
     run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [5, 5, 5], "operation": "new", "body_name": "Pieces"}));
     run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [30, 5, 5], "operation": "join", "targets": ["Pieces"]}));
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let pieces = st.bodies.iter().find(|b| b.name == "Pieces").map(|b| b.body.shell_count());
     assert_eq!(pieces, Some(2), "the two cubes are one body in two pieces");
     let i = run(&mut s, "inspect.interference", json!({}));
@@ -122,7 +122,7 @@ pub(super) fn insert_two_mesh_cubes(s: &mut Session, tag: &str) -> Vec<String> {
         run(s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
     }
     let _ = std::fs::remove_dir_all(&dir);
-    s.world_state().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect()
+    s.world_state().unwrap().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect()
 }
 
 /// #3249: mesh bodies (STL, 3MF, OBJ imports) are not intersected, but they used to vanish from

@@ -1,0 +1,31 @@
+{
+ "sources": [],
+ "what": "config.column delete of W: Long no longer sets the length",
+ "method": "the W column and its values go; activating Long sets only the hole (on): W stays 40, V = 12000 - pi 25 10",
+ "body_count": 1,
+ "volume_mm3": 11214.601836602551,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   10
+  ]
+ },
+ "results": [
+  {
+   "step": 7,
+   "json": {
+    "columns": [
+     "suppress:Hole"
+    ]
+   }
+  }
+ ],
+ "source": "analytic"
+}

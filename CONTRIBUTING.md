@@ -88,6 +88,8 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
 
 - `crates/geom`: vectors, planes, meshes, measures.
 - `crates/sketch`: our own constraint solver, plus profile finding.
+- `crates/dynamics`: multibody dynamics: rigid bodies, joint constraints, gravity and springs,
+  integrated in time (RFC #9719). It depends only on `geom`.
 - `crates/kernel`: the B-rep kernel boundary. It wraps [truck](https://github.com/ricosjp/truck),
   and it's the only crate allowed to touch truck. Fillets, chamfers, shell/offset, Delete Face,
   Split Face, STEP/IGES read and write, and face provenance are our own code here. Patched
@@ -161,9 +163,23 @@ the most complete description of the house style.
 | UI scenarios | `crates/ui-egui/tests/scenarios/*.json` | part of `cargo test` |
 | Reference tests | `cargo xtask oracle` | `tests/oracle/` (see below) |
 
-A geometry change that changes the robustness goldens re-records them in the same pull request:
-`ROBUSTNESS_GOLDENS_BLESS="why it changed" cargo test --profile ci -p solidcraft-engine --lib robustness_goldens::`
-(see [docs/robustness.md](docs/robustness.md)); CI runs every seed on pull requests that touch geometry.
+The reference for what the kernel builds is the kernel-cases ladder (`tests/kernel-cases/ladder/`,
+`cargo xtask kernel-cases --ladder`, [docs/kernel-ladder.md](docs/kernel-ladder.md)).
+
+**Kernel cases go to solidcore.** A case that checks a kernel operation (a boolean, a blend, a
+shell, a sweep, an import's geometry) is a new entry in solidcore's corpus,
+`crates/solidcore/tests/kernel_cases/<area>/` in
+[tangency-labs/solidcore](https://github.com/tangency-labs/solidcore), with an answer in closed
+form or exact. Draft it as a rig case here, export it with
+`cargo xtask kernel-cases --area <area> --export DIR`, add `DIR/<area>/<case>.json` and its
+`.bodies.json.gz` there, and delete the draft; or write the entry by hand as that folder's README
+describes. `tests/kernel-cases/` takes no new cases: its `CASES` list only shrinks
+(`cargo xtask lists`). App-level cases (what a command does, the UI, product rules) stay in
+SolidCraft, as tests in their area's existing test file or UI scenarios.
+
+The naming corpus checks persistent names: every name a corpus design stores still finds a face or
+an edge, and two builds name its faces and edges alike
+(`cargo test --profile ci -p solidcraft-cli --test naming_corpus`).
 [docs/mutation-testing.md](docs/mutation-testing.md) shows how to find kernel behaviour these
 black-box suites miss.
 
@@ -222,8 +238,7 @@ Pull requests skip a few heavy tests (one to twelve minutes each), which run in 
 Check that validation after merging. They are listed in
 `.config/nextest.toml` and the [testing page](docs/book/src/dev/testing.md):
 
-- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness` and
-  the seeds of `tests::robustness_goldens` (`seed_00` … `seed_95`; pull requests that change the kernel, truck or the goldens run all but the slowest, `SLOW_SEEDS` in `ci.yml`),
+- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness`,
   `pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen`,
   `pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs`,
   `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`, the `atomic_commands` contract tests
@@ -243,7 +258,8 @@ the surface itself). Expected values are either worked out in closed form
 (`tools/oracle-analytic/`) or computed by building the same recipe in FreeCAD, run as a separate
 program (`tools/freecad-oracle/`); each file says which. The generated
 [reference test report](docs/oracle.md) has the current case count and results. The reference-test
-CI job runs `cargo xtask oracle` during full validation; pull-request runs skip it. A case that
+CI job runs `cargo xtask oracle` during full validation, and on pull requests that reach
+`solidcraft-cli`. A case that
 fails because of a known bug names its issue in `expected.json` (`"known_failure": "#123"`);
 never change an expected value to match SolidCraft's output.
 
@@ -263,7 +279,7 @@ mean something else, it needs a format change. **Add one file, and edit nothing 
    change's file, or any `v<N>/` folder: those are fixed once released.
 
 That's all. The build counts the files: while any are pending it writes the next format number,
-which no release reads, so a release refuses a design that has your change instead of losing it.
+which no release reads, so a release warns about a design that has your change and keeps what it can't read of it.
 A file also lists the pending changes it has (`format_pending`), so a later development build
 runs only the steps that file is missing. Two pull requests that each add a change merge without
 a conflict. `crates/doc/src/format/pending/README.md` has an example.
@@ -457,6 +473,16 @@ the same area), first resolve the command registry and source conflicts, then ru
 `union` merge driver: it can silently retain stale or duplicate command rows.
 The generator tests cover stable ordering and additions that leave existing lines
 unchanged. The initial switch to sorted rows is a one-time larger diff.
+
+## Pictures in the user guide
+
+The user guide's screenshots and short clips (`docs/book/src/media/`) are captured from the real
+app by `examples/demo/doc_shots.py`, one function per figure. Each run starts a fresh app with its
+own settings, so your preferences never show. When a change makes a figure out of date, run
+`python3 examples/demo/doc_shots.py <page or shot>` (it needs Xvfb, ffmpeg, Pillow and a release
+build) and commit the new file. A new figure is a new function there, an ATTRIBUTION row in
+`attribution/pending/`, and a `<video>` (clips) or image link on the page. Keep a still under
+about 250 KB and a clip under about 1 MB.
 
 ## Licence
 

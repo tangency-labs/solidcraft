@@ -11,12 +11,13 @@
 //! bottom (History, the navigation bar, toasts) sit above it, and it is one of the shell's
 //! covered rects.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, FontId, Rect, Sense, pos2, vec2};
 
 use crate::SolveApp;
 use crate::context_menu::Target;
-use crate::theme::Tokens;
 use crate::ui_kit::{Container, Edge, Surface};
+use solidcraft_theme::Tokens;
 
 /// The bar's height (logical pixels).
 pub(crate) const HEIGHT: f32 = 24.0;
@@ -54,10 +55,10 @@ impl SketchState {
 
     pub(crate) fn text(self) -> String {
         match self {
-            SketchState::Conflict => crate::i18n::tr("ui.constraints_conflict").to_string(),
-            SketchState::Empty => crate::i18n::tr("ui.no_geometry_yet").to_string(),
-            SketchState::Full => crate::i18n::tr("ui.fully_constrained").to_string(),
-            SketchState::Under(dof) => crate::i18n::format(
+            SketchState::Conflict => solidcraft_ui_text::tr("ui.constraints_conflict").to_string(),
+            SketchState::Empty => solidcraft_ui_text::tr("ui.no_geometry_yet").to_string(),
+            SketchState::Full => solidcraft_ui_text::tr("ui.fully_constrained").to_string(),
+            SketchState::Under(dof) => solidcraft_ui_text::format(
                 if dof == 1 { "status.under_constrained_one" } else { "status.under_constrained" },
                 &[("count", &dof.to_string())],
             ),
@@ -91,7 +92,7 @@ pub(crate) struct Contents {
 }
 
 pub(crate) fn contents(app: &SolveApp) -> Contents {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let sketch = app.session.active_sketch.and_then(|id| st.sketch(id));
     let edited = app
         .dialog
@@ -102,7 +103,7 @@ pub(crate) fn contents(app: &SolveApp) -> Contents {
         .or(app.session.active_sketch)
         .and_then(|id| app.session.doc.feature(id).map(|f| f.name.clone()).or_else(|| st.sketch(id).map(|ss| ss.name.clone())));
     Contents {
-        editing: edited.map(|name| crate::i18n::format("status.editing", &[("name", &crate::i18n::tr_name(&name))])),
+        editing: edited.map(|name| solidcraft_ui_text::format("status.editing", &[("name", &crate::i18n::tr_name(&name))])),
         sketch: sketch.map(SketchState::of),
         units: app.session.doc.units.clone(),
         navigation: crate::prefs::nav_preset(&app.preferences.nav).translated_label().to_string(),
@@ -119,13 +120,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let contents = contents(app);
     let host = Container::new(ui.ctx(), Surface::ApplicationBar);
-    let response = host
-        .edge("sc_status_bar", Edge::Bottom)
-        .exact_size(HEIGHT)
-        .show_separator_line(false)
-        .frame(host.edge_frame(t.toolbar))
-        .show(ui, |ui| paint(app, ui, &contents))
-        .response;
+    let panel = host.edge("sc_status_bar", Edge::Bottom).exact_size(HEIGHT).show_separator_line(false);
+    let response = host.show_edge(ui, panel, host.edge_frame(t.toolbar), |ui| paint(app, ui, &contents)).response;
     app.shell.status_bar = Some(response.rect);
     crate::scenario::publish_target("status:bar", response.rect);
 }
@@ -143,10 +139,10 @@ fn paint(app: &mut SolveApp, ui: &mut egui::Ui, contents: &Contents) {
     let mut right = r.right() - t.space_6;
 
     // The units, then the mouse mapping: flat buttons that open their menus.
-    let units = crate::i18n::format("browser.units", &[("units", &contents.units)]);
-    let button = menu_button(app, ui, right, Target::Units, &contents.units, &units, crate::i18n::tr("status.units_tip"));
-    let navigation = crate::i18n::format("status.navigation", &[("mapping", &contents.navigation)]);
-    let tip = crate::i18n::tr("status.navigation_tip");
+    let units = solidcraft_ui_text::format("browser.units", &[("units", &contents.units)]);
+    let button = menu_button(app, ui, right, Target::Units, &contents.units, &units, solidcraft_ui_text::tr("status.units_tip"));
+    let navigation = solidcraft_ui_text::format("status.navigation", &[("mapping", &contents.navigation)]);
+    let tip = solidcraft_ui_text::tr("status.navigation_tip");
     let button = menu_button(app, ui, button.left() - t.space_4, Target::Navigation, &contents.navigation, &navigation, tip);
     right = button.left() - t.space_6;
 
@@ -174,7 +170,7 @@ fn paint(app: &mut SolveApp, ui: &mut egui::Ui, contents: &Contents) {
             painter.circle_filled(pos2(item.left() + t.space_4, item.center().y), t.space_3 + 0.5, dot);
         }
         painter.galley(pos2(item.left() + dot_width, item.center().y - galley.size().y / 2.0), galley, colour);
-        ui.interact(item, egui::Id::new(handle), Sense::hover()).widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &text));
+        ui.interact(item, egui::Id::unique(handle), Sense::hover()).widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &text));
         crate::scenario::publish_target(handle, item);
         right = item.left();
     }
@@ -191,7 +187,7 @@ fn menu_button(app: &mut SolveApp, ui: &mut egui::Ui, right: f32, target: Target
     let chevron = t.space_10;
     let width = t.space_6 + galley.size().x + t.space_4 + chevron + t.space_6;
     let button = Rect::from_min_max(pos2(right - width, r.top() + t.space_3), pos2(right, r.bottom() - t.space_3));
-    let response = ui.interact(button, egui::Id::new(("sc_status_menu", handle)), Sense::click());
+    let response = ui.interact(button, egui::Id::unique(("sc_status_menu", handle)), Sense::click());
     let open = app.viewport.context_menu.is_some() && app.menu.target == target;
     if response.hovered() || open {
         painter.rect_filled(button, t.control_radius, t.hover);
@@ -201,9 +197,9 @@ fn menu_button(app: &mut SolveApp, ui: &mut egui::Ui, right: f32, target: Target
     painter.galley(text_at, galley, t.text);
     let chevron_rect = Rect::from_center_size(pos2(button.right() - t.space_6 - chevron / 2.0, button.center().y), vec2(chevron, chevron));
     crate::ui_kit::dropdown_indicator(&painter, chevron_rect, t.text_dim);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     crate::scenario::publish_target(handle, button);
-    if response.on_hover_text(tip).clicked() {
+    if response.backing_on_hover_text(tip).clicked() {
         crate::context_menu::toggle_for(app, button, button.right_top(), target);
     }
     button
@@ -215,6 +211,7 @@ mod tests {
 
     #[test]
     fn sketch_states_take_their_texts_and_the_window_themes_sketch_colours() {
+        crate::i18n::install();
         let t = Tokens::light();
         assert_eq!(SketchState::Full.text(), "Fully constrained");
         assert_eq!(SketchState::Conflict.text(), "Constraints conflict");
@@ -227,7 +224,7 @@ mod tests {
         // Each state's text reads on the bar in both themes.
         for t in [Tokens::light(), Tokens::dark()] {
             for state in [SketchState::Under(2), SketchState::Full, SketchState::Conflict, SketchState::Empty] {
-                let ratio = crate::theme::contrast_ratio(state.colour(&t), t.toolbar);
+                let ratio = solidcraft_theme::contrast_ratio(state.colour(&t), t.toolbar);
                 assert!(ratio >= 3.0, "{state:?} on the bar: contrast {ratio:.2}");
             }
         }

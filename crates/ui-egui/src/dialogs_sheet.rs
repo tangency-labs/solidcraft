@@ -4,19 +4,21 @@
 //! its bend lines, the bend table and DXF export).
 
 use crate::dialogs::put;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
 use egui::{Align2, Color32, FontId, Pos2, Rect, RichText, Stroke, pos2, vec2};
 use serde_json::{Map, Value, json};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::sheet::SheetRule;
 use solidcraft_engine::doc::{FeatureKind, ProfileSel};
-use solidcraft_engine::geom::{Vec2, Vec3};
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, edge_sel, face_sel, form_row, profile_indices};
 use crate::selection::{AXES, BODIES, CURVES, EDGES, FACES, PLANAR_FACES, PROFILES, SelInput, SelectionExt as _, items, point_value as pt};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 const PERFORATION_PATTERNS: [&str; 2] = ["staggered", "square"];
 const PERFORATION_LABELS: [&str; 2] = ["ui.perforate_staggered", "ui.perforate_square"];
@@ -249,7 +251,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
         Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
-                ui.label(FLANGE_TYPES.get(*ty).copied().map(crate::i18n::tr).unwrap_or(""));
+                ui.label(FLANGE_TYPES.get(*ty).copied().map(solidcraft_ui_text::tr).unwrap_or(""));
             });
             match *ty {
                 1 => {
@@ -260,7 +262,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     // Further bends: each a flange on the far edge of the one before it.
                     form_row(ui, "Further Bends", |ui| {
                         let add = crate::ui_kit::button(ui, "Add bend", crate::ui_kit::Button::Normal)
-                            .on_hover_text(crate::i18n::tr_label("Another bend on the far edge of the last flange"));
+                            .backing_on_hover_text(solidcraft_ui_text::tr_label("Another bend on the far edge of the last flange"));
                         if add.clicked() && then.len() < 16 {
                             then.push(("45 deg".into(), "20 mm".into(), false));
                         }
@@ -270,7 +272,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                         let bend = n + 2;
                         // The bend's heading: what it makes, and a bin to take it out.
                         form_row(ui, &format!("Bend {bend}"), |ui| {
-                            if crate::ui_kit::bin_button(ui, crate::i18n::tr_label("Remove this bend")).clicked() {
+                            if crate::ui_kit::bin_button(ui, solidcraft_ui_text::tr_label("Remove this bend")).clicked() {
                                 drop = Some(n);
                             }
                             ui.label(format!("{} · {}", a.trim(), h.trim()));
@@ -285,17 +287,17 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                         then.remove(n);
                     }
                     crate::ui_kit::section(ui, "flange_advanced", "Advanced", false, |ui| {
-                        enter |= hint_row(ui, "Bend Radius", radius, crate::i18n::tr_label("from the rule"));
+                        enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
                         // The relief at the corners these flanges make: the rule's unless set here.
                         choice_row(ui, "Corner Relief Shape", "sm_flange_relief", relief, &FLANGE_RELIEF_LABELS);
-                        enter |= hint_row(ui, "Corner Relief", relief_size, crate::i18n::tr_label("from the rule"));
+                        enter |= hint_row(ui, "Corner Relief", relief_size, solidcraft_ui_text::tr_label("from the rule"));
                         // With several edges, a row for each: an angle and a height of its own, left
                         // empty for the values above (shown as the hints).
                         let points = edge_point_list(inputs);
                         if points.len() > 1 || own.iter().any(|o| !(o.1.trim().is_empty() && o.2.trim().is_empty())) {
                             form_row(ui, "Per Edge", |ui| {
-                                ui.label(RichText::new(crate::i18n::tr_label("angle, height")).weak())
-                                    .on_hover_text("An edge's own angle and height. Empty: the values above.");
+                                ui.label(RichText::new(solidcraft_ui_text::tr_label("angle, height")).weak())
+                                    .backing_on_hover_text("An edge's own angle and height. Empty: the values above.");
                             });
                             for (n, p) in points.iter().enumerate() {
                                 let slot = own_slot(own, *p);
@@ -340,21 +342,21 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
         Sm::Perforate { diameter, pitch, margin, pattern } => {
             enter |= expr_row(ui, "ui.diameter", diameter);
             enter |= expr_row(ui, "ui.perforate_pitch", pitch);
-            enter |= hint_row(ui, "Margin", margin, crate::i18n::tr_label("ui.perforate_margin_default"));
+            enter |= hint_row(ui, "Margin", margin, solidcraft_ui_text::tr_label("ui.perforate_margin_default"));
             choice_row(ui, "Pattern", "sm_perforate_pattern", pattern, &PERFORATION_LABELS);
         }
         Sm::Hem { length, gap, flip } => {
             form_row(ui, "Type", |ui| {
-                ui.label(crate::i18n::tr_label("Flat"));
+                ui.label(solidcraft_ui_text::tr_label("Flat"));
             });
             enter |= expr_row(ui, "Length", length);
-            enter |= hint_row(ui, "ui.sheet_gap", gap, crate::i18n::tr_label("from the rule"));
+            enter |= hint_row(ui, "ui.sheet_gap", gap, solidcraft_ui_text::tr_label("from the rule"));
             crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
         }
         Sm::Fold { angle, radius, position, flip } => {
             choice_row(ui, "Bend Line Position", "sm_fold_pos", position, &FOLD_POSITION_LABELS);
             enter |= expr_row(ui, "Angle", angle);
-            enter |= hint_row(ui, "Bend Radius", radius, crate::i18n::tr_label("from the rule"));
+            enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
             crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
         }
         Sm::Path { radius } => {
@@ -363,14 +365,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             let lengths = path_lengths(app, inputs);
             form_row(ui, "Flanges", |ui| {
                 ui.label(if lengths.is_empty() {
-                    crate::i18n::tr_label("pick the path").to_string()
+                    solidcraft_ui_text::tr_label("pick the path").to_string()
                 } else {
                     let each: Vec<String> = lengths.iter().map(|l| format!("{l:.1}")).collect();
                     format!("{} mm", each.join(" · "))
                 });
             });
-            crate::ui_kit::caption(ui, "Flanges", crate::i18n::tr_label("set by the sketch's lines"));
-            enter |= hint_row(ui, "Bend Radius", radius, crate::i18n::tr_label("from the rule"));
+            crate::ui_kit::caption(ui, "Flanges", solidcraft_ui_text::tr_label("set by the sketch's lines"));
+            enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
         }
         Sm::Unfold { .. } => {}
         Sm::Convert { rule } => rule_combo(app, ui, "sm_conv_rule", rule),
@@ -409,7 +411,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             }
             if *pick < rules.len()
                 && !app.session.doc.sheet.rules.is_empty()
-                && crate::ui_kit::button(ui, crate::i18n::tr_label("Delete rule"), crate::ui_kit::Button::Normal).clicked()
+                && crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Delete rule"), crate::ui_kit::Button::Normal).clicked()
             {
                 let n = rules.get(*pick).map(|r| r.name.clone()).unwrap_or_default();
                 match app.run("sheet.manage_rules", json!({"name": n, "delete": true})) {
@@ -465,12 +467,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                         });
                     }
                     ui.vertical(|ui| {
-                        if crate::ui_kit::button(ui, crate::i18n::tr_label("Export DXF…"), crate::ui_kit::Button::Normal).clicked() {
+                        if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export DXF…"), crate::ui_kit::Button::Normal).clicked() {
                             *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), "dxf"));
                         }
                     });
                     ui.vertical(|ui| {
-                        if crate::ui_kit::button(ui, crate::i18n::tr_label("Export Bend Table…"), crate::ui_kit::Button::Normal).clicked() {
+                        if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export Bend Table…"), crate::ui_kit::Button::Normal).clicked() {
                             *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), "csv"));
                         }
                     });
@@ -503,8 +505,11 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
     if let Some(body) = app.session.model.state().sheets.last().map(|sheet| sheet.body.clone()) {
         export_flat(app, &body, extension);
     } else {
-        // Let the command report its ordinary "no sheet body" error without opening a picker.
-        let _ = app.run(id, json!({}));
+        // Let the command report its ordinary "no sheet body" error without opening a picker;
+        // nothing starts, so the ribbon goes back to the tab it was started from (#10540).
+        if app.run(id, json!({})).is_err() {
+            app.restore_command_tab();
+        }
     }
     true
 }
@@ -545,7 +550,7 @@ fn rule_value(app: &SolveApp, rule: usize) -> Option<String> {
 fn path_chain(app: &SolveApp, inputs: &mut [SelInput]) {
     let edge = inputs.first().and_then(|i| i.items.edge_points().first().copied());
     let Some(input) = inputs.get_mut(1) else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     // The path is in the sketch its picks name (#3726).
     let Some(ss) = crate::dialogs::picks_sketch(app, &input.items, None).and_then(|k| st.sketch(k)) else { return };
     let mut ids: Vec<String> = Vec::new();
@@ -583,7 +588,7 @@ fn path_chain(app: &SolveApp, inputs: &mut [SelInput]) {
 
 /// The lengths of the path's lines, in the order picked (mm).
 fn path_lengths(app: &SolveApp, inputs: &[SelInput]) -> Vec<f64> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let picks = items(inputs, 1);
     let Some(ss) = crate::dialogs::picks_sketch(app, picks, None).and_then(|k| st.sketch(k)) else { return Vec::new() };
     picks
@@ -671,7 +676,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                 }
                 2 => {
                     let ids: Vec<String> = items(inputs, 0).curve_ids();
-                    let st = s.world_state();
+                    let st = crate::open_meshing::session_world(s);
                     let sketch = items(inputs, 0)
                         .named_sketch()
                         .or_else(|| st.sketches.iter().rev().find(|ss| ids.iter().all(|id| ss.sketch.curve_index(id).is_some())).map(|ss| ss.feature))
@@ -704,7 +709,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             let mut p = json!({});
             match items(inputs, 0).first() {
                 Some(Sel::SketchCurve { id, sketch: named }) => {
-                    let st = s.world_state();
+                    let st = crate::open_meshing::session_world(s);
                     let sketch = named
                         .or_else(|| st.sketches.iter().rev().find(|ss| ss.sketch.curve_index(id).is_some()).map(|ss| ss.feature))
                         .ok_or("the line's sketch is gone")?;
@@ -787,7 +792,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
 /// The dialog editing a sheet metal feature, filled from it.
 pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
     let s = &app.session;
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let rule_index = |r: &Option<String>| r.as_ref().and_then(|n| rule_list(app).iter().position(|x| &x.name == n)).map_or(0, |i| i + 1);
     let mut extra = Map::new();
     let (k, items): (Sm, Vec<Sel>) = match kind {
@@ -955,7 +960,7 @@ pub fn arrow(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
 /// from the sheet), and the sheet's thickness along the first.
 fn edge_frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3, f64)> {
     let Sel::Edge { body, index, point } = d.inputs.first()?.items.first()? else { return None };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let m = st.body(body)?.mesh();
     let faces = m.edge_faces.get(*index)?;
     let area = |f: u32| -> f64 {
@@ -1006,7 +1011,7 @@ pub fn hem_handle(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
 /// Bend line colours: up and down (theme tokens, legible on either theme and in every colour
 /// vision mode).
 fn bend_colors() -> (Color32, Color32) {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     (t.bend_up, t.bend_down)
 }
 
@@ -1022,7 +1027,7 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
             rect.center(),
             Align2::CENTER_CENTER,
             "no sheet metal body",
-            FontId::proportional(crate::theme::Tokens::get().font_heading),
+            FontId::proportional(solidcraft_theme::Tokens::get().font_heading),
             t.text_dim,
         );
         return true;
@@ -1045,7 +1050,7 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
     // to its width limit, so its actual edge, rather than a fixed reserve, bounds the view.
     let panel_left = painter
         .ctx()
-        .memory(|m| m.area_rect(egui::Id::new(("sc_dialog", "FLAT PATTERN"))))
+        .memory(|m| m.area_rect(egui::Id::unique(("sc_dialog", "FLAT PATTERN"))))
         .map(|panel| panel.left())
         .unwrap_or(rect.right() - crate::frame::DIALOG_MAX_W);
     let content = crate::shell::content_rect(app, rect);
@@ -1117,7 +1122,7 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
         }
     }
     for (anchor, labels) in pocket_annotations {
-        painter.text(anchor, Align2::CENTER_BOTTOM, labels.join("\n"), FontId::proportional(crate::theme::Tokens::get().font_body), t.accent);
+        painter.text(anchor, Align2::CENTER_BOTTOM, labels.join("\n"), FontId::proportional(solidcraft_theme::Tokens::get().font_body), t.accent);
     }
     for b in v["bends"].as_array().into_iter().flatten() {
         let (Some(a), Some(e)) = (read(&b["start"]), read(&b["end"])) else { continue };
@@ -1130,13 +1135,19 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
         pos2(rect.left() + 14.0, y),
         Align2::LEFT_TOP,
         "FLAT PATTERN",
-        FontId::proportional(crate::theme::Tokens::get().font_button),
+        FontId::proportional(solidcraft_theme::Tokens::get().font_button),
         t.text,
     );
     for (label, col) in [("Bend up", up_col), ("Bend down", down_col)] {
         y += 20.0;
         painter.line_segment([pos2(rect.left() + 14.0, y + 7.0), pos2(rect.left() + 38.0, y + 7.0)], Stroke::new(2.0, col));
-        painter.text(pos2(rect.left() + 44.0, y), Align2::LEFT_TOP, label, FontId::proportional(crate::theme::Tokens::get().font_body), t.text_dim);
+        painter.text(
+            pos2(rect.left() + 44.0, y),
+            Align2::LEFT_TOP,
+            label,
+            FontId::proportional(solidcraft_theme::Tokens::get().font_body),
+            t.text_dim,
+        );
     }
     if !pockets.is_empty() {
         y += 20.0;
@@ -1150,7 +1161,7 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
             pos2(rect.left() + 44.0, y),
             Align2::LEFT_TOP,
             "Pocket boundary (material remains)",
-            FontId::proportional(crate::theme::Tokens::get().font_body),
+            FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             t.text_dim,
         );
     }
@@ -1181,7 +1192,7 @@ impl Default for FlatView {
 
 impl FlatView {
     fn cache_perforations(&mut self, session: &solidcraft_engine::Session, body: &str) {
-        let state = session.world_state();
+        let state = crate::open_meshing::session_world(session);
         let state_key = std::sync::Arc::downgrade(&state);
         if self.perforation_key.as_ref().is_some_and(|(cached, name)| cached.ptr_eq(&state_key) && name == body) {
             return;

@@ -10,7 +10,7 @@ use solidcraft_engine::{
 };
 
 fn tr(id: &str) -> String {
-    crate::i18n::tr(id).to_owned()
+    solidcraft_ui_text::tr(id).to_owned()
 }
 fn field(id: &str, label: &str, value: DetailValue) -> DetailSetting {
     DetailSetting { id: id.into(), label: tr(label), value, enabled: true }
@@ -41,7 +41,7 @@ fn record_id(row: &ContinuityDetail) -> String {
     json!([row.body, row.edge]).to_string()
 }
 fn record_label(row: &ContinuityDetail) -> String {
-    crate::i18n::format("ui.details_seam", &[("body", &row.body), ("edge", &row.edge.to_string())])
+    solidcraft_ui_text::format("ui.details_seam", &[("body", &row.body), ("edge", &row.edge.to_string())])
 }
 fn selected<'a>(app: &SolveApp, rows: &'a [ContinuityDetail]) -> Option<&'a ContinuityDetail> {
     app.viewport_status.selected_record.as_ref().and_then(|id| rows.iter().find(|row| record_id(row) == *id)).or_else(|| rows.first())
@@ -132,7 +132,7 @@ fn continuity_description(app: &SolveApp, details: &mut Details) {
     if !row.current {
         details.caption = Some(tr("ui.details_continuity_stale"));
     }
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     for (label, colour, count) in [
         ("ui.details_smooth", t.continuity[0], rows.iter().filter(|s| s.verdict == V::Smooth).count()),
         ("ui.details_jump", t.continuity[1], rows.iter().filter(|s| s.verdict == V::CurvatureJump).count()),
@@ -286,15 +286,17 @@ pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::
         descriptions.push(("analysis:legend", legacy_description(app)));
     }
     if (!app.preferences.viewport_analysis_status || !app.preferences.viewport_status_details) && !app.session.continuity.is_empty() {
-        let t = crate::theme::Tokens::get();
-        let key = ["ui.continuity_g2", "ui.continuity_g1", "ui.continuity_g0", "ui.continuity_gap"]
+        let t = solidcraft_theme::Tokens::get();
+        // Best to worst: the curvature-continuous orders share a colour, then a gap between faces.
+        let mut classes: Vec<Option<solidcraft_engine::kernel::Continuity>> =
+            solidcraft_engine::kernel::Continuity::ALL.into_iter().rev().map(Some).collect();
+        classes.push(None);
+        let key = classes
             .into_iter()
-            .zip(t.continuity)
-            .enumerate()
-            .map(|(index, (label, colour))| DetailKey {
-                colour,
-                label: tr(label),
-                pattern: index == 3,
+            .map(|order| DetailKey {
+                colour: crate::viewport::continuity_color(&t, order),
+                label: tr(crate::sketch_tools::order_class(order)),
+                pattern: order.is_none(),
                 value: String::new(),
                 numeric: false,
                 pattern_colour: None,
@@ -305,7 +307,7 @@ pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::
     let mut free = crate::shell::workspace_content(app, viewport);
     for (id, description) in descriptions {
         if let Some(rect) = legacy_legend(app, ui, free, id, &description) {
-            free.max.y = (rect.top() - crate::theme::Tokens::get().space_8).max(free.top());
+            free.max.y = (rect.top() - solidcraft_theme::Tokens::get().space_8).max(free.top());
         }
     }
 }
@@ -314,10 +316,10 @@ fn legacy_legend(_app: &SolveApp, ui: &mut egui::Ui, free: egui::Rect, id: &str,
     if description.key.is_empty() {
         return None;
     }
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let container = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::ViewportStatus);
     let result = container
-        .area(egui::Id::new(id))
+        .area(egui::Id::unique(id))
         .order(egui::Order::Background)
         .movable(false)
         .pivot(egui::Align2::LEFT_BOTTOM)

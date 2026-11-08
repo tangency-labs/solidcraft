@@ -1,6 +1,6 @@
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
-use solidcraft_engine::geom::Vec3;
 
 use super::*;
 use crate::Services;
@@ -9,7 +9,7 @@ use crate::dialogs::{Kind, apply_commands, preview_commands};
 #[test]
 fn missing_joint_messages_are_drawn_in_full() {
     for language in ["en", "de", "vi"] {
-        let _language = crate::i18n::scope(language);
+        let _language = solidcraft_ui_text::scope(language);
         for (command, message) in [
             ("joint.screw", "needs a joint that turns and one that slides"),
             ("joint.gear", "needs two joints that turn"),
@@ -44,7 +44,7 @@ fn missing_joint_messages_are_drawn_in_full() {
                 .save(std::path::Path::new(&dir).join(format!("{command}-{language}.png")))
                 .unwrap();
             }
-            let message = crate::i18n::tr_label(message);
+            let message = solidcraft_ui_text::tr_label(message);
             let text = crate::test_support::text_shapes(&output).find(|text| text.galley.text() == message).expect("missing-joint message");
             assert!(!text.galley.elided, "{command} ({language}) cuts off: {message}");
             let bounds = text.galley.rect.translate(text.pos.to_vec2());
@@ -77,7 +77,7 @@ fn discs() -> SolveApp {
 /// A pick of the round wall a point of the exact geometry lies on (the facets of the wall's mesh
 /// cut inside it, so the nearest face of any body).
 fn wall(app: &SolveApp, p: Vec3) -> Sel {
-    let st = app.session.world_state();
+    let st = app.session.world_state().unwrap();
     let mut best: Option<(f64, Sel)> = None;
     for b in &st.bodies {
         let m = b.mesh();
@@ -103,8 +103,9 @@ fn picked_gear_faces_choose_their_joints_and_radii() {
     let mut app = discs();
     app.start("joint.gear");
     let mut d = app.dialog.take().unwrap();
-    // G2 first, G1 second: the joints follow the picks, whatever the dialog started on.
-    for (i, p) in [Vec3::new(50.0, 0.0, 2.5), Vec3::new(10.0, 0.0, 2.5)].into_iter().enumerate() {
+    // G2 first, G1 second: the joints follow the picks, whatever the dialog started on. The
+    // discs touch at x = 10, on both walls, so G1 is picked on its far side.
+    for (i, p) in [Vec3::new(50.0, 0.0, 2.5), Vec3::new(-10.0, 0.0, 2.5)].into_iter().enumerate() {
         d.active = i;
         let pick = wall(&app, p);
         d.pick(&app.session, pick);
@@ -219,7 +220,8 @@ fn play_turns_the_angle_of_a_planar_pinion() {
 /// The dialog's rows pass their English text, which the catalogs translate by its key.
 #[test]
 fn the_dialog_labels_translate() {
-    let de = crate::i18n::Locale::for_language("de");
+    crate::i18n::install();
+    let de = solidcraft_ui_text::Locale::for_language("de");
     for (english, german) in [
         ("Gear 1", "Zahnrad 1"),
         ("Radius 2", "Radius 2"),
@@ -229,5 +231,5 @@ fn the_dialog_labels_translate() {
     ] {
         assert_eq!(de.label(english), german);
     }
-    assert_eq!(crate::i18n::Locale::for_language("ja").label("not a round face"), "円筒面ではありません");
+    assert_eq!(solidcraft_ui_text::Locale::for_language("ja").label("not a round face"), "円筒面ではありません");
 }
