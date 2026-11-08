@@ -176,7 +176,12 @@ mod tests {
             let sag = mesh
                 .triangles
                 .iter()
-                .map(|t| t.map(|i| mesh.positions[i as usize]))
+                .zip(&mesh.tri_face)
+                // The side wall's own triangles: the flat caps have corners on the rim too.
+                .filter(|(_, f)| {
+                    matches!(solidcraft_kernel::face_surface(&mb.body, **f as usize), Some(solidcraft_kernel::FaceSurface::Cylinder { .. }))
+                })
+                .map(|(t, _)| t.map(|i| mesh.positions[i as usize]))
                 .filter(|t| t.iter().all(|p| (r(*p) - 20.0).abs() < 1e-9))
                 .map(|[a, b, c]| 20.0 - r((a + b + c) * (1.0 / 3.0)))
                 .fold(0.0, f64::max);

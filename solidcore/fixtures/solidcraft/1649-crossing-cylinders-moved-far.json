@@ -1,0 +1,216 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/1649",
+ "pr": "https://github.com/tangency-labs/solidcore/pull/1863",
+ "test": "none: the issue is open and has no fixing PR (SolidCraft's kernel work is paused, #3992), so `pr` points at the PR that adds this fixture, as the loader requires a /pull/ URL; the issue's property test (`crossing_cylinders_union_moved_far`, ignored) reproduces it; the numbers here are analytic",
+ "summary": "The union of two crossing cylinders changed volume when both were moved by (1000, -700, 300) on SolidCraft's kernel: 2955.58 mm^3 at the origin and 2694.71 mm^3 moved (found by the `translation_invariant` property test; some tolerance does not scale with position). Cylinder A: base (17.5, 30, 7.5), axis +X, radius 5, height 10; cylinder B: base (17.5, 30, 15), axis +Y, radius 12.5, height 5. A comment on the issue adds the intersection of two parallel cylinders (A: base (7.5, 15, 5), axis +Y, radius 3.75, height 10; B: base (0, 10, 5), axis +Y, radius 11.25, height 7.5), 98.07 mm^3 at the origin and 110.44 mm^3 moved. For true cylinders the first union is 2893.4579 mm^3 (not the kernel's 2955.58), and in the parallel pair A lies inside B (the centres are 7.5 apart and 7.5 + 3.75 = 11.25, so the discs touch internally) over the y range 15 to 17.5, so the intersection is that piece of A, pi * 3.75^2 * 2.5. Each pair is run at the origin and moved, and both must give the same exact volume. The tolerance is 0.01 mm^3, as in the other boolean cases.",
+ "cases": [
+  {
+   "name": "union_at_origin",
+   "note": "#1649: the union at the origin.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "a",
+     "origin": [
+      17.5,
+      30,
+      7.5
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 5.0,
+     "height": 10.0
+    },
+    {
+     "op": "cylinder",
+     "id": "b",
+     "origin": [
+      17.5,
+      30,
+      15
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "radius": 12.5,
+     "height": 5.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2893.45791796,
+     "tol": 0.01,
+     "formula": "V = A + B - I; A = pi*5^2*10, B = pi*12.5^2*5; I = int_{17.5}^{27.5} int_{30}^{35} max(0, (7.5 + h) - max(7.5 - h, 15 - s)) dy dx, h = sqrt(25 - (y-30)^2), s = sqrt(12.5^2 - (x-17.5)^2) (B covers y >= 30 only, so half of A is inside its slab; z of B's disc below 15 - s); adaptive quadrature (scipy dblquad, error 5e-9) and 300 x 300 Gauss-Legendre agree within 1e-5; V = A + B - I"
+    }
+   }
+  },
+  {
+   "name": "union_moved_1000_700_300",
+   "note": "#1649: the same union with both cylinders moved by (1000, -700, 300), which lost volume on SolidCraft's kernel.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "a",
+     "origin": [
+      1017.5,
+      -670.0,
+      307.5
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 5.0,
+     "height": 10.0
+    },
+    {
+     "op": "cylinder",
+     "id": "b",
+     "origin": [
+      1017.5,
+      -670.0,
+      315.0
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "radius": 12.5,
+     "height": 5.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2893.45791796,
+     "tol": 0.01,
+     "formula": "V = A + B - I; A = pi*5^2*10, B = pi*12.5^2*5; I = int_{17.5}^{27.5} int_{30}^{35} max(0, (7.5 + h) - max(7.5 - h, 15 - s)) dy dx, h = sqrt(25 - (y-30)^2), s = sqrt(12.5^2 - (x-17.5)^2) (B covers y >= 30 only, so half of A is inside its slab; z of B's disc below 15 - s); adaptive quadrature (scipy dblquad, error 5e-9) and 300 x 300 Gauss-Legendre agree within 1e-5; V = A + B - I"
+    }
+   }
+  },
+  {
+   "name": "parallel_intersection_at_origin",
+   "note": "#1649 (comment): the intersection of two parallel cylinders at the origin; A lies inside B over the overlap in y.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "a",
+     "origin": [
+      7.5,
+      15,
+      5
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "radius": 3.75,
+     "height": 10.0
+    },
+    {
+     "op": "cylinder",
+     "id": "b",
+     "origin": [
+      0,
+      10,
+      5
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "radius": 11.25,
+     "height": 7.5
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 110.446616728,
+     "tol": 0.01,
+     "formula": "V = pi*3.75^2*2.5 (A lies inside B, touching internally, over y in [15, 17.5])"
+    }
+   }
+  },
+  {
+   "name": "parallel_intersection_moved_1000_700_300",
+   "note": "#1649 (comment): the same intersection moved by (1000, -700, 300), which changed volume on SolidCraft's kernel.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "a",
+     "origin": [
+      1007.5,
+      -685.0,
+      305.0
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "radius": 3.75,
+     "height": 10.0
+    },
+    {
+     "op": "cylinder",
+     "id": "b",
+     "origin": [
+      1000.0,
+      -690.0,
+      305.0
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "radius": 11.25,
+     "height": 7.5
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 110.446616728,
+     "tol": 0.01,
+     "formula": "V = pi*3.75^2*2.5 (A lies inside B, touching internally, over y in [15, 17.5])"
+    }
+   }
+  }
+ ]
+}

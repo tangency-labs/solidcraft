@@ -1,0 +1,143 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "shell",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              7.6,
+              3.5757575757575766,
+              0.0
+            ]
+          ],
+          "tolerance": 0.05099119513592785
+        },
+        "thickness": -2.0
+      }
+    }
+  ],
+  "case": "316-shell-open-beside-a-bottom-round-r2-as-large-as-the-wall-steps",
+  "expected": {
+    "bbox": {
+      "max": [
+        40,
+        30,
+        10
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "box 40x30x10 less the bottom rounds R2 (the four edges mitred at the vertical corners), less the cavity: the walls and top moved 2 in, the open bottom kept, and at the bottom's tangent edge with the round a step wall along the bottom's normal from the bottom (offset 0) to the round's offset (offset 2); the round's offset has radius 0. The material along each bottom edge is a mitred ring of section t(r - t) + (1 - pi/4)(r - t)^2 on top of the walls' plain sections; integrated round the outline with the mitred corners (quadrature agrees to 3e-5): V = 4394.890822",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#316"
+    ],
+    "volume_mm3": 4394.890822,
+    "what": "a 40 x 30 x 10 box, its bottom outline rounded R2, shelled 2 mm open at the bottom: where the round meets the open bottom the cavity's wall steps down along the bottom's normal (a step wall), so the round meets it at 90 degrees at the opening's edge and the opening is exactly the picked face"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 28,
+      "faces": 14,
+      "vertices": 16
+    }
+  },
+  "records": "316-shell-open-beside-a-bottom-round-r2-as-large-as-the-wall-steps.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4669.557489053123,
+      "body_count": 1,
+      "edges": 28,
+      "faces": 14,
+      "vertices": 16,
+      "volume_mm3": 4394.890822681632
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#316"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [],
+  "what": "a 40 x 30 x 10 box, its bottom outline rounded R2, shelled 2 mm open at the bottom: where the round meets the open bottom the cavity's wall steps down along the bottom's normal (a step wall), so the round meets it at 90 degrees at the opening's edge and the opening is exactly the picked face",
+  "why_not": []
+}

@@ -1,0 +1,10 @@
+#### WR-507. `SmBrep::Transform` sets every vertex, edge and face tolerance to the body tolerance, even under a rotation or reflection
+- **Severity:** Wrong result (a tolerance wider than the body's shrinks below its own gap)
+- **Area:** Topology
+- **Location:** `source/SMLib/src/SmBrep.cpp`, `SmBrep::Transform`. The 4x4 overload always passes a scale, a unit one for a rotation or reflection, and `if(cpOptScale && bScaleTol)` then sets each vertex, edge and face tolerance to `m_sThisZoneTol3d`.
+- **What happens:** a rotation or a reflection (a scale of 1) resets every tolerance of the body to the body tolerance, so a vertex, edge or face tolerance wider than that shrinks below its own gap. A uniform scale s resets them the same way, so a wide tolerance does not grow with the body.
+- **Trigger:** a box with one edge at tolerance 1e-3 (the body tolerance is about 1e-5 for this box) transformed by a rotation or a mirror through the 4x4 overload with `bScaleTol` TRUE: the edge comes back at the body tolerance. Scaled by 2, it should be 2e-3 and comes back at the body tolerance too.
+- **How found:** SolidCraft fork (tangency-labs/smlib#49), reported in tangency-labs/solidcore#1520.
+- **Confirmed:** no. The pinned C++ is not built on this machine, so the fork's commit is the evidence. The port reproduces the reset with the opt-in off: `transform_scales_each_tolerance_wr507` (`crates/solidcore/src/topology/brep/p5.rs`).
+- **Fix (fork):** tangency-labs/smlib#49 sets the tolerances only when the scale is not 1 (`fabs(dTolScale - 1.0) > SM_EFF_ZERO`, with `dTolScale` the largest absolute scale component), each to `max(m_sThisZoneTol3d, old tolerance * dTolScale)`.
+- **Rust port:** opt-in `Kernel::fixes.transform_scales_each_tolerance` (default `false`, upstream's behaviour) in `transform_in` (`crates/solidcore/src/topology/brep/p5.rs`). Test: `transform_scales_each_tolerance_wr507`, which asserts the kept (1e-3 under a mirror and a rotation) and doubled (2e-3 under a scale of 2) edge tolerances with the flag on, and the body-tolerance reset with it off.

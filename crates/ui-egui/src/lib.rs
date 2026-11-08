@@ -326,6 +326,7 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+pub mod window_chrome;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
@@ -335,7 +336,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::Session;
 use solidcraft_engine::render::{Camera, CameraAnim, StandardView};
 
-pub use control::{ControlRequest, ControlResponse};
+pub(crate) use control::ControlRequest;
 
 /// How close (radians) the camera must be to a standard axis view for the #2682 mode
 /// (`auto_ortho_faces`) to snap the projection to orthographic. One degree: exact axis views
@@ -789,13 +790,8 @@ pub struct SolveApp {
     pub agent_chat: agent_chat::AgentChat,
     /// Making SolidCraft available to the AI apps installed here ([`ai_connect`]).
     pub ai_connect: ai_connect::State,
-    pending_shots: Vec<(u64, Option<String>, std::sync::mpsc::Sender<Value>, f64)>,
-    shot_chat_turns: std::collections::HashMap<u64, std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    queued_shots: Vec<(u64, f64, u32)>,
-    /// Screenshots egui hands back, by token; egui calls back, `collect_screenshots` reads them.
-    shot_tx: std::sync::mpsc::Sender<(u64, std::sync::Arc<egui::ColorImage>)>,
-    shot_rx: std::sync::mpsc::Receiver<(u64, std::sync::Arc<egui::ColorImage>)>,
-    shot_token: u64,
+    /// The window's screenshots in flight: control requests' and the issue report's.
+    shots: solidcraft_control_egui::screenshot::Shots,
     styled: bool,
     fitted: bool,
     /// A framing to settle once the viewport's layout is known: the camera to frame from, the
@@ -858,7 +854,6 @@ impl SolveApp {
         #[cfg(not(target_arch = "wasm32"))]
         solidcraft_engine::slicer_files::clean_old();
         let tree = browser::TreeState::for_session(session.uid);
-        let (shot_tx, shot_rx) = std::sync::mpsc::channel();
         let mut app = SolveApp {
             panel_runtime: None,
             panel_content_frame: None,
@@ -985,12 +980,7 @@ impl SolveApp {
             control_job: None,
             control_answering: Vec::new(),
             agent: Default::default(),
-            pending_shots: Vec::new(),
-            shot_chat_turns: Default::default(),
-            queued_shots: Vec::new(),
-            shot_tx,
-            shot_rx,
-            shot_token: 0,
+            shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
             fitted: false,
             pending_fit: None,
@@ -3341,7 +3331,7 @@ impl SolveApp {
                 }
             }
         }
-        control::publish_design(self, &control::DESIGN_WATCH);
+        control::publish_design(self, &control::DOCUMENT_WATCH);
     }
 
     /// The frame's input before the app reads it: synthetic events, then what is typed while a
@@ -3464,7 +3454,7 @@ impl SolveApp {
         if self.file_picker_busy() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
-        control::publish_design(self, &control::DESIGN_WATCH);
+        control::publish_design(self, &control::DOCUMENT_WATCH);
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());
@@ -3778,87 +3768,24 @@ impl SolveApp {
             control::Outcome::Done(v) => {
                 let _ = reply.send(v);
             }
-            // A window that is minimised or covered (another macOS Space) presents no frame:
-            // say so at once rather than after the deadline (#1677).
-            control::Outcome::Screenshot { .. } if window_hidden(ctx) => {
-                let _ = reply.send(json!({"ok": false, "hidden": true, "error": "no frame was presented (window hidden?); use ui.render"}));
-            }
-            control::Outcome::Screenshot { path } => {
-                self.shot_token += 1;
-                let token = self.shot_token;
-                if let Some(turn) = req.chat_turn {
-                    self.shot_chat_turns.insert(token, turn);
-                }
-                self.queued_shots.push((token, now_ms() + 150.0, 0));
-                self.pending_shots.push((token, path, reply, now_ms() + 8000.0));
-            }
+            control::Outcome::Screenshot { path } => self.shots.request(ctx, path, reply, req.chat_turn, now_ms()),
         }
         ctx.request_repaint();
     }
 
     fn issue_screenshots(&mut self, ctx: &egui::Context) {
-        let now = now_ms();
         // A view that just moved is drawn with fewer AO samples: shoot the full-quality frame
         // that follows (#7165), or after half a second a view that keeps moving as it is.
         let settled = viewport::ao_settled(self, ctx);
-        let shot_tx = &self.shot_tx;
-        self.queued_shots.retain_mut(|(token, at, frames)| {
-            *frames += 1;
-            if now >= *at && *frames >= 3 && (settled || now >= *at + 500.0) {
-                let (token, tx, ctx2) = (*token, shot_tx.clone(), ctx.clone());
-                ctx.request_screenshot(move |image| {
-                    let _ = tx.send((token, image));
-                    ctx2.request_repaint();
-                });
-                false
-            } else {
-                true
-            }
-        });
-        if !self.queued_shots.is_empty() || !self.pending_shots.is_empty() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(16));
-        }
+        self.shots.issue(ctx, settled, now_ms());
     }
 
     fn collect_screenshots(&mut self, ctx: &egui::Context) {
-        // A screenshot requested in one tab must never return or save a frame of another.
-        let chat_turns = &mut self.shot_chat_turns;
-        let queued_shots = &mut self.queued_shots;
-        self.pending_shots.retain(|(token, _, reply, _)| {
-            if control::chat_turn_cancelled(chat_turns.get(token).map(std::sync::Arc::as_ref)) {
-                chat_turns.remove(token);
-                queued_shots.retain(|(queued, ..)| queued != token);
-                let _ = reply.send(control::cancelled_chat_response());
-                false
-            } else {
-                true
-            }
-        });
-        // Drained every frame: a shot that comes after its request was cancelled or timed out
-        // is dropped here instead of waiting in the channel.
-        let shots: Vec<_> = self.shot_rx.try_iter().collect();
-        if self.pending_shots.is_empty() && !issue_report::pending(self) {
-            return;
-        }
+        let report = issue_report::pending(self);
+        let shots = self.shots.collect(ctx, now_ms(), report, control::save_screenshot);
         for (token, image) in shots {
-            issue_report::receive(self, token, image.clone());
-            if let Some(i) = self.pending_shots.iter().position(|(t, ..)| *t == token) {
-                let (_, path, reply, _) = self.pending_shots.remove(i);
-                self.shot_chat_turns.remove(&token);
-                let _ = reply.send(control::save_screenshot(&image, path.as_deref()));
-            }
+            issue_report::receive(self, token, image);
         }
-        let now = now_ms();
-        // Hidden while waiting: no frame is coming.
-        let hidden = window_hidden(ctx);
-        self.pending_shots.retain(|(token, _, reply, deadline)| {
-            if now < *deadline && !hidden {
-                return true;
-            }
-            let _ = reply.send(json!({"ok": false, "error": "no frame was presented (window hidden?); use ui.render"}));
-            self.shot_chat_turns.remove(token);
-            false
-        });
     }
 }
 
@@ -3871,12 +3798,6 @@ fn finite_input(raw: &mut egui::RawInput) {
         egui::Event::Touch { pos, force, .. } => pos.is_finite() && force.is_none_or(f32::is_finite),
         _ => true,
     });
-}
-
-/// The window is minimised or fully covered, so it presents no frames (#1677). Unknown counts as
-/// shown: the screenshot deadline still ends a wait for a frame that never comes.
-fn window_hidden(ctx: &egui::Context) -> bool {
-    ctx.input(|i| i.viewport().visible()) == Some(false)
 }
 
 /// An edit in place command's result, saying when it waits for the end of the agent's turn.

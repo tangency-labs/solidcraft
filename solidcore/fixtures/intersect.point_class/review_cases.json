@@ -1,0 +1,5298 @@
+{
+ "cases": [
+  {
+   "name": "review_null_object_class_100",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 1,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 100,
+      "obj": null
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     },
+     {
+      "op": "brep",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 1
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:257"
+  },
+  {
+   "name": "review_null_object_class_101",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 1,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 101,
+      "obj": null
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     },
+     {
+      "op": "brep",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 1
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:257"
+  },
+  {
+   "name": "review_null_object_class_102",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 1,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 102,
+      "obj": null
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     },
+     {
+      "op": "brep",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 1
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:257"
+  },
+  {
+   "name": "review_null_object_class_103",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 1,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 103,
+      "obj": null
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     },
+     {
+      "op": "brep",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 1
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:257"
+  },
+  {
+   "name": "review_null_object_class_104",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 1,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 104,
+      "obj": null
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     },
+     {
+      "op": "brep",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 1
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:257"
+  },
+  {
+   "name": "review_null_object_class_105",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 1,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 105,
+      "obj": null
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     },
+     {
+      "op": "brep",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 1
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:257"
+  },
+  {
+   "name": "review_null_object_class_106",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 1,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 106,
+      "obj": null
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     },
+     {
+      "op": "brep",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 1
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:257"
+  },
+  {
+   "name": "review_null_object_class_107",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 1,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 107,
+      "obj": null
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     },
+     {
+      "op": "brep",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 1
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:257"
+  },
+  {
+   "name": "review_null_object_class_108",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 1,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 108,
+      "obj": null
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     },
+     {
+      "op": "brep",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 1
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:257"
+  },
+  {
+   "name": "review_null_object_class_109",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 1,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 109,
+      "obj": null
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     },
+     {
+      "op": "brep",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 1
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:257"
+  },
+  {
+   "name": "review_null_object_class_110",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 1,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 110,
+      "obj": null
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     },
+     {
+      "op": "brep",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 0
+     },
+     {
+      "op": "combine",
+      "t": 1
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:257"
+  },
+  {
+   "name": "review_construct_tol_minus_use_default",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     -9876543.21,
+     -9876543.21
+    ],
+    "ops": [
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "src_tol",
+      "t": 1
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "reset",
+      "t": 1,
+      "tol": -9876543.21
+     },
+     {
+      "op": "src_tol",
+      "t": 1
+     },
+     {
+      "op": "set_src_tol",
+      "t": 0,
+      "tol": -9876543.21
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/inc/SmPointClass.h:105"
+  },
+  {
+   "name": "review_construct_tol_use_default",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     9876543.21,
+     9876543.21
+    ],
+    "ops": [
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "src_tol",
+      "t": 1
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "reset",
+      "t": 1,
+      "tol": -9876543.21
+     },
+     {
+      "op": "src_tol",
+      "t": 1
+     },
+     {
+      "op": "set_src_tol",
+      "t": 0,
+      "tol": -9876543.21
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/inc/SmPointClass.h:105"
+  },
+  {
+   "name": "review_construct_tol_negative",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     -0.0002,
+     -0.0002
+    ],
+    "ops": [
+     {
+      "op": "src_tol",
+      "t": 0
+     },
+     {
+      "op": "src_tol",
+      "t": 1
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 106,
+      "obj": 0
+     },
+     {
+      "op": "xsect_tol",
+      "t": 0
+     },
+     {
+      "op": "reset",
+      "t": 1,
+      "tol": -9876543.21
+     },
+     {
+      "op": "src_tol",
+      "t": 1
+     },
+     {
+      "op": "set_src_tol",
+      "t": 0,
+      "tol": -9876543.21
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/inc/SmPointClass.h:105"
+  },
+  {
+   "name": "review_load_obj0_max_off9",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "load",
+      "t": 0,
+      "tol": 2e-05,
+      "obj": 0,
+      "value": 0.125,
+      "params": [
+       0.25,
+       0.5,
+       0.75,
+       1.0,
+       1.25,
+       1.5,
+       1.75,
+       2.0,
+       2.25,
+       2.5
+      ],
+      "offset": 9,
+      "pre": 0.5
+     },
+     {
+      "op": "find",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:1102"
+  },
+  {
+   "name": "review_load_obj1_max_off9",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "load",
+      "t": 0,
+      "tol": 2e-05,
+      "obj": 1,
+      "value": 0.125,
+      "params": [
+       0.25,
+       0.5,
+       0.75,
+       1.0,
+       1.25,
+       1.5,
+       1.75,
+       2.0,
+       2.25,
+       2.5
+      ],
+      "offset": 9,
+      "pre": 0.5
+     },
+     {
+      "op": "find",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:1102"
+  },
+  {
+   "name": "review_load_obj3_max_off8",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "load",
+      "t": 0,
+      "tol": 2e-05,
+      "obj": 3,
+      "value": 0.125,
+      "params": [
+       0.25,
+       0.5,
+       0.75,
+       1.0,
+       1.25,
+       1.5,
+       1.75,
+       2.0,
+       2.25,
+       2.5
+      ],
+      "offset": 8,
+      "pre": 0.5
+     },
+     {
+      "op": "find",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:1102"
+  },
+  {
+   "name": "review_load_obj10_max_off7",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "load",
+      "t": 0,
+      "tol": 2e-05,
+      "obj": 10,
+      "value": 0.125,
+      "params": [
+       0.25,
+       0.5,
+       0.75,
+       1.0,
+       1.25,
+       1.5,
+       1.75,
+       2.0,
+       2.25,
+       2.5
+      ],
+      "offset": 7,
+      "pre": 0.5
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:1102"
+  },
+  {
+   "name": "review_load_obj8_max_off9",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "load",
+      "t": 0,
+      "tol": 2e-05,
+      "obj": 8,
+      "value": 0.125,
+      "params": [
+       0.25,
+       0.5,
+       0.75,
+       1.0,
+       1.25,
+       1.5,
+       1.75,
+       2.0,
+       2.25,
+       2.5
+      ],
+      "offset": 9,
+      "pre": 0.5
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:1102"
+  },
+  {
+   "name": "review_load_obj9_max_off8",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "load",
+      "t": 0,
+      "tol": 2e-05,
+      "obj": 9,
+      "value": 0.125,
+      "params": [
+       0.25,
+       0.5,
+       0.75,
+       1.0,
+       1.25,
+       1.5,
+       1.75,
+       2.0,
+       2.25,
+       2.5
+      ],
+      "offset": 8,
+      "pre": 0.5
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:1102"
+  },
+  {
+   "name": "review_load_obj6_max_off9",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "load",
+      "t": 0,
+      "tol": 2e-05,
+      "obj": 6,
+      "value": 0.125,
+      "params": [
+       0.25,
+       0.5,
+       0.75,
+       1.0,
+       1.25,
+       1.5,
+       1.75,
+       2.0,
+       2.25,
+       2.5
+      ],
+      "offset": 9,
+      "pre": 0.5
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:1102"
+  },
+  {
+   "name": "review_load_obj11_max_off9",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "load",
+      "t": 0,
+      "tol": 2e-05,
+      "obj": 11,
+      "value": 0.125,
+      "params": [
+       0.25,
+       0.5,
+       0.75,
+       1.0,
+       1.25,
+       1.5,
+       1.75,
+       2.0,
+       2.25,
+       2.5
+      ],
+      "offset": 9,
+      "pre": 0.5
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:1102"
+  },
+  {
+   "name": "review_load_obj12_max_off9",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "load",
+      "t": 0,
+      "tol": 2e-05,
+      "obj": 12,
+      "value": 0.125,
+      "params": [
+       0.25,
+       0.5,
+       0.75,
+       1.0,
+       1.25,
+       1.5,
+       1.75,
+       2.0,
+       2.25,
+       2.5
+      ],
+      "offset": 9,
+      "pre": 0.5
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:1102"
+  },
+  {
+   "name": "review_load_obj13_max_off9",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "load",
+      "t": 0,
+      "tol": 2e-05,
+      "obj": 13,
+      "value": 0.125,
+      "params": [
+       0.25,
+       0.5,
+       0.75,
+       1.0,
+       1.25,
+       1.5,
+       1.75,
+       2.0,
+       2.25,
+       2.5
+      ],
+      "offset": 9,
+      "pre": 0.5
+     },
+     {
+      "op": "src_tol",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:1102"
+  },
+  {
+   "name": "review_compute_ellipse_near",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 106,
+      "obj": 1
+     },
+     {
+      "op": "compute",
+      "t": 0,
+      "p": [
+       5.0,
+       2.0,
+       0.5
+      ]
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:651"
+  },
+  {
+   "name": "review_compute_ellipse_center",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 106,
+      "obj": 1
+     },
+     {
+      "op": "compute",
+      "t": 0,
+      "p": [
+       1.0,
+       2.0,
+       0.5
+      ]
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:651"
+  },
+  {
+   "name": "review_compute_ellipse_far",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 106,
+      "obj": 1
+     },
+     {
+      "op": "compute",
+      "t": 0,
+      "p": [
+       -10.0,
+       7.0,
+       3.0
+      ]
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:651"
+  },
+  {
+   "name": "review_compute_ellipse_on_side",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 106,
+      "obj": 1
+     },
+     {
+      "op": "compute",
+      "t": 0,
+      "p": [
+       1.0,
+       3.5,
+       0.8
+      ]
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:651"
+  },
+  {
+   "name": "review_compute_circle_near",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 106,
+      "obj": 2
+     },
+     {
+      "op": "compute",
+      "t": 0,
+      "p": [
+       5.0,
+       2.0,
+       0.5
+      ]
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:651"
+  },
+  {
+   "name": "review_compute_circle_center",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 106,
+      "obj": 2
+     },
+     {
+      "op": "compute",
+      "t": 0,
+      "p": [
+       1.0,
+       2.0,
+       0.5
+      ]
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:651"
+  },
+  {
+   "name": "review_compute_circle_far",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 106,
+      "obj": 2
+     },
+     {
+      "op": "compute",
+      "t": 0,
+      "p": [
+       -10.0,
+       7.0,
+       3.0
+      ]
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:651"
+  },
+  {
+   "name": "review_compute_circle_on_side",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         1,
+         2,
+         0.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0.2
+        ],
+        "domain": [
+         -30,
+         250
+        ],
+        "rx": 4.0,
+        "ry": 1.5,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "curve": {
+       "conic": {
+        "center": [
+         -1,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         0,
+         360
+        ],
+        "rx": 2.5,
+        "ry": null,
+        "inside_out": true
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        1
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "point": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "point": [
+       1,
+       2,
+       3.5
+      ]
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "face": 3
+     },
+     "volume",
+     "region",
+     "edgeuse",
+     "other"
+    ],
+    "tol": [
+     1e-05,
+     1e-05
+    ],
+    "ops": [
+     {
+      "op": "set_class_object",
+      "t": 0,
+      "class": 106,
+      "obj": 2
+     },
+     {
+      "op": "compute",
+      "t": 0,
+      "p": [
+       1.0,
+       3.5,
+       0.8
+      ]
+     },
+     {
+      "op": "find",
+      "t": 0
+     },
+     {
+      "op": "obj_tol",
+      "t": 0
+     },
+     {
+      "op": "curve_object",
+      "t": 0
+     }
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmPointClass.cpp:651"
+  }
+ ]
+}
