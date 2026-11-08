@@ -15,7 +15,6 @@ file.save
 file.save_as
 file.save_mesh
 file.slicers
-joint.sweep
 motion.export_animation
 motion.interference
 motion.plot
