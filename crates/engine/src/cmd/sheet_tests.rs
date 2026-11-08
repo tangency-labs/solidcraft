@@ -6845,6 +6845,70 @@ fn a_mirrored_sheet_copy_is_the_opposite_hand_with_the_mirror_image_flat_pattern
     assert_eq!(dxf["bends"], 3);
 }
 
+/// A mirrored sheet copy's rims turn over with its charts: each lies where the copy's own layout
+/// puts it, the material on its left. A flange picked on the copy's back edge stores the name the
+/// model gives that edge (the source's back edge's, as the copy's: `@` the mirror that made it),
+/// lands on the copy's edge, and finds the edge by that name again when the base grows and the
+/// edge moves off the pick.
+#[test]
+fn a_flange_on_a_mirrored_sheet_copy_is_picked_by_its_rims_name_and_lands_on_the_copys_edge() {
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    // A 100 x H base (T = 2.5, the default rule) on XY with flanges up its front (y = 0) and
+    // right (x = 100) edges, which meet at a corner; its sketch's back edge, y = H, is l3.
+    run(&mut s, "parameters.add", json!({"name": "H", "expression": "60 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities": ["p1"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "value": "H"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
+    run(&mut s, "sheet.flange", json!({"edges": [[100, 30, 2.5]], "height": 15}));
+    run(&mut s, "solid.mirror", json!({"bodies": ["Body1"], "plane": "YZ"}));
+    let copy = "Body1 (2)";
+
+    // The copy's rims where its own layout puts them: the same panel and edge in its chart, the
+    // material on the edge's left.
+    let state = s.model.state();
+    let named = state.surface_sheets.iter().find(|sk| sk.body == copy).expect("the copy's sheet").clone();
+    drop(state);
+    let mut own = named.clone();
+    own.build().unwrap();
+    assert!(!own.rims.is_empty());
+    assert_eq!(named.rims.len(), own.rims.len(), "{:?}\n{:?}", named.rims, own.rims);
+    for r in &own.rims {
+        let same = |q: &&(usize, solidcore_record::Vec2, solidcore_record::Vec2, String)| q.0 == r.0 && q.1.dist(r.1) < 1e-9 && q.2.dist(r.2) < 1e-9;
+        assert!(named.rims.iter().any(|q| same(&q)), "the copy's own rim {r:?} is not among {:?}", named.rims);
+    }
+
+    // A flange on the copy's back edge (y = 60, x from -100 to 0) is named by the edge's own name,
+    // the source's back edge's as the copy's, and lands on the copy: a wall up from y = 60 - 2.5 to
+    // 60.
+    let state = s.model.state();
+    let source_name = solidcraft_doc::sheet::sheet_edge_names(&state, &[Vec3::new(50.0, 60.0, 2.5)]);
+    let copy_name = solidcraft_doc::sheet::sheet_edge_names(&state, &[Vec3::new(-50.0, 60.0, 2.5)]);
+    drop(state);
+    assert!(source_name.len() == 1 && source_name[0].contains("side:l3"), "{source_name:?}");
+    assert!(copy_name.len() == 1 && copy_name[0].starts_with(source_name[0].split('|').next().unwrap()), "{copy_name:?} for {source_name:?}");
+    run(&mut s, "sheet.flange", json!({"edges": [[-50, 60, 2.5]], "height": 10, "body": copy}));
+    assert_eq!(s.doc.features.last().map(|f| f.edge_names.clone()), Some(copy_name));
+    let inside = |s: &Session, name: &str, p: [f64; 3]| {
+        s.model
+            .state()
+            .body(name)
+            .is_some_and(|b| b.body.classify_point(Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside)
+    };
+    assert!(inside(&s, copy, [-50.0, 59.0, 8.0]) && !inside(&s, copy, [-50.0, 59.0, -8.0]));
+    assert!(!inside(&s, "Body1", [50.0, 59.0, 8.0]), "the source has no flange on its back edge");
+
+    // The base grows to 80 deep: the back edge moves 20 mm off the pick, and the flange finds it by
+    // its name.
+    let r = run(&mut s, "parameters.change", json!({"name": "H", "expression": "80 mm"}));
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert!(inside(&s, copy, [-50.0, 79.0, 8.0]) && !inside(&s, copy, [-50.0, 59.0, 8.0]));
+}
+
 #[test]
 fn mirroring_or_copying_a_sheet_body_leaves_the_original_sheet_as_it_was() {
     let mut s = Session::default();

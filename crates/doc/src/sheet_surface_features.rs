@@ -998,9 +998,10 @@ impl SurfaceSheet {
     /// hand. A mirror turns each panel's chart over (u → −u), so that its frame stays
     /// right-handed with the material where it was and the copy's flat is its source's mirrored
     /// across the flat's y axis (x → −x). Every outline, anchor, cut and record in the charts and
-    /// the flat is mirrored with it, each joint and bend line runs the other way, and each
-    /// perforation field counts its grid from the other side. None for a transform that is no
-    /// rigid motion or mirror, and for a mirror of a sheet with a roll.
+    /// the flat is mirrored with it, each joint and bend line runs the other way, each
+    /// perforation field counts its grid from the other side, and its rims and faces are named as
+    /// its own layout names them. None for a transform that is no rigid motion or mirror, and for
+    /// a mirror of a sheet with a roll.
     pub fn copied(&self, body: &str, m: &crate::Mat) -> Option<SurfaceSheet> {
         let axis = |i: usize| m.get(i).map(|c| Vec3::new(c[0], c[1], c[2]));
         let (x, y, z) = (axis(0)?, axis(1)?, axis(2)?);
@@ -1111,6 +1112,25 @@ impl SurfaceSheet {
         for b in &mut self.bores {
             b.base.x = -b.base.x;
             b.axis.x = -b.axis.x;
+        }
+        // Each panel's own sketch lines and its rims as its own layout would keep them: each edge
+        // where its chart turned it, the material still on its left.
+        for (_, _, a, b) in &mut self.sketch_curves {
+            (*a, *b) = (f(*b), f(*a));
+        }
+        for (_, a, b, _) in &mut self.rims {
+            (*a, *b) = (f(*b), f(*a));
+        }
+        // The holes' loops and their sketch curves as drawn, where the chart turned them: each
+        // drawn curve keeps its way, so a wall's pieces rank along it as on the source.
+        let turned = crate::sheet_surface_convert::rigid_seg(f);
+        for h in &mut self.holes {
+            for (seg, _, drawn) in &mut h.segs {
+                *seg = turned(seg);
+                if let Some(d) = drawn {
+                    *d = turned(d);
+                }
+            }
         }
     }
 
