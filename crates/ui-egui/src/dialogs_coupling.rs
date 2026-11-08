@@ -4,6 +4,7 @@
 //! face also picks the joint it turns on. Play turns the driving joint so the coupling shows its
 //! motion before OK.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{StatusTone, choice_row, expr_row, status_line};
 use egui::RichText;
 use serde_json::{Value, json};
@@ -97,7 +98,7 @@ fn occurrence(s: &Session, body: &str) -> Option<u64> {
     s.doc.body_frames(&s.model.state()).into_iter().find(|f| f.0 == body).map(|(_, _, path, _)| path.last().copied().unwrap_or(0))
 }
 
-fn pick(inputs: &[SelInput], i: usize) -> Option<(&str, solidcraft_engine::geom::Vec3)> {
+fn pick(inputs: &[SelInput], i: usize) -> Option<(&str, solidcore_record::Vec3)> {
     match inputs.get(i)?.items.first()? {
         Sel::Face { body, point, .. } | Sel::Edge { body, point, .. } => Some((body.as_str(), *point)),
         _ => None,
@@ -206,7 +207,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CouplingForm, inputs:
     form_row(ui, "Animate", |ui| {
         let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
         let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
-            .on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"));
+            .backing_on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"));
         crate::scenario::publish_handle("dialog:Animate", r.rect.center());
         if r.clicked() {
             f.animate = !f.animate;

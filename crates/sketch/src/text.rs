@@ -3,14 +3,16 @@
 //! OpenType (CFF) cubic Béziers are cubic control splines, both exact. A glyph's counters (the
 //! holes of A, B, 8…) are loops inside its outline; profile detection makes them holes.
 //!
-//! The default font is embedded (Liberation Sans, SIL OFL 1.1; see `assets/fonts/liberation-sans/OFL.txt` and
+//! The default font is embedded (Liberation Sans, SIL OFL 1.1; see `crates/sketch/assets/fonts/liberation-sans/OFL.txt` and
 //! ATTRIBUTION.md); [`crate::fonts`] finds others by file path or installed family name. [`TextMetrics`] measures
 //! text by the rule that draws it. A line with right-to-left characters (Arabic, Hebrew…) is ordered by the
 //! Unicode bidirectional algorithm and shaped with the font's own rules, so letters join and marks sit where the font
 //! puts them; every other line is set glyph by glyph, as it always was.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Ring, Vec2};
+use solidcore_record::Vec2;
+use solidcraft_geom::Ring;
+use solidcraft_geom::prelude::*;
 
 use crate::fonts::{FontData, font_data_styled};
 use crate::link::{LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES};
@@ -588,7 +590,7 @@ mod tests {
 
     #[test]
     fn a_font_file_gives_the_same_outlines_and_unknown_fonts_are_errors() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/liberation-sans/LiberationSans-Regular.ttf");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/liberation-sans/LiberationSans-Regular.ttf");
         let by_file = text_geometry_in(Some(&path.to_string_lossy()), "A7_L", Vec2::ZERO, 8.0, 0.0).unwrap();
         assert_eq!(by_file, text_geometry("A7_L", Vec2::ZERO, 8.0, 0.0).unwrap());
         let e = text_geometry_in(Some("No Such Family 12345"), "A", Vec2::ZERO, 8.0, 0.0).unwrap_err().to_string();

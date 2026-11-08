@@ -1,7 +1,9 @@
 // Home and Fit frame what is shown now, and a middle-button double-click goes Home.
 use crate::scenario::Harness;
 use serde_json::json;
-use solidcraft_engine::geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::Aabb3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::StandardView;
 
 /// A block drawn at the origin and extruded, then moved 500 mm along X: its sketch stays at the
@@ -161,9 +163,10 @@ fn view_bar_json_commands_apply_ui_state_without_dialogs_or_undo() {
         assert_eq!(r["ok"], true, "{r}");
         assert_eq!(usize::from(h.app.ui.visual_style), index);
     }
-    for id in ["view.spin", "view.grid", "view.ground_shadow", "view.navigation_bar"] {
+    for id in ["view.tool.zoom", "view.spin", "view.grid", "view.ground_shadow", "view.navigation_bar"] {
         let key = if id == "view.navigation_bar" { "visible" } else { "on" };
         let state = |app: &crate::SolveApp| match id {
+            "view.tool.zoom" => app.viewport.nav == Some(NavMode::Zoom),
             "view.spin" => app.viewport.spin,
             "view.grid" => app.ui.show_grid,
             "view.ground_shadow" => app.ui.ground_shadow,
@@ -196,6 +199,66 @@ fn view_bar_json_commands_apply_ui_state_without_dialogs_or_undo() {
 }
 
 #[test]
+fn drag_to_zoom_shortcut_stops_on_key_release_without_editing_the_sketch() {
+    use egui::{Event, Key, Modifiers, PointerButton, vec2};
+
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[20,0]]})).unwrap();
+    h.app.start("sketch.line");
+    h.settle();
+    let cmd = crate::keymap::DRAG_ZOOM;
+    assert!(crate::keymap::keys(&h.app, cmd).is_empty());
+    let bind = h.call("ui.shortcut", json!({"command":cmd,"key":"Shift+F6"}));
+    assert_eq!(bind["ok"], true, "{bind}");
+    // Shift+F6 is assignable, but the built-in F6 Fit handler also sees it.
+    h.app.cam.distance *= 1.5;
+    let before = h.app.cam;
+    let before_doc = h.app.session.doc.to_json();
+    let before_undo = h.app.session.undo.len();
+    let at = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap()).to_screen(Vec3::ZERO).unwrap();
+    let shifted = Modifiers::SHIFT;
+    let plain = Modifiers::NONE;
+    let key = |pressed, modifiers| Event::Key { key: Key::F6, physical_key: None, pressed, repeat: false, modifiers };
+    let mouse = |pos, pressed, modifiers| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers };
+    let frame = |h: &mut Harness, modifiers, events: Vec<Event>| {
+        h.frame_with(std::iter::once(Event::ModifiersChanged(modifiers)).chain(events).collect());
+    };
+
+    frame(&mut h, shifted, vec![Event::PointerMoved(at), key(true, shifted)]);
+    assert_eq!(h.app.cam, before, "the assigned chord does not trigger Fit");
+    assert!(h.app.viewport.nav.is_none(), "the key press does not latch Zoom");
+    frame(&mut h, shifted, vec![mouse(at, true, shifted)]);
+    let zoomed_at = at - vec2(0.0, 48.0);
+    frame(&mut h, shifted, vec![Event::PointerMoved(zoomed_at)]);
+    let zoomed = h.app.cam;
+    assert!(zoomed.distance < before.distance, "an upward drag zooms in");
+    assert_eq!(zoomed.back(), before.back());
+
+    let after_release = zoomed_at - vec2(0.0, 48.0);
+    frame(&mut h, plain, vec![Event::PointerMoved(after_release)]);
+    assert_eq!(h.app.cam, zoomed, "releasing Shift breaks the chord and stops zoom");
+    frame(&mut h, plain, vec![key(false, plain), mouse(after_release, false, plain)]);
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty());
+    assert_eq!(h.app.session.doc.to_json(), before_doc);
+    assert_eq!(h.app.session.undo.len(), before_undo);
+
+    // A stationary zoom press remains owned by navigation when the shortcut is released first.
+    frame(&mut h, shifted, vec![Event::PointerMoved(at), key(true, shifted)]);
+    frame(&mut h, shifted, vec![mouse(at, true, shifted)]);
+    frame(&mut h, plain, vec![key(false, plain)]);
+    frame(&mut h, plain, vec![mouse(at, false, plain)]);
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "the release does not place a line point");
+    assert_eq!(h.app.cam, zoomed);
+
+    h.frame();
+    frame(&mut h, plain, vec![mouse(at, true, plain)]);
+    frame(&mut h, plain, vec![mouse(at, false, plain)]);
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 1, "the next ordinary click starts the line");
+}
+
+#[test]
 fn navigation_bar_visibility_defaults_and_round_trips() {
     let mut h = Harness::new();
     moved_block(&mut h);
@@ -223,12 +286,14 @@ fn navigation_bar_buttons_run_registered_commands() {
     moved_block(&mut h);
     let undo = h.app.session.undo.len();
     let mut orbit_on = false;
+    let mut zoom_on = false;
     h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","fit","home","visual_style","spin"]}}));
     for (slot, id) in [
         ("orbit", "view.tool"),
         ("orbit", "view.tool"),
         ("pan", "view.tool"),
-        ("zoom", "view.tool"),
+        ("zoom", "view.tool.zoom"),
+        ("zoom", "view.tool.zoom"),
         ("fit", "view.fit"),
         ("home", "view.home"),
         ("spin", "view.spin"),
@@ -242,6 +307,9 @@ fn navigation_bar_buttons_run_registered_commands() {
         if slot == "orbit" {
             orbit_on = !orbit_on;
             assert_eq!(h.app.viewport.nav, if orbit_on { Some(crate::viewport::NavMode::Orbit) } else { None });
+        } else if slot == "zoom" {
+            zoom_on = !zoom_on;
+            assert_eq!(h.app.viewport.nav, if zoom_on { Some(crate::viewport::NavMode::Zoom) } else { None });
         }
     }
     let log = h.app.session.log.len();
@@ -341,7 +409,8 @@ fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
         h.step(&json!({"widget":label})).unwrap();
         let after = if id == "view.grid" { h.app.ui.show_grid } else { h.app.ui.ground_shadow };
         assert_eq!(after, !before);
-        let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
+        let language = crate::i18n::Locale::for_language(&h.app.preferences.language);
+        let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]);
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{id} was not run");
     }
 }

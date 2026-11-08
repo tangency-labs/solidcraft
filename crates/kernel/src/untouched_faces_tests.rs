@@ -1,7 +1,8 @@
 //! A cut or a join never splits faces it doesn't touch: a flat wall with an opening cut into
 //! it stays one face with an inner loop, whatever is cut or joined elsewhere afterwards.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::{Body, BoolOp, FaceSurface, boolean, box_solid, face_surface, fillet, shell};
 
@@ -168,7 +169,7 @@ fn stations(b: &Body) -> usize {
     }
     let point = |v: u32| Vec3::from(r.vertices[v as usize].point);
     let dir = |e: usize| (point(r.edges[e].vertices[1]) - point(r.edges[e].vertices[0])).normalized();
-    let line = |e: usize| matches!(r.edges[e].curve, solidcraft_geom::brep::Curve::Line { .. });
+    let line = |e: usize| matches!(r.edges[e].curve, solidcore_record::brep::Curve::Line { .. });
     at.iter()
         .filter(|es| match es.as_slice() {
             [a, b] => line(*a) && line(*b) && dir(*a).zip(dir(*b)).is_some_and(|(u, w)| u.dot(w).abs() > 1. - 1e-9),

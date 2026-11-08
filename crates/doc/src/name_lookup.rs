@@ -9,13 +9,19 @@
 //! that uses it fails, asking for the reference to be picked again
 //! ([`crate::DocError::Reselect`]). A face whose name was worked out from geometry, found where
 //! the reference's point no longer lies, is reported: only geometry decided.
+//! Saved numbered Project links also have a compatibility check for a whole face that
+//! contains the saved pick and comes directly from its original construction feature.
+//! This check is local to manual sketch projection.
 
-use solidcraft_geom::{Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
+use solidcraft_geom::brep::eval::SurfaceEval;
+use solidcraft_geom::prelude::*;
 
 use crate::history_names::{Match, Names};
 use crate::naming::{self, closest, edge_names, face_names, strip_piece};
 use crate::piece_names::strip_edge_number;
-use crate::{ModelBody, ModelState};
+use crate::{FeatureKind, ModelBody, ModelState, Operation};
 
 /// The mark on a name saved before format 14 (`?F2:top#2`). Those names were worked out from
 /// geometry, and some of them name a face that exact history names differently (a tube's outer
@@ -333,6 +339,27 @@ pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
     locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p).ok()
 }
 
+/// The one body of `st` with a face the stored face name finds, as [`locate_face`] looks for it.
+/// `None` when no body has one, several do, or the name is one saved before format 14.
+pub(crate) fn face_body<'a>(st: &'a ModelState, name: &str) -> Option<&'a ModelBody> {
+    if let Some((body, _)) = crate::sheet::split_sheet_face_name(name) {
+        return st.bodies.iter().find(|b| b.name == body && !b.body.is_mesh());
+    }
+    if name.is_empty() || legacy_name(name).is_some() {
+        return None;
+    }
+    let solids = || st.bodies.iter().filter(|b| !b.body.is_mesh());
+    naming::warm_names(solids());
+    let mut holders = solids().filter(|b| {
+        let names = naming::names(b);
+        (0..names.faces.len()).any(|face| crate::history_names::matches(&names, face, name).is_some_and(exactly))
+    });
+    match (holders.next(), holders.next()) {
+        (Some(b), None) => Some(b),
+        _ => None,
+    }
+}
+
 /// [`locate_face`] for a feature that works on the faces of the body called `body` (a shell, a
 /// draft…): the face of that body the name finds, found without working out the names of every
 /// other body (a body named from geometry is meshed for it: seconds in a large model). When
@@ -429,6 +456,84 @@ pub fn faces_with_stem(b: &ModelBody, name: &str) -> Vec<usize> {
 /// [`locate_face`] on one body.
 pub(crate) fn locate_on(body: &ModelBody, name: &str, p: Vec3) -> Option<FaceHit> {
     locate_in(std::iter::once((0, body)), name, p).ok()
+}
+
+/// Find a saved manual Project face in its body. Older designs can name a numbered piece of
+/// a face that now evaluates whole. Recover it only when the original feature directly made
+/// the exact whole face and the face contains the
+/// old pick. Other face references still require the stored name as picked.
+pub(crate) fn locate_projected_face(body: &ModelBody, name: &str, p: Vec3) -> Option<(usize, Vec3)> {
+    if body.body.is_mesh() {
+        return None;
+    }
+    match locate_in(std::iter::once((0, body)), name, p) {
+        Ok(hit) => Some((hit.face, hit.point)),
+        Err(Miss::Gone) => recover_numbered_projected_face(body, name, p),
+        Err(Miss::Several) => None,
+    }
+}
+
+/// Bound the quadratic scan in remove_faces, which takes the list of faces to remove.
+const MAX_PROJECTION_RECOVERY_FACES: usize = 1024;
+
+fn recover_numbered_projected_face(body: &ModelBody, name: &str, pick: Vec3) -> Option<(usize, Vec3)> {
+    let (stem, number) = name.rsplit_once('#')?;
+    let count = body.body.face_count();
+    if count > MAX_PROJECTION_RECOVERY_FACES
+        || !pick.is_finite()
+        || stem.is_empty()
+        || strip_piece(stem) != stem
+        || number.is_empty()
+        || number.starts_with('0')
+        || !number.bytes().all(|digit| digit.is_ascii_digit())
+    {
+        return None;
+    }
+    // A changed body may keep the same face name while the face absorbs a smaller piece.
+    // Projecting that larger face could silently grow a downstream feature's material.
+    let producer = stem.strip_prefix('F')?.split_once(':')?.0.parse::<u64>().ok()?;
+    let live_construction = body.names.origin.as_ref().is_some_and(|origin| {
+        producer == origin.feature.id
+            && matches!(
+                &origin.feature.kind,
+                FeatureKind::Box { operation: Operation::NewBody, .. } | FeatureKind::Extrude { operation: Operation::NewBody, .. }
+            )
+            && origin.before.body(&body.name).is_none()
+    });
+    if producer != body.feature || !(live_construction || body.names.cached_construction == Some(producer)) {
+        return None;
+    }
+
+    let candidates = faces_with_stem(body, stem);
+    let &[face] = candidates.as_slice() else { return None };
+    let names = naming::names(body);
+    let info = names.info.get(face)?;
+    if names.faces.get(face)?.as_str() != stem || !info.verified || info.aliases.iter().any(|alias| strip_piece(alias) != stem) {
+        return None;
+    }
+
+    let record = body.body.record().faces.get(face)?;
+    let [[u0, u1], [v0, v1]] = record.domain;
+    let surface = SurfaceEval::new(record.parameters()).ok()?;
+    let tolerance = (body.body.size() * 1e-3).max(1e-3);
+    if !tolerance.is_finite() {
+        return None;
+    }
+    let point = surface.point(surface.project(pick, Some([u0.midpoint(u1), v0.midpoint(v1)]), tolerance)?)?;
+    if !point.is_finite() || !(point.dist(pick) <= tolerance) {
+        return None;
+    }
+
+    // Isolate the face so a point on another face of the same surface cannot pass the trim test.
+    let others: Vec<_> = (0..count).filter(|index| *index != face).collect();
+    let isolated;
+    let trimmed = if others.is_empty() {
+        &body.body
+    } else {
+        isolated = solidcraft_kernel::remove_faces(&body.body, &others).ok()?;
+        &isolated
+    };
+    matches!(trimmed.classify_point(point), Ok(solidcraft_kernel::PointClass::OnBoundary)).then_some((face, point))
 }
 
 /// The one face a name `model.faces` lists finds, on the body called `body` or, without one, on

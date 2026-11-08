@@ -3,11 +3,13 @@
 //! the move's transform. The preview from a scratch design evaluated the move and meshed the
 //! bodies again for every change, so while the triad was dragged the part trailed the arrow by
 //! one evaluation, longer for a larger part.
+use solidcraft_engine::geom::prelude::*;
 use std::sync::Arc;
 
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::{Document, Mat, apply_point, apply_vector, expr::Kind, rigid};
-use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
+use solidcraft_engine::geom::{Aabb3, Mesh};
 
 use crate::{
     SolveApp,

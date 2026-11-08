@@ -1,6 +1,6 @@
 //! Fillets and chamfers where a curved wall runs out into a flat face in a knife edge (#851).
 use crate::*;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use std::f64::consts::PI;
 
 const R_WALL: f64 = 21.0;

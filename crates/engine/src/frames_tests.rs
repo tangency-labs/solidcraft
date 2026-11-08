@@ -2,7 +2,8 @@
 //! world land in the component's own frame (user bug #4).
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -355,6 +356,104 @@ fn editing_a_primitive_in_a_turned_component_keeps_its_placement() {
     assert!(((lo + hi) * 0.5).dist((rod_lo + rod_hi) * 0.5) < 1e-3, "the rod moved: {lo:?} {hi:?}");
     let (size, before) = (hi - lo, rod_hi - rod_lo);
     assert!((size.x - before.x).abs() < 1e-6 && (size.y - 12.0).abs() < 0.05 && (size.z - 12.0).abs() < 0.05, "{size:?}");
+}
+
+/// Edit Feature shows an explicit revolve axis with its origin evaluated; sending that back
+/// untouched keeps the saved expressions, for a solid and a surface revolve alike.
+#[test]
+fn an_untouched_revolve_axis_keeps_its_origin_expressions_through_redefine() {
+    for (command, name) in [("solid.revolve", "Turn"), ("surface.revolve", "Shell")] {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+        run(&mut s, "sketch.create", json!({"name": "Profile", "plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let axis = json!({"origin": ["W / 2", 0, 0], "dir": [0, 1, 0]});
+        let mut made = json!({"sketch": "Profile", "axis": axis, "angle": "90 deg", "name": name});
+        if command == "solid.revolve" {
+            made["operation"] = json!("new");
+        }
+        run(&mut s, command, made);
+        // The origin's coordinates as text (a saved 0 may read back as 0 or 0.0).
+        let saved = |s: &mut Session| -> Vec<String> {
+            let axis = run(s, "timeline.inspect", json!({"feature": name}))["definition"]["axis"].clone();
+            axis["origin"].as_array().unwrap().iter().map(|c| c.as_f64().map_or_else(|| c.as_str().unwrap().to_string(), |x| x.to_string())).collect()
+        };
+        let original = saved(&mut s);
+        assert_eq!(original, ["W / 2", "0", "0"]);
+        // What the dialog sends back untouched: the origin as numbers.
+        let mut params = json!({"sketch": "Profile", "axis": {"origin": [20.0, 0.0, 0.0], "dir": [0.0, 1.0, 0.0]}, "angle": "45 deg"});
+        if command == "solid.revolve" {
+            params["operation"] = json!("new");
+        }
+        run(&mut s, "timeline.redefine", json!({"feature": name, "command": command, "params": params}));
+        assert_eq!(saved(&mut s), original, "{command}");
+        // Only the direction changed: the origin keeps its expressions.
+        let mut turned = params.clone();
+        turned["axis"]["dir"] = json!([0.0, -1.0, 0.0]);
+        run(&mut s, "timeline.redefine", json!({"feature": name, "command": command, "params": turned}));
+        assert_eq!(saved(&mut s), original, "{command}");
+        // A changed origin is taken as given.
+        params["axis"]["origin"] = json!([21.0, 0.0, 0.0]);
+        run(&mut s, "timeline.redefine", json!({"feature": name, "command": command, "params": params}));
+        assert_eq!(saved(&mut s), ["21", "0", "0"], "{command}");
+    }
+}
+
+/// A surface revolve's `{origin, dir}` axis is a world axis in a moved or turned component, as a
+/// solid revolve's is, when the revolve is made and when its axis is changed in Edit Feature.
+#[test]
+fn a_surface_revolve_axis_maps_into_a_moved_component() {
+    let made = |command: &str, turned: bool| {
+        let mut s = moved_part();
+        if turned {
+            run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [50, 0, 0]}));
+        }
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Ring"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "Ring", "axis": {"origin": [50, 0, 0], "dir": [0, 0, 1]}, "name": "Turn"});
+        if command == "solid.revolve" {
+            p["operation"] = json!("new");
+        }
+        run(&mut s, command, p.clone());
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+        let first = world_bbox(&s, &body);
+        // Edit Feature with a new axis, also given in the world: 2 mm along the sketch's X, which
+        // the quarter turn lays along the world's Y.
+        p["axis"]["origin"] = if turned { json!([50, 2, 0]) } else { json!([52, 0, 0]) };
+        run(&mut s, "timeline.redefine", json!({"feature": "Turn", "command": command, "params": p}));
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+        (first, world_bbox(&s, &body))
+    };
+    for turned in [false, true] {
+        let (solid, solid_edit) = made("solid.revolve", turned);
+        let (surface, surface_edit) = made("surface.revolve", turned);
+        assert!(near(solid.0, surface.0) && near(solid.1, surface.1), "turned {turned}: {solid:?} against {surface:?}");
+        assert!(
+            near(solid_edit.0, surface_edit.0) && near(solid_edit.1, surface_edit.1),
+            "turned {turned}, edited: {solid_edit:?} against {surface_edit:?}"
+        );
+    }
+}
+
+/// A surface revolve about a picked edge of a moved component turns about that edge where it is
+/// shown, as one about the same axis given as `{origin, dir}` does.
+#[test]
+fn a_surface_revolve_about_a_picked_edge_of_a_moved_component() {
+    let made = |axis: Value| {
+        let mut s = moved_part();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Ring"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.revolve", json!({"sketch": "Ring", "axis": axis, "name": "Turn"}));
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+        world_bbox(&s, &body)
+    };
+    // The block's vertical edge at its corner, shown at world x = 50.
+    let edge = made(json!({"edge": [50, 0, 5]}));
+    let line = made(json!({"origin": [50, 0, 0], "dir": [0, 0, 1]}));
+    assert!(near(edge.0, line.0) && near(edge.1, line.1), "{edge:?} against {line:?}");
 }
 
 /// A new placement given to `timeline.redefine` is still a world point.

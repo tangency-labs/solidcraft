@@ -68,7 +68,7 @@ macro_rules! slot {
 pub(crate) const CATALOGUE: &[Slot] = &[
     slot!("orbit", Tool, "orbit", Some("view.tool")),
     slot!("pan", Tool, "pan", Some("view.tool")),
-    slot!("zoom", Tool, "zoom", Some("view.tool")),
+    slot!("zoom", Tool, "zoom", Some(crate::keymap::DRAG_ZOOM)),
     slot!("spin", Toggle, "spin", Some("view.spin")),
     slot!("fit", Action, "fit", Some("view.fit")),
     slot!("look_at", Action, "lookat", Some("view.normal_to")),

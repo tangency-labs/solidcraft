@@ -1,6 +1,7 @@
 //! Rounded Rectangle (#891): a 2-point rectangle whose corners are filleted alike, in one step.
 
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::ConstraintKind;
 
 use crate::Session;

@@ -2,7 +2,7 @@
 //! volume.
 use std::f64::consts::PI;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::{Body, box_solid, cylinder, sphere, torus};
 
@@ -69,7 +69,7 @@ fn extruded_circles_go_as_cylinders() {
     use solidcraft_smlib::flat;
     let body = cylinder(v(0., 50., -60.), v(0., 0., 1.), 40.0, 120.0).unwrap();
     let record = super::brep_record(&body).unwrap();
-    let walls = record.faces.iter().filter(|f| matches!(f.surface, solidcraft_geom::brep::Surface::Cylinder { .. })).count();
+    let walls = record.faces.iter().filter(|f| matches!(f.surface, solidcore_record::brep::Surface::Cylinder { .. })).count();
     assert_eq!((walls, record.faces.len()), (1, 3));
     let arrays = solidcraft_smlib::import::arrays(&record, true).unwrap();
     let kinds = &arrays.ints[&flat::FACE_SURFACE_TYPE];
@@ -99,7 +99,7 @@ fn a_cavity_comes_back_from_smlib() {
 /// square to the axis (annular sectors), its walls cylinders.
 #[test]
 fn a_revolved_annulus_goes_with_its_flat_faces() {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     let square =
         Region2 { outer: Loop2::polygon(&[Vec2::new(4., 12.), Vec2::new(12., 12.), Vec2::new(12., 20.), Vec2::new(4., 20.)]), holes: vec![] };
     let plane = Plane { y: v(0., 0., 1.), ..Plane::XZ };
@@ -114,7 +114,7 @@ fn a_revolved_annulus_goes_with_its_flat_faces() {
 /// A drill point (a cone ending in its apex) through SMLib and back measures as it went in.
 #[test]
 fn a_cone_apex_comes_back_measuring_as_it_went() {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     let r = 3.4;
     let h = r / (59f64.to_radians()).tan();
     let profile =

@@ -249,7 +249,7 @@ struct Measured {
     kinds: BTreeMap<String, usize>,
 }
 
-fn kinds(rec: &solidcraft_geom::brep::Brep) -> BTreeMap<String, usize> {
+fn kinds(rec: &solidcore_record::brep::Brep) -> BTreeMap<String, usize> {
     let mut out = BTreeMap::new();
     for f in &rec.faces {
         let v = serde_json::to_value(&f.surface).unwrap();
@@ -327,7 +327,7 @@ fn solidcore_case(name: &'static str) -> Got {
             let size = if sheet { area(&body, 1e-8) } else { volume(&body, 1e-8) }.unwrap_or_else(|e| panic!("{name}: size: {e}"));
             let n = counts(&body).unwrap();
             let (rec, _) = native(&to_arrays(&body).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-            rec.validate().unwrap_or_else(|e| panic!("{name}: record: {e}"));
+            solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
             let bx = bounds(&body).unwrap();
             Measured { size, bounds: bx, counts: n, kinds: kinds(&rec) }
         });
@@ -546,9 +546,8 @@ fn offset_faces_close_a_step_wall() {
 /// Rig case shell/4492's rounded box: four mitred rounds, r 3, come off a 40 x 30 x 10 box's top
 /// together and follow it. From height 0 the outline is the 34 x 24 top moved out by the round's
 /// w(z) = sqrt(9 - (z - axis)^2), or 3 below the axis. With the fork's values at +19, and bodies
-/// whose rounds go all the way down from -7 and are cut short from -7.5 (solidcore#2027). At -9
-/// solidcore refuses to put the rounds back (solidcore#2020, open): SolidCraft says it does not
-/// make that move.
+/// whose rounds go all the way down from -7 and are cut short from -7.5 (solidcore#2027). At -9,
+/// which solidcore refused before 9856ffee5 (solidcore#2020), it builds the closed form too.
 #[test]
 fn mitred_rounds_follow_a_moved_top() {
     use super::blend::{Corners, blend};
@@ -574,6 +573,7 @@ fn mitred_rounds_follow_a_moved_top() {
         (-7.0, [6, 12, 8]),
         (-7.5, [6, 12, 8]),
         (-8.0, [6, 12, 8]),
+        (-9.0, [6, 12, 8]),
         (-9.5, [6, 12, 8]),
     ];
     for (d, n) in moves {
@@ -582,7 +582,6 @@ fn mitred_rounds_follow_a_moved_top() {
         assert_eq!(counts(&moved).unwrap(), n, "d {d}");
         assert!(rel(v, analytic(d)) < 1e-6, "d {d}: {v} vs {}", analytic(d));
     }
-    assert!(matches!(offset_faces(&rounded, &[top], 0.1, -9.0), Err(Error::Unsupported)));
 }
 
 /// `moved_faces`: drafts so small they leave a plane or cylinder where it was still moved a face

@@ -5,7 +5,8 @@
 //! imports sit loose in a component open and rebuild as they did.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Aabb3;
 use solidcraft_kernel::{ExportBody, ExportProduct, StepHeader, box_solid, step_export_products};
 
 use super::run;
@@ -277,6 +278,109 @@ fn a_mesh_file_comes_in_as_one_component() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A 10 x 20 x 30 box with its low corner at (100, 50, 7), saved as `block.stl` in `dir`.
+fn off_origin_stl(dir: &std::path::Path) -> String {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "corner": [100, 50, 7]}));
+    let stl = dir.join("block.stl").to_string_lossy().to_string();
+    run(&mut s, "file.save_mesh", json!({"path": stl}));
+    stl
+}
+
+/// The one box the design shows.
+fn only_box(s: &Session) -> [i64; 6] {
+    let boxes = shown_boxes(s);
+    assert_eq!(boxes.len(), 1, "{boxes:?}");
+    boxes[0]
+}
+
+/// Insert Mesh's `origin` (#12543): off, the mesh stays where its file puts it; on, its box is
+/// centred on X and Y with its base on Z = 0, by moving the import's occurrence, and the reply
+/// says by how much. A unit scales the mesh first, so the scaled box is the one centred.
+#[test]
+fn a_mesh_import_moves_to_the_origin_only_when_asked() {
+    let dir = temp_dir("origin");
+    let stl = off_origin_stl(&dir);
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_mesh", json!({"path": stl}));
+    assert!(r.get("moved_to_origin").is_none(), "{r}");
+    assert_eq!(only_box(&s), [100_000, 50_000, 7_000, 110_000, 70_000, 37_000], "the file's coordinates by default");
+
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_mesh", json!({"path": stl, "origin": true}));
+    assert_eq!(only_box(&s), [-5_000, -10_000, 0, 5_000, 10_000, 30_000], "centred on X and Y, base on Z = 0");
+    assert_eq!(r["moved_to_origin"], json!([-105.0, -60.0, -7.0]), "{r}");
+    let occ = r["occurrence"].as_u64().unwrap();
+    let placed = s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().transform;
+    assert_eq!(placed[3], [-105.0, -60.0, -7.0, 1.0], "the occurrence carries the move");
+    // One undo step takes the whole import, move and all, away.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.world_state().unwrap().bodies.is_empty());
+
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl, "origin": true, "units": "cm"}));
+    assert_eq!(only_box(&s), [-50_000, -100_000, 0, 50_000, 100_000, 300_000], "scaled to millimetres, then centred");
+
+    let mut s = Session::default();
+    let e = s.execute("file.insert_mesh", &json!({"path": stl, "origin": "yes"})).unwrap_err().to_string();
+    assert!(e.contains("`origin` must be true"), "{e}");
+    assert!(s.doc.features.is_empty(), "a refused import adds nothing");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `origin` is the origin of the component the mesh is inserted into, wherever that component
+/// is placed; and opening a mesh file as a design takes it too.
+#[test]
+fn a_mesh_moved_to_the_origin_sits_on_the_active_components_origin() {
+    let dir = temp_dir("origin-active");
+    let stl = off_origin_stl(&dir);
+    let mut s = Session::default();
+    let holder = run(&mut s, "component.create", json!({"name": "Holder", "grounded": false}));
+    // Made active as it is made.
+    run(&mut s, "occurrence.move", json!({"occurrence": holder["occurrence"], "translate": [0, 0, 40]}));
+    assert_ne!(s.active_component, 0);
+    run(&mut s, "file.insert_mesh", json!({"path": stl, "origin": true}));
+    assert_eq!(only_box(&s), [-5_000, -10_000, 40_000, 5_000, 10_000, 70_000], "on Holder's origin, 40 mm up");
+
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": stl, "origin": true}));
+    assert_eq!(r["moved_to_origin"], json!([-105.0, -60.0, -7.0]), "{r}");
+    assert_eq!(only_box(&s), [-5_000, -10_000, 0, 5_000, 10_000, 30_000]);
+    let e = s.execute("doc.open", &json!({"path": dir.join("x.sc").to_string_lossy(), "origin": true})).unwrap_err().to_string();
+    assert!(e.contains("`origin` applies to"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Moving to the origin measures the mesh in the active component's own frame, so a component
+/// turned 45 degrees takes exactly the file box's shift (not a larger box around the turned
+/// one's corners); and a component made active without an occurrence path is taken at its first
+/// placement, as everywhere else.
+#[test]
+fn a_mesh_moves_to_the_origin_of_a_turned_or_pathless_active_component() {
+    let dir = temp_dir("origin-turned");
+    let stl = off_origin_stl(&dir);
+    let shift = |r: &Value| -> Vec3 {
+        let v = r["moved_to_origin"].as_array().unwrap_or_else(|| panic!("not moved: {r}"));
+        Vec3::new(v[0].as_f64().unwrap(), v[1].as_f64().unwrap(), v[2].as_f64().unwrap())
+    };
+
+    let mut s = Session::default();
+    let holder = run(&mut s, "component.create", json!({"name": "Holder", "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": holder["occurrence"], "axis": [1, 0, 0], "angle": "45 deg", "translate": [0, 0, 40]}));
+    assert_ne!(s.active_component, 0);
+    let r = run(&mut s, "file.insert_mesh", json!({"path": stl, "origin": true}));
+    assert!(close(shift(&r), Vec3::new(-105.0, -60.0, -7.0)), "in Holder's frame: {r}");
+
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Holder", "grounded": false}));
+    assert_ne!(s.active_component, 0);
+    s.active_occurrence_path = None;
+    let r = run(&mut s, "file.insert_mesh", json!({"path": stl, "origin": true}));
+    assert!(close(shift(&r), Vec3::new(-105.0, -60.0, -7.0)), "at Holder's first placement: {r}");
+    assert_eq!(only_box(&s), [-5_000, -10_000, 0, 5_000, 10_000, 30_000]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn undo_takes_the_whole_import_away() {
     let dir = temp_dir("undo");
@@ -356,6 +460,108 @@ fn an_inserted_assembly_exports_its_nested_parts_where_they_are() {
     run(&mut back, "file.insert_step", json!({"path": again}));
     assert_eq!(shown_boxes(&back), placed);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A file from the STEP corpus (`tests/step-conformance`).
+fn corpus(name: &str) -> String {
+    format!("{}/../../tests/step-conformance/{name}.step", env!("CARGO_MANIFEST_DIR"))
+}
+
+/// With `folder: true`, a file that brings more than one item into the history (its Import
+/// feature and the rigid joints holding its parts: one cylinder placed twice, an assembly) gets a
+/// history folder of its own, `Group #N` with the first free number, holding its Import feature and those joints,
+/// made by the same command and undone with it; a file with one object gets none. Inserted
+/// between the features of a folder, the import's folder nests in it.
+#[test]
+fn a_multi_object_step_insert_is_one_history_folder() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0], "name": "Mine"}));
+    let r = run(&mut s, "file.insert_step", json!({"path": corpus("cylinder"), "folder": true}));
+    assert!(r.get("group").is_none() && s.doc.timeline_groups.is_empty(), "one object: no folder: {r}");
+
+    let undo = s.undo.len();
+    let r = run(&mut s, "file.insert_step", json!({"path": corpus("cylinder_twice"), "folder": true}));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let feature = r["feature"].as_u64().unwrap();
+    let [folder] = s.doc.timeline_groups.as_slice() else { panic!("one folder: {:?}", s.doc.timeline_groups) };
+    assert_eq!(
+        (json!(folder.id), folder.name.as_str(), folder.features.as_slice(), folder.parent),
+        (r["group"].clone(), "Group #1", &[feature][..], None),
+        "{r}"
+    );
+    let mut rigid: Vec<u64> = s.doc.assembly.joints.iter().map(|j| j.id).collect();
+    rigid.sort_unstable();
+    let mut held = folder.joints.clone();
+    held.sort_unstable();
+    assert!(!rigid.is_empty() && held == rigid, "the folder holds the import's joints: {held:?} of {rigid:?}");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.timeline_groups.is_empty() && s.doc.feature(feature).is_none(), "undo takes the folder with the import");
+
+    // An assembly, inserted with the marker inside a folder: its folder nests in that one.
+    let dir = temp_dir("folder");
+    let path = rig_file(&dir);
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0], "operation": "new_body", "name": "Later"}));
+    let all: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+    let outer = run(&mut s, "timeline.group", json!({"name": "Everything", "features": all}))["group"].as_u64().unwrap();
+    run(&mut s, "timeline.roll_to", json!({"feature": "Mine"}));
+    let r = run(&mut s, "file.insert_step", json!({"path": path, "folder": true}));
+    let folder = s.doc.timeline_groups.iter().find(|f| json!(f.id) == r["group"]).unwrap();
+    assert_eq!((folder.name.as_str(), folder.parent), ("Group #1", Some(outer)), "{r}");
+    assert_eq!(folder.features, [r["feature"].as_u64().unwrap()]);
+    // The next one takes the next free number.
+    let r = run(&mut s, "file.insert_step", json!({"path": path, "folder": true}));
+    let folder = s.doc.timeline_groups.iter().find(|f| json!(f.id) == r["group"]).unwrap();
+    assert_eq!(folder.name, "Group #2", "{r}");
+    assert!(solidcraft_doc::non_contiguous_timeline_group(&s.doc.features, &s.doc.timeline_groups).is_none());
+    // Opening a file as a design folds it the same way.
+    let r = run(&mut s, "doc.open", json!({"path": corpus("cylinder_twice"), "folder": true}));
+    assert_eq!(s.doc.timeline_groups.len(), 1, "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Without `folder`, as before the option, and with `folder: false` (the app's "Fold the History
+/// bar into groups" turned off), a multi-object import goes into no folder, inserted or opened as
+/// a design; a value that isn't true or false is refused.
+#[test]
+fn a_step_import_told_no_folder_makes_none() {
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_step", json!({"path": corpus("cylinder_twice"), "folder": false}));
+    assert!(r.get("group").is_none() && s.doc.timeline_groups.is_empty(), "no folder: {r}");
+    assert_eq!(s.doc.assembly.joints.len(), 2, "its rigid joints are there all the same");
+    let r = run(&mut s, "doc.open", json!({"path": corpus("cylinder_twice"), "folder": false}));
+    assert!(s.doc.timeline_groups.is_empty(), "opened as a design, no folder either: {r}");
+    let e = s.execute("file.insert_step", &json!({"path": corpus("cylinder_twice"), "folder": "no"})).unwrap_err();
+    assert!(e.to_string().contains("`folder` must be true"), "{e}");
+    // Left out or null, as before the option: no folder either.
+    let r = run(&mut s, "doc.open", json!({"path": corpus("cylinder_twice")}));
+    assert!(s.doc.timeline_groups.is_empty(), "opened without `folder`, no folder: {r}");
+    let r = run(&mut s, "file.insert_step", json!({"path": corpus("cylinder_twice"), "folder": null}));
+    assert!(r.get("group").is_none() && s.doc.timeline_groups.is_empty(), "inserted with `folder: null`, no folder: {r}");
+}
+
+/// Grouping is refused, with a reason a menu can show, when the features aren't one run of the
+/// history or would split another folder; one or several neighbours group.
+#[test]
+fn group_refusal_says_why_a_selection_cannot_be_grouped() {
+    let mut s = Session::default();
+    for (i, name) in ["A", "B", "C", "D"].iter().enumerate() {
+        let corner = [20.0 * i as f64, 0.0, 0.0];
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": corner, "operation": "new_body", "name": name}));
+    }
+    let id = |s: &Session, n: &str| s.doc.find_feature(n).unwrap().id;
+    let (a, b, c, d) = (id(&s, "A"), id(&s, "B"), id(&s, "C"), id(&s, "D"));
+    assert_eq!(s.group_refusal(&[b], None), None);
+    assert_eq!(s.group_refusal(&[b, c], None), None);
+    let apart = s.group_refusal(&[a, c], None).unwrap();
+    assert!(apart.contains("next to each other"), "{apart}");
+    assert!(s.execute("timeline.group", &json!({"features": [a, c]})).is_err(), "the command refuses it too");
+    run(&mut s, "timeline.group", json!({"name": "Run", "features": [a, b, c]}));
+    let split = s.group_refusal(&[b], None).unwrap();
+    assert!(split.contains("Run"), "taking the middle out splits the folder: {split}");
+    let run_id = s.doc.timeline_groups.first().unwrap().id;
+    assert_eq!(s.group_refusal(&[b], Some(run_id)), None, "inside the folder it nests");
+    assert_eq!(s.group_refusal(&[c, d], None), None, "a folder's last feature leaves it for the new folder");
+    assert!(s.group_refusal(&[], None).is_some());
 }
 
 /// The parts of one STEP import share their face names, and each keeps its body where the file

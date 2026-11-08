@@ -5,16 +5,24 @@
 //! changing anything, so the UI can ask first.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::FeatureKind;
-use solidcraft_geom::Vec3;
 
 use super::{CommandSpec, sketch_store};
 use crate::params::{bad, bool_};
+use crate::schema::delete::{SelectionDeleteParams, SelectionDeleteResult};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", delete).icon("delete").params(
-    "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step)",
-)];
+const DELETE_CONTRACT: TypedContract<SelectionDeleteParams> = TypedContract::new();
+
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", crate::checked!("selection.delete", delete))
+    .icon("delete")
+    .contract(&DELETE_CONTRACT)
+    .output(output_schema_for::<SelectionDeleteResult>)
+    .params(
+        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step)",
+    )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
 fn sub(s: &mut Session, id: &str, p: Value) -> Result<Value> {
@@ -211,6 +219,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     for k in keys(p, "canvases") {
+        // A locked canvas stays (#12310), as a locked body does.
+        if let Some(c) = s.doc.canvases.iter().find(|c| c.id.to_string() == k || c.name == k).filter(|c| c.locked) {
+            skip(super::sketch_canvas::locked_reason(c));
+            continue;
+        }
         sub(s, "canvas.delete", json!({ "canvas": k }))?;
         done = true;
     }
@@ -222,11 +235,12 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, skipped.first().cloned().unwrap_or_else(|| "nothing to delete".into())));
     }
     s.refresh();
-    let deleted: Vec<&String> = features_before.iter().filter(|(id, _)| s.doc.feature(*id).is_none()).map(|(_, n)| n).collect();
+    let deleted: Vec<String> = features_before.iter().filter(|(id, _)| s.doc.feature(*id).is_none()).map(|(_, n)| n.clone()).collect();
     // Features after a rolled-back marker count too (#3471).
     let would_fail: Vec<String> =
         super::edit::newly_broken_in_history(&before_doc, &before, &s.doc, &s.model).into_iter().map(|(name, _)| name).collect();
-    Ok(json!({ "deleted": deleted, "deleted_joints": joints, "bodies": bodies, "would_fail": would_fail, "skipped": skipped }))
+    let reply = SelectionDeleteResult { deleted, deleted_joints: joints, bodies, would_fail, skipped, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 #[cfg(test)]
@@ -597,7 +611,7 @@ mod tests {
         run(&mut s, "sketch.circle.center", json!({"center": [10, 10], "radius": 3, "id": "hole"}));
         let index = {
             let st = s.model.state();
-            solidcraft_sketch::profile_at_point(&st.sketch(sk).unwrap().profiles, solidcraft_geom::Vec2::new(30.0, 10.0)).unwrap()
+            solidcraft_sketch::profile_at_point(&st.sketch(sk).unwrap().profiles, solidcore_record::Vec2::new(30.0, 10.0)).unwrap()
         };
         let before = curves(&s, sk);
         assert_eq!(before.len(), 5, "four lines and a circle: {before:?}");

@@ -156,7 +156,7 @@ mod validity;
 pub mod watch;
 
 pub use blend::{
-    ChamferSide, SETBACK_AT_LEAST, blend_edges, chamfer, chamfer_max, chamfer_sides, fillet, fillet_each, fillet_g2, fillet_g2_corners,
+    ChamferSide, FilletTurn, SETBACK_AT_LEAST, blend_edges, chamfer, chamfer_max, chamfer_sides, fillet, fillet_each, fillet_g2, fillet_g2_corners,
     fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_removing, fillet_setback, largest_fit_note,
     names_largest_fit, tangent_chain, with_fit_note,
 };
@@ -215,6 +215,9 @@ pub use prism_curve::{PlanarPiece, PlanarSpline};
 pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_prism_section};
 pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairReport, SewnGap, repair};
 pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
+pub use solidcraft_smlib::hold_a_kernel;
+pub use solidcraft_smlib::stop::Stop;
+pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::{SplitTool, split_body, split_faces, split_faces_with_map};
 pub use step::step_export;
 pub use step_in::{
@@ -278,7 +281,7 @@ impl Cause for str {}
 impl Cause for String {}
 impl Cause for solidcraft_smlib::CheckReport {}
 impl Cause for solidcraft_smlib::export::ExportError {}
-impl Cause for solidcraft_geom::brep::history::Failed {}
+impl Cause for solidcore_record::brep::history::Failed {}
 impl Cause for solidcraft_geom::brep::pcurve::Error {}
 impl<T: Cause + ?Sized> Cause for &T {
     fn panic(&self) -> Option<&str> {

@@ -12,7 +12,7 @@ use super::blend::{Corners, blend, blend_dropping, blend_holes, chamfer_sides, f
 use super::boolean::boolean;
 use super::{Body, counts, make_box, make_cylinder, to_arrays, volume};
 use crate::export::native;
-use crate::{Blend, BooleanOp, ChamferSecond, Error};
+use crate::{Blend, BooleanOp, ChamferSecond, Error, Turn};
 
 /// A case longer than this is a hang.
 const TIMEOUT: Duration = Duration::from_secs(300);
@@ -215,7 +215,7 @@ struct Measured {
     kinds: BTreeMap<String, usize>,
 }
 
-fn kinds(rec: &solidcraft_geom::brep::Brep) -> BTreeMap<String, usize> {
+fn kinds(rec: &solidcore_record::brep::Brep) -> BTreeMap<String, usize> {
     let mut out = BTreeMap::new();
     for f in &rec.faces {
         let v = serde_json::to_value(&f.surface).unwrap();
@@ -280,7 +280,7 @@ fn solidcore_case(name: &'static str) -> Got {
             let v = volume(&body, 1e-8).unwrap_or_else(|e| panic!("{name}: volume: {e}"));
             let n = counts(&body).unwrap();
             let (rec, _) = native(&to_arrays(&body).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-            rec.validate().unwrap_or_else(|e| panic!("{name}: record: {e}"));
+            solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
             Measured { volume: v, counts: n, kinds: kinds(&rec) }
         });
         judge(name, "solidcore", &c.expect, got)
@@ -399,7 +399,7 @@ fn overflow_goes_first() {
     ];
     for (points, sizes, dropped, want, bound) in cases {
         let got = timed("overflow_first", move || {
-            let (b, d) = blend_dropping(&Shape::Box([0.0; 3], [20.0; 3]).core(), Blend::Round, points, sizes, 1.0).unwrap();
+            let (b, d) = blend_dropping(&Shape::Box([0.0; 3], [20.0; 3]).core(), Blend::Round, Turn::Mitre, points, sizes, 1.0).unwrap();
             native(&to_arrays(&b).unwrap()).unwrap();
             (volume(&b, 1e-8).unwrap(), d)
         });
@@ -443,6 +443,71 @@ fn rounds_at_a_concave_face_corner_are_mitred() {
     let (got, v) = (volume(&b, 1e-8).unwrap(), 21000.0 - (50.0 * d * d + 4.0 / 3.0 * d * d * d));
     println!("mitred chamfer {d}: {got:.9}, expected {v:.9}");
     assert!(rel(got, v) < 1e-8, "{got} vs {v}");
+}
+
+/// A 40 x 30 x 10 plate with a 10 x 10 x 5 boss on it (x 15..25, y 10..20), the boss's four base
+/// edges rounded at r 1: at each upright boss edge two concave rounds turn round the sharp convex
+/// edge. Each base edge gains the spandrel A = (1 - π/4) r² along its 10, and each corner the
+/// rounds' part beyond both walls, whose section's first moment about the upright edge is
+/// M = (5/6 - π/4) r³: mitred, 8 M in all; swept, the section revolved a quarter turn at each,
+/// 2π M, the corner a horn torus of radii r, r. Swept with unequal radii, or along a pocket's floor
+/// (its upright edges sharp and concave), is refused with solidcore's reason.
+#[test]
+fn rounds_turning_round_a_boss_edge_mitred_or_swept() {
+    let made = |a: Body, b: Body, op| boolean(&a, &b, op).unwrap().unwrap();
+    let boss =
+        move || made(make_box([0.0; 3], [40.0, 30.0, 10.0]).unwrap(), make_box([15.0, 10.0, 10.0], [10.0, 10.0, 5.0]).unwrap(), BooleanOp::Union);
+    let pocket =
+        move || made(make_box([0.0; 3], [40.0, 30.0, 10.0]).unwrap(), make_box([10.0, 10.0, 5.0], [20.0, 10.0, 6.0]).unwrap(), BooleanOp::Subtract);
+    const BASE: [[f64; 3]; 4] = [[20.0, 10.0, 10.0], [25.0, 15.0, 10.0], [20.0, 20.0, 10.0], [15.0, 15.0, 10.0]];
+    const RIM: [[f64; 3]; 4] = [[20.0, 10.0, 5.0], [30.0, 15.0, 5.0], [20.0, 20.0, 5.0], [10.0, 15.0, 5.0]];
+    let r = 1.0;
+    let rounded =
+        move |body: Body, at: [[f64; 3]; 4], turn, sizes: [f64; 4]| blend_dropping(&body, Blend::Round, turn, &at, &sizes, 0.1).map(|(b, _)| b);
+    // solidcore's tori, and the record's kinds of surface: its torus is a ring torus, so a horn
+    // torus's face there is its exact rational form.
+    let measured = |b: &Body| {
+        use solidcore::surface::surface::p2::SurfaceKind;
+        let (rec, _) = native(&to_arrays(b).unwrap()).unwrap();
+        rec.validate().unwrap();
+        let mut tori = Vec::new();
+        {
+            let g = b.0.lock().unwrap();
+            for f in solidcore::query::api_queries::get_faces(&g).unwrap() {
+                if let Some(s) = solidcore::topology::face::p2::surface(&g, f).unwrap()
+                    && let SurfaceKind::Torus(t) = s.kind()
+                {
+                    tori.push((t.major_radius(), t.minor_radius()));
+                }
+            }
+        }
+        (volume(b, 1e-10).unwrap(), counts(b).unwrap()[0], tori, kinds(&rec))
+    };
+    let (mitre, swept) =
+        timed("turn", move || (rounded(boss(), BASE, Turn::Mitre, [r; 4]).unwrap(), rounded(boss(), BASE, Turn::Swept, [r; 4]).unwrap()));
+    let (vm, fm, tm, km) = measured(&mitre);
+    let (vs, fs, ts, ks) = measured(&swept);
+    println!("mitre: {vm:.9}, {fm} faces {km:?}; swept: {vs:.9}, {fs} faces {ks:?}, tori {ts:?}");
+    let (a, m) = (spandrel(r), (5.0 / 6.0 - PI / 4.0) * r * r * r);
+    let base = 12500.0 + 40.0 * a;
+    assert!(rel(vm, base + 8.0 * m) < 1e-9, "mitre {vm} vs {}", base + 8.0 * m);
+    assert!(rel(vs, base + 2.0 * PI * m) < 1e-9, "swept {vs} vs {}", base + 2.0 * PI * m);
+    assert_eq!((fm, tm.len(), km.get("rational_spline")), (15, 0, None));
+    assert_eq!((fs, ts.len(), ks.get("rational_spline")), (19, 4, Some(&4)));
+    assert!(ts.iter().all(|(major, minor)| (major - r).abs() < 1e-12 && (minor - r).abs() < 1e-12), "{ts:?}");
+    // Swept is for rounds only.
+    assert_eq!(blend_dropping(&boss(), Blend::Chamfer, Turn::Swept, &BASE, &[r; 4], 0.1).err(), Some(Error::Argument));
+    let unequal = timed("turn unequal", move || rounded(boss(), BASE, Turn::Swept, [1.0, 1.5, 1.0, 1.5]).err());
+    let rim = timed("turn rim", move || rounded(pocket(), RIM, Turn::Swept, [r; 4]).err());
+    println!("unequal: {unequal:?}\nrim: {rim:?}");
+    assert!(
+        matches!(&unequal, Some(Error::TurnRefused { room: false, why, at: Some(_) }) if why.starts_with("a swept turn is built between constant rounds of one radius")),
+        "{unequal:?}"
+    );
+    assert!(
+        matches!(&rim, Some(Error::TurnRefused { room: true, why, at: Some(_) }) if why.contains("round that edge at a radius of at least 1 first")),
+        "{rim:?}"
+    );
 }
 
 /// Solidcore alone: edge attributes across a cliff overflow. A 40 x 30 x 10 block notched below its
@@ -557,7 +622,7 @@ fn a_setback_corner_left_open_returns_its_hole() {
     assert_eq!(hole.edges.len(), 12);
     let flat = to_arrays(&open).unwrap();
     let (rec, _) = native(&flat).unwrap();
-    rec.validate().unwrap();
+    solidcraft_geom::brep::check::validate(&rec).unwrap();
     let ends = &flat.ints[&crate::flat::EDGE_VERTICES];
     let end = |h: &crate::HoleEdge, last: bool| ends[2 * h.edge + usize::from(h.forward == last)];
     for (k, h) in hole.edges.iter().enumerate() {
@@ -592,7 +657,7 @@ fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() 
     for (at, alpha) in [(a, 0.75 * PI), (b, 0.5 * PI)] {
         let round = blend(&chamfered, Blend::Curvature, &[at], &[r], TOL, &[], &[], Corners::Filled).unwrap();
         let (rec, _) = native(&to_arrays(&round).unwrap()).unwrap();
-        rec.validate().unwrap();
+        solidcraft_geom::brep::check::validate(&rec).unwrap();
         let removed = v0 - volume(&round, 1e-8).unwrap();
         assert!(rel(removed, 40.0 * cut(alpha)) < 1e-6, "{removed} vs {}", 40.0 * cut(alpha));
     }
@@ -620,7 +685,7 @@ fn a_variable_round_is_the_union_of_its_balls() {
     let removed = |radii: &[f64], start: [f64; 3]| {
         let r = fillet_variable(&b, TOP_FRONT, TOL, start, 1, &[0.0, 0.0, 1.0, 1.0], radii).unwrap();
         let (rec, _) = native(&to_arrays(&r).unwrap()).unwrap();
-        rec.validate().unwrap();
+        solidcraft_geom::brep::check::validate(&rec).unwrap();
         ABC - volume(&r, 1e-8).unwrap()
     };
     let constant = removed(&[2.0, 2.0], [0.0, 0.0, 10.0]);
@@ -848,7 +913,7 @@ fn tabbed_plate_rounds_mitred_on_the_arcs_continuation() {
     let removed = volume(&plate, 1e-8).unwrap() - volume(&round, 1e-8).unwrap();
     assert!(rel(removed, want) < 1e-6, "removed {removed}, expected {want}");
     let (rec, _) = native(&to_arrays(&round).unwrap()).unwrap();
-    rec.validate().unwrap();
+    solidcraft_geom::brep::check::validate(&rec).unwrap();
     assert!(super::is_manifold_solid(&round).unwrap());
     assert!(super::check(&round, crate::check::CheckLevel::All).unwrap().is_valid());
 }
@@ -857,7 +922,7 @@ fn tabbed_plate_rounds_mitred_on_the_arcs_continuation() {
 /// with one blend on its top front edge (y = 0, z = 10), leaves the bottom and back as they were,
 /// trims the top, front and both sides, and makes the blend face.
 mod history {
-    use solidcraft_geom::brep::history::Change;
+    use solidcore_record::brep::history::Change;
 
     use crate::history::Raw;
     use crate::{Blend, Brep};

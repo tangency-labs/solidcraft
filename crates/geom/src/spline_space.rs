@@ -17,8 +17,8 @@
 //! Input is hostile: constructors check sizes and finiteness and return [`SplineError`]; no
 //! function here panics.
 
-use crate::Vec3;
 use crate::bspline::{HPoint, MAX_SPLINE_DEGREE, Side, SplineError, SplineResult, check_knots, find_span, insert_knot, invalid, local_basis};
+use solidcore_record::Vec3;
 
 /// Most basis functions a space used for interpolation may have (its systems are solved densely).
 pub const MAX_SPACE_DIMENSION: usize = 2048;
@@ -520,6 +520,7 @@ impl Monotone {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prelude::*;
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-10

@@ -590,14 +590,14 @@
     },
     "ladder/04-spline-profiles/009-extrude-periodic-fit-spline": {
       "measured": {
-        "area_mm2": 3698.602434788986,
+        "area_mm2": 3698.602434789069,
         "body_count": 1,
-        "edges": 18,
-        "faces": 8,
-        "vertices": 12,
-        "volume_mm3": 12281.012021766748
+        "edges": 3,
+        "faces": 3,
+        "vertices": 2,
+        "volume_mm3": 12281.012021767758
       },
-      "seconds": 0.023294486,
+      "seconds": 0.031118513,
       "status": "pass"
     },
     "ladder/04-spline-profiles/010-part-bezier-window": {
@@ -626,14 +626,14 @@
     },
     "ladder/04-spline-profiles/012-loft-ribs-joined-to-a-rounded-pad": {
       "measured": {
-        "area_mm2": 13275.842713531902,
+        "area_mm2": 13275.842714137438,
         "body_count": 1,
-        "edges": 86,
-        "faces": 31,
-        "vertices": 57,
-        "volume_mm3": 100193.00303538967
+        "edges": 78,
+        "faces": 28,
+        "vertices": 52,
+        "volume_mm3": 100193.00305173994
       },
-      "seconds": 0.667583652,
+      "seconds": 1.03017509,
       "status": "pass"
     },
     "ladder/05-holes-and-taps/001-simple-through": {
@@ -878,14 +878,14 @@
     },
     "ladder/06-threads/004-external-m10-to-shoulder": {
       "measured": {
-        "area_mm2": 2047.0229463264673,
+        "area_mm2": 2070.374916609214,
         "body_count": 1,
-        "edges": 213,
-        "faces": 74,
-        "vertices": 142,
-        "volume_mm3": 3648.5299214318684
+        "edges": 219,
+        "faces": 76,
+        "vertices": 146,
+        "volume_mm3": 3639.157043325919
       },
-      "seconds": 2.202216156,
+      "seconds": 5.739657892,
       "status": "pass"
     },
     "ladder/06-threads/005-internal-m10-through": {
@@ -914,14 +914,14 @@
     },
     "ladder/06-threads/007-external-m10-at-filleted-shoulder": {
       "measured": {
-        "area_mm2": 2018.7759940693177,
+        "area_mm2": 2042.128006779366,
         "body_count": 1,
-        "edges": 203,
-        "faces": 71,
-        "vertices": 135,
-        "volume_mm3": 3668.971297386959
+        "edges": 214,
+        "faces": 75,
+        "vertices": 142,
+        "volume_mm3": 3659.598361255103
       },
-      "seconds": 2.249734845,
+      "seconds": 5.496053349,
       "status": "pass"
     },
     "ladder/06-threads/008-multi-start-thread": {
@@ -950,14 +950,14 @@
     },
     "ladder/06-threads/010-part-threaded-boss": {
       "measured": {
-        "area_mm2": 13318.766397751697,
+        "area_mm2": 13370.25800424205,
         "body_count": 1,
-        "edges": 111,
-        "faces": 41,
-        "vertices": 74,
-        "volume_mm3": 53208.190621080044
+        "edges": 120,
+        "faces": 44,
+        "vertices": 80,
+        "volume_mm3": 53181.215541289486
       },
-      "seconds": 1.239079404,
+      "seconds": 2.7871945240000002,
       "status": "pass"
     },
     "ladder/06-threads/011-external-tr20x4": {
@@ -1130,26 +1130,26 @@
     },
     "ladder/06-threads/025-external-s20x4-steep-flank-end-to-shoulder": {
       "measured": {
-        "area_mm2": 5883.043222895581,
+        "area_mm2": 6009.162011983694,
         "body_count": 1,
-        "edges": 102,
-        "faces": 37,
-        "vertices": 68,
-        "volume_mm3": 13986.200396963923
+        "edges": 108,
+        "faces": 39,
+        "vertices": 72,
+        "volume_mm3": 13886.806724574824
       },
-      "seconds": 1.1821016069999999,
+      "seconds": 3.113976484,
       "status": "pass"
     },
     "ladder/06-threads/026-external-s20x4-steep-flank-start-to-shoulder": {
       "measured": {
-        "area_mm2": 5793.407884066657,
+        "area_mm2": 6009.162011488332,
         "body_count": 1,
-        "edges": 99,
-        "faces": 36,
-        "vertices": 66,
-        "volume_mm3": 14054.201923138782
+        "edges": 108,
+        "faces": 39,
+        "vertices": 72,
+        "volume_mm3": 13886.806673641227
       },
-      "seconds": 1.147335109,
+      "seconds": 3.47044052,
       "status": "pass"
     },
     "ladder/06-threads/027-external-m10-chamfered-start": {
@@ -1810,24 +1810,24 @@
     },
     "ladder/11-cumulative-parts/003-threaded-flange": {
       "measured": {
-        "area_mm2": 17357.359407146,
+        "area_mm2": 17528.149663462264,
         "body_count": 1,
-        "edges": 104,
-        "faces": 38,
-        "vertices": 69,
-        "volume_mm3": 52962.097419669546
+        "edges": 112,
+        "faces": 41,
+        "vertices": 74,
+        "volume_mm3": 52806.59825789034
       },
-      "seconds": 3.757525087,
+      "seconds": 7.150208538,
       "status": "pass"
     },
     "ladder/11-cumulative-parts/004-housing": {
       "measured": {
-        "area_mm2": 21105.287553425696,
+        "area_mm2": 21156.778657103445,
         "body_count": 1,
-        "edges": 210,
-        "faces": 78,
-        "vertices": 139,
-        "volume_mm3": 15138.519861452509
+        "edges": 218,
+        "faces": 81,
+        "vertices": 144,
+        "volume_mm3": 15111.545095719644
       },
       "seconds": 4.128625132,
       "status": "pass"
@@ -2001,5 +2001,5 @@
       "status": "pass"
     }
   },
-  "reason": "recorded at solidcore 8ddce9016: 06-threads/018 makes 606 edges and 404 vertices (486 and 324 at 97ed188db), its 204 faces, area and volume the same to 1e-11; every other case as before. Before: recorded on solidcore, the only kernel since the C++ SMLib kernel was removed (the golden before was C++ SMLib v1.1.0-alpha, a18bbe5): 07-fillets/012 passes (the variable round no longer gains the End at the smooth vertex: 8 faces, 18 edges, 12 vertices, 47755.12 mm3); 07-fillets/021 has 24 edges and 15 vertices (no End cap edge); 07-fillets/013 removes 47325.53 mm3; 06-threads/018 makes 486 edges and 324 vertices every run, so it is no longer marked unstable"
+  "reason": "a modelled external thread running a whole face to a shoulder now runs on through the plane of the face end and is trimmed there (#11610): 06-threads/004, 007, 010, 025, 026 and 11-cumulative-parts/003 gain the faces of the trimmed last turn, their volumes worked out again by hand; every other case as before. Before: 04-spline-profiles/009 and 012 re-recorded, an extruded spline or ellipse sweeps one wall (one-curve extrude): 009 makes 3 faces, 3 edges and 2 vertices (8, 18 and 12 per span before); 012 makes 28 faces, 78 edges and 52 vertices (31, 86 and 57 before); every other case as before. Before: recorded at solidcore 8ddce9016: 06-threads/018 makes 606 edges and 404 vertices (486 and 324 at 97ed188db), its 204 faces, area and volume the same to 1e-11; every other case as before. Before: recorded on solidcore, the only kernel since the C++ SMLib kernel was removed (the golden before was C++ SMLib v1.1.0-alpha, a18bbe5): 07-fillets/012 passes (the variable round no longer gains the End at the smooth vertex: 8 faces, 18 edges, 12 vertices, 47755.12 mm3); 07-fillets/021 has 24 edges and 15 vertices (no End cap edge); 07-fillets/013 removes 47325.53 mm3; 06-threads/018 makes 486 edges and 324 vertices every run, so it is no longer marked unstable"
 }

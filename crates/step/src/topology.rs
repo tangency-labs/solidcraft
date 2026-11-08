@@ -34,18 +34,19 @@
 //! Input is hostile: every reference is checked, nesting and counts are capped, and the work of
 //! a whole file is bounded (shared shells count each time a solid uses them).
 
+use solidcraft_geom::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::TAU;
 
-use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval, face_flux};
-use solidcraft_geom::brep::pcurve::{self, EdgeUse, TrimEdge, TrimFace, TrimUse, Trims};
-use solidcraft_geom::brep::{
+use solidcore_record::Vec3;
+use solidcore_record::brep::{
     self, Brep, Curve as BCurve, Curve2, Edge, EdgeUseRef, Face, Frame, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell,
     Surface as BSurface, Vertex,
 };
+use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval, face_flux};
+use solidcraft_geom::brep::pcurve::{self, EdgeUse, TrimEdge, TrimFace, TrimUse, Trims};
 
-use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Placement, dot, scale, sub};
+use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Placement, Transform, dot, scale, sub};
 use crate::p21::{Entity, Exchange, Param};
 use crate::read::{R, Reader};
 use crate::units;
@@ -511,7 +512,7 @@ struct FaceB {
     outer: Option<usize>,
     /// The face's normal is the surface's natural normal.
     forward: bool,
-    /// A round face's box on its label (`brep::form::extent`), once measured.
+    /// A round face's box on its label (`solidcraft_geom::brep::form::extent`), once measured.
     extent: Option<[[f64; 2]; 2]>,
 }
 
@@ -672,7 +673,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 for k in 0..=EDGE_GAP_SAMPLES {
                     let t = if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) };
                     // A point a pcurve or surface lacks is the record check's to name.
-                    let (Some(q), Some(p)) = (c.eval(t), eval.point(t)) else { continue };
+                    let (Some(q), Some(p)) = (solidcraft_geom::brep::pcurve::eval(c, t), eval.point(t)) else { continue };
                     if let Some(s) = on.point(q) {
                         gap = gap.max(s.dist(p));
                     }
@@ -744,6 +745,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             match c {
                 Curve::SurfaceCurve { curve_3d, .. } => c = curve_3d,
                 Curve::Trimmed { basis, .. } => c = basis,
+                Curve::Replica { parent, transform } => return replicate(parent, transform, 0),
                 _ => return Ok(c.clone()),
             }
         }
@@ -968,7 +970,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         let mut frames: Vec<Vec<brep::Frame>> = vec![Vec::new(); self.edges.len()];
         let mut tori: Vec<Vec<BSurface>> = vec![Vec::new(); self.edges.len()];
         for f in &self.faces {
-            let Some(frame) = brep::form::frame_of(&f.surface) else { continue };
+            let Some(frame) = solidcraft_geom::brep::form::frame_of(&f.surface) else { continue };
             let torus = matches!(f.surface, BSurface::Torus { .. });
             for l in &f.loops {
                 if let LoopB::Edges(es) = l {
@@ -984,8 +986,8 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
         }
         for ((edge, fr), tr) in self.edges.iter_mut().zip(&frames).zip(&tori) {
-            let (label, interval, form) =
-                brep::form::edge_on(&edge.curve, edge.interval, fr, tr, self.tol).ok_or_else(|| unsupported("an arc of more than one turn"))?;
+            let (label, interval, form) = solidcraft_geom::brep::form::edge_on(&edge.curve, edge.interval, fr, tr, self.tol)
+                .ok_or_else(|| unsupported("an arc of more than one turn"))?;
             (edge.curve, edge.interval, edge.form) = (label, interval, form);
         }
         // Each face's pcurves; a face whose loops disagree with its same_sense is turned over.
@@ -1263,8 +1265,8 @@ impl<'b, 'a> Builder<'b, 'a> {
             out_shells.push(Shell::Faces { faces, wires: Vec::new() });
         }
         let brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
-        brep.validate().map_err(|e| format!("the record is invalid: {e}"))?;
-        brep.check_geometry().map_err(|e| format!("the record's geometry disagrees: {e}"))?;
+        solidcraft_geom::brep::check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
+        solidcraft_geom::brep::geometry::check(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
     }
 
@@ -1290,7 +1292,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         std::iter::once(outer).chain((0..face.loops.len()).filter(|l| *l != outer)).collect()
     }
 
-    /// A face's box on its label over its edge loops (`brep::form::extent`); `None` where the
+    /// A face's box on its label over its edge loops (`solidcraft_geom::brep::form::extent`); `None` where the
     /// boundary does not project onto it.
     fn face_extent(&self, fi: usize) -> R<Option<[[f64; 2]; 2]>> {
         let face = self.faces.get(fi).ok_or("face reference")?;
@@ -1304,7 +1306,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
             boundary.push(b);
         }
-        Ok(brep::form::extent(&face.surface, &boundary))
+        Ok(solidcraft_geom::brep::form::extent(&face.surface, &boundary))
     }
 
     /// The pcurves of a face's edge loops (in its edge-loop order), its domain, whether it was
@@ -1329,14 +1331,14 @@ impl<'b, 'a> Builder<'b, 'a> {
         let tol = self.tol;
         // A cylinder, cone, sphere, torus or revolution on its NURBS form, over the extent of its
         // boundary on its label; then every pcurve on the forms.
-        let form = match brep::form::frame_of(&label) {
+        let form = match solidcraft_geom::brep::form::frame_of(&label) {
             Some(_) => {
                 let extent = match face.extent {
                     Some(e) => Some(e),
                     None => self.face_extent(fi)?,
                 };
                 let extent = extent.ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
-                Some(brep::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?)
+                Some(solidcraft_geom::brep::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?)
             }
             None => None,
         };
@@ -1368,7 +1370,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         // Each use starts near where the one before it ends, along a bounded direction that
         // does not wrap: a loop around a closed spline surface without a seam edge jumps across
         // its domain.
-        let natural = surface.natural();
+        let natural = solidcraft_geom::brep::label::surface_natural(&surface);
         // At a pole (where the surface collapses to a point across a direction, to within the
         // tolerance of the vertex the two uses meet at) a loop may jump in that direction: the
         // seam's two uses meet there a period apart, and a side collapsed to within the vertex's
@@ -1380,7 +1382,10 @@ impl<'b, 'a> Builder<'b, 'a> {
             let mut ends = Vec::with_capacity(l.len());
             for (&(_, forward), c) in l.iter().zip(pc) {
                 let [a, b] = c.interval().ok_or("pcurve interval")?;
-                let (s, e) = (c.eval(a).ok_or("pcurve start")?, c.eval(b).ok_or("pcurve end")?);
+                let (s, e) = (
+                    solidcraft_geom::brep::pcurve::eval(c, a).ok_or("pcurve start")?,
+                    solidcraft_geom::brep::pcurve::eval(c, b).ok_or("pcurve end")?,
+                );
                 ends.push(if forward { (s, e) } else { (e, s) });
             }
             for k in 0..ends.len() {
@@ -1533,7 +1538,7 @@ fn uses_of<'e>(edges: &'e [EdgeB], edge_loops: &[Vec<(u32, bool)>], given: Optio
 
 /// A spline surface's parameter box: its knot ranges.
 fn natural_box(s: &BSurface) -> Option<[[f64; 2]; 2]> {
-    match s.natural() {
+    match solidcraft_geom::brep::label::surface_natural(s) {
         [Natural::Range(a, b), Natural::Range(c, d)] if [a, b, c, d].iter().all(|x| x.is_finite()) => Some([[a, b], [c, d]]),
         _ => None,
     }
@@ -1559,7 +1564,7 @@ fn reverse(uses: &mut [(u32, bool)]) {
 }
 
 fn natural_periods(s: &BSurface) -> [bool; 2] {
-    s.natural().map(|n| matches!(n, Natural::Periodic))
+    solidcraft_geom::brep::label::surface_natural(s).map(|n| matches!(n, Natural::Periodic))
 }
 
 /// The signed area a loop encloses in (u, v) (positive counter-clockwise), or `None` when it
@@ -1571,7 +1576,7 @@ fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f
         for k in 0..=16 {
             let s = f64::from(k) / 16.0;
             let t = if forward { a + (b - a) * s } else { b - (b - a) * s };
-            pts.push(c.eval(t)?);
+            pts.push(solidcraft_geom::brep::pcurve::eval(c, t)?);
         }
     }
     let (first, last) = (*pts.first()?, *pts.last()?);
@@ -1608,7 +1613,7 @@ fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2]; 2]> {
             }
         }
     }
-    let natural = surface.natural();
+    let natural = solidcraft_geom::brep::label::surface_natural(surface);
     let mut out = [[0.0; 2]; 2];
     for d in 0..2 {
         let (a, b) = (lo[d], hi[d]);
@@ -1700,6 +1705,42 @@ fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
     })
 }
 
+/// A CURVE_REPLICA's curve: the parent (under its SURFACE_CURVE and TRIMMED_CURVE wrappers)
+/// moved by `t`, as the same kind of curve, with the parent's parameter. A mirroring operator
+/// would turn a conic over, so it is not supported.
+fn replicate(parent: &Curve, t: &Transform, depth: usize) -> R<Curve> {
+    if depth > MAX_NESTING {
+        return Err("curve replicas nested too deeply".into());
+    }
+    if !t.is_proper() {
+        return Err(unsupported("a CURVE_REPLICA that mirrors"));
+    }
+    let place = |p: &Placement| Placement { origin: t.point(p.origin), axis: t.direction(p.axis), ref_direction: t.direction(p.ref_direction) };
+    let k = t.scale;
+    Ok(match parent {
+        Curve::Line { origin, direction, magnitude } => {
+            Curve::Line { origin: t.point(*origin), direction: t.direction(*direction), magnitude: magnitude * k }
+        }
+        Curve::Circle { position, radius } => Curve::Circle { position: place(position), radius: radius * k },
+        Curve::Ellipse { position, semi_axis_1, semi_axis_2 } => {
+            Curve::Ellipse { position: place(position), semi_axis_1: semi_axis_1 * k, semi_axis_2: semi_axis_2 * k }
+        }
+        Curve::Hyperbola { position, semi_axis, semi_imag_axis } => {
+            Curve::Hyperbola { position: place(position), semi_axis: semi_axis * k, semi_imag_axis: semi_imag_axis * k }
+        }
+        Curve::Parabola { position, focal_dist } => Curve::Parabola { position: place(position), focal_dist: focal_dist * k },
+        Curve::BSpline(b) => {
+            let mut moved = (**b).clone();
+            moved.points = b.points.iter().map(|p| t.point(*p)).collect();
+            Curve::BSpline(Box::new(moved))
+        }
+        Curve::Polyline(points) => Curve::Polyline(points.iter().map(|p| t.point(*p)).collect()),
+        Curve::SurfaceCurve { curve_3d: inner, .. } | Curve::Trimmed { basis: inner, .. } => replicate(inner, t, depth + 1)?,
+        Curve::Replica { parent, transform } => replicate(&replicate(parent, transform, depth + 1)?, t, depth + 1)?,
+        Curve::OffsetCurve3d { .. } => return Err(unsupported("a CURVE_REPLICA of an OFFSET_CURVE_3D")),
+    })
+}
+
 /// An edge on its schema curve.
 #[derive(Debug)]
 struct Mapped {
@@ -1767,6 +1808,7 @@ fn map_edge(curve: &Curve, ps: P3, pe: P3, same_sense: bool, closed: bool, full:
             open_conic(curve, ps, pe, same_sense, closed, |lo, hi| swept::parabola_spline(position, *focal_dist, lo, hi))
         }
         Curve::OffsetCurve3d { .. } => Err(unsupported("OFFSET_CURVE_3D")),
+        Curve::Replica { parent, transform } => map_edge(&replicate(parent, transform, 0)?, ps, pe, same_sense, closed, full, tol),
         Curve::Trimmed { .. } | Curve::SurfaceCurve { .. } => Err(unsupported("nested trimmed or surface curves")),
     }
 }

@@ -1,8 +1,10 @@
 //! Vector hidden-line removal: intersect each projected edge with triangle half planes and
 //! its depth plane, then union occluded parameter intervals. A BVH bounds the candidate work.
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::Aabb3;
 #[cfg(test)]
 use solidcraft_geom::Mesh;
-use solidcraft_geom::{Aabb3, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_io::{DxfEntity, DxfShape};
 use solidcraft_render::Camera;
 use std::collections::BTreeMap;

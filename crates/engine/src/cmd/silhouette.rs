@@ -1,18 +1,27 @@
 //! A tightly framed, view-aligned union of the projected body meshes.
 
-use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use serde_json::Value;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::bad;
 use crate::render::{Camera, StandardView};
+use crate::schema::silhouette::{SilhouetteParams, SilhouetteProjection, SilhouetteResult};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const CMD: &str = "inspect.silhouette";
+const CONTRACT: TypedContract<SilhouetteParams> = TypedContract::new();
 const MAX_PIXELS: usize = 4 * 1024 * 1024;
 
 // For agents comparing the model with a picture; nothing to show a person, so no toolbar button.
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Silhouette", run).noundo().icon("silhouette").params(
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Silhouette", crate::checked!("inspect.silhouette", run))
+    .noundo()
+    .icon("silhouette")
+    .contract(&CONTRACT)
+    .output(output_schema_for::<SilhouetteResult>)
+    .params(
     "view?: front|back|left|right|top|bottom|iso (default front); or camera?: {target: [x,y,z], yaw, pitch, distance, fov?} (mm, radians; fov 0 means parallel); bodies?: [world body names] (default visible bodies, named hidden bodies included); rows?: mask height in pixels (default 240, clamped to 16..1024) → tightly framed run-length mask, box_mm, mm_per_px, right/up, projection, body and triangle counts",
 )];
 
@@ -22,18 +31,20 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let wanted = body_names(p)?;
     let out = outline(s, &camera, wanted.as_deref(), rows)?;
     let mask: Vec<Vec<[usize; 2]>> = out.mask.iter().map(|row| spans(row)).collect();
-    Ok(json!({
-        "width": out.width,
-        "height": out.height,
-        "mm_per_px": round4(out.mm_per_px),
-        "box_mm": [[round4(out.lo[0]), round4(out.lo[1])], [round4(out.hi[0]), round4(out.hi[1])]],
-        "right": [clean(out.right.x), clean(out.right.y), clean(out.right.z)],
-        "up": [clean(out.up.x), clean(out.up.y), clean(out.up.z)],
-        "projection": if out.perspective { "perspective" } else { "parallel" },
-        "bodies": out.bodies,
-        "triangles": out.triangles,
-        "mask": mask,
-    }))
+    let reply = SilhouetteResult {
+        width: out.width,
+        height: out.height,
+        mm_per_px: round4(out.mm_per_px),
+        box_mm: [[round4(out.lo[0]), round4(out.lo[1])], [round4(out.hi[0]), round4(out.hi[1])]],
+        right: [clean(out.right.x), clean(out.right.y), clean(out.right.z)],
+        up: [clean(out.up.x), clean(out.up.y), clean(out.up.z)],
+        projection: if out.perspective { SilhouetteProjection::Perspective } else { SilhouetteProjection::Parallel },
+        bodies: out.bodies,
+        triangles: out.triangles,
+        mask,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(CMD, e.to_string()))
 }
 
 /// A projected, tightly framed silhouette: the pixel grid, its scale and placement, and the

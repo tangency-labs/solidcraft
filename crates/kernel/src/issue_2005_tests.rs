@@ -5,7 +5,7 @@
 
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 
 use crate::{Body, BoolOp, PathSeg, SweepControl, boolean, measure, sweep_with};
 

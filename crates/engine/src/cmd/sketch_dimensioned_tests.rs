@@ -1,5 +1,6 @@
 use crate::Session;
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::ConstraintKind;
 
 fn run(s: &mut Session, command: &str, params: Value) -> Value {
@@ -152,6 +153,43 @@ fn slots_and_polygon_keep_permanent_typed_dimensions() {
         assert_eq!(result["errors"], json!([]));
         close(measure(&s, |k| matches!(k, ConstraintKind::Radius { .. })), 15.0);
     }
+    // A polygon drawn by a side takes that side's length in place of its radius (#11271), and
+    // every side follows it.
+    let mut s = session();
+    let undo = s.undo.len();
+    let out = draw(&mut s, "sketch.polygon.edge", json!({"p0":[0,0],"p1":[10,0],"sides":5,"connect":false}), json!({"length":"12 mm"}));
+    assert_eq!(s.undo.len(), undo + 1);
+    let length = out["dimensions"]["length"]["param"].as_str().unwrap();
+    let result = run(&mut s, "parameters.change", json!({"name":length,"expression":20}));
+    assert_eq!(result["errors"], json!([]));
+    let sk = sketch(&s);
+    let sides: Vec<f64> = sk
+        .curves
+        .iter()
+        .filter(|c| !c.construction)
+        .filter_map(|c| match c.kind {
+            solidcraft_sketch::CurveKind::Line { a, b } => Some(sk.points[a].pos.dist(sk.points[b].pos)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sides.len(), 5);
+    sides.iter().for_each(|l| close(*l, 20.0));
+    // As drawn, a typed length leaves out the radius; both given are refused.
+    let mut s = session();
+    let out = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command":"sketch.polygon.edge","params":{"p0":[0,0],"p1":[10,0],"sides":5},"dimensions":{"length":10},"as_drawn":true}),
+    );
+    assert!(out["dimensions"].get("radius").is_none(), "{out}");
+    let error = s
+        .execute(
+            "sketch.draw.dimensioned",
+            &json!({"command":"sketch.polygon.edge","params":{"p0":[0,0],"p1":[10,0]},"dimensions":{"length":10,"radius":9}}),
+        )
+        .expect_err("both sizes")
+        .to_string();
+    assert!(error.contains("choose radius or length, not both"), "{error}");
 }
 
 #[test]

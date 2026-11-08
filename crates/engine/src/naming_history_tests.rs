@@ -4,7 +4,7 @@
 //! names again by sampling geometry could do.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Session;
 
@@ -262,6 +262,40 @@ fn pieces_of_a_cut_body_keep_their_body_names_when_the_cut_moves() {
         let unique: std::collections::BTreeSet<&String> = all.iter().collect();
         assert_eq!(unique.len(), all.len(), "{all:?}");
     }
+}
+
+/// A hole that cuts a body in three pieces names them as the design names them when it is
+/// evaluated again from the names it pinned, as on opening it. Found by the model fuzzer: the two
+/// smaller pieces swapped names there, so a later feature naming one of them met the other.
+#[test]
+fn pieces_of_a_cut_keep_their_names_when_the_design_is_evaluated_again() {
+    let mut s = Session::default();
+    run(&mut s, "construct.plane.offset", json!({"base": "XZ", "name": "P8", "offset": 5}));
+    run(&mut s, "sketch.create", json!({"plane": "P8"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-7, -9], "p1": [5, -7]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "join"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [7, -3], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "join"}));
+    run(&mut s, "solid.hole", json!({"depth": 14, "diameter": 5, "position": [-1, 10, 8]}));
+    // Each body by name, with where it is (two pieces have the same volume).
+    let pieces = |st: &solidcraft_doc::ModelState| -> Vec<(String, String)> {
+        st.bodies
+            .iter()
+            .map(|b| {
+                let m = solidcraft_kernel::measure(&b.body).unwrap();
+                (b.name.clone(), format!("{:.3} {:.3} {:.3} {:.3}", m.volume, m.centroid.x, m.centroid.y, m.centroid.z))
+            })
+            .collect()
+    };
+    let live = pieces(&s.model.state());
+    assert_eq!(live.len(), 3, "{live:?}");
+    let mut again = solidcraft_doc::Model::new();
+    again.no_cache = true;
+    again.evaluate(&s.doc);
+    assert_eq!(pieces(&again.state()), live);
 }
 
 #[test]
@@ -752,4 +786,62 @@ fn a_chamfer_running_past_the_side_edges_it_takes_up_is_named_by_its_edge() {
     let on = |z: f64| Vec3::new(0.0, -11.0 * (1.0 - z / 220.0), z);
     let at = solidcraft_doc::naming::face_names_at(&s.model.state(), &[on(40.0), on(150.0)]);
     assert_eq!(at, vec![blends[0].clone(), blends[0].clone()]);
+}
+
+/// A line extruded into a surface and thickened into a slab. Every face of the slab is named
+/// from that history, and a sketch on the offset face attaches and follows the thickness (#7641).
+#[test]
+fn a_sketch_on_a_thickened_surface_follows_the_face() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "thick", "expression": "2 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Line"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Line", "curves": ["l1"], "distance": 30, "body_name": "Sheet"}));
+    run(&mut s, "surface.thicken", json!({"bodies": ["Sheet"], "thickness": "thick", "body_name": "Slab"}));
+    // The offset face is the copy at y = -2. Its frame is X and Z, origin on that plane.
+    let made = run(&mut s, "sketch.create", json!({"plane": {"face": [30.0, -2.0, 10.0]}, "name": "OnFace"}));
+    assert_eq!(made["attachment"], "exact_face", "{made}");
+    let named = names(&s, "Slab");
+    assert!(named.iter().all(|(_, exact)| *exact), "a thickened face must keep exact history: {named:?}");
+    // Kept face keeps the sheet's name; the offset and the edge walls are the thicken feature's.
+    assert!(named.iter().any(|(n, _)| n == "F2:side:l1"), "{named:?}");
+    assert!(named.iter().any(|(n, _)| n == "F3:inner:F2:side:l1"), "{named:?}");
+    assert_eq!(named.iter().filter(|(n, _)| n.starts_with("F3:blend:")).count(), 4, "{named:?}");
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 15], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "OnFace", "distance": 4, "operation": "join", "name": "Boss"}));
+    // An end wall (the face at x = 0) takes a sketch too.
+    let wall = run(&mut s, "sketch.create", json!({"plane": {"face": [0.0, -1.0, 15.0]}, "name": "OnWall"}));
+    assert_eq!(wall["attachment"], "exact_face", "{wall}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    let slab = |s: &Session| {
+        let body = s.model.state().body("Slab").unwrap().body.clone();
+        let measured = solidcraft_kernel::measure(&body).unwrap();
+        (measured.volume, measured.bbox.min.y)
+    };
+    let (volume, min_y) = slab(&s);
+    let boss = std::f64::consts::PI * 9.0 * 4.0;
+    // The join of the cylinder is a hair under the analytic sum (about 0.02 mm³ here).
+    assert!((volume - (2400.0 + boss)).abs() < 0.05, "slab 40×30×2 plus the boss {}: got {volume}", 2400.0 + boss);
+    assert!((min_y - (-6.0)).abs() < 1e-6, "the boss stands 4 mm off y = -2: {min_y}");
+    assert_eq!(error(&s, "OnFace"), None);
+    assert_eq!(error(&s, "Boss"), None);
+    assert_eq!(warning(&s, "Boss"), None);
+
+    change(&mut s, "thick", "4 mm");
+    assert_eq!(error(&s, "OnFace"), None);
+    assert_eq!(error(&s, "Boss"), None);
+    assert_eq!(warning(&s, "OnFace"), None);
+    assert_eq!(warning(&s, "Boss"), None);
+    let (volume, min_y) = slab(&s);
+    assert!((volume - (4800.0 + boss)).abs() < 0.05, "the slab grew with the thickness and the boss stayed whole {}: got {volume}", 4800.0 + boss);
+    assert!((min_y - (-8.0)).abs() < 1e-6, "the boss followed the face to y = -4: {min_y}");
+
+    let mut cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    cold.refresh();
+    let (volume, min_y) = slab(&cold);
+    assert!((volume - (4800.0 + boss)).abs() < 0.05 && (min_y - (-8.0)).abs() < 1e-6, "reopened: {volume} {min_y}");
+    assert_eq!(error(&cold, "Boss"), None);
 }

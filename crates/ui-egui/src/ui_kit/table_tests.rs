@@ -12,18 +12,19 @@ fn fitting_flex_tables_have_no_horizontal_scrollbar_at_card_widths_and_pixel_sca
                     ui.set_width(width);
                     // Include a non-zero inherited scroll margin: the grid owns its insets.
                     ui.spacing_mut().scroll.content_margin = egui::Margin::same(1);
-                    table(
+                    table_custom(
                         ui,
                         "fit",
                         &[Column::new("Name", 1.1).flex(), Column::new("Expression", 1.5).flex(), Column::new("Value", 1.1).flex()],
                         "Empty",
                         |ui, table| {
+                            table.headers(ui, |_, _| false);
                             table.row(ui, "row", false, |row| {
                                 row.cell(|ui| {
                                     ui_kit::text(ui, "Width", ui_kit::Text::Cell);
                                 });
                                 row.cell(|ui| {
-                                    ui_kit::cell_editor(ui, ui.id().with("value"), &mut "10 mm".into(), "", false);
+                                    ui_kit::cell_editor(ui, ui.scope_id().with("value"), &mut "10 mm".into(), "", false);
                                 });
                                 row.cell(|ui| {
                                     ui_kit::text(ui, "10 mm", ui_kit::Text::MonoCell);
@@ -58,7 +59,8 @@ fn fitting_flex_tables_have_no_horizontal_scrollbar_at_card_widths_and_pixel_sca
 fn genuinely_wide_tables_keep_horizontal_scrolling() {
     let ctx = crate::fonts::test_context();
     harness::frame(&ctx, vec![], |ui| {
-        table(ui, "overflow", &[Column::new("Name", 1.0).flex().min_content_width(400.0)], "Empty", |ui, table| {
+        table_custom(ui, "overflow", &[Column::new("Name", 1.0).flex().min_content_width(400.0)], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
             table.row(ui, "row", false, |row| {
                 row.cell(|ui| ui_kit::text(ui, "Name", ui_kit::Text::Cell));
             });
@@ -77,7 +79,7 @@ fn row_hover_paints_under_every_interactive_child_and_respects_clip_and_enabled(
     let mut selected = 0;
     let mut draw = |ui: &mut Ui| {
         ui.set_width(600.0);
-        table(
+        table_custom(
             ui,
             "hover",
             &[
@@ -88,12 +90,13 @@ fn row_hover_paints_under_every_interactive_child_and_respects_clip_and_enabled(
             ],
             "Empty",
             |ui, table| {
+                table.headers(ui, |_, _| false);
                 table.row(ui, "row", false, |row| {
                     row.cell(|ui| {
                         ui_kit::text(ui, "Width", ui_kit::Text::Cell);
                     });
                     row.cell(|ui| {
-                        ui_kit::cell_editor(ui, ui.id().with("value"), &mut value, "", false);
+                        ui_kit::cell_editor(ui, ui.scope_id().with("value"), &mut value, "", false);
                     });
                     row.cell(|ui| {
                         ui_kit::dropdown(ui, "choice", &mut selected, &["mm", "in"]);
@@ -139,7 +142,8 @@ fn row_hover_paints_under_every_interactive_child_and_respects_clip_and_enabled(
 fn add_prompt_is_short_rounded_and_uses_a_hand_cursor() {
     let ctx = crate::fonts::test_context();
     let mut draw = |ui: &mut Ui| {
-        table(ui, "prompt", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+        table_custom(ui, "prompt", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
             table.add_prompt(ui, "Add configuration", "Add configuration");
         });
     };
@@ -199,7 +203,7 @@ fn hover_remove_bin_prompt_and_plus_menu_share_one_grid() {
                     if pending {
                         table.row(ui, "draft", false, |row| {
                             row.cell(|ui| {
-                                ui_kit::cell_editor(ui, ui.id().with("name"), &mut String::new(), "Name", false);
+                                ui_kit::cell_editor(ui, ui.scope_id().with("name"), &mut String::new(), "Name", false);
                             });
                             row.cell(|ui| {
                                 deleted |= bin_button(ui, "Delete").clicked();
@@ -283,7 +287,8 @@ fn horizontal_bar_is_painted_only_for_actual_table_overflow() {
                     ui.set_width(280.0);
                     ui_kit::scope(ui, |ui| {
                         let column = Column::new("Name", 1.0).flex().min_content_width(if overflow { 400.0 } else { 0.0 });
-                        table(ui, "bar", &[column], "Empty", |ui, table| {
+                        table_custom(ui, "bar", &[column], "Empty", |ui, table| {
+                            table.headers(ui, |_, _| false);
                             table.row(ui, "row", false, |row| {
                                 row.cell(|ui| ui_kit::text(ui, "Width", ui_kit::Text::Cell));
                             });

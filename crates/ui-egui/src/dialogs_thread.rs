@@ -653,6 +653,8 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         chamfer_angle,
         chamfer_depth,
         steep_flank,
+        // Kept by the edit itself (`timeline.redefine`), not a dialog option.
+        old_auto_size: _,
     } = kind
     else {
         return;
@@ -723,7 +725,8 @@ mod contribution_tests {
         dialogs::{Dialog, Kind, apply_commands},
     };
     use serde_json::json;
-    use solidcraft_engine::{Sel, Session, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::{Sel, Session};
     fn hole() -> (SolveApp, Dialog) {
         let mut app = SolveApp::new(Session::default(), Services::default());
         app.run("solid.box", json!({"length":20,"width":20,"height":10,"body_name":"Plate"})).unwrap();
@@ -980,11 +983,13 @@ mod contribution_tests {
             let mut designation = original.to_string();
             let mut custom = None;
             let doc = Document::default();
-            let _ = ctx.run_ui(Default::default(), |ui| {
+            ctx.run_ui(Default::default(), |ui| {
                 egui::Grid::new("hole_catalogue").show(ui, |ui| {
                     hole_rows(ui, &doc, &mut designation, &mut custom, &mut None);
                 });
-            });
+            })
+            .textures_delta
+            .clear();
             assert_eq!(designation, original);
         }
     }
@@ -1131,11 +1136,14 @@ mod contribution_tests {
             let mut hole = original.to_string();
             let mut custom = None;
             let doc = Document::default();
-            let _ = context.run_ui(Default::default(), |ui| {
-                egui::Grid::new("authored_hole").show(ui, |ui| {
-                    hole_rows(ui, &doc, &mut hole, &mut custom, &mut None);
-                });
-            });
+            context
+                .run_ui(Default::default(), |ui| {
+                    egui::Grid::new("authored_hole").show(ui, |ui| {
+                        hole_rows(ui, &doc, &mut hole, &mut custom, &mut None);
+                    });
+                })
+                .textures_delta
+                .clear();
             assert_eq!(hole, original);
         }
     }

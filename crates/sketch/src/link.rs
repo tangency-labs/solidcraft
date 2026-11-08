@@ -7,7 +7,9 @@
 //! constants; they still bound profiles and take constraints and dimensions like any curve.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Aabb2, Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::Aabb2;
+use solidcraft_geom::prelude::*;
 
 use crate::model::{Curve, CurveKind, Result, Sketch, SketchError, in_range, radius_in_range};
 
@@ -271,7 +273,7 @@ impl LinkGeom {
                     && nurbs.as_ref().is_none_or(|k| *control && !*periodic && k.check(pts.len(), *degree).is_ok())
                     && (2..=crate::curves::MAX_SPLINE_POINTS).contains(&pts.len())
                     && pts.iter().all(ok)
-                    && (1..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(degree)
+                    && (1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(degree)
             }
         }
     }
@@ -1076,7 +1078,10 @@ impl Sketch {
             // thicker moves the inner corner by more than a tenth of the face) is still the same
             // boundary when two witnesses agree: the new boundary was read in the same order
             // with the same curves, and each point read in that order is, among the points on
-            // the same loop with lines the same way, clearly the nearest to where it was.
+            // the same loop with lines leaving them the same ways, clearly the nearest to where
+            // it was. The two end corners of a thin arm have the same lines; the lines leave them
+            // in opposite senses, which tells them apart when the box the points are compared in
+            // shrinks with the face (#12086).
             same_order_agrees = same
                 && loop_roles.as_ref().is_some_and(|roles| {
                     (0..points.len()).all(|k| {
@@ -1088,6 +1093,7 @@ impl Sketch {
                                 old_roles.get(k) == fresh_roles.get(*i)
                                     && roles.old.get(k) == roles.fresh.get(*i)
                                     && roles.old_lines.get(k).zip(roles.fresh_lines.get(*i)).is_some_and(|(x, y)| loops::same_lines(x, y))
+                                    && roles.old_leaving.get(k).zip(roles.fresh_leaving.get(*i)).is_some_and(|(x, y)| loops::same_leaving(x, y))
                             })
                             .map(|(i, q)| (i, p.dist(*q)))
                             .collect();

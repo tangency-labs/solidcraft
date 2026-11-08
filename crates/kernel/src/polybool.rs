@@ -3,9 +3,11 @@
 //! SMLib's boolean takes with the body as it is. The result's history is over the body and the
 //! mesh, the mesh's faces being its triangles.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-use solidcraft_geom::{Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
 
 use crate::body::Body;
 use crate::heal::find;

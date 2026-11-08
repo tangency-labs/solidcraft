@@ -10,7 +10,8 @@
 //! corner turns into the offset the offset curves overlap and every rule trims them where they
 //! cross.
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Region2, Seg2, Vec2};
+use solidcore_record::{Region2, Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 
 use crate::Result;
 

@@ -139,6 +139,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcraft_engine::geom::prelude::*;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
@@ -526,10 +527,11 @@ mod tests {
                 _ => false,
             }
         }
-        let out = h.ctx.run_ui(
+        let mut out = h.ctx.run_ui(
             egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() },
             |ui| h.app.ui(ui),
         );
+        out.textures_delta.clear();
         out.shapes.iter().any(|shape| contains(&shape.shape, hint))
     }
 

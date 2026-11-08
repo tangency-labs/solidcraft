@@ -1256,7 +1256,7 @@ fn comb_options_draw_the_combs_shown_again() {
     let combs = shown_combs(&h.app);
     assert_eq!(combs.len(), 1, "{:?}", h.app.status);
     assert_eq!(combs[0].len(), 40);
-    let tooth = |c: &[[solidcraft_engine::geom::Vec3; 2]]| c[0][0].dist(c[0][1]);
+    let tooth = |c: &[[solidcore_record::Vec3; 2]]| c[0][0].dist(c[0][1]);
     let auto = tooth(&combs[0]);
     assert!(auto > 0.0);
     let slider = |name: &str| crate::scenario::rect_of(&format!("dialog:slider_track:{name}")).unwrap_or_else(|| panic!("no slider {name}"));
@@ -1300,7 +1300,7 @@ fn combs_shown_together_share_one_scale() {
     let ratio = |h: &Harness| {
         let combs = shown_combs(&h.app);
         assert_eq!(combs.len(), 2, "{:?}", h.app.status);
-        let tooth = |c: &[[solidcraft_engine::geom::Vec3; 2]]| c[0][0].dist(c[0][1]);
+        let tooth = |c: &[[solidcore_record::Vec3; 2]]| c[0][0].dist(c[0][1]);
         tooth(&combs[0]) / tooth(&combs[1])
     };
     assert!((ratio(&h) - 2.0).abs() < 1e-9, "{}", ratio(&h));
@@ -2128,8 +2128,8 @@ fn analysis_status_row_and_key_stay_below_preferences_and_cannot_steal_its_click
             assert!(window.contains(at), "the real Preferences window must overlap {target}");
             let layer = h.ctx.layer_id_at(at).unwrap();
             assert_eq!(layer.order, egui::Order::Middle, "Preferences stays above {target}");
-            assert_ne!(layer.id, egui::Id::new("viewport_status_row"));
-            assert_ne!(layer.id, egui::Id::new("viewport_status_key"));
+            assert_ne!(layer.id, egui::Id::unique("viewport_status_row"));
+            assert_ne!(layer.id, egui::Id::unique("viewport_status_key"));
         }
         let at = crate::scenario::handle_at(&format!("viewport_status:{}:close", item.id)).unwrap();
         h.call("ui.click", json!({"x":at.x,"y":at.y}));

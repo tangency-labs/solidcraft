@@ -211,8 +211,8 @@ fn one_solid(ex: &p21::Exchange) -> Solid {
     assert!(r.failures.is_empty(), "{:?}", r.failures);
     assert_eq!(r.solids.len(), 1);
     let s = r.solids.into_iter().next().unwrap();
-    s.brep.validate().unwrap();
-    s.brep.check_geometry().unwrap();
+    solidcraft_geom::brep::check::validate(&s.brep).unwrap();
+    solidcraft_geom::brep::geometry::check(&s.brep).unwrap();
     s
 }
 
@@ -233,7 +233,10 @@ fn sides(b: &Brep) -> Vec<(usize, V, V)> {
             let u = &edges[0];
             let [t0, t1] = u.pcurve.interval().unwrap();
             let m = 0.5 * (t0 + t1);
-            let (a, c) = (u.pcurve.eval(m).unwrap(), u.pcurve.eval(m + 1e-4 * (t1 - t0)).unwrap());
+            let (a, c) = (
+                solidcraft_geom::brep::pcurve::eval(&u.pcurve, m).unwrap(),
+                solidcraft_geom::brep::pcurve::eval(&u.pcurve, m + 1e-4 * (t1 - t0)).unwrap(),
+            );
             let along = if u.forward { [c[0] - a[0], c[1] - a[1]] } else { [a[0] - c[0], a[1] - c[1]] };
             let n = (along[0].hypot(along[1])).max(1e-300);
             let left = [-along[1] / n, along[0] / n];
@@ -374,7 +377,7 @@ fn a_cylinder_has_a_seam_used_twice_by_its_side() {
     for e in &s.brep.edges {
         if matches!(e.curve, BCurve::Circle { .. }) {
             // On its NURBS form: a whole turn in angle, its interval in the form's parameter.
-            let [a0, a1] = e.curve_interval().unwrap();
+            let [a0, a1] = solidcraft_geom::brep::label::edge_curve_interval(e).unwrap();
             assert!(e.nurbs.is_some() && (a1 - a0 - TAU).abs() < 1e-12);
             assert_eq!(e.vertices[0], e.vertices[1]);
         }
@@ -408,7 +411,7 @@ fn a_ball_bounded_by_its_seam_alone() {
         let s = one_solid(&w.file(&[solid]));
         assert_eq!(counts(&s.brep), [2, 1, 1, 1, 2]);
         let e = &s.brep.edges[0];
-        let [a0, a1] = e.curve_interval().unwrap();
+        let [a0, a1] = solidcraft_geom::brep::label::edge_curve_interval(e).unwrap();
         assert!((a1 - a0 - PI).abs() < 1e-12, "{:?}", e.interval);
         faces_away(&s.brep, 0, |_| [0.0; 3]);
     }
@@ -772,6 +775,43 @@ fn edited(edit: impl Fn(&str) -> String) -> Solids {
     read_solids(&parse(&text))
 }
 
+/// The cube with its first edge's LINE replaced by a CURVE_REPLICA of a line 7 mm lower, moved up
+/// by a transformation operator (what FreeCAD writes for a repeated edge).
+fn replica_edge(t: &str) -> String {
+    let at = t.find("=LINE('',#").expect("a line");
+    let (_, line_id) = t[..at].rsplit_once('#').expect("an id");
+    let tail = &t[at + "=LINE('',#".len()..];
+    let (point, tail) = tail.split_once(",#").expect("a vector");
+    let (vector, _) = tail.split_once(')').expect("the end");
+    let pt = t.split_once(&format!("#{point}=CARTESIAN_POINT('',(")).expect("the point").1;
+    let xyz: Vec<f64> = pt.split_once(')').unwrap().0.split(',').map(|v| v.parse().unwrap()).collect();
+    let replaced = t.replacen(&format!("#{line_id}=LINE('',#{point},#{vector})"), &format!("#{line_id}=CURVE_REPLICA('',#9003,#9004)"), 1);
+    format!(
+        "{replaced}#9001=CARTESIAN_POINT('',({},{},{}));#9002=CARTESIAN_POINT('',(0.,0.,7.));#9003=LINE('',#9001,#{vector});#9004=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',$,$,#9002,$,$);",
+        real(xyz[0]),
+        real(xyz[1]),
+        real(xyz[2] - 7.0)
+    )
+}
+
+#[test]
+fn an_edge_on_a_curve_replica_is_the_moved_curve() {
+    let plain = edited(str::to_string);
+    let moved = edited(|t| {
+        let edited = replica_edge(t);
+        assert!(edited.contains("CURVE_REPLICA"), "the edit did not apply");
+        edited
+    });
+    assert!(moved.failures.is_empty(), "{:?}", moved.failures);
+    assert_eq!(moved.solids.len(), 1);
+    let (a, b) = (&plain.solids[0].brep, &moved.solids[0].brep);
+    solidcraft_geom::brep::check::validate(b).unwrap();
+    assert_eq!(counts(a), counts(b));
+    // The replica's edge is the plain cube's edge: same curve, same interval.
+    assert_eq!(a.edges[0].curve, b.edges[0].curve);
+    assert_eq!(a.edges[0].interval, b.edges[0].interval);
+}
+
 #[test]
 fn hostile_topology_is_an_error_never_a_panic() {
     // Sanity: unedited, the cube reads.
@@ -873,8 +913,8 @@ fn step_conformance_parts() {
         let r = read_solids(&p21::parse(&std::fs::read_to_string(&path).unwrap()).unwrap());
         assert!(r.failures.is_empty() && r.solids.len() == 1, "{name}: {:?}", r.failures);
         let b = &r.solids[0].brep;
-        b.validate().unwrap();
-        b.check_geometry().unwrap();
+        solidcraft_geom::brep::check::validate(b).unwrap();
+        solidcraft_geom::brep::geometry::check(b).unwrap();
         assert_eq!(b.regions.len(), 2, "{name}");
     }
 }
@@ -943,7 +983,7 @@ fn same_surface(data: &str, us: (f64, f64), vs: (f64, f64)) -> BSurface {
         .collect();
     let ext = swept::Extent { points: grid.iter().map(|&(u, v)| v3(s.point(u, v).unwrap())).collect(), seam: Vec::new() };
     let (record, reversed) = swept::map_surface(&s, &ext, DEFAULT_TOLERANCE).unwrap();
-    record.natural();
+    solidcraft_geom::brep::label::surface_natural(&record);
     let eval = SurfaceEval::new(&record).unwrap();
     for &(u, v) in &grid {
         let p = v3(s.point(u, v).unwrap());

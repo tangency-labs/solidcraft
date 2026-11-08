@@ -13,13 +13,16 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use serde_json::{Value, json};
+use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_geom::mesh_distance::TriangleSet;
-use solidcraft_geom::{Aabb3, Mesh, Vec3};
+use solidcraft_geom::{Aabb3, Mesh};
 use solidcraft_kernel::Body;
 use solidcraft_kernel::profile::KernelTimes;
 
 use crate::params::{bad, num, string_list};
+use crate::schema::clearance::{Overlap, OverlapBounds, Unchecked};
+use crate::schema::interference::{InterferenceResult, PairTime};
 use crate::{Result, Session};
 
 /// Most pairs with overlapping bounding boxes one call intersects.
@@ -48,7 +51,7 @@ struct Job {
 
 /// What an exact check of one pair came to.
 enum Outcome {
-    Hit(Value),
+    Hit(Overlap),
     Clear,
     Unchecked(String),
 }
@@ -158,26 +161,30 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     let waited_ms = waited.elapsed().as_secs_f64() * 1000.0;
 
     // Mesh bodies are not intersected: say so, rather than let `count: 0` read as "no overlap".
-    let mut unchecked: Vec<Value> = meshes_left.iter().map(|b| json!({"a": b.name, "b": null, "reason": MESH_NOT_CHECKED})).collect();
+    let mut unchecked: Vec<Unchecked> =
+        meshes_left.iter().map(|b| Unchecked { a: b.name.clone(), b: None, reason: MESH_NOT_CHECKED.to_string() }).collect();
     let (mut hits, mut timed) = (Vec::new(), Vec::new());
     let (mut not_checked, mut boolean_ms, mut tessellate_ms) = (0usize, 0.0, 0.0);
     for ((a, b), d) in done {
         let Some(d) = d else {
             not_checked += 1;
-            unchecked.push(json!({"a": a, "b": b, "reason": format!("not checked: the time budget of {budget_s} s ran out (budget_s)")}));
+            unchecked.push(Unchecked { a, b: Some(b), reason: format!("not checked: the time budget of {budget_s} s ran out (budget_s)") });
             continue;
         };
         boolean_ms += d.kernel.boolean_ms;
         tessellate_ms += d.kernel.tessellate_ms;
-        timed.push((
-            d.ms,
-            json!({"a": a, "b": b, "ms": round_ms(d.ms), "boolean_ms": round_ms(d.kernel.boolean_ms),
-            "tessellate_ms": round_ms(d.kernel.tessellate_ms)}),
-        ));
+        let time = PairTime {
+            a: a.clone(),
+            b: b.clone(),
+            ms: round_ms(d.ms),
+            boolean_ms: round_ms(d.kernel.boolean_ms),
+            tessellate_ms: round_ms(d.kernel.tessellate_ms),
+        };
+        timed.push((d.ms, time));
         match d.outcome {
-            Outcome::Hit(v) => hits.push(v),
+            Outcome::Hit(overlap) => hits.push(overlap),
             Outcome::Clear => {}
-            Outcome::Unchecked(reason) => unchecked.push(json!({"a": a, "b": b, "reason": reason})),
+            Outcome::Unchecked(reason) => unchecked.push(Unchecked { a, b: Some(b), reason }),
         }
     }
     // A timing profile of the command (`--profile`) counts the kernel time the workers spent,
@@ -188,15 +195,28 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_kernel::profile::credit(KernelTimes { boolean_ms: boolean_ms * share, tessellate_ms: tessellate_ms * share });
     }
     timed.sort_by(|x, y| y.0.total_cmp(&x.0));
-    let slowest: Vec<Value> = timed.into_iter().take(SLOWEST).map(|t| t.1).collect();
-    Ok(json!({
-        "interferences": hits, "count": hits.len(), "checked": bodies.len(), "unchecked": unchecked,
-        "truncated": skipped > 0, "skipped_pairs": skipped,
-        "pairs_candidate": pairs.len(), "pairs_cleared": cleared, "pairs_intersected": intersected,
-        "pairs_not_checked": not_checked, "budget_s": budget_s, "budget_exceeded": not_checked > 0,
-        "threads": threads, "boolean_ms": round_ms(boolean_ms), "tessellate_ms": round_ms(tessellate_ms),
-        "slowest": slowest, "ms": round_ms(started.elapsed().as_secs_f64() * 1000.0),
-    }))
+    let slowest: Vec<PairTime> = timed.into_iter().take(SLOWEST).map(|t| t.1).collect();
+    let reply = InterferenceResult {
+        count: hits.len(),
+        interferences: hits,
+        checked: bodies.len(),
+        unchecked,
+        truncated: skipped > 0,
+        skipped_pairs: skipped,
+        pairs_candidate: pairs.len(),
+        pairs_cleared: cleared,
+        pairs_intersected: intersected,
+        pairs_not_checked: not_checked,
+        budget_s,
+        budget_exceeded: not_checked > 0,
+        threads,
+        boolean_ms: round_ms(boolean_ms),
+        tessellate_ms: round_ms(tessellate_ms),
+        slowest,
+        ms: round_ms(started.elapsed().as_secs_f64() * 1000.0),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
 fn round_ms(ms: f64) -> f64 {
@@ -283,9 +303,14 @@ fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> Outcome {
         Err(e) => return Outcome::Unchecked(e.to_string()),
     };
     if m.volume > threshold {
-        let hit = json!({"a": na, "b": nb, "volume_mm3": m.volume, "area_mm2": m.area, "center": m.centroid,
-            "bbox": {"min": m.bbox.min, "max": m.bbox.max}});
-        return Outcome::Hit(hit);
+        return Outcome::Hit(Overlap {
+            a: na.clone(),
+            b: nb.clone(),
+            volume_mm3: m.volume,
+            area_mm2: m.area,
+            bbox: OverlapBounds { min: m.bbox.min.into(), max: m.bbox.max.into() },
+            center: m.centroid.into(),
+        });
     }
     Outcome::Clear
 }

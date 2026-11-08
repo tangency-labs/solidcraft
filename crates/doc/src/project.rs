@@ -10,9 +10,11 @@
 //! lines and circular arcs are recovered exactly, the rest (an ellipse from a tilted circle,
 //! a spline edge running out of the plane) becomes a chain of lines.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
-use solidcraft_geom::{Mesh, Plane, Seg2, Vec2, Vec3};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::Mesh;
 use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource, Sketch, WireCurve};
 
 use crate::eval::ModelState;
@@ -53,17 +55,21 @@ pub struct Resolved {
 static CACHE: std::sync::Mutex<Vec<(String, Resolved)>> = std::sync::Mutex::new(Vec::new());
 const CACHE_SIZE: usize = 64;
 
+fn is_sketch_curve(src: &LinkSource) -> bool {
+    matches!(src, LinkSource::SketchCurve { .. })
+}
+
 fn cache_key(st: &ModelState, plane: &Plane, kind: LinkKind, src: &LinkSource) -> Option<String> {
+    // An intersection with a sketch curve (#11048) changes with that sketch, not with the meshes.
     let body_based = matches!(
         src,
         LinkSource::Edge { .. }
             | LinkSource::Face { .. }
             | LinkSource::Body { .. }
             | LinkSource::Vertex { .. }
-            | LinkSource::Intersection { .. }
             | LinkSource::Iso { .. }
             | LinkSource::Spun { .. }
-    );
+    ) || matches!(src, LinkSource::Intersection { a, b } if !is_sketch_curve(a) && !is_sketch_curve(b));
     if !body_based {
         return None;
     }
@@ -223,16 +229,12 @@ fn resolve_uncached(
             Vec::new()
         }
         LinkSource::Intersection { a, b } => {
-            // Where the bodies (or faces) meet, as the edges SMLib's imprint of one by the other
-            // makes: each its exact record curve, its points at the display tolerance.
-            let (ba, fa) = crate::project3d::part_of(st, a).ok_or_else(|| lost(&a.describe()))?;
-            let (bb, fb) = crate::project3d::part_of(st, b).ok_or_else(|| lost(&b.describe()))?;
-            let chord = (ba.body.size().max(bb.body.size()) * 1e-3).max(1e-3);
-            for e in
-                crate::kernel::meeting_edges(&ba.body, fa.as_ref().map(std::slice::from_ref), &bb.body, fb.as_ref().map(std::slice::from_ref), chord)?
-            {
-                wires.push(e.points);
-                exact.push(vec![WireCurve { curve: e.curve, interval: e.interval }]);
+            // Where the bodies, faces or other sketches' curves meet, as the edges SMLib's imprint
+            // of one by the other makes: each its exact record curve, its points at the display
+            // tolerance.
+            for (pts, curves) in crate::project3d::meeting(st, a, b)? {
+                wires.push(pts);
+                exact.push(curves);
             }
             Vec::new()
         }
@@ -363,7 +365,7 @@ fn edge_curves(body: Option<&crate::ModelBody>, e: usize) -> Vec<WireCurve> {
     record
         .edges
         .get(e)
-        .filter(|edge| !matches!(edge.curve, solidcraft_geom::brep::Curve::SurfaceIntersection { .. }))
+        .filter(|edge| !matches!(edge.curve, solidcore_record::brep::Curve::SurfaceIntersection { .. }))
         .map(|edge| vec![WireCurve { curve: edge.parameters().clone(), interval: edge.interval }])
         .unwrap_or_default()
 }
@@ -394,9 +396,9 @@ fn projected_wires(
 /// in front of it.
 fn first_hits(
     target: &crate::ModelBody,
-    curves: Vec<(solidcraft_geom::brep::Curve, [f64; 2])>,
+    curves: Vec<(solidcore_record::brep::Curve, [f64; 2])>,
     toward: Vec3,
-) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
+) -> Result<Vec<(solidcore_record::brep::Curve, [f64; 2])>> {
     let Some(dir) = toward.normalized() else { return Ok(curves) };
     let mesh = target.mesh();
     let reach = 2.0 * mesh.bounds().diagonal().max(1e-9);
@@ -418,7 +420,7 @@ fn first_hits(
 /// direction they come (a projection split at a sphere's pole into two pieces that both end there
 /// joins again there, the second run the other way), each wire its points (for display) and its
 /// exact curves.
-fn joined_wires(curves: Vec<(solidcraft_geom::brep::Curve, [f64; 2])>, tol: f64) -> Result<(Vec<Vec<Vec3>>, Vec<Vec<WireCurve>>)> {
+fn joined_wires(curves: Vec<(solidcore_record::brep::Curve, [f64; 2])>, tol: f64) -> Result<(Vec<Vec<Vec3>>, Vec<Vec<WireCurve>>)> {
     let (mut wires, mut exact): (Vec<Vec<Vec3>>, Vec<Vec<WireCurve>>) = (Vec::new(), Vec::new());
     for (curve, interval) in curves {
         let pts = crate::kernel::PathPiece::Segs(crate::kernel::curve_path(&curve, interval)?).points();
@@ -466,7 +468,7 @@ fn joined_wires(curves: Vec<(solidcraft_geom::brep::Curve, [f64; 2])>, tol: f64)
 /// own knots (a line's `1 - t`, a circle's or ellipse's angle negated with its y axis turned).
 /// Exact; `None` for a curve kind it doesn't turn.
 fn reversed(c: &WireCurve) -> Option<WireCurve> {
-    use solidcraft_geom::brep::{Curve, Frame};
+    use solidcore_record::brep::{Curve, Frame};
     let [t0, t1] = c.interval;
     let flip = |frame: &Frame| Frame { origin: frame.origin, x_axis: frame.x_axis, y_axis: frame.y_axis.map(|v| -v) };
     let (curve, interval) = match &c.curve {
@@ -910,7 +912,31 @@ pub fn refresh_face_anchor_links(
     sk: &mut Sketch,
     anchor: &crate::FaceAnchor,
 ) -> Result<Vec<String>> {
-    refresh_links_in(doc, vals, st, plane, sk, Some(anchor))
+    refresh_links_in(doc, vals, st, plane, sk, Some(anchor), LostNames::Fail)
+}
+
+/// What a link kept by the name of a face or edge does when the name finds nothing any more.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LostNames {
+    /// The sketch fails, asking for the reference to be picked again ([`DocError::Reselect`]).
+    Fail,
+    /// The link is marked lost and keeps its last geometry, with a warning naming the reference.
+    /// No other face or edge is taken for it. Only for showing a failed sketch while it is edited
+    /// (#12085), never for the evaluation the features after it build from.
+    Mark,
+}
+
+/// [`refresh_links`] (or [`refresh_face_anchor_links`] with `anchor`) that marks a link whose
+/// named face or edge is gone lost instead of failing ([`LostNames::Mark`]).
+pub(crate) fn refresh_links_marking_lost(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    plane: &Plane,
+    sk: &mut Sketch,
+    anchor: Option<&crate::FaceAnchor>,
+) -> Result<Vec<String>> {
+    refresh_links_in(doc, vals, st, plane, sk, anchor, LostNames::Mark)
 }
 
 /// Remove degree-two straight stations introduced by coplanar face subdivision.
@@ -987,7 +1013,7 @@ fn merge_family_lines(geom: Vec<LinkGeom>) -> Result<Vec<LinkGeom>> {
 /// longer finds exactly that face or edge is not lost: the sketch fails, asking for the
 /// reference to be picked again ([`DocError::Reselect`]).
 pub fn refresh_links(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, plane: &Plane, sk: &mut Sketch) -> Result<Vec<String>> {
-    refresh_links_in(doc, vals, st, plane, sk, None)
+    refresh_links_in(doc, vals, st, plane, sk, None, LostNames::Fail)
 }
 
 /// Lay every text that runs along a curve of its sketch along that curve as the solve left it.
@@ -1023,6 +1049,7 @@ fn refresh_links_in(
     plane: &Plane,
     sk: &mut Sketch,
     anchor: Option<&crate::FaceAnchor>,
+    lost_names: LostNames,
 ) -> Result<Vec<String>> {
     let mut warn = Vec::new();
     let links = sk.links.clone();
@@ -1032,8 +1059,17 @@ fn refresh_links_in(
         if !l.auto_face
             && let (Some(name), LinkSource::Face { body, at }) = (&l.face_name, &mut source)
         {
-            let (index, p) =
-                st.body(body).and_then(|target| crate::naming::face_on_body(target, name, *at)).ok_or_else(|| DocError::reselect(name.as_str()))?;
+            let found = st.body(body).and_then(|target| {
+                if l.kind == LinkKind::Project {
+                    crate::name_lookup::locate_projected_face(target, name, *at)
+                } else {
+                    crate::naming::face_on_body(target, name, *at)
+                }
+            });
+            let Some((index, p)) = found else {
+                lose_named(sk, &l.id, name, lost_names, &mut warn)?;
+                continue;
+            };
             *at = p;
             named_face = Some((body.clone(), index, p));
         }
@@ -1041,7 +1077,10 @@ fn refresh_links_in(
         // edge has the name any more no other edge is taken for it: the sketch fails.
         let mut named_edge = None;
         if let (Some(name), LinkSource::Edge { body, at }) = (&l.edge_name, &source) {
-            let (body, hit) = locate_named_edge(st, body, name, *at).ok_or_else(|| DocError::reselect(name.as_str()))?;
+            let Some((body, hit)) = locate_named_edge(st, body, name, *at) else {
+                lose_named(sk, &l.id, name, lost_names, &mut warn)?;
+                continue;
+            };
             warn.extend(hit.note(name).map(|note| format!("projected {note}")));
             named_edge = Some((body, hit.edge, *at));
         }
@@ -1107,6 +1146,19 @@ fn refresh_links_in(
         }
     }
     Ok(warn)
+}
+
+/// A link whose face or edge `name` finds nothing: the sketch fails asking for it again, or (only
+/// while a failed sketch is shown for editing) the link is marked lost, with a warning naming it.
+fn lose_named(sk: &mut Sketch, id: &str, name: &str, lost_names: LostNames, warn: &mut Vec<String>) -> Result<()> {
+    match lost_names {
+        LostNames::Fail => Err(DocError::reselect(name)),
+        LostNames::Mark => {
+            sk.set_link_lost(id, true);
+            warn.push(format!("projected reference lost: `{name}` no longer exists as it was picked; reselect it"));
+            Ok(())
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1602,14 +1654,92 @@ pub(crate) fn section(plane: &Plane, m: &Mesh, face: Option<u32>) -> Vec<LinkGeo
     let size = m.bounds().diagonal().max(1e-9);
     let (segs, exact) = section_segments(plane, m, face);
     let segs: Vec<(Vec2, Vec2)> = segs.into_iter().map(|(a, b, _)| (a, b)).collect();
-    let loose = size * 2e-3;
-    let refine = |v: Vec<LinkGeom>| -> Vec<LinkGeom> { v.into_iter().map(|g| refine_round(g, &exact, loose)).collect() };
+    let refine = |v: Vec<LinkGeom>| -> Vec<LinkGeom> { refine_rounds(v, &exact, size) };
     let lossy = refine(fit_segments(&segs, size, false));
     // Lines and arcs that follow the section closely (the corners of a rounded profile stay
     // where they are) are kept when they take no more curves than the loose fit.
     let close = refine(fit_segments(&segs, size, true));
     let plain = |v: &[LinkGeom]| v.iter().all(|g| matches!(g, LinkGeom::Line(..) | LinkGeom::Arc { .. } | LinkGeom::Circle(..)));
-    if plain(&close) && close.len() <= lossy.len() { close } else { lossy }
+    // A loose fit with fewer curves can still be wrong: short faces beside a small round (2 mm
+    // walls each side of an R2 corner) fit within its tolerance as one larger arc. The exact
+    // crossings (on planes and rulings) show it: one of them off every curve of the fit.
+    // Any other curve counts as near, and past a work limit nothing is checked: the loose fit
+    // stands, as before.
+    let tight = size * 1e-4;
+    let checkable = exact.len().saturating_mul(close.len()) <= 4_000_000;
+    let strays = |v: &[LinkGeom]| exact.iter().any(|p| !v.iter().any(|g| plain_distance(g, *p).is_none_or(|d| d <= tight)));
+    let fitted = if plain(&close) && (close.len() <= lossy.len() || (checkable && strays(&lossy) && !strays(&close))) { close } else { lossy };
+    join_rounds(fitted, size * 1e-5)
+}
+
+/// Where the fit left a line and an arc ends apart by at most `tol`, both end at one point. A
+/// line can swallow an arc's first chord (a mesh crossing just past the tangent line), and
+/// [`refine_round`] moves an arc's ends but not the lines': the outline would not close.
+fn join_rounds(mut fitted: Vec<LinkGeom>, tol: f64) -> Vec<LinkGeom> {
+    for i in 0..fitted.len() {
+        let Some(&LinkGeom::Arc { c, mut a, mut b }) = fitted.get(i) else { continue };
+        let r = c.dist(a);
+        for end in [&mut a, &mut b] {
+            for curve in &mut fitted {
+                let LinkGeom::Line(p, q) = curve else { continue };
+                let (near, far) = if p.dist(*end) <= q.dist(*end) { (p, q) } else { (q, p) };
+                if near.dist(*end) <= tol {
+                    let joint = line_meets_round(*far, *near, c, r, tol);
+                    *near = joint;
+                    *end = joint;
+                }
+            }
+        }
+        if let Some(arc) = fitted.get_mut(i) {
+            *arc = LinkGeom::Arc { c, a, b };
+        }
+    }
+    fitted
+}
+
+/// Where a line from `far` ending near `near` meets the circle (`c`, `r`): the tangent point when
+/// the line runs into the circle there, within `tol` of it over the arc's first chord, else its
+/// crossing nearest `near`, else the circle's point nearest `near`.
+fn line_meets_round(far: Vec2, near: Vec2, c: Vec2, r: f64, tol: f64) -> Vec2 {
+    let nearest = |[x, y]: [Vec2; 2]| if x.dist(near) <= y.dist(near) { x } else { y };
+    let to_centre = c - far;
+    let span = to_centre.len();
+    if let Some(unit) = to_centre.normalized().filter(|_| span > r) {
+        let reach = (span * span - r * r).sqrt();
+        let (along, side) = (unit * (reach * reach / span), unit.perp() * (reach * r / span));
+        let tangent = nearest([far + along + side, far + along - side]);
+        if tangent.dist(near) <= tol + (2.0 * r * tol).sqrt() {
+            return tangent;
+        }
+    }
+    let Some(dir) = (near - far).normalized() else { return near };
+    let foot = far + dir * (c - far).dot(dir);
+    let half = r * r - (foot - c).len2();
+    if half >= 0.0 {
+        return nearest([foot + dir * half.sqrt(), foot - dir * half.sqrt()]);
+    }
+    (near - c).normalized().map_or(near, |unit| c + unit * r)
+}
+
+/// How far `p` lies from a line, arc or circle; None for any other curve.
+fn plain_distance(g: &LinkGeom, p: Vec2) -> Option<f64> {
+    match *g {
+        LinkGeom::Line(a, b) => {
+            let d = b - a;
+            let t = if d.len2() > 0.0 { ((p - a).dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
+            Some(p.dist(a.lerp(b, t)))
+        }
+        LinkGeom::Circle(c, r) => Some((p.dist(c) - r).abs()),
+        LinkGeom::Arc { c, a, b } => {
+            let (s0, sw) = ((a - c).angle(), ((b - c).angle() - (a - c).angle()).rem_euclid(std::f64::consts::TAU));
+            if ((p - c).angle() - s0).rem_euclid(std::f64::consts::TAU) <= sw + 1e-9 {
+                Some((p.dist(c) - c.dist(a)).abs())
+            } else {
+                Some(p.dist(a).min(p.dist(b)))
+            }
+        }
+        _ => None,
+    }
 }
 
 /// The segments where the plane crosses the mesh's triangles (in plane coordinates, each with
@@ -1744,6 +1874,91 @@ fn section_segments(plane: &Plane, m: &Mesh, face: Option<u32>) -> (Vec<(Vec2, V
         }
     }
     (segs, exact.into_inner())
+}
+
+/// Re-fit each circle and arc of a fitted section through the exact section points near it.
+/// The outline stays closed: a line meeting an arc's end moves with it. Where two arcs meet,
+/// their refits stand only while their ends stay within the distance a profile joins ends
+/// across; else both keep their fits, since moving an arc's end would take it off its circle.
+fn refine_rounds(mut v: Vec<LinkGeom>, exact: &[Vec2], size: f64) -> Vec<LinkGeom> {
+    // Ends this close meet: the fit joins crossings this close into one point.
+    let meet = size * 1e-7;
+    let ends = |h: &LinkGeom| match *h {
+        LinkGeom::Arc { a, b, .. } => Some([a, b]),
+        _ => None,
+    };
+    let fitted = v.clone();
+    // Each arc's refit, and whether it stands.
+    let refits: Vec<Option<LinkGeom>> =
+        fitted.iter().map(|g| matches!(g, LinkGeom::Arc { .. }).then(|| refine_round(g.clone(), exact, size * 2e-3))).collect();
+    let mut stands: Vec<bool> = refits.iter().map(Option::is_some).collect();
+    // Where two arcs met as fitted: (arc, its end, other arc, its end).
+    let mut joints = Vec::new();
+    for (i, gi) in fitted.iter().enumerate() {
+        for (j, gj) in fitted.iter().enumerate().skip(i + 1) {
+            let (Some(ei), Some(ej)) = (ends(gi), ends(gj)) else { continue };
+            for (ki, pi) in ei.iter().enumerate() {
+                for (kj, pj) in ej.iter().enumerate() {
+                    if pi.dist(*pj) <= meet {
+                        joints.push((i, ki, j, kj));
+                    }
+                }
+            }
+        }
+    }
+    // Take back both refits at a joint they would tear, until no joint tears.
+    let end_now = |stands: &[bool], i: usize, k: usize| {
+        let g = if stands.get(i).copied().unwrap_or(false) { refits.get(i).and_then(Option::as_ref) } else { fitted.get(i) };
+        g.and_then(ends).and_then(|e| e.get(k).copied())
+    };
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &(i, ki, j, kj) in &joints {
+            let (Some(p), Some(q)) = (end_now(&stands, i, ki), end_now(&stands, j, kj)) else { continue };
+            if p.dist(q) > solidcraft_sketch::ENDPOINT_JOIN_TOL {
+                for k in [i, j] {
+                    if let Some(s) = stands.get_mut(k).filter(|s| **s) {
+                        *s = false;
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+    for (i, g) in fitted.iter().enumerate() {
+        match g {
+            LinkGeom::Arc { a: a0, b: b0, .. } => {
+                let (true, Some(refined @ LinkGeom::Arc { a: a1, b: b1, .. })) =
+                    (stands.get(i).copied().unwrap_or(false), refits.get(i).and_then(Option::as_ref))
+                else {
+                    continue;
+                };
+                for h in v.iter_mut() {
+                    if let LinkGeom::Line(s, t) = h {
+                        for end in [s, t] {
+                            if end.dist(*a0) <= meet {
+                                *end = *a1;
+                            } else if end.dist(*b0) <= meet {
+                                *end = *b1;
+                            }
+                        }
+                    }
+                }
+                if let Some(slot) = v.get_mut(i) {
+                    *slot = refined.clone();
+                }
+            }
+            LinkGeom::Circle(..) => {
+                if let Some(slot) = v.get_mut(i) {
+                    *slot = refine_round(g.clone(), exact, size * 2e-3);
+                }
+            }
+            // Lines have moved with the arcs they meet; nothing else is refitted.
+            _ => {}
+        }
+    }
+    v
 }
 
 /// Re-fit a circle or arc through the exact section points near it, when there are enough.

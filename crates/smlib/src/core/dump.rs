@@ -6,7 +6,7 @@
 //! fails, so a call that answers costs nothing more than it would with no folder.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use solidcore::kernel::Kernel;
@@ -90,6 +90,7 @@ plain!(
     bool,
     f64,
     usize,
+    [usize; 2],
     [usize; 3],
     ([f64; 3], [f64; 3]),
     Vec<u8>,
@@ -97,35 +98,36 @@ plain!(
     Brep,
     solidcore::geom::vector3d::Point3,
     crate::history::Raw,
-    crate::MassProperties
+    crate::MassProperties,
+    Vec<crate::trace::Pick>
 );
 
 impl<T> Answer for Option<T> {}
 
-/// The longest call name [`current`] gives.
-const NAME_MAX: usize = 96;
-static NAME: [AtomicU8; NAME_MAX] = [const { AtomicU8::new(0) }; NAME_MAX];
-static NAME_LEN: AtomicUsize = AtomicUsize::new(0);
+/// The calls running now, in the order they started.
+static IN_FLIGHT: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
-/// `call` is running now (`None`: none is). One at a time, under the kernel's lock.
-pub(super) fn set_current(call: Option<&str>) {
-    NAME_LEN.store(0, Ordering::SeqCst);
-    let Some(call) = call else { return };
-    let bytes = call.as_bytes();
-    let n = bytes.len().min(NAME_MAX);
-    for (slot, b) in NAME.iter().zip(bytes) {
-        slot.store(*b, Ordering::Relaxed);
+/// A call in [`current`]'s list until dropped.
+pub(super) struct InFlight(&'static str);
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        let mut calls = IN_FLIGHT.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(at) = calls.iter().position(|c| *c == self.0) {
+            calls.remove(at);
+        }
     }
-    NAME_LEN.store(n, Ordering::SeqCst);
 }
 
-/// The call running now. Takes no lock, for crash reports, so it may be cut short or mixed with the
-/// next call's name if read just as one starts.
+/// `call` is running from now until the answer is dropped.
+pub(super) fn in_flight(call: &'static str) -> InFlight {
+    IN_FLIGHT.lock().unwrap_or_else(PoisonError::into_inner).push(call);
+    InFlight(call)
+}
+
+/// The calls running now, joined by commas. Never waits, for crash reports: `None` as well if a
+/// call is starting or ending at this very moment.
 pub(crate) fn current() -> Option<String> {
-    let n = NAME_LEN.load(Ordering::SeqCst);
-    if n == 0 {
-        return None;
-    }
-    let bytes: Vec<u8> = NAME.iter().take(n).map(|b| b.load(Ordering::Relaxed)).collect();
-    Some(String::from_utf8_lossy(&bytes).into_owned())
+    let calls = IN_FLIGHT.try_lock().ok()?;
+    (!calls.is_empty()).then(|| calls.join(", "))
 }

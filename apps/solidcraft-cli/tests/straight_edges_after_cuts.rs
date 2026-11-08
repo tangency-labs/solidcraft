@@ -5,13 +5,14 @@
 //! vertices nothing else used, so an edge that is one straight line was drawn (and lit on hover)
 //! as many pieces, and a sketch on such a face projected every piece.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::kernel::{FaceSurface, face_surface};
-use solidcraft_engine::geom::Vec3;
 
 fn design() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/action_matrix/designs/crazy-geom-cuts.sc")

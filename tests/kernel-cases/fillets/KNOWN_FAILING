@@ -4,8 +4,6 @@
 1080-fillet-equal-slope-basin-1-mm-rim-loop-4 [fail] continuity_order: got {'body': 'Slab', 'edges': 'blend', 'order': 'g0',  want >= g1 at every blend seam
 1080-fillet-sloped-basin-1-mm-rim-r4-2-edges [fail] continuity_order: got {'body': 'Slab', 'edges': 'blend', 'order': 'g0',  want >= g1 at every blend seam
 1080-fillet-sloped-basin-1-mm-rim-r4-4-edges [fail] continuity_order: got {'body': 'Slab', 'edges': 'blend', 'order': 'g0',  want >= g1 at every blend seam
-2893-chamfer-distance-and-angle-past-the-wall-refused [fail] refused, but not because "angle": step 2 (solid.chamfer): SMLib chamfer: operation: SMLib rejected the input (SM_ERR_INVALID_INPUT)
-2893-chamfer-two-distances-elliptical-rim [fail] refused, but not because "not supported yet": step 3 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: 
 4782-fillet-bar-edge-wider-than-both-faces [fail] continuity_order: got Box: no null seams want >= g1 at every blend seam
 9-fillet-corner-curvature-with-reduce-fit [unsupported] solid.fillet builds `corner: g2` with `fit: exact` only
 9-fillet-corner-curvature-with-taper-fit [unsupported] solid.fillet builds `corner: g2` with `fit: exact` only
@@ -15,12 +13,8 @@ cov-fillet-g2-four-edge-apex-corner [fail] step 11 (solid.fillet): invalid input
 cov-fillet-g2-mixed-corner [unsupported] refused as on SMLib d01d7b0: a G2 corner is set back only where every edge meeting it is rounded and all are convex or all concave
 cov-fillet-g2-oblique-three-edge-corner [unsupported] refused on solidcore: its three edges meet at different wedge angles, and one curvature fillet takes the first edge's equal-area thumbweight for every edge (solidcore#2250, issuecomment-6563419897); SMLib d01d7b0 fails it too
 cov-fillet-g2-pocket-corner [fail] continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0
-cov-fillet-turn-swept-boss-base-r1 [fail] as on SMLib: solid.fillet has no `turn`; the corners are mitred (12508.9675, the Mitre case's volume)
-cov-fillet-turn-swept-pocket-sharp-corner-refused-r1 [fail] as on SMLib: solid.fillet has no `turn`, so the sharp concave corners are mitred, not refused
 cov-junction-boss-tilt-20-root-round [fail] fillet status 1001 on a cylinder tilted 20 degrees into the plate, as on SMLib
-cov-junction-boss-tilt-40-root-round [fail] fillet status 1001 on a cylinder tilted 40 degrees into the plate, as on SMLib
-cov-junction-tee-equal-round [fail] the result is not a closed solid, as on SMLib: equal pipes' intersection is two plane ellipses crossing, a corner the old corner code cannot join (the corner step)
 cov-junction-y-junction-120-round [unsupported] refused as on SMLib: the faces between the three intersection curves narrow to nothing at the two triple points, so the room check trips (the corner step)
-report-drafted-peg-front-and-concave-rounds-together-r2 [unsupported] step 13 (solid.fillet): invalid input: not supported yet: the fillet meets a corner of this kind, which SMLib's blends do not handle yet (where its ed
 report-fillet-curvature-three-edges-at-bar-corner [fail] continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)
 report-fillet-curvature-three-edges-at-bar-corner-solver-residues [fail] continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)
+report-fillet-curvature-three-edges-at-bar-corner-solver-residues-outside-setback [unsupported] solidcore#2697: solidcore's own filled corner builds this to its closed form (7e-11); SolidCraft's least-squares fit misses curvature by 4.02e-3 against 2.5e-3 at this pin

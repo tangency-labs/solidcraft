@@ -33,6 +33,7 @@ mod offset;
 mod offset_topology;
 mod pattern;
 mod periodic;
+pub mod pierce;
 mod profiles;
 #[cfg(feature = "solver-profiling")]
 pub mod profiling;
@@ -67,14 +68,14 @@ pub use offset_topology::{OffsetCreated, OffsetRole, OffsetRoleFlags, OffsetRole
 pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
 pub use periodic::periodic_beziers;
 pub use profiles::{
-    CurvePick, MAX_PROFILE_EDGES, Profile, ProfileSearch, distinct_curves, find_drawn_profiles, find_profiles, find_profiles_checked, merge_regions,
-    profile_at_point, profile_by_curves, without_text_counters,
+    CurvePick, ENDPOINT_JOIN_TOL, MAX_PROFILE_EDGES, Profile, ProfileSearch, distinct_curves, find_drawn_profiles, find_profiles,
+    find_profiles_checked, merge_regions, profile_at_point, profile_by_curves, without_text_counters,
 };
 pub use shape::{Shape, intersections, intersections_within, nearest_crossing, nearest_curve_intersection};
 pub use solver::solve_after_edit_with_analysis;
 pub use solver::{
     Analysis, CONSISTENT, DrivingValues, Hold, MAX_COMPONENT_VARS, SolveReport, SolveStatus, constraint_residual, determined_by, fillets_kept,
-    flips_from_stored, measure_dimension, move_line_towards, move_point_towards, solve, solve_after_edit, solve_after_link_move,
+    flips_from_stored, measure_dimension, move_line_towards, move_point_towards, point_along, solve, solve_after_edit, solve_after_link_move,
     solve_after_value_edit, solve_holding, solve_with,
 };
 pub use text::{MAX_TEXT_CHARS, TextAlign, TextMetrics, TextStyle, text_geometry, text_geometry_in, text_geometry_styled};

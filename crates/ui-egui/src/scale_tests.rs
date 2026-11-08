@@ -277,6 +277,7 @@ pub(crate) fn view_frame(
         pv_key: 0,
         pv_slot: none(),
         pv_hide: false,
+        preview_bounds: None,
         view_proj: proj.vp.to_f32(),
         back: proj.cam.back().to_f32(),
         size_px: [size as f32; 2],
@@ -296,6 +297,7 @@ pub(crate) fn view_frame(
         hover_tint: [f32::from(t.hover_face_lift) / 255.0; 3],
         selection_tint: [0.4, 0.6, 0.9],
         hatch: Default::default(),
+        moving: None,
     }
 }
 
@@ -618,7 +620,7 @@ fn zoomed_view_frame_cost() {
 #[test]
 #[ignore = "manual highlight measurement"]
 fn many_selected_bodies_hover_cost() {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let mut h = match std::env::var_os("SOLIDCRAFT_SCALE_DESIGN") {
         Some(path) => {
             let mut h = Harness::new();

@@ -2,8 +2,9 @@
 //! keeps its place on the face, and `component.move_sketches.to_parts` (#10218) moves sketches
 //! to the part whose face they are drawn on.
 use serde_json::{Value, json};
+use solidcore_record::Plane;
 use solidcraft_doc::{EmbossFace, FeatureKind, PlaneRef, apply_point, apply_vector, mat_inverse, mat_mul};
-use solidcraft_geom::Plane;
+use solidcraft_geom::prelude::*;
 
 use crate::params::{bad, name_or_id_list};
 use crate::schema::component::{MoveSketchesToPartsResult, SketchKeptInPlace, SketchMovedToPart};
@@ -35,7 +36,9 @@ pub(super) fn reauthor(s: &mut Session, id: u64, to: u64, cmd: &str) -> Result<(
     if from == to {
         return Ok(());
     }
-    let doc = s.placed_document();
+    // Both placements as the design has them: an exploded view shown would move the sketch by
+    // the difference of its offsets.
+    let doc = s.design_document();
     let path = if to == anchor.component {
         anchor.path.clone()
     } else if to == 0 {

@@ -1,8 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use crate::Session;
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{Document, FeatureKind, PlaneRef};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 fn run(s: &mut Session, command: &str, params: Value) -> Value {

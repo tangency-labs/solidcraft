@@ -1,6 +1,7 @@
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI};
 
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 
 use crate::*;
 
@@ -276,6 +277,94 @@ fn circles_tangent_equal_concentric() {
     sk.add_constraint(Concentric { a: c3, b: c2 }, None).unwrap();
     assert!(solve(&mut sk).ok());
     assert!(sk.center(c3).unwrap().dist(sk.center(c2).unwrap()) < 1e-7);
+}
+
+/// The least and greatest of `gap` over many points along a free-form curve, read from its own
+/// definition (not the solver's polyline).
+fn freeform_gap_range(sk: &Sketch, c: usize, gap: impl Fn(Vec2) -> f64) -> (f64, f64) {
+    let p = |i: usize| sk.points[i].pos;
+    let n = 20_000;
+    let at: Box<dyn Fn(f64) -> Vec2> = match sk.curves[c].kind {
+        CurveKind::Ellipse { c, m, r } => Box::new(move |t| crate::curves::ellipse_point(p(c), p(m), r, t * 2.0 * PI)),
+        CurveKind::Conic { a, b, apex, rho } => Box::new(move |t| crate::curves::conic_point(p(a), p(apex), p(b), rho, t)),
+        _ => panic!("not an ellipse or a conic"),
+    };
+    (0..=n).map(|i| gap(at(i as f64 / n as f64))).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), g| (lo.min(g), hi.max(g)))
+}
+
+/// Touching means the gap reaches zero on one side only: `(least, greatest)` crossing zero is a
+/// crossing.
+fn assert_touches(what: &str, (lo, hi): (f64, f64)) {
+    let near = if lo.abs() < hi.abs() { lo } else { hi };
+    assert!(near.abs() < 1e-3 && (lo > -1e-3 || hi < 1e-3), "{what}: the gap runs from {lo} to {hi}");
+}
+
+/// A tangent to an ellipse or a conic keeps the curves touching, also once the geometry moves:
+/// a crossing has a zero gap as well, and was taken for a touch (#11535).
+#[test]
+fn a_tangent_to_an_ellipse_or_a_conic_touches_and_never_crosses() {
+    use ConstraintKind::*;
+    let side = |a: Vec2, b: Vec2| move |q: Vec2| (b - a).cross(q - a) / a.dist(b);
+    // A line on an ellipse (a 30, b 15), then the line's end dragged to (38, 6).
+    let mut sk = Sketch::new();
+    let (ec, em) = (sk.add_point(v(0.0, 0.0), None).unwrap(), sk.add_point(v(30.0, 0.0), None).unwrap());
+    let e = sk.add_curve(CurveKind::Ellipse { c: ec, m: em, r: 15.0 }, None).unwrap();
+    let l = sk.add_line(v(-20.0, 25.0), v(40.0, 20.0), None, None, None).unwrap();
+    sk.add_constraint(Tangent { a: l, b: e }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let (a, b) = line_pts(&sk, l);
+    assert_touches("the line", freeform_gap_range(&sk, e, side(a, b)));
+    let CurveKind::Line { b: end, .. } = sk.curves[l].kind else { panic!("a line") };
+    sk.points[end].pos = v(38.0, 6.0);
+    let hold = Hold { points: vec![ec, em, end], radii: vec![e] };
+    assert!(solve_holding(&mut sk, &hold).ok());
+    let (a, b) = line_pts(&sk, l);
+    assert_touches("the line dragged", freeform_gap_range(&sk, e, side(a, b)));
+
+    // A circle of radius 10 on the same ellipse, then the major axis's end dragged from 30 to 36.
+    let mut sk = Sketch::new();
+    let (ec, em) = (sk.add_point(v(0.0, 0.0), None).unwrap(), sk.add_point(v(30.0, 0.0), None).unwrap());
+    let e = sk.add_curve(CurveKind::Ellipse { c: ec, m: em, r: 15.0 }, None).unwrap();
+    let c = sk.add_circle(v(45.0, 12.0), 10.0, None, None).unwrap();
+    sk.add_constraint(Radius { c, value: 10.0 }, None).unwrap();
+    sk.add_constraint(Tangent { a: e, b: c }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let round = |sk: &Sketch| {
+        let (cc, r) = (sk.center(c).unwrap(), sk.radius(c).unwrap());
+        move |q: Vec2| q.dist(cc) - r
+    };
+    assert_touches("the circle", freeform_gap_range(&sk, e, round(&sk)));
+    sk.points[em].pos = v(36.0, 0.0);
+    assert!(solve_holding(&mut sk, &Hold { points: vec![ec, em], radii: vec![e] }).ok());
+    assert_touches("the circle on the longer ellipse", freeform_gap_range(&sk, e, round(&sk)));
+
+    // A line on a conic arch, then the line's end dragged down to (45, 2).
+    let mut sk = Sketch::new();
+    let [ca, cb, apex] = [v(0.0, 0.0), v(40.0, 0.0), v(20.0, 20.0)].map(|p| sk.add_point(p, None).unwrap());
+    let k = sk.add_curve(CurveKind::Conic { a: ca, b: cb, apex, rho: 0.5 }, None).unwrap();
+    let l = sk.add_line(v(-10.0, 15.0), v(50.0, 12.0), None, None, None).unwrap();
+    sk.add_constraint(Tangent { a: l, b: k }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let (a, b) = line_pts(&sk, l);
+    assert_touches("the line on the conic", freeform_gap_range(&sk, k, side(a, b)));
+    let CurveKind::Line { b: end, .. } = sk.curves[l].kind else { panic!("a line") };
+    sk.points[end].pos = v(45.0, 2.0);
+    assert!(solve_holding(&mut sk, &Hold { points: vec![ca, cb, apex, end], radii: vec![] }).ok());
+    let (a, b) = line_pts(&sk, l);
+    assert_touches("the line on the conic dragged", freeform_gap_range(&sk, k, side(a, b)));
+
+    // A line that crosses the arch from end to end (x = 20 through the apex's span): the gap is
+    // monotone and ~0 at the crossing, which is not a touch.
+    let mut sk = Sketch::new();
+    let [ca, cb, apex] = [v(0.0, 0.0), v(40.0, 0.0), v(20.0, 20.0)].map(|p| sk.add_point(p, None).unwrap());
+    let k = sk.add_curve(CurveKind::Conic { a: ca, b: cb, apex, rho: 0.5 }, None).unwrap();
+    let l = sk.add_line(v(20.0, -10.0), v(20.0, 40.0), None, None, None).unwrap();
+    sk.add_constraint(Tangent { a: l, b: k }, None).unwrap();
+    // The solver may report it cannot do it, but it must never call the crossing a touch.
+    if solve(&mut sk).ok() {
+        let (a, b) = line_pts(&sk, l);
+        assert_touches("the line across the conic", freeform_gap_range(&sk, k, side(a, b)));
+    }
 }
 
 #[test]
@@ -787,13 +876,15 @@ fn curves_lying_on_one_another_do_not_chain_past_the_tolerance() {
 
 #[test]
 fn merging_adjacent_regions() {
-    let a =
-        solidcraft_geom::Region2 { outer: solidcraft_geom::Loop2::polygon(&[v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)]), holes: vec![] };
-    let b = solidcraft_geom::Region2 {
-        outer: solidcraft_geom::Loop2::polygon(&[v(10.0, 0.0), v(20.0, 0.0), v(20.0, 10.0), v(10.0, 10.0)]),
+    let a = solidcore_record::Region2 {
+        outer: solidcore_record::Loop2::polygon(&[v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)]),
         holes: vec![],
     };
-    let c = solidcraft_geom::Region2 { outer: solidcraft_geom::Loop2::polygon(&[v(50.0, 0.0), v(60.0, 0.0), v(60.0, 10.0)]), holes: vec![] };
+    let b = solidcore_record::Region2 {
+        outer: solidcore_record::Loop2::polygon(&[v(10.0, 0.0), v(20.0, 0.0), v(20.0, 10.0), v(10.0, 10.0)]),
+        holes: vec![],
+    };
+    let c = solidcore_record::Region2 { outer: solidcore_record::Loop2::polygon(&[v(50.0, 0.0), v(60.0, 0.0), v(60.0, 10.0)]), holes: vec![] };
     let m = merge_regions(&[a, b, c]);
     assert_eq!(m.len(), 2);
     let mut areas: Vec<f64> = m.iter().map(|r| r.area()).collect();
@@ -953,7 +1044,7 @@ fn links_update_in_place_rebuild_and_break() {
 /// end in "face of " with nothing after the "of" (#4929).
 #[test]
 fn a_source_without_a_body_name_names_its_kind_alone() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let at = Vec3::ZERO;
     for (source, expected) in [
         (LinkSource::Edge { body: String::new(), at }, "edge"),
@@ -1017,7 +1108,7 @@ fn long_connected_chain_solves() {
 /// cut in two by a line through it (each side gets an exact sub-curve ending on the line).
 #[test]
 fn exact_profiles_for_high_degree_and_cut_free_form_curves() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     let exact_loop = |p: &Profile| p.region.outer.segs.iter().all(|s| !matches!(s, Seg2::Line { .. }) || s.length() > 1.0);
     let closed = |p: &Profile| p.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-9);
     // Degree 5 over six points, closed by a line.
@@ -1650,6 +1741,67 @@ fn rounded_rectangles_sharing_their_sides_leave_every_profile_closed() {
     }
 }
 
+/// A Pierce constraint holds a point of this sketch where a curve of another sketch crosses
+/// the plane of this one (#3599): the point of the XY sketch sits where the XZ sketch's line
+/// crosses it, and stays there.
+#[test]
+fn a_pierce_constraint_holds_its_point_where_the_other_sketches_curve_crosses_this_plane() {
+    let mut sk = Sketch::new();
+    let p = sk.add_point(v(20.0, 20.0), None).unwrap();
+    // The other sketch's line on the XZ plane: it crosses the XY plane at (5, 0, 0).
+    let world = vec![Vec3::new(5.0, 0.0, -5.0), Vec3::new(5.0, 0.0, 5.0)];
+    sk.add_constraint(ConstraintKind::Pierce { p, sketch: 7, curve: "l1".into(), plane: Plane::XY, world }, None).unwrap();
+    let report = solve(&mut sk);
+    assert!(report.ok(), "{report:?}");
+    let at = sk.points[p].pos;
+    assert!((at.x - 5.0).abs() < 1e-9 && at.y.abs() < 1e-9, "{at:?}");
+    // The point sits in the plane: nothing off it.
+    assert!(Plane::XY.height(Plane::XY.to_world(at)).abs() < 1e-9);
+}
+
+/// The point follows the curve of the other sketch: the curve moves across this plane, the
+/// pierced point moves with it.
+#[test]
+fn a_pierced_point_follows_the_curve_of_the_other_sketch() {
+    let mut sk = Sketch::new();
+    let p = sk.add_point(v(20.0, 20.0), None).unwrap();
+    let world = vec![Vec3::new(5.0, 0.0, -5.0), Vec3::new(5.0, 0.0, 5.0)];
+    sk.add_constraint(ConstraintKind::Pierce { p, sketch: 7, curve: "l1".into(), plane: Plane::XY, world }, None).unwrap();
+    solve(&mut sk);
+    assert!((sk.points[p].pos.x - 5.0).abs() < 1e-9, "{:?}", sk.points[p].pos);
+
+    // The other sketch's line moves across this plane.
+    if let ConstraintKind::Pierce { world, .. } = &mut sk.constraints[0].kind {
+        *world = vec![Vec3::new(7.0, 0.0, -5.0), Vec3::new(7.0, 0.0, 5.0)];
+    }
+    solve(&mut sk);
+    assert!((sk.points[p].pos.x - 7.0).abs() < 1e-9, "{:?}", sk.points[p].pos);
+}
+
+/// A pierce needs a curve that meets this sketch's plane: a curve that never crosses it has
+/// no point to pierce, and the constraint is refused.
+#[test]
+fn a_pierce_constraint_whose_curve_never_crosses_the_plane_is_refused() {
+    let mut sk = Sketch::new();
+    let p = sk.add_point(v(20.0, 20.0), None).unwrap();
+    // A line on the XZ plane that stays above the XY plane: it never reaches it.
+    let world = vec![Vec3::new(5.0, 0.0, 1.0), Vec3::new(5.0, 0.0, 5.0)];
+    let e = sk.add_constraint(ConstraintKind::Pierce { p, sketch: 7, curve: "l1".into(), plane: Plane::XY, world }, None).unwrap_err().to_string();
+    assert!(e.contains("cross"), "{e}");
+}
+
+/// A pierce renumbers with the sketch: its point is renumbered, the curve of the other
+/// sketch is not (it has no index here).
+#[test]
+fn a_pierce_constraint_remaps_its_point() {
+    let mut kind = ConstraintKind::Pierce { p: 3, sketch: 7, curve: "l1".into(), plane: Plane::XY, world: vec![] };
+    assert!(kind.remap(&|i| Some(i + 1), &|_| Some(0)));
+    assert!(matches!(kind, ConstraintKind::Pierce { p: 4, .. }), "{kind:?}");
+    // A point with no new number leaves the constraint partly renumbered: it must go.
+    let mut kind = ConstraintKind::Pierce { p: 3, sketch: 7, curve: "l1".into(), plane: Plane::XY, world: vec![] };
+    assert!(!kind.remap(&|_| None, &|_| Some(0)));
+}
+
 /// A drag step that cannot succeed gives up once the iteration has stalled (#6606). Holding
 /// the two right corners of a rectangle further apart than its dimensioned left side leaves the
 /// left corners a least-squares valley (the perpendicular repeats what horizontal and vertical
@@ -1709,4 +1861,64 @@ fn pattern_upkeep_does_not_search_ids_per_copy() {
     sk.refresh_pattern_shapes();
     assert_eq!(ID_SEARCHES.with(std::cell::Cell::get), 0, "id searches in pattern upkeep");
     assert!(sk.curves.iter().all(|c| c.reversed));
+}
+
+/// A fillet whose corner the solve leaves where it is stays that corner's arc, even when the
+/// reference it is judged against (the positions before a move, here the corner mirrored) shows
+/// it the other way round: ending its sweep where it started is no turn of the corner, and
+/// swapping its ends would make the fillet its long complement. A corner of 135° (lines turning
+/// by 45°), all its points fixed.
+#[test]
+fn a_fillet_the_solve_leaves_in_place_keeps_its_short_arc_against_a_mirrored_reference() {
+    let mut sk = Sketch::new();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let l1 = sk.add_line(v(10.0, 10.0), v(35.0, 10.0), None, None, None).unwrap();
+    let CurveKind::Line { b: ta, .. } = sk.curves[l1].kind else { panic!() };
+    let end = v(35.0 + 5.0 * s, 15.0 - 5.0 * s);
+    let arc = sk.add_arc(v(35.0, 15.0), v(35.0, 10.0), end, [None, Some(ta), None], None).unwrap();
+    let CurveKind::Arc { b: tb, .. } = sk.curves[arc].kind else { panic!() };
+    let l2 = sk.add_line(end, end + v(10.0, 10.0), Some(tb), None, None).unwrap();
+    sk.add_constraint(ConstraintKind::Radius { c: arc, value: 5.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l1, b: arc }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l2, b: arc }, None).unwrap();
+    for p in &mut sk.points {
+        p.fixed = true;
+    }
+    assert!(solve(&mut sk).ok());
+    assert!((sweep_deg(&sk, arc) - 45.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
+    let mirrored: Vec<Vec2> = sk.points.iter().map(|p| v(80.0 - p.pos.x, p.pos.y)).collect();
+    let rep = solve_with(&mut sk, &Hold::default(), Some(&mirrored), Analysis::Full, None);
+    assert!(rep.ok(), "{rep:?}");
+    assert!((sweep_deg(&sk, arc) - 45.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
+    assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
+}
+
+/// A fillet over three quarters of a turn (the round end of a drop shape) whose corner really
+/// mirrored, its arc's ends as they were, stays the long arc its lines leave: judged against the
+/// corner before the mirror its sweep jumps, but its lines already leave it, so no swap makes it
+/// the short complement with both lines cutting back through it.
+#[test]
+fn a_mirrored_fillet_over_three_quarters_of_a_turn_stays_the_arc_its_lines_leave() {
+    let mut sk = Sketch::new();
+    let (fa, fb) = (-FRAC_PI_2, -FRAC_PI_2 + 300f64.to_radians());
+    let (pa, pb) = (Vec2::from_angle(fa) * 5.0, Vec2::from_angle(fb) * 5.0);
+    let (da, db) = (v(-fa.sin(), fa.cos()), v(-fb.sin(), fb.cos()));
+    let l1 = sk.add_line(pa - da * 10.0, pa, None, None, None).unwrap();
+    let CurveKind::Line { b: ta, .. } = sk.curves[l1].kind else { panic!() };
+    let arc = sk.add_arc(v(0.0, 0.0), pa, pb, [None, Some(ta), None], None).unwrap();
+    let CurveKind::Arc { b: tb, .. } = sk.curves[arc].kind else { panic!() };
+    let l2 = sk.add_line(pb, pb + db * 10.0, Some(tb), None, None).unwrap();
+    sk.add_constraint(ConstraintKind::Radius { c: arc, value: 5.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l1, b: arc }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l2, b: arc }, None).unwrap();
+    assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
+    let before: Vec<Vec2> = sk.points.iter().map(|p| p.pos).collect();
+    for p in &mut sk.points {
+        p.pos = v(-p.pos.x, p.pos.y);
+        p.fixed = true;
+    }
+    let rep = solve_with(&mut sk, &Hold::default(), Some(&before), Analysis::Full, None);
+    assert!(rep.ok(), "{rep:?}");
+    assert!((sweep_deg(&sk, arc) - 300.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
+    assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
 }

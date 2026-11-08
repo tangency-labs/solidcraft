@@ -4,7 +4,8 @@
 
 use std::sync::Arc;
 
-use solidcraft_geom::{Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
 
 use crate::SceneAnalysis;
 use crate::hatch::{HATCH_COLOURS, Hatch};

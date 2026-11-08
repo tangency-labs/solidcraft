@@ -1,34 +1,54 @@
 //! Sketch drawing exchange: Insert DXF, Insert SVG and sketch DXF export.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
-use solidcraft_io::{Geom2, MAX_DRAWING_BYTES};
-use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, Sketch};
+use solidcore_record::Vec2;
+use solidcraft_io::{DxfEntity, DxfLayer, Geom2, MAX_DRAWING_BYTES};
+use solidcraft_sketch::{Analysis, CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::CommandSpec;
-use super::sketch::{edit, ids_of};
+use super::sketch::{Left, edit_solved, ids_of};
 use super::sketch_store;
 use crate::params::{bad, num, str_, vec2};
+use crate::schema::sketch_import::{DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams, SketchSolve};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const INSERT_DXF_CONTRACT: TypedContract<InsertDxfParams> = TypedContract::new();
+const INSERT_SVG_CONTRACT: TypedContract<InsertSvgParams> = TypedContract::new();
+const EXPORT_DXF_CONTRACT: TypedContract<ExportDxfParams> = TypedContract::new();
+
+/// A command's reply as JSON, built from the type its output schema describes so the two can't
+/// drift apart.
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.insert_dxf", "Insert DXF", insert_dxf)
+    CommandSpec::new("sketch.insert_dxf", "Insert DXF", crate::checked!("sketch.insert_dxf", insert_dxf))
         .at("SKETCH", "INSERT")
         .icon("sketch_dxf")
+        .contract(&INSERT_DXF_CONTRACT)
+        .output(output_schema_for::<DrawingInserted>)
         .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
-    CommandSpec::new("sketch.insert_svg", "Insert SVG", insert_svg)
+    CommandSpec::new("sketch.insert_svg", "Insert SVG", crate::checked!("sketch.insert_svg", insert_svg))
         .at("SKETCH", "INSERT")
         .icon("svg")
+        .contract(&INSERT_SVG_CONTRACT)
+        .output(output_schema_for::<DrawingInserted>)
         .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.drawing_bounds", "Drawing Size", drawing_bounds)
         .icon("svg")
         .noundo()
         .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); returns min, max, width and height in the file's own size"),
-    CommandSpec::new("sketch.export_dxf", "Save As DXF", export_dxf).icon("sketch_dxf")
+    CommandSpec::new("sketch.export_dxf", "Save As DXF", crate::checked!("sketch.export_dxf", export_dxf))
+        .icon("sketch_dxf")
         .noundo()
-        .params("sketch?: id|name (default active); path?: file to write (else the DXF text is returned)"),
+        .contract(&EXPORT_DXF_CONTRACT)
+        .output(output_schema_for::<ExportDxfResult>)
+        .params("sketch?: id|name (default active); path?: file to write (else the DXF text is returned); units?: \"design\" | \"in\" | \"inch\" | \"mm\" | \"cm\" | \"m\" | \"ft\" (default mm); layer?: profile layer name (default \"0\"); layers?: \"single\" | \"roles\" (default \"single\": all on `layer`; \"roles\": outer on \"OUTLINE\", holes on \"CUT\"); join?: bool (default false: R12 LINE/ARC; true: closed loops as LWPOLYLINE with arc bulges)"),
 ];
 
 /// The sketch import command for a drawing file name, regardless of extension case.
@@ -169,7 +189,7 @@ fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
             // Points along the curve, not its apex, which can lie well outside it (an elliptical
             // arc of a DXF comes in as conics, #8155).
             Geom2::Conic { a, apex, b, rho } if *rho > 0.0 && *rho < 1.0 => {
-                let seg = solidcraft_geom::Seg2::Conic { a: *a, apex: *apex, b: *b, w: rho / (1.0 - rho) };
+                let seg = solidcore_record::Seg2::Conic { a: *a, apex: *apex, b: *b, w: rho / (1.0 - rho) };
                 pts.extend((0..=64).map(|i| seg.point_at(f64::from(i) / 64.0)));
             }
             Geom2::Conic { a, apex, b, .. } => pts.extend([*a, *apex, *b]),
@@ -250,10 +270,13 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
     if geom.len() > solidcraft_sketch::MAX_POINTS {
         return Err(solidcraft_sketch::SketchError::TooLarge.into());
     }
-    let ((curves, texts), info) = edit(s, p, cmd, false, |sk, _| {
+    // `sketch::edit`, but keeping the solve as a typed value for the reply.
+    let target = sketch_store::target(s, p, cmd)?;
+    let ((curves, texts), report) = edit_solved(s, target, false, Analysis::Freedom, |sk, _| {
         let (cs, texts) = add_geometry(sk, &geom, &f, k, tol)?;
-        Ok((ids_of(sk, &cs), texts))
+        Ok(((ids_of(sk, &cs), texts), Left::Unsolved))
     })?;
+    let info = report.map(|rep| SketchSolve { solved: rep.keeps_orientation(), dof: rep.dof });
     // Text becomes sketch text.
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch"))?;
     let mut n_text = 0;
@@ -278,7 +301,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             }
         }
     }
-    Ok(json!({"sketch": id, "created_sketch": created, "curves": curves.len(), "texts": n_text, "info": info}))
+    reply(cmd, DrawingInserted { sketch: id, created_sketch: created, curves: curves.len(), texts: n_text, info, param_warnings: Vec::new() })
 }
 
 fn insert_dxf(s: &mut Session, p: &Value) -> Result<Value> {
@@ -289,39 +312,249 @@ fn insert_svg(s: &mut Session, p: &Value) -> Result<Value> {
     insert(s, p, "sketch.insert_svg", true)
 }
 
+fn sorted_curve_ids<'a>(ids: &'a [String]) -> Vec<&'a str> {
+    let mut v: Vec<&'a str> = ids.iter().map(String::as_str).collect();
+    v.sort_unstable();
+    v
+}
+
 fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.export_dxf";
     let id = sketch_store::target(s, p, cmd)?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
     let sk = &ss.sketch;
-    let mut geom = Vec::new();
-    for (i, c) in sk.curves.iter().enumerate() {
-        if c.construction {
-            continue;
-        }
-        let pt = |k: usize| sk.point(k).unwrap_or_default();
-        match &c.kind {
-            CurveKind::Line { a, b } => geom.push(Geom2::Line(pt(*a), pt(*b))),
-            CurveKind::Circle { c, r } => geom.push(Geom2::Circle(pt(*c), *r)),
-            CurveKind::Arc { c, a, b } => geom.push(Geom2::Arc { c: pt(*c), a: pt(*a), b: pt(*b) }),
-            _ => {
-                let poly = sk.polyline(i);
-                geom.extend(poly.windows(2).map(|w| Geom2::Line(w[0], w[1])));
+
+    let units_val = p.get("units").filter(|v| !v.is_null());
+    if let Some(v) = units_val
+        && !v.is_string()
+    {
+        return Err(bad(cmd, "`units` must be a string"));
+    }
+    let units_param = str_(p, "units").map(str::to_ascii_lowercase);
+    let (insunits, scale) = match units_param.as_deref() {
+        None => (4, 1.0),
+        Some("design") => {
+            let doc_units = solidcraft_doc::expr::length_unit_or_mm(&s.doc.units);
+            match doc_units.to_ascii_lowercase().as_str() {
+                "in" | "inch" => (1, 1.0 / 25.4),
+                "ft" => (2, 1.0 / 304.8),
+                "cm" => (5, 0.1),
+                "m" => (6, 0.001),
+                _ => (4, 1.0),
             }
         }
+        Some("in" | "inch") => (1, 1.0 / 25.4),
+        Some("ft") => (2, 1.0 / 304.8),
+        Some("mm") => (4, 1.0),
+        Some("cm") => (5, 0.1),
+        Some("m") => (6, 0.001),
+        Some(other) => {
+            return Err(bad(cmd, format!("unsupported unit `{other}` (use \"design\", \"mm\", \"in\", \"cm\", \"m\", or \"ft\")")));
+        }
+    };
+
+    let layer_val = p.get("layer").filter(|v| !v.is_null());
+    if let Some(v) = layer_val
+        && !v.is_string()
+    {
+        return Err(bad(cmd, "`layer` must be a string"));
     }
-    let text = solidcraft_io::write_dxf(&geom);
+    let custom_layer = str_(p, "layer").map(str::trim).filter(|s| !s.is_empty());
+
+    let layers_val = p.get("layers").filter(|v| !v.is_null());
+    if let Some(v) = layers_val
+        && !v.is_string()
+    {
+        return Err(bad(cmd, "`layers` must be \"single\" or \"roles\""));
+    }
+    let roles_layers = match str_(p, "layers").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("single") => false,
+        Some("roles") => true,
+        Some(_) => return Err(bad(cmd, "`layers` must be \"single\" or \"roles\"")),
+    };
+
+    let join = match p.get("join").filter(|v| !v.is_null()) {
+        None => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(bad(cmd, "`join` must be true or false")),
+    };
+
+    let path_val = p.get("path").filter(|v| !v.is_null());
+    if let Some(v) = path_val
+        && !v.is_string()
+    {
+        return Err(bad(cmd, "`path` must be a string"));
+    }
+
+    let is_default = units_val.is_none() && layer_val.is_none() && layers_val.is_none() && !join;
+
+    let (text, entity_count) = if is_default {
+        let mut geom = Vec::new();
+        for (i, c) in sk.curves.iter().enumerate() {
+            if c.construction {
+                continue;
+            }
+            let pt = |k: usize| sk.point(k).unwrap_or_default();
+            match &c.kind {
+                CurveKind::Line { a, b } => geom.push(Geom2::Line(pt(*a), pt(*b))),
+                CurveKind::Circle { c, r } => geom.push(Geom2::Circle(pt(*c), *r)),
+                CurveKind::Arc { c, a, b } => geom.push(Geom2::Arc { c: pt(*c), a: pt(*a), b: pt(*b) }),
+                _ => {
+                    let poly = sk.polyline(i);
+                    geom.extend(poly.windows(2).map(|w| Geom2::Line(w[0], w[1])));
+                }
+            }
+        }
+        let count = geom.len();
+        (solidcraft_io::write_dxf(&geom), count)
+    } else if !join {
+        let hole_keys: std::collections::HashSet<Vec<&str>> =
+            ss.profiles.iter().flat_map(|p| p.hole_curves.iter().map(|h| sorted_curve_ids(h))).collect();
+
+        let mut outline_ids = std::collections::HashSet::new();
+        let mut cut_ids = std::collections::HashSet::new();
+        if roles_layers {
+            for prof in &ss.profiles {
+                for holes in &prof.hole_curves {
+                    for id in holes {
+                        cut_ids.insert(id.as_str());
+                    }
+                }
+                if !hole_keys.contains(&sorted_curve_ids(&prof.outer_curves)) {
+                    for id in &prof.outer_curves {
+                        outline_ids.insert(id.as_str());
+                    }
+                }
+            }
+        }
+        let base_layer = custom_layer.unwrap_or("0");
+        let mut entities = Vec::new();
+        for (i, c) in sk.curves.iter().enumerate() {
+            if c.construction {
+                continue;
+            }
+            let layer = if roles_layers {
+                if cut_ids.contains(c.id.as_str()) {
+                    "CUT"
+                } else if outline_ids.contains(c.id.as_str()) {
+                    "OUTLINE"
+                } else {
+                    base_layer
+                }
+            } else {
+                base_layer
+            };
+            let pt = |k: usize| sk.point(k).unwrap_or_default() * scale;
+            match &c.kind {
+                CurveKind::Line { a, b } => entities.push((layer, Geom2::Line(pt(*a), pt(*b)))),
+                CurveKind::Circle { c, r } => entities.push((layer, Geom2::Circle(pt(*c), *r * scale))),
+                CurveKind::Arc { c, a, b } => entities.push((layer, Geom2::Arc { c: pt(*c), a: pt(*a), b: pt(*b) })),
+                _ => {
+                    let poly = sk.polyline(i);
+                    for w in poly.windows(2) {
+                        entities.push((layer, Geom2::Line(w[0] * scale, w[1] * scale)));
+                    }
+                }
+            }
+        }
+        let count = entities.len();
+        (solidcraft_io::write_dxf_entities(&entities, insunits), count)
+    } else {
+        // join: true -> emit closed loops as LWPOLYLINE with bulges for arcs
+        let hole_keys: std::collections::HashSet<Vec<&str>> =
+            ss.profiles.iter().flat_map(|p| p.hole_curves.iter().map(|h| sorted_curve_ids(h))).collect();
+
+        let mut outline_ids = std::collections::HashSet::new();
+        let mut cut_ids = std::collections::HashSet::new();
+        for prof in &ss.profiles {
+            for id in &prof.outer_curves {
+                outline_ids.insert(id.as_str());
+            }
+            for holes in &prof.hole_curves {
+                for id in holes {
+                    cut_ids.insert(id.as_str());
+                }
+            }
+        }
+        let base_layer = custom_layer.unwrap_or("0");
+        let mut entities = Vec::new();
+        for prof in &ss.profiles {
+            if hole_keys.contains(&sorted_curve_ids(&prof.outer_curves)) {
+                continue;
+            }
+            let outer_layer = if roles_layers { "OUTLINE" } else { base_layer };
+            let shape = solidcraft_io::loop_lwpolyline_scaled(&prof.region.outer, scale);
+            entities.push(DxfEntity { layer: outer_layer.into(), shape });
+
+            for hole in &prof.region.holes {
+                let hole_layer = if roles_layers { "CUT" } else { base_layer };
+                let shape = solidcraft_io::loop_lwpolyline_scaled(hole, scale);
+                entities.push(DxfEntity { layer: hole_layer.into(), shape });
+            }
+        }
+        // Preserve any non-profile open curves as disconnected entities so nothing is lost
+        for (i, c) in sk.curves.iter().enumerate() {
+            if c.construction || outline_ids.contains(c.id.as_str()) || cut_ids.contains(c.id.as_str()) {
+                continue;
+            }
+            let pt = |k: usize| sk.point(k).unwrap_or_default() * scale;
+            match &c.kind {
+                CurveKind::Line { a, b } => {
+                    entities.push(DxfEntity { layer: base_layer.into(), shape: solidcraft_io::DxfShape::Line(pt(*a), pt(*b)) })
+                }
+                CurveKind::Circle { c, r } => {
+                    entities.push(DxfEntity { layer: base_layer.into(), shape: solidcraft_io::DxfShape::Circle { c: pt(*c), r: *r * scale } })
+                }
+                CurveKind::Arc { c, a, b } => {
+                    let center = pt(*c);
+                    let pa = pt(*a);
+                    let pb = pt(*b);
+                    let r = center.dist(pa);
+                    let a0 = (pa - center).angle().to_degrees().rem_euclid(360.0);
+                    let a1 = (pb - center).angle().to_degrees().rem_euclid(360.0);
+                    entities.push(DxfEntity { layer: base_layer.into(), shape: solidcraft_io::DxfShape::Arc { c: center, r, a0, a1 } });
+                }
+                _ => {
+                    let poly = sk.polyline(i);
+                    let points: Vec<Vec2> = poly.into_iter().map(|p| p * scale).collect();
+                    entities.push(DxfEntity { layer: base_layer.into(), shape: solidcraft_io::DxfShape::Polyline { points } });
+                }
+            }
+        }
+        let mut layer_names = std::collections::BTreeSet::new();
+        if roles_layers {
+            layer_names.insert("OUTLINE".to_string());
+            layer_names.insert("CUT".to_string());
+        }
+        for e in &entities {
+            layer_names.insert(e.layer.clone());
+        }
+        let layers: Vec<DxfLayer> = layer_names
+            .iter()
+            .map(|name| match name.as_str() {
+                "OUTLINE" => DxfLayer::new(name, 7),
+                "CUT" => DxfLayer::new(name, 4),
+                _ => DxfLayer::new(name, 7),
+            })
+            .collect();
+        let count = entities.len();
+        (solidcraft_io::write_dxf_drawing_units(&layers, &entities, insunits)?, count)
+    };
+
     if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty()) {
         solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-        return Ok(json!({"path": path, "entities": geom.len()}));
+        let exported = DxfExported::Written { path: path.to_string(), entities: entity_count };
+        return reply(cmd, ExportDxfResult { exported, param_warnings: Vec::new() });
     }
-    Ok(json!({"dxf": text, "entities": geom.len()}))
+    reply(cmd, ExportDxfResult { exported: DxfExported::Text { dxf: text, entities: entity_count }, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use solidcraft_geom::prelude::*;
+    use solidcraft_io::Geom2;
 
     use crate::Session;
 
@@ -492,6 +725,199 @@ mod tests {
             let mut p = json!({"text": PLATE});
             p.as_object_mut().unwrap().extend(bad.as_object().unwrap().clone());
             assert!(s.execute("sketch.insert_svg", &p).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn export_dxf_default_is_byte_identical_to_before() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+        s.execute("sketch.circle.center", &json!({"center": [15, 15], "radius": 5})).unwrap();
+
+        let out = s.execute("sketch.export_dxf", &json!({})).unwrap();
+        let text = out["dxf"].as_str().unwrap();
+
+        // Build expected R12 DXF exactly as before
+        let st = s.model.state();
+        let ss = st.sketch(1).unwrap();
+        let sk = &ss.sketch;
+        let mut geom = Vec::new();
+        for (i, c) in sk.curves.iter().enumerate() {
+            if c.construction {
+                continue;
+            }
+            let pt = |k: usize| sk.point(k).unwrap_or_default();
+            match &c.kind {
+                solidcraft_sketch::CurveKind::Line { a, b } => geom.push(Geom2::Line(pt(*a), pt(*b))),
+                solidcraft_sketch::CurveKind::Circle { c, r } => geom.push(Geom2::Circle(pt(*c), *r)),
+                solidcraft_sketch::CurveKind::Arc { c, a, b } => geom.push(Geom2::Arc { c: pt(*c), a: pt(*a), b: pt(*b) }),
+                _ => {
+                    let poly = sk.polyline(i);
+                    geom.extend(poly.windows(2).map(|w| Geom2::Line(w[0], w[1])));
+                }
+            }
+        }
+        let expected = solidcraft_io::write_dxf(&geom);
+        assert_eq!(text, expected, "default output must be byte-identical to previous write_dxf output");
+
+        // Null options must be treated as omitted (default behavior)
+        for null_params in [
+            json!({"units": null}),
+            json!({"layer": null}),
+            json!({"layers": null}),
+            json!({"join": null}),
+            json!({"path": null}),
+            json!({"units": null, "layer": null, "layers": null, "join": null, "path": null}),
+        ] {
+            let out_null = s.execute("sketch.export_dxf", &null_params).unwrap();
+            assert_eq!(out_null["dxf"].as_str().unwrap(), expected, "null options must behave identically to default options");
+            assert_eq!(out_null["entities"], out["entities"]);
+        }
+
+        // Hostile inputs
+        assert!(s.execute("sketch.export_dxf", &json!({"units": 123})).is_err());
+        assert!(s.execute("sketch.export_dxf", &json!({"units": "unknown_unit"})).is_err());
+        assert!(s.execute("sketch.export_dxf", &json!({"layer": 456})).is_err());
+        assert!(s.execute("sketch.export_dxf", &json!({"layers": 123})).is_err());
+        assert!(s.execute("sketch.export_dxf", &json!({"layers": "all"})).is_err());
+        assert!(s.execute("sketch.export_dxf", &json!({"join": "true"})).is_err());
+        assert!(s.execute("sketch.export_dxf", &json!({"path": 123})).is_err());
+    }
+
+    #[test]
+    fn export_dxf_layers_present() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [50, 50]})).unwrap();
+        s.execute("sketch.circle.center", &json!({"center": [25, 25], "radius": 10})).unwrap();
+
+        // 1. Single custom layer
+        let out_cut = s.execute("sketch.export_dxf", &json!({"layer": "CUT"})).unwrap();
+        let dxf_cut = out_cut["dxf"].as_str().unwrap();
+        assert!(dxf_cut.contains("\n8\nCUT\n"));
+        assert!(!dxf_cut.contains("\n8\n0\n"));
+
+        // 2. Roles layers (OUTLINE for outer profile, CUT for holes)
+        let out_roles = s.execute("sketch.export_dxf", &json!({"layers": "roles"})).unwrap();
+        let dxf_roles = out_roles["dxf"].as_str().unwrap();
+        assert!(dxf_roles.contains("\n8\nOUTLINE\n"));
+        assert!(dxf_roles.contains("\n8\nCUT\n"));
+
+        // 3. Roles layers with join: true
+        let out_joined_roles = s.execute("sketch.export_dxf", &json!({"join": true, "layers": "roles"})).unwrap();
+        assert_eq!(out_joined_roles["entities"], 2);
+        let dxf_joined = out_joined_roles["dxf"].as_str().unwrap();
+        assert!(dxf_joined.contains("AcDbPolyline"));
+        assert!(dxf_joined.contains("\n  8\nOUTLINE\n") || dxf_joined.contains("\n8\nOUTLINE\n"));
+        assert!(dxf_joined.contains("\n  8\nCUT\n") || dxf_joined.contains("\n8\nCUT\n"));
+    }
+
+    #[test]
+    fn export_dxf_join_does_not_duplicate_holes() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [100, 80]})).unwrap();
+        s.execute("sketch.circle.center", &json!({"center": [30, 40], "radius": 5})).unwrap();
+        s.execute("sketch.circle.center", &json!({"center": [70, 40], "radius": 8})).unwrap();
+
+        // With join: true, layers: "roles": exactly 3 entities (1 outer outline, 2 hole cuts)
+        let out_roles = s.execute("sketch.export_dxf", &json!({"join": true, "layers": "roles"})).unwrap();
+        assert_eq!(out_roles["entities"], 3, "expected 1 outer outline and 2 hole cuts, got {}", out_roles["entities"]);
+        let dxf_roles = out_roles["dxf"].as_str().unwrap();
+        let lwpolyline_count = dxf_roles.lines().filter(|l| l.trim() == "LWPOLYLINE").count();
+        assert_eq!(lwpolyline_count, 3, "expected exactly 3 LWPOLYLINE entities in DXF");
+
+        // Without roles (single layer): still exactly 3 entities
+        let out_single = s.execute("sketch.export_dxf", &json!({"join": true})).unwrap();
+        assert_eq!(out_single["entities"], 3, "entities without roles must also be exactly 3");
+    }
+
+    #[test]
+    fn export_dxf_join_closed_lwpolyline_with_bulge() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        // Quarter-pie shape: center at (0, 0), arc from (10, 0) to (0, 10), and lines to (0, 0)
+        s.execute("sketch.line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();
+        s.execute("sketch.arc.center_point", &json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[0, 10], [0, 0]]})).unwrap();
+
+        let out = s.execute("sketch.export_dxf", &json!({"join": true})).unwrap();
+        let dxf = out["dxf"].as_str().unwrap();
+        assert!(dxf.contains("LWPOLYLINE"));
+        // 70: bit 1 (closed) + bit 128 (plinegen) = 129
+        assert!(dxf.contains("\n 70\n129\n") || dxf.contains("\n70\n129\n"));
+        // Bulge: 90° arc has sweep = pi/2, bulge = tan(sweep / 4) = tan(pi / 8) = sqrt(2) - 1 ≈ 0.414213562373
+        let expected_bulge = (std::f64::consts::FRAC_PI_2 / 4.0).tan();
+        let has_bulge = dxf
+            .lines()
+            .zip(dxf.lines().skip(1))
+            .any(|(k, v)| k.trim() == "42" && (v.trim().parse::<f64>().unwrap_or(0.0).abs() - expected_bulge).abs() < 1e-6);
+        assert!(has_bulge, "DXF must contain group 42 bulge approx {expected_bulge}");
+
+        // Re-import the joined DXF into a new sketch and verify round-trip profile area
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let r = s.execute("sketch.insert_dxf", &json!({"text": dxf, "at": [100, 0]})).unwrap();
+        let id = r["sketch"].as_u64().unwrap();
+        let ss = s.model.state().sketch(id).unwrap().clone();
+        assert_eq!(ss.profiles.len(), 1);
+        let expected_area = std::f64::consts::PI * 100.0 / 4.0; // quarter circle of radius 10
+        assert!((ss.profiles[0].area - expected_area).abs() < 1e-4, "area was {}", ss.profiles[0].area);
+    }
+
+    #[test]
+    fn export_dxf_inch_design_round_trip() {
+        let mut s = Session::default();
+        s.doc_mut().units = "in".to_string();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        // A 2 in by 3 in rectangle in an inch design (stored internally as 50.8 mm by 76.2 mm)
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [50.8, 76.2]})).unwrap();
+
+        // 1. Export with units: "design"
+        let out = s.execute("sketch.export_dxf", &json!({"units": "design"})).unwrap();
+        let dxf = out["dxf"].as_str().unwrap();
+        // $INSUNITS must be 1 (inches)
+        assert!(dxf.contains("\n$INSUNITS\n70\n1\n"));
+        // Sizes in inches: 2.0 and 3.0
+        assert!(dxf.contains("2.000000000"));
+        assert!(dxf.contains("3.000000000"));
+
+        // Round-trip through read_dxf: reads $INSUNITS=1, scales by 25.4 to mm
+        let geom = solidcraft_io::read_dxf(dxf).unwrap();
+        let mut widths = Vec::new();
+        let mut heights = Vec::new();
+        for g in &geom {
+            if let Geom2::Line(a, b) = g {
+                let dx = (b.x - a.x).abs() / 25.4;
+                let dy = (b.y - a.y).abs() / 25.4;
+                if dx > 0.1 {
+                    widths.push(dx);
+                }
+                if dy > 0.1 {
+                    heights.push(dy);
+                }
+            }
+        }
+        for w in widths {
+            assert!((w - 2.0).abs() < 1e-8, "width in inches was {w}");
+        }
+        for h in heights {
+            assert!((h - 3.0).abs() < 1e-8, "height in inches was {h}");
+        }
+
+        // 2. Export with join: true and explicit units: "in"
+        let out_join = s.execute("sketch.export_dxf", &json!({"join": true, "units": "in"})).unwrap();
+        let dxf_join = out_join["dxf"].as_str().unwrap();
+        assert!(dxf_join.contains("LWPOLYLINE"));
+        assert!(dxf_join.contains("\n$INSUNITS\n 70\n1\n") || dxf_join.contains("\n$INSUNITS\n70\n1\n"));
+
+        let geom_join = solidcraft_io::read_dxf(dxf_join).unwrap();
+        assert_eq!(geom_join.len(), 4);
+        for g in &geom_join {
+            if let Geom2::Line(a, b) = g {
+                let len_in = a.dist(*b) / 25.4;
+                assert!((len_in - 2.0).abs() < 1e-8 || (len_in - 3.0).abs() < 1e-8, "edge length {len_in}");
+            }
         }
     }
 }

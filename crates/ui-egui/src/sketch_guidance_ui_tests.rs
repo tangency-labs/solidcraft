@@ -3,8 +3,9 @@ use crate::scenario::Harness;
 use crate::sketch_modify_ui::{Mod, candidate};
 use crate::viewport::Hit;
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 fn step(h: &mut Harness, value: Value) {
     h.step(&value).unwrap();
@@ -12,6 +13,7 @@ fn step(h: &mut Harness, value: Value) {
 fn fixture() -> Harness {
     let mut h = Harness::new();
     h.app.preferences.look_at_anim = false;
+    h.app.preferences.sketch_mirror_auto_line = false; // Exercise manual reference picking.
     for (command, params) in [
         ("sketch.create", json!({"plane":"XY"})),
         ("sketch.line", json!({"points":[[-30,10],[-15,10]]})),
@@ -163,7 +165,7 @@ fn sketch_modify_inputs_refuse_other_sketches_without_changing_hole_points() {
         h.app.start(command);
         let d = h.app.dialog.as_ref().unwrap();
         assert!(candidate(d, &h.app.session, &Hit::SketchCurve { sketch: 2, id: "l1".into(), straight: true, point: Vec3::ZERO }).is_none());
-        assert!(candidate(d, &h.app.session, &Hit::SketchPoint { sketch: 2, id: "p1".into(), at: solidcraft_engine::geom::Vec2::ZERO }).is_none());
+        assert!(candidate(d, &h.app.session, &Hit::SketchPoint { sketch: 2, id: "p1".into(), at: solidcore_record::Vec2::ZERO }).is_none());
         if command != "sketch.offset" {
             assert!(d.inputs[0].accept & crate::selection::SKETCH_POINTS != 0);
             assert_eq!(d.inputs[0].accept & crate::selection::POINTS, 0);
@@ -171,7 +173,7 @@ fn sketch_modify_inputs_refuse_other_sketches_without_changing_hole_points() {
     }
     let input = crate::selection::SelInput::new("Hole points", crate::selection::POINTS, true);
     assert_eq!(
-        input.accepts(&Hit::SketchPoint { sketch: 2, id: "p1".into(), at: solidcraft_engine::geom::Vec2::ZERO }, None, |_, _| false),
+        input.accepts(&Hit::SketchPoint { sketch: 2, id: "p1".into(), at: solidcore_record::Vec2::ZERO }, None, |_, _| false),
         Some(Sel::SketchPoint { id: "2:p1".into() })
     );
     h.app.start("sketch.pattern.circular");
@@ -191,7 +193,7 @@ fn sketch_preselected_points_toggle_once_and_empty_shift_box_keeps_reference() {
     let d = h.app.dialog.as_mut().unwrap();
     assert_eq!(d.inputs[0].items, vec![Sel::SketchPoint { id: point.clone() }]);
     d.active = 0;
-    let selected = candidate(d, &h.app.session, &Hit::SketchPoint { sketch: 1, id: point, at: solidcraft_engine::geom::Vec2::ZERO }).unwrap();
+    let selected = candidate(d, &h.app.session, &Hit::SketchPoint { sketch: 1, id: point, at: solidcore_record::Vec2::ZERO }).unwrap();
     d.pick(&h.app.session, selected);
     assert!(d.inputs[0].items.is_empty(), "clicking a preselection removes it instead of duplicating it");
     d.active = 1;
@@ -284,7 +286,7 @@ fn tracking_fixture() -> Harness {
 
 #[test]
 fn centre_and_midpoint_tracking_is_visual_in_idle_and_drawing_modes() {
-    use solidcraft_engine::geom::Vec2;
+    use solidcore_record::Vec2;
     let mut h = tracking_fixture();
     let before = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
@@ -311,7 +313,7 @@ fn centre_and_midpoint_tracking_is_visual_in_idle_and_drawing_modes() {
 /// midpoint does; idle hovering and the preference turned off keep the old centre/MID-only guides.
 #[test]
 fn a_corner_starts_a_guide_while_drawing_unless_turned_off() {
-    use solidcraft_engine::geom::Vec2;
+    use solidcore_record::Vec2;
     let mut h = tracking_fixture();
     assert!(h.app.preferences.sketch_tracking_points, "on by default");
     let before = h.app.session.doc.to_json();
@@ -340,7 +342,7 @@ fn a_corner_starts_a_guide_while_drawing_unless_turned_off() {
 
 #[test]
 fn a_rectangle_snaps_to_an_infinite_line_crossing() {
-    use solidcraft_engine::geom::Vec2;
+    use solidcore_record::Vec2;
     let mut h = Harness::new();
     h.app.preferences.look_at_anim = false;
     for (command, params) in [
@@ -365,7 +367,7 @@ fn a_rectangle_snaps_to_an_infinite_line_crossing() {
 
 #[test]
 fn two_recent_midpoints_snap_where_their_guides_meet() {
-    use solidcraft_engine::geom::Vec2;
+    use solidcore_record::Vec2;
     let mut h = tracking_fixture();
     // Grid snap at this zoom already rounds a nearby cursor onto the origin. Snap off leaves
     // the cursor where it is, so only the remembered crossing can pull it to (0, 0).
@@ -486,7 +488,7 @@ fn point_and_alignments(h: &Harness, at: [f64; 2]) -> Option<(String, Vec<(&'sta
     use solidcraft_engine::sketch::ConstraintKind::{HorizontalPoints, VerticalPoints};
     let st = crate::open_meshing::session_world(&h.app.session);
     let sk = &st.sketch(h.app.session.active_sketch?)?.sketch;
-    let at = solidcraft_engine::geom::Vec2::new(at[0], at[1]);
+    let at = solidcore_record::Vec2::new(at[0], at[1]);
     let i = sk.points.iter().position(|p| p.pos.dist(at) < 1e-9)?;
     let id = |k: usize| sk.points.get(k).map(|p| p.id.clone()).unwrap_or_default();
     let tied = sk
@@ -504,7 +506,7 @@ fn point_and_alignments(h: &Harness, at: [f64; 2]) -> Option<(String, Vec<(&'sta
 #[test]
 fn line_up_takes_the_nearest_point_on_each_axis_on_its_own() {
     use crate::sketch_tools::{Lined, line_up};
-    use solidcraft_engine::geom::Vec2;
+    use solidcore_record::Vec2;
     let points = [(Some("a".to_string()), Vec2::new(0.0, 10.4)), (Some("b".to_string()), Vec2::new(50.3, -30.0)), (None, Vec2::new(5.0, 10.2))];
     let (level, plumb) = line_up(&points, Vec2::new(50.0, 10.0), 0.5);
     assert_eq!(level, Some(Lined { id: None, at: Vec2::new(5.0, 10.2), horizontal: true }), "the nearer of the two level points");

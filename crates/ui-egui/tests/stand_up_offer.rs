@@ -5,6 +5,7 @@
 //! with `stand_up:stand`, `stand_up:never` and its close (×), `toast:stand_up:close` (also published
 //! as `stand_up:dismiss`, the Close button's handle, #7971); Preferences picks the dialog or nothing.
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_egui::prefs::StandUpUnknown;
 use solidcraft_ui_egui::scenario::Harness;
 
@@ -50,8 +51,8 @@ fn opened_boxes(size: [f64; 3], corners: &[[f64; 3]], programs: &str, prepare: i
     std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", programs)).unwrap();
     let mut h = Harness::new();
     prepare(&mut h);
-    h.app.open_path(&path);
-    h.frames(3);
+    h.app.open_path_async(&path);
+    h.settle();
     h
 }
 
@@ -156,7 +157,8 @@ fn turn_up_axis_in_the_component_menu_turns_and_undo_restores() {
     let occurrence = h.app.session.doc.occurrences.iter().map(|o| o.id).max().expect("the import's occurrence");
     h.app.run("occurrence.ground", json!({"occurrence": occurrence, "grounded": false})).unwrap();
     let items = solidcraft_ui_egui::context_menu::items(&h.app, &solidcraft_ui_egui::context_menu::Target::Occurrence { path: vec![occurrence] });
-    let turn = items.iter().find(|i| i.id == "ui.turnUpAxis").expect("Turn Up Axis is in the menu");
+    let placement = items.iter().find(|i| i.label == "Placement").expect("the Placement flyout is in the menu");
+    let turn = placement.children.iter().find(|i| i.id == "ui.turnUpAxis").expect("Turn Up Axis is in the Placement flyout");
     let labels: Vec<_> = turn.children.iter().map(|c| c.label.as_str()).collect();
     assert_eq!(labels, ["Y up \u{2192} Z up", "Z up \u{2192} Y up"]);
     let at = egui::pos2(10.0, 10.0);
@@ -177,7 +179,7 @@ fn old_preferences_files_still_load() {
     assert!(empty.offer_stand_up);
 }
 
-type V3 = solidcraft_engine::geom::Vec3;
+type V3 = solidcore_record::Vec3;
 
 /// A stood-up SolidWorks file (its component still the active one), a sketch started by
 /// `start`, a rectangle far from the part at x 200..220, y 0..10 on it, extruded 15 mm: the

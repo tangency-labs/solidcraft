@@ -10,20 +10,23 @@ workspace = true
 
 [features]
 default = []
-raytrace-cpu = []
+raytrace-cpu = ["dep:robust"]
 
 [dependencies]
+solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 image = { workspace = true, features = ["jpeg"] }
 moxcms = { workspace = true }
 png = { workspace = true }
+robust = { workspace = true, optional = true }
 sha2 = { workspace = true }
 web-time = { workspace = true }
 weezl = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
+flate2 = "1"
 
 [[example]]
 name = "cpu_resource_smoke"
