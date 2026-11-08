@@ -1,6 +1,6 @@
 //! Helical sweeps (coils, springs) and lofts to a point (pyramids, cones).
 
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
 
@@ -128,9 +128,6 @@ pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
     if ((apex - plane.origin).dot(plane.normal())).abs() < 1e-9 {
         return Err(KernelError::Invalid("the apex lies in the section's plane".into()));
     }
-    if lp.segs.iter().any(|s| !matches!(s, Seg2::Line { .. })) {
-        return Err(KernelError::Invalid("not supported yet: lofting curved sections to a point".into()));
-    }
     // Wind the base so its normal points away from the apex.
     let above = (apex - plane.origin).dot(plane.normal()) > 0.0;
     let base = crate::numbered::number_loops([lp]).pop().ok_or_else(|| KernelError::Invalid("loft to a point: bad section".into()))?.oriented(above);
@@ -140,6 +137,7 @@ pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore_record::Seg2;
 
     #[test]
     fn coil_volume_is_section_times_helix_length() {

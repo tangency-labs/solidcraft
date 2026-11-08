@@ -955,9 +955,11 @@ pub(super) fn build_faces<T>(b: &mut Brep, f: impl FnOnce(&mut Brep, &mut FaceBu
     f(b, &mut fenv)
 }
 
-/// `smlib_loft_to_point`: a pyramid from the planar `section` (one closed loop of lines, in
-/// order) to `apex`: the base and a triangle on each line, each `CreatePlanarFaceWith3DCurves` of
-/// new lines, then `StitchAndOrient`.
+/// `smlib_loft_to_point`: the planar `section` (one closed loop of curves, in order) lofted to
+/// `apex`: the base on the section's curves, a planar triangle on each line, and on each arc or
+/// spline the ruled surface from it to the apex (a zero-length curve there: the wall's pole) as
+/// one face over the surface's whole box, then `StitchAndOrient`. Upstream's `smlib_loft_to_point`
+/// took lines only (solidcraft#11216).
 pub(crate) fn loft_to_point(section: &[Profile], apex: [f64; 3]) -> Result<Body> {
     if !coord_ok(&apex) {
         return Err(Error::Argument);
@@ -967,16 +969,20 @@ pub(crate) fn loft_to_point(section: &[Profile], apex: [f64; 3]) -> Result<Body>
             Ok(c) => c,
             Err(e) => return Ok(Err(e)),
         };
-        if curves.len() < 3 || !one_loop(k, &curves, 1e-6)? {
+        if curves.is_empty() || !one_loop(k, &curves, 1e-6)? {
             return Ok(Err(Error::Argument));
         }
-        // The base's corners, each line's start.
+        // Each segment's start, the base's corners; a curved segment's B-spline, for its wall.
         let mut corners = Vec::with_capacity(curves.len());
+        let mut walls: Vec<Option<BSplineCurve>> = Vec::with_capacity(curves.len());
         for c in &curves {
-            if !matches!(c.kind(), CurveKind::Line(_)) {
-                return Ok(Err(Error::Argument));
-            }
             corners.push(ends(k, c)?.0);
+            walls.push(match c.kind() {
+                CurveKind::Line(_) => None,
+                CurveKind::Ellipse(e) => Some(e.base().clone()),
+                CurveKind::BSpline(s) => Some(s.clone()),
+                _ => return Ok(Err(Error::Argument)),
+            });
         }
         let Ok(normal) = compute_crvs_normal(k, &curves) else { return Ok(Err(Error::Argument)) };
         let top = v3(apex);
@@ -989,18 +995,46 @@ pub(crate) fn loft_to_point(section: &[Profile], apex: [f64; 3]) -> Result<Body>
         let region = b.infinite_region();
         let tol = 1e-6;
         let made = build_faces(&mut b, |b, fenv| -> Out<()> {
-            let mut face = |b: &mut Brep, fenv: &mut FaceBuildEnv<'_, '_>, pts: &[Point3]| -> Out<()> {
-                let mut edges = Vec::with_capacity(pts.len());
-                for (i, &p) in pts.iter().enumerate() {
-                    let q = pts.get((i + 1) % pts.len()).copied().unwrap_or(p);
-                    edges.push(Curve::from(called(Line::create_line_segment(3, p, q, None))?));
-                }
-                called(create_planar_face_with_3d_curves(k, b, region, &edges, tol, fenv)).map(|_| ())
-            };
-            face(b, fenv, &corners)?;
-            for (i, &p) in corners.iter().enumerate() {
+            // The base, on the section's own curves.
+            called(create_planar_face_with_3d_curves(k, b, region, &curves, tol, fenv))?;
+            for (i, (&p, wall)) in corners.iter().zip(&walls).enumerate() {
                 let q = corners.get((i + 1) % corners.len()).copied().unwrap_or(p);
-                face(b, fenv, &[p, q, top])?;
+                match wall {
+                    // A line: the planar triangle to the apex.
+                    None => {
+                        let mut edges = Vec::with_capacity(3);
+                        for (a, z) in [(p, q), (q, top), (top, p)] {
+                            edges.push(Curve::from(called(Line::create_line_segment(3, a, z, None))?));
+                        }
+                        called(create_planar_face_with_3d_curves(k, b, region, &edges, tol, fenv))?;
+                    }
+                    // An arc or a spline: the ruled surface from it to the apex, a zero-length
+                    // curve there (the wall's pole); u = 0 and u = 1 are the rulings from the
+                    // segment's ends, so the face is the surface's whole box.
+                    Some(base) => {
+                        let at_apex = [top, top];
+                        let data = CanonicalData {
+                            dim: 3,
+                            degree: 1,
+                            control_points: &at_apex,
+                            form: BSplineCurveForm::Unspecified,
+                            knot_multiplicities: &[2, 2],
+                            knots: &[0.0, 1.0],
+                            knot_type: KnotType::Unspecified,
+                            weights: None,
+                            trim: None,
+                        };
+                        let tip = called(BSplineCurve::create_canonical(&data))?;
+                        let ruled = called(solidcore::nurbs::b_spline_surface::BSplineSurface::create_ruled_surface(
+                            base,
+                            &tip,
+                            solidcore::nurbs::b_spline_surface::p1::SurfParamType::Unknown,
+                        ))?;
+                        let surface = solidcore::surface::surface::Surface::from(ruled);
+                        let bx = called(surface.natural_uv_domain_with_nurb(k))?;
+                        called(solidcore::topology::brep::p8::create_face_from_surface(k, b, Some(surface), &bx, fenv))?;
+                    }
+                }
             }
             Ok(())
         });
