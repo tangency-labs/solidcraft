@@ -10,9 +10,6 @@ face.delete
 file.export
 file.insert_mesh
 file.insert_step
-file.save
-file.save_as
-file.new
 file.save_mesh
 file.slicers
 motion.export_animation
