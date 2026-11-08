@@ -458,7 +458,7 @@ impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
 }
 
 /// The shader's analysis colours and flags for the theme's colours.
-pub fn analysis_colors(c: &crate::theme::AnalysisColors) -> [f32; 36] {
+pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
     solidcraft_gpu::view::analysis_colors(c)
 }
 

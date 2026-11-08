@@ -66,6 +66,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("gpu", Class::Layer(5)),
     ("mcp", Class::Layer(5)),
     ("testkit", Class::Testkit),
+    // the sRGB transfer rule and the surface-analysis palette, read by the renderer and the theme (#13291)
+    ("color", Class::Shared),
     // the widget handle and rect registry UI components publish into and scenarios/the control channel read (#12936)
     ("ui-registry", Class::Shared),
     // apps and tooling
