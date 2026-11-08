@@ -180,8 +180,55 @@ pub struct LayoutReply {
     pub availability: AvailabilityMap,
 }
 
+/// Keyboard actions whose target belongs to the live panel host, never the document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContextualPanelAction {
+    FocusNext,
+    FocusPrevious,
+    Toggle,
+    MoveNextZone,
+    ResizeLeft,
+    ResizeRight,
+    ResizeUp,
+    ResizeDown,
+    ResetSash,
+}
+impl ContextualPanelAction {
+    pub const ALL: [Self; 9] = [
+        Self::FocusNext,
+        Self::FocusPrevious,
+        Self::Toggle,
+        Self::MoveNextZone,
+        Self::ResizeLeft,
+        Self::ResizeRight,
+        Self::ResizeUp,
+        Self::ResizeDown,
+        Self::ResetSash,
+    ];
+    pub const fn command_id(self) -> &'static str {
+        match self {
+            Self::FocusNext => "panel.focus.next",
+            Self::FocusPrevious => "panel.focus.previous",
+            Self::Toggle => "panel.toggle",
+            Self::MoveNextZone => "panel.move.next_zone",
+            Self::ResizeLeft => "panel.sash.left",
+            Self::ResizeRight => "panel.sash.right",
+            Self::ResizeUp => "panel.sash.up",
+            Self::ResizeDown => "panel.sash.down",
+            Self::ResetSash => "panel.sash.reset",
+        }
+    }
+    pub fn from_command_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|action| action.command_id() == id)
+    }
+}
+
 /// Same boundary for GUI and programmatic callers. No mutable Session reference.
 pub trait ActionSink {
+    /// Optional live-host target resolution. Headless sinks cannot infer UI focus.
+    fn resolve_contextual(&self, _action: ContextualPanelAction) -> PanelResult<LayoutAction> {
+        Err(error(Rule::Availability, "live panel host keyboard context is unavailable"))
+    }
     fn dispatch(&mut self, action: LayoutAction) -> PanelResult<LayoutReply>;
     fn inspect(&self) -> LayoutReply;
     /// Pure projection on the authoritative service. Adapters stage bounded
@@ -931,9 +978,15 @@ impl Reservations<'_> {
     }
 }
 
-fn place(layout: &mut Layout, id: &InstanceId, destination: Destination, reservations: &Reservations<'_>) -> PanelResult<()> {
+fn place(
+    layout: &mut Layout,
+    id: &InstanceId,
+    destination: Destination,
+    reservations: &Reservations<'_>,
+    new_column_width: Option<f32>,
+) -> PanelResult<()> {
     match destination {
-        Destination::NewSection { section, index, mut location, size } => {
+        Destination::NewSection { section, index, mut location, mut size } => {
             fresh_section(layout, id, &section)?;
             if let SectionLocation::Window { return_to, .. } = &mut location {
                 if return_to.zone.side() && return_to.column.is_none() {
@@ -970,11 +1023,19 @@ fn place(layout: &mut Layout, id: &InstanceId, destination: Destination, reserva
                 .filter(|p| p.memory.section == section && p.memory.location.zone() == location.zone())
                 .map(|p| p.memory.clone());
             let zone = location.zone();
+            let mut created_column = false;
             let column = if zone.side() {
                 if let Some(memory) = &memory
                     && let Some(column) = &memory.column
                 {
-                    Some(restore_column(layout, column.clone(), zone, memory.column_index, memory.column_width.unwrap_or(size.width))?)
+                    created_column = layout.column(column).is_err();
+                    Some(restore_column(
+                        layout,
+                        column.clone(),
+                        zone,
+                        memory.column_index,
+                        new_column_width.unwrap_or_else(|| memory.column_width.unwrap_or(size.width)),
+                    )?)
                 } else {
                     let existing = layout
                         .sections
@@ -986,14 +1047,21 @@ fn place(layout: &mut Layout, id: &InstanceId, destination: Destination, reserva
                     Some(match existing {
                         Some(column) => column,
                         None => {
+                            created_column = true;
                             let column = next_column_id_with_reservations(layout, reservations.columns)?;
-                            restore_column(layout, column, zone, MAX_SECTIONS, size.width)?
+                            restore_column(layout, column, zone, MAX_SECTIONS, new_column_width.unwrap_or(size.width))?
                         }
                     })
                 }
             } else {
                 None
             };
+            if created_column
+                && new_column_width.is_some()
+                && let Some(column) = &column
+            {
+                size.width = layout.column(column)?.width;
+            }
             let index = if let Some(column) = &column { column_insert_index(layout, column, index)? } else { index };
             layout.sections.insert(
                 index,
@@ -1019,7 +1087,7 @@ fn place(layout: &mut Layout, id: &InstanceId, destination: Destination, reserva
             s.tabs.insert(index, id.clone());
             // Joining never steals active tab or resizes the group.
         }
-        Destination::Relative { section, placement, new_section, new_column, size } => {
+        Destination::Relative { section, placement, new_section, new_column, mut size } => {
             fresh_section(layout, id, &new_section)?;
             size.validate()?;
             let target = layout.section(&section)?.clone();
@@ -1039,6 +1107,9 @@ fn place(layout: &mut Layout, id: &InstanceId, destination: Destination, reserva
                     (target_column.clone(), target_index + usize::from(placement == RelativePlacement::Below), weight)
                 }
                 RelativePlacement::BeforeColumn | RelativePlacement::AfterColumn => {
+                    if let Some(width) = new_column_width {
+                        size.width = width;
+                    }
                     let column = new_column.ok_or_else(|| error(Rule::Placement, "column placement requires identity"))?;
                     valid_id(&column.0)?;
                     if layout.columns.iter().any(|c| c.id == column)
@@ -1136,6 +1207,8 @@ fn apply(
     mutation: Mutation,
 ) -> PanelResult<()> {
     let MutationContext { registry, availability, caps, reservations, defer_availability } = *context;
+    let changes_placement =
+        matches!(&mutation, Mutation::Open { .. } | Mutation::Move { .. } | Mutation::Focus { .. } | Mutation::NativeClose { .. });
     match mutation {
         Mutation::Open { kind, instance, destination } => {
             valid_id(&instance.0)?;
@@ -1156,7 +1229,7 @@ fn apply(
                 let mut destination = destination.unwrap_or_else(|| reopen_destination(layout, &p));
                 inherit_native_preference(&mut destination, p.memory.location.zone(), p.memory.preferred_extent, p.memory.extent_priority)?;
                 let created = !matches!(&destination, Destination::JoinTab { .. });
-                place(layout, &instance, destination, reservations)?;
+                place(layout, &instance, destination, reservations, None)?;
                 if created {
                     let section = layout.containing(&instance)?.id.clone();
                     let section = section_mut(layout, &section)?;
@@ -1175,7 +1248,7 @@ fn apply(
                 }
             } else {
                 let destination = destination.ok_or_else(|| error(Rule::Placement, "new instance requires explicit destination"))?;
-                place(layout, &instance, destination, reservations)?;
+                place(layout, &instance, destination, reservations, None)?;
                 let s = layout.containing(&instance)?.clone();
                 layout.instances.push(PanelInstance {
                     id: instance.clone(),
@@ -1224,6 +1297,10 @@ fn apply(
             }
             let collapsed = layout.containing(&instance)?.collapsed;
             let source = layout.containing(&instance)?.clone();
+            let column_width = match &source.column {
+                Some(column) => layout.column(column)?.width,
+                None => registry.get(&layout.instance(&instance)?.kind)?.default_size.width,
+            };
             if let Destination::NewSection { location: SectionLocation::Window { return_to, .. }, .. } = &mut destination
                 && source.location.zone() == return_to.zone
                 && source.location.zone().docked()
@@ -1257,7 +1334,7 @@ fn apply(
                 Destination::Relative { new_section, .. } => Some(new_section.clone()),
                 _ => None,
             };
-            place(layout, &instance, destination, reservations)?;
+            place(layout, &instance, destination, reservations, Some(column_width))?;
             if let Some(id) = new_section {
                 let section = section_mut(layout, &id)?;
                 section.collapsed = collapsed;
@@ -1276,7 +1353,7 @@ fn apply(
             if !p.requested_open {
                 let mut destination = reopen_destination(layout, &p);
                 inherit_native_preference(&mut destination, p.memory.location.zone(), p.memory.preferred_extent, p.memory.extent_priority)?;
-                place(layout, &instance, destination, reservations)?;
+                place(layout, &instance, destination, reservations, None)?;
                 if let Some(entry) = layout.instances.iter_mut().find(|p| p.id == instance) {
                     entry.requested_open = true;
                 }
@@ -1535,6 +1612,7 @@ fn apply(
                 let index = join.index.min(target.tabs.len());
                 drop(target.tabs.splice(index..index, section.tabs));
                 let members = target.tabs.clone();
+                normalize_fixed_bottom_rows(layout, registry)?;
                 for instance in members {
                     remember(layout, &instance)?;
                 }
@@ -1566,6 +1644,9 @@ fn apply(
             layout.sections.insert(index, section);
         }
     }
+    if changes_placement {
+        normalize_fixed_bottom_rows(layout, registry)?;
+    }
     // Every live member gets the same committed group geometry/proportions.
     // Closed memories are intentionally independent until their panel reopens.
     let members: Vec<_> = layout.sections.iter().flat_map(|s| s.tabs.iter().cloned()).collect();
@@ -1577,6 +1658,26 @@ fn apply(
     // Retained unsupported windows can be closed/redocked without native capability.
     if caps.native_windows && windows.len() > caps.max_native_hosts {
         return Err(error(Rule::Capability, "native host limit"));
+    }
+    Ok(())
+}
+
+fn normalize_fixed_bottom_rows(layout: &mut Layout, registry: &PanelRegistry) -> PanelResult<()> {
+    let mut fixed = Vec::new();
+    for section in layout.sections.iter().filter(|section| section.location.zone() == Zone::Bottom) {
+        let mut declared = false;
+        for instance in &section.tabs {
+            declared |= registry.get(&layout.instance(instance)?.kind)?.fixed_bottom_height.is_some();
+        }
+        if declared {
+            let (min, _) = tab_bounds(layout, registry, section)?;
+            fixed.push((section.id.clone(), min.height));
+        }
+    }
+    for (id, height) in fixed {
+        let section = section_mut(layout, &id)?;
+        section.size.height = height;
+        section.collapsed = false;
     }
     Ok(())
 }

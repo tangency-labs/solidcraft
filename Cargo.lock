@@ -4097,6 +4097,7 @@ dependencies = [
  "solidcraft-gpu",
  "solidcraft-space-mouse",
  "solidcraft-ui-egui",
+ "solidcraft-ui-text",
  "ureq",
  "windows-sys 0.61.2",
  "winit",
@@ -4124,6 +4125,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-color"
+version = "0.40.0-rc.3"
+
+[[package]]
 name = "solidcraft-derive"
 version = "0.40.0-rc.3"
 dependencies = [
@@ -4141,6 +4146,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solidcore-record",
+ "solidcraft-color",
  "solidcraft-derive",
  "solidcraft-geom",
  "solidcraft-kernel",
@@ -4173,6 +4179,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "solidcore-record",
+ "solidcraft-color",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-io",
@@ -4207,6 +4214,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcore-record",
+ "solidcraft-color",
  "solidcraft-engine",
  "solidcraft-geom",
  "solidcraft-io",
@@ -4234,6 +4242,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solidcore-record",
+ "solidcraft-color",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-kernel",
@@ -4293,6 +4302,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solidcore-record",
+ "solidcraft-color",
  "solidcraft-geom",
  "web-time",
  "weezl",
@@ -4363,18 +4373,36 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solidcore-record",
+ "solidcraft-color",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",
+ "solidcraft-ui-registry",
+ "solidcraft-ui-text",
  "syn 2.0.119",
- "sys-locale",
  "tiny-skia",
  "toml",
  "ttf-parser",
- "unicode-bidi",
  "web-time",
  "winreg",
  "zip",
+]
+
+[[package]]
+name = "solidcraft-ui-registry"
+version = "0.40.0-rc.3"
+dependencies = [
+ "egui",
+]
+
+[[package]]
+name = "solidcraft-ui-text"
+version = "0.40.0-rc.3"
+dependencies = [
+ "log",
+ "serde_json",
+ "sys-locale",
+ "unicode-bidi",
 ]
 
 [[package]]
@@ -4389,6 +4417,7 @@ dependencies = [
  "serde_json",
  "solidcraft-engine",
  "solidcraft-ui-egui",
+ "solidcraft-ui-text",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",

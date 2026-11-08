@@ -220,7 +220,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
             p.with_clip_rect(rect.intersect(p.clip_rect())).text(
                 centre,
                 egui::Align2::CENTER_CENTER,
-                crate::i18n::tr_label(label),
+                solidcraft_ui_text::tr_label(label),
                 egui::FontId::proportional(t.font_small),
                 t.form_dim,
             );
@@ -230,7 +230,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     panel(inset, inset, 120.0 - inset * 2.0, ribbon_height, "", t.toolbar);
     let browser =
         panel(bx, top, bw, browser_height, "Browser", if state.translucent && !state.compact { t.panel.gamma_multiply(0.60) } else { t.panel });
-    crate::scenario::publish_rect("prefs:layout_preview:browser", browser);
+    solidcraft_ui_registry::publish_rect("prefs:layout_preview:browser", browser);
     // A full row of quiet tool symbols, with label marks only when labels are enabled.
     let quiet = t.form_dim.lerp_to_gamma(t.viewport_top, 0.55);
     for index in 0..10 {
@@ -261,7 +261,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
         _ => Some(panel(inset, bottom - 10.0, 120.0 - inset * 2.0, 10.0, "History", t.selected_bg)),
     };
     if let Some(history) = history {
-        crate::scenario::publish_rect("prefs:layout_preview:history", history);
+        solidcraft_ui_registry::publish_rect("prefs:layout_preview:history", history);
     }
     if let Some(history) = history.filter(|_| state.history == 1) {
         // A single vertical mark reads as the narrow icon-only history rail.
@@ -279,10 +279,10 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
         (120.0 - inset - bw, top, (viewport_bottom - top) * 0.65)
     };
     let dialog = panel(dialog_x, dialog_top, bw, dialog_height, "Dialogs", t.dialog_footer);
-    crate::scenario::publish_rect("prefs:layout_preview:dialog", dialog);
-    crate::scenario::publish_rect("prefs:layout_preview", outer);
+    solidcraft_ui_registry::publish_rect("prefs:layout_preview:dialog", dialog);
+    solidcraft_ui_registry::publish_rect("prefs:layout_preview", outer);
     ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover())
-        .backing_on_hover_text(crate::i18n::tr("prefs.layout_note"));
+        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.layout_note"));
 }
 
 #[allow(unused_imports, reason = "painted by the Preferences pages of #9875 to #9883")]

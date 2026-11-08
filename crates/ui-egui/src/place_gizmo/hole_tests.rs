@@ -382,8 +382,8 @@ fn a_pick_the_held_line_cannot_reach_says_why_and_leaves_the_hole() {
     // A refusal of the pick, not a failure: no red report, no Create Issue.
     h.frames(2);
     assert!(handle_at("dialog:create_issue").is_none(), "no Create Issue for the held line");
-    let _japanese = crate::i18n::scope("ja");
-    assert!(!crate::i18n::tr_label(crate::hole_place::HELD_OFF_ITS_LINE).is_ascii(), "the message reads in the user's language");
+    let _japanese = solidcraft_ui_text::scope("ja");
+    assert!(!solidcraft_ui_text::tr_label(crate::hole_place::HELD_OFF_ITS_LINE).is_ascii(), "the message reads in the user's language");
     drop(_japanese);
     // A typed distance changes what the dialog makes: the message gives way.
     h.step(&json!({"click": {"handle": "dialog:Distance 1"}})).unwrap();

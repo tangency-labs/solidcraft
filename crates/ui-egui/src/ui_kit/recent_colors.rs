@@ -1,6 +1,6 @@
-//! The colours picked last in any colour field, newest first (#9234). The app keeps the list in
-//! its saved settings (`UiState::recent_colors`) and hands it to the colour pickers every frame
-//! through egui memory; the shared `ui_kit` colour popover shows it and adds finished picks.
+//! The colours picked last in any colour field, newest first (#9234). The host keeps the list in
+//! its saved settings and hands it to the colour pickers every frame through egui memory with
+//! [`share`]; the kit's colour popover shows it and adds finished picks.
 
 /// How many colours the recent list keeps.
 pub(crate) const MAX_RECENT_COLORS: usize = 12;

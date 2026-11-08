@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::*;
 
-mod mesh_convert;
+pub(crate) mod mesh_convert;
 
 /// Counts the copies `Session::doc_mut` makes of a shared document.
 pub(crate) mod doc_copies {
@@ -94,6 +94,74 @@ fn edge_picks_at_a_corner_are_refused() {
         let removed = if id == "solid.chamfer" { 40.0 } else { (4.0 - PI) * 20.0 };
         assert!(rel(volume(&mut s), 8000.0 - removed) < 2e-4);
     }
+}
+
+/// Edge picks on bodies apart: one pick keeps its body on the feature (the model has two), and
+/// picks on both keep none, each found where it lies.
+#[test]
+fn edge_picks_on_bodies_apart_keep_the_body_they_lie_on() {
+    let boxes = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Low"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 50], "operation": "new", "body_name": "High"}));
+        s
+    };
+    let kept = |s: &Session| match &s.doc.features.last().unwrap().kind {
+        solidcraft_doc::FeatureKind::Chamfer { body, .. } => body.as_ref().map(|b| b.0.clone()),
+        k => panic!("{k:?}"),
+    };
+    let each = |s: &Session| ["Low", "High"].map(|b| s.model.state().body(b).unwrap().measure().unwrap().volume);
+    let mut s = boxes();
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1}));
+    assert_eq!(kept(&s).as_deref(), Some("Low"));
+    let [low, high] = each(&s);
+    assert!((low - 11980.0).abs() < 0.02 && high == 12000.0, "{low} {high}");
+    let mut s = boxes();
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0], [20, 0, 60]], "distance": 1}));
+    assert_eq!(kept(&s), None);
+    let [low, high] = each(&s);
+    assert!((low - 11980.0).abs() < 0.02 && (high - 11980.0).abs() < 0.02, "{low} {high}");
+}
+
+/// The halves of a split box share the edges along the cut: a pick on one is refused naming both
+/// halves, and `body` cuts the half named.
+#[test]
+fn edge_picks_on_the_cut_of_a_split_body_name_both_halves() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Box"}));
+    run(&mut s, "solid.split_body", json!({"body": "Box", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
+    let features = s.doc.features.len();
+    let err = s.execute("solid.chamfer", &json!({"edges": [[20, 15, 10]], "distance": 1})).unwrap_err().to_string();
+    assert!(err.contains("[20, 15, 10] lies on edges of 2 bodies, Box and Box (1)") && err.contains("with `body`"), "{err}");
+    assert_eq!(s.doc.features.len(), features);
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 15, 10]], "distance": 1, "body": "Box (1)"}));
+    let half = |s: &Session, b: &str| s.model.state().body(b).unwrap().measure().unwrap().volume;
+    assert!((half(&s, "Box (1)") - 5985.0).abs() < 0.02 && (half(&s, "Box") - 6000.0).abs() < 1e-6, "{} {}", half(&s, "Box"), half(&s, "Box (1)"));
+}
+
+/// A box touching a cylinder along the cylinder's seam: the seam is not an edge to blend, so the
+/// box's edge there is cut.
+#[test]
+fn an_edge_along_another_bodys_seam_is_picked() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 10, "body_name": "Rod"}));
+    let rod = s.model.state().body("Rod").unwrap().body.clone();
+    let mesh = rod.mesh(&solidcraft_kernel::MeshTolerance::chord(0.06)).unwrap();
+    let seam = mesh.edges.iter().zip(&mesh.seams).find(|(_, seam)| **seam).unwrap().0[0];
+    // The box's quarter past the seam's line is outside the cylinder: they touch along it.
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 20, "width": 20, "height": 10, "corner": [seam.x, seam.y, 0], "operation": "new", "body_name": "Block"}),
+    );
+    run(&mut s, "solid.chamfer", json!({"edges": [[seam.x, seam.y, 5]], "distance": 1}));
+    let kept = match &s.doc.features.last().unwrap().kind {
+        solidcraft_doc::FeatureKind::Chamfer { body, .. } => body.as_ref().map(|b| b.0.clone()),
+        k => panic!("{k:?}"),
+    };
+    assert_eq!(kept.as_deref(), Some("Block"));
+    let v = |b: &str| s.model.state().body(b).unwrap().measure().unwrap().volume;
+    assert!((v("Block") - 3995.0).abs() < 0.02 && (v("Rod") - PI * 1000.0).abs() < 1.0, "{} {}", v("Block"), v("Rod"));
 }
 
 #[test]

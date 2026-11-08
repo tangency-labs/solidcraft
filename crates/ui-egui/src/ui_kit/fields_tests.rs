@@ -1359,7 +1359,7 @@ fn bounded_dropdown_focus_announces_full_selected_source_with_a_nonempty_accessi
             let info = event.widget_info();
             assert_eq!(info.role, egui::Role::ComboBox);
             assert!(info.enabled);
-            let expected = if labelled { crate::i18n::tr_label("Retained source") } else { current };
+            let expected = if labelled { solidcraft_ui_text::tr_label("Retained source") } else { current };
             assert_eq!(info.label.as_deref(), Some(expected));
             assert!(!info.label.as_deref().unwrap().trim().is_empty());
             assert_eq!(
@@ -1419,7 +1419,7 @@ fn a_track_number_adds_up_and_a_sign_adds_to_the_value_now() {
 
 #[test]
 fn a_label_drag_reads_only_literal_values_and_moves_them_on_the_step_grid() {
-    let literal = |text: &str| super::literal(text).map(|l| (l.number, l.unit, l.comma));
+    let literal = |text: &str| super::literal(&crate::params_dialog::DocExpressions, text).map(|l| (l.number, l.unit, l.comma));
     assert_eq!(literal("20 mm"), Some((20.0, " mm".into(), false)));
     assert_eq!(literal(" 1,5in "), Some((1.5, "in".into(), true)));
     assert_eq!(literal("-3"), Some((-3.0, String::new(), false)));
@@ -1435,7 +1435,7 @@ fn a_label_drag_reads_only_literal_values_and_moves_them_on_the_step_grid() {
     assert_eq!(super::scrubbed(2.0, -500.0, 0.1), 0.0, "a size stops at zero");
     assert!((super::scrubbed(-2.0, -10.0, 0.1) + 3.0).abs() < 1e-9, "a negative offset keeps moving");
     assert_eq!(super::scrubbed(1.0, f32::MAX, 1e8), 1.0, "an overflowing drag keeps the value");
-    let text = |n, step, typed: &str| super::scrub_text(n, step, &super::literal(typed).unwrap());
+    let text = |n, step, typed: &str| super::scrub_text(n, step, &super::literal(&crate::params_dialog::DocExpressions, typed).unwrap());
     assert_eq!(text(23.0, 0.1, "20 mm"), "23.0 mm");
     assert_eq!(text(1.75, 0.01, "1,5 in"), "1,75 in");
     assert_eq!(text(-0.0001, 0.01, "-1"), "0.00");
@@ -1473,6 +1473,7 @@ fn dragging_a_value_rows_label_changes_its_literal_and_leaves_expressions_alone(
         frame(ctx, vec![], modifiers, values);
     }
     let ctx = crate::fonts::test_context();
+    crate::params_dialog::install_expressions(&ctx);
     let mut values = ["20 mm".to_owned(), "depth + 2 mm".to_owned()];
     frame(&ctx, vec![], Default::default(), &mut values);
     drag(&ctx, "Distance", 40.0, Default::default(), &mut values);

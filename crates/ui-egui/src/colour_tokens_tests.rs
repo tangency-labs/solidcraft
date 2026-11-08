@@ -265,7 +265,7 @@ fn analysis_shader_colours_come_from_the_uniform() {
             "vec3<f32>(0.35)",
             "vec3<f32>(1.0)",
         ],
-        "a new colour in the analysis shader must come from `ana_c` (theme::AnalysisColors)"
+        "a new colour in the analysis shader must come from `ana_c` (solidcraft_color::AnalysisColors)"
     );
     assert_eq!(body.matches("u.ana_c[").count(), 9, "every analysis colour reads `ana_c`");
 }

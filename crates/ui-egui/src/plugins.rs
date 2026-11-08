@@ -150,21 +150,21 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
     crate::ui_kit::settings_page(ui, |ui| {
-        crate::ui_kit::settings_heading(ui, crate::i18n::tr("ui.plugins"), crate::i18n::tr("prefs.plugins_intro"));
+        crate::ui_kit::settings_heading(ui, solidcraft_ui_text::tr("ui.plugins"), solidcraft_ui_text::tr("prefs.plugins_intro"));
         let Some(dir) = dir else {
-            ui.label(crate::i18n::tr("ui.plugins_desktop"));
+            ui.label(solidcraft_ui_text::tr("ui.plugins_desktop"));
             return;
         };
         let t = crate::theme::Tokens::get();
         let path = dir.display().to_string();
-        let searching = crate::prefs_search::querying(ui);
+        let searching = crate::ui_kit::settings_search::querying(ui);
         // The page's own box is for browsing Plugins. The dialog search is the filter while it is active.
         if !searching {
             crate::ui_kit::search_field(
                 ui,
                 ui.scope_id().with("plugins_search"),
                 &mut app.prefs_window.plugin_query,
-                crate::i18n::tr("ui.plugins_search"),
+                solidcraft_ui_text::tr("ui.plugins_search"),
             );
             ui.add_space(8.0);
         }
@@ -173,40 +173,40 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         crate::ui_kit::settings_list_section(
             ui,
             "plugins_installed",
-            crate::i18n::tr("prefs.plugins_installed"),
+            solidcraft_ui_text::tr("prefs.plugins_installed"),
             Some(&plugins.len().to_string()),
             |ui| {
-                if plugins.is_empty() && (!searching || crate::prefs_search::shows_all(ui)) {
-                    crate::ui_kit::text(ui, crate::i18n::tr("ui.plugins_empty"), crate::ui_kit::Text::Hint("plugins_empty"));
+                if plugins.is_empty() && (!searching || crate::ui_kit::settings_search::shows_all(ui)) {
+                    crate::ui_kit::text(ui, solidcraft_ui_text::tr("ui.plugins_empty"), crate::ui_kit::Text::Hint("plugins_empty"));
                 }
                 ui.spacing_mut().item_spacing.y = t.space_8;
                 let mut shown = 0usize;
                 for plugin in plugins.iter().filter(|plugin| searching || matches_query(plugin, &query)) {
                     if searching
-                        && !crate::prefs_search::shows_all(ui)
-                        && !crate::prefs_search::texts_hit(ui, &[&plugin.name, &plugin.id, &plugin.description, &plugin.version])
+                        && !crate::ui_kit::settings_search::shows_all(ui)
+                        && !crate::ui_kit::settings_search::texts_hit(ui, &[&plugin.name, &plugin.id, &plugin.description, &plugin.version])
                     {
                         continue;
                     }
                     shown += 1;
                     if searching {
-                        crate::prefs_search::reveal(ui);
-                        crate::prefs_search::push_force(ui);
+                        crate::ui_kit::settings_search::reveal(ui);
+                        crate::ui_kit::settings_search::push_force(ui);
                     }
                     plugin_card(app, ui, dir, plugin);
                     if searching {
-                        crate::prefs_search::pop_force(ui);
+                        crate::ui_kit::settings_search::pop_force(ui);
                     }
                 }
                 if !searching && !plugins.is_empty() && shown == 0 {
-                    ui.label(crate::i18n::tr("ui.plugins_none"));
+                    ui.label(solidcraft_ui_text::tr("ui.plugins_none"));
                 }
             },
         );
         if !searching && query.trim().is_empty() && !skipped.is_empty() {
             ui.add_space(6.0);
             ui.label(
-                RichText::new(crate::i18n::format("ui.plugins_skipped", &[("count", &skipped.len().to_string())]))
+                RichText::new(solidcraft_ui_text::format("ui.plugins_skipped", &[("count", &skipped.len().to_string())]))
                     .size(t.font_small)
                     .color(t.text_dim),
             );
@@ -217,8 +217,8 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         }
         if !searching {
             ui.horizontal(|ui| {
-                let button = crate::ui_kit::icon_label_button(ui, crate::i18n::tr("prefs.plugins_show_folder"), "folder", true, false)
-                    .backing_on_hover_text(crate::i18n::format("ui.plugins_note", &[("path", &path)]));
+                let button = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("prefs.plugins_show_folder"), "folder", true, false)
+                    .backing_on_hover_text(solidcraft_ui_text::format("ui.plugins_note", &[("path", &path)]));
                 crate::scenario::publish_target("prefs:plugins:folder", button.rect);
                 if button.clicked() {
                     if let Err(e) = std::fs::create_dir_all(dir) {
@@ -257,11 +257,11 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
     }
     crate::scenario::publish_rect(&format!("prefs:plugin:{}:card", plugin.id), response.rect);
     let texts = [&plugin.name, &plugin.id, &plugin.description, &plugin.version];
-    if let Some(text) = texts.iter().find(|text| crate::prefs_search::texts_hit(ui, &[*text])) {
-        crate::prefs_search::remember(ui, text, response.rect);
+    if let Some(text) = texts.iter().find(|text| crate::ui_kit::settings_search::texts_hit(ui, &[*text])) {
+        crate::ui_kit::settings_search::remember(ui, text, response.rect);
     }
     for text in texts {
-        crate::prefs_search::follow(ui, text, response.rect);
+        crate::ui_kit::settings_search::follow(ui, text, response.rect);
     }
 }
 
@@ -322,7 +322,7 @@ mod tests {
         for dark in [false, true] {
             crate::theme::set_dark(dark);
             for language in ["en", "de"] {
-                let _language = crate::i18n::scope(language);
+                let _language = solidcraft_ui_text::scope(language);
                 for width in [646.0, 200.0] {
                     let mut h = crate::scenario::Harness::new();
                     let dir = h.dir.join("plugin-action-layout");
@@ -458,17 +458,17 @@ mod tests {
                 crate::scenario::clear_handles();
                 let mut output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     ui.set_width(646.0);
-                    let _search = crate::prefs_search::begin(ui, query);
-                    crate::prefs_search::begin_page(ui, crate::prefs::PAGE_PLUGINS, "Extend > Plugins");
+                    let _search = crate::ui_kit::settings_search::begin(ui, query);
+                    crate::ui_kit::settings_search::begin_page(ui, crate::prefs::PAGE_PLUGINS, "Extend > Plugins");
                     crate::ui_kit::scope(ui, |ui| page_in_dir(&mut h.app, ui, Some(&dir)));
-                    crate::prefs_search::store_nav(ui);
+                    crate::ui_kit::settings_search::store_nav(ui);
                 });
                 output.textures_delta.clear();
             }
-            let (_, _, hits) = crate::prefs_search::nav(&ctx);
+            let (_, _, hits) = crate::ui_kit::settings_search::nav(&ctx);
             assert_eq!(hits.len(), 1, "{query}: one real plugin result");
             assert_eq!(hits[0].page, crate::prefs::PAGE_PLUGINS);
-            crate::prefs_search::set_reveal(&ctx, Some(crate::prefs_search::reveal_for(hits[0].page, &hits[0].label)));
+            crate::ui_kit::settings_search::set_reveal(&ctx, Some(crate::ui_kit::settings_search::reveal_for(hits[0].page, &hits[0].label)));
             page_frame(&mut h.app, &ctx, &dir, vec![]);
             let card = crate::scenario::rect_of("prefs:plugin:public-one:card").unwrap();
             assert!(crate::scenario::handle_at("prefs:revealed").unwrap().distance(card.center()) <= 1.0);
