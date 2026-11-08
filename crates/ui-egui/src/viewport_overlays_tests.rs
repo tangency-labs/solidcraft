@@ -577,8 +577,9 @@ fn viewport_status_close_hover_has_a_theme_fill_and_native_space_action_in_every
         let mut found = false;
         for shape in &output.shapes {
             crate::test_support::each_shape(&shape.shape, &mut |shape| {
-                if let Shape::Rect(rect) = shape {
-                    found |= rect.rect == target && rect.fill == t.hover && rect.corner_radius == t.control_radius.into();
+                // The status actions are round (#13265): the hover fill is a circle on the target.
+                if let Shape::Circle(circle) = shape {
+                    found |= circle.center == target.center() && circle.fill == t.hover && circle.radius * 2.0 <= target.width() + 0.5;
                 }
             });
         }
@@ -2818,4 +2819,51 @@ fn a_section_card_shows_every_row_and_reads_like_its_pill() {
             assert!(description.settings.iter().any(|s| matches!(&s.value, V::Axis { current, .. } if current == normal)), "{plane}");
         }
     }
+}
+
+#[test]
+fn status_item_actions_are_round_and_their_card_is_opaque() {
+    use crate::ui_kit::{StatusItem, StatusKind, StatusPresentation, viewport_status_item};
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        let t = Tokens::get();
+        let ctx = crate::fonts::test_context();
+        let item = StatusItem {
+            id: "round".into(),
+            kind: StatusKind::Result,
+            name: "Draft".into(),
+            setting: "Z · 1°".into(),
+            has_key: true,
+            editable: false,
+        };
+        let mut state = StatusPresentation::default();
+        let mut draw = |input: egui::RawInput| {
+            crate::test_support::frame(&ctx, input, |ui| {
+                viewport_status_item(ui, &item, &mut state);
+            })
+        };
+        draw(egui::RawInput::default());
+        let mut actions = Vec::new();
+        for part in ["key", "close"] {
+            let rect = crate::scenario::rect_of(&format!("viewport_status:round:{part}")).unwrap();
+            actions.push(rect);
+            let hover = egui::RawInput { events: vec![egui::Event::PointerMoved(rect.center())], ..Default::default() };
+            draw(hover.clone());
+            let out = draw(hover);
+            assert!(
+                out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.center == rect.center() && c.fill == t.hover)),
+                "dark {dark}: hovering {part} fills a circle"
+            );
+            assert!(
+                !out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect.intersects(rect.shrink(1.0)) && r.rect.width() <= rect.width() + 2.0 && (r.fill != egui::Color32::TRANSPARENT || r.stroke.width > 0.0))),
+                "dark {dark}: {part} draws no square box"
+            );
+        }
+        let card = crate::ui_kit::viewport_status_card_frame();
+        assert_eq!(card.fill.a(), 255, "dark {dark}: the card is opaque");
+        assert!(card.stroke.width > 0.0 && card.shadow.blur > 0, "dark {dark}: the card has a border and a shadow");
+        assert_eq!(card.corner_radius, egui::CornerRadius::same(t.radius_lg));
+    }
+    crate::theme::set_dark(previous);
 }
