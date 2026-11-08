@@ -322,3 +322,17 @@ fn a_mesh_outline_drops_a_rounded_corner_part_way_along_a_side() {
         assert!(corners.iter().any(|q| q.dist(p) < 1e-12), "{p:?} is a corner: {corners:?}");
     }
 }
+
+/// #13464: far from the origin, a small flat patch keeps its corners. A tolerance that grew with
+/// the distance from the origin alone took every corner of a 1 × 1 square at x = 1 000 000 for one
+/// on a straight side, and the face projected to nothing.
+#[test]
+fn a_small_mesh_patch_far_from_the_origin_keeps_its_corners() {
+    let x = 1_000_000.0;
+    let corners = [Vec3::new(x, 0.0, 0.0), Vec3::new(x + 1.0, 0.0, 0.0), Vec3::new(x + 1.0, 1.0, 0.0), Vec3::new(x, 1.0, 0.0)];
+    let mesh =
+        solidcraft_geom::Mesh { positions: corners.to_vec(), triangles: vec![[0, 1, 2], [0, 2, 3]], tri_face: vec![0, 0], ..Default::default() };
+    let loops = crate::project3d::flat_outline(&mesh, Vec3::new(x + 0.5, 0.5, 0.0));
+    assert_eq!(loops.len(), 1, "{loops:?}");
+    assert_eq!(loops.first().map(Vec::len), Some(5), "four corners and the first again: {loops:?}");
+}

@@ -379,8 +379,12 @@ pub(crate) fn flat_outline(m: &Mesh, at: Vec3) -> Vec<Vec<Vec3>> {
                 steps += 1;
             }
             if v == start && pts.len() >= 4 {
-                // A corner off the line within the single precision a mesh file keeps is on it.
-                let precision = pts.iter().map(|p| p.len()).fold(1.0, f64::max) * 1e-6;
+                // A corner off the line within the single precision a mesh file keeps is on it, but
+                // never one farther off than 1e-4 of the loop's own size: far from the origin a small
+                // patch's real corners stay.
+                let far = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+                let (lo, hi) = pts.iter().fold((far, -far), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+                let precision = (pts.iter().map(|p| p.len()).fold(1.0, f64::max) * 1e-6).min(lo.dist(hi) * 1e-4);
                 loops.extend(turning_corners(&pts, precision));
             }
         }
