@@ -34,10 +34,7 @@ render.result.regrade
 render.scene
 render.start
 render.status
-sheet.export_bend_table
 sheet.export_dxf
-sheet.flat_pattern
-sheet.path_flange
 sketch.dimension
 sketch.draw.dimensioned
 sketch.slot.center_to_center

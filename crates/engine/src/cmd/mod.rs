@@ -106,8 +106,8 @@ mod render_ui;
 mod script_tests;
 mod sheet;
 pub(crate) use sheet::{
-    FlangeType, ThenStep, flange_edge, flange_edge_list, flange_position, flange_type, fold_points, fold_position, perforation_pattern, sheet_points,
-    sheet_rule_name, then_list,
+    FlangeType, ThenStep, bend_table_format, flange_edge, flange_edge_list, flange_position, flange_type, fold_points, fold_position,
+    perforation_pattern, sheet_points, sheet_rule_name, then_list,
 };
 mod silhouette;
 mod sketch;
