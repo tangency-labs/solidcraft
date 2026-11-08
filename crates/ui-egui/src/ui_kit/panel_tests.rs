@@ -2442,6 +2442,7 @@ fn border_hierarchy_reaches_hosts_sections_controls_and_inset_without_new_target
             tertiary: Some(Stroke::new(0.5, Color32::GREEN)),
             container: None,
             bevel: None,
+            glass: None,
             control: Some(Stroke::new(1.5, Color32::BLUE)),
             primary_inset: Some(InsetBorder { stroke: Stroke::new(0.75, Color32::YELLOW), gap: 3.0 }),
         };
