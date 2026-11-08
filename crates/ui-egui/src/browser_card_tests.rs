@@ -2279,6 +2279,76 @@ fn expanding_a_sketch_shows_its_contents_groups_and_geometry_rows() {
     assert!(handle_at(&group("lines")).is_none(), "folding the sketch hides its contents again");
 }
 
+/// A figure is one row with its members nested; its sides are not listed again under Lines, and
+/// clicking the figure selects the whole shape.
+#[test]
+fn a_sketch_figure_is_one_row_and_selects_its_members() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Figures"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let out = h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,6]})).unwrap();
+    let figure = out["figure"].as_str().unwrap().to_string();
+    let sides: Vec<String> = out["curves"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+    h.app.finish_sketch();
+    h.settle();
+
+    let scope = format!("s:{sketch}");
+    h.step(&json!({"click":{"handle":"fold:Figures"}})).unwrap();
+    h.settle();
+    let group = format!("browser:sketch-contents-group:{scope}:figures");
+    assert!(handle_at(&group).is_some(), "the Figures group shows: {:?}", crate::scenario::handles("browser:sketch-contents-group"));
+    let row = format!("browser:sketch-contents-row:{scope}:figures:{figure}");
+    assert!(handle_at(&row).is_some(), "the figure row shows");
+    assert!(
+        crate::scenario::handles(&format!("browser:sketch-contents-row:{scope}:lines:")).is_empty(),
+        "the figure's sides are not listed again under Lines: {:?}",
+        crate::scenario::handles("browser:sketch-contents-row")
+    );
+
+    // Open the figure: its members appear under it.
+    h.step(&json!({"click":{"handle":format!("browser:sketch-contents-fold:{scope}:figures:{figure}")}})).unwrap();
+    h.settle();
+    for side in &sides {
+        assert!(
+            handle_at(&format!("browser:sketch-contents-row:{scope}:figures:{figure}:{side}")).is_some(),
+            "missing member {side}: {:?}",
+            crate::scenario::handles("browser:sketch-contents-row")
+        );
+    }
+
+    // Clicking the figure row selects every side.
+    h.step(&json!({"click":{"handle":&row}})).unwrap();
+    h.settle();
+    for side in &sides {
+        assert!(
+            h.app.session.selection.iter().any(|sel| matches!(
+                sel,
+                solidcraft_engine::Sel::SketchCurve { id, .. } | solidcraft_engine::Sel::ExternalSketchCurve { id, .. } if id == side
+            )),
+            "side {side} not selected: {:?}",
+            h.app.session.selection
+        );
+    }
+
+    // Shift over two member rows takes the range: a member key parses one level deeper.
+    let child = |id: &str| format!("browser:sketch-contents-row:{scope}:figures:{figure}:{id}");
+    h.step(&json!({"click":{"handle":child(&sides[0])}})).unwrap();
+    h.step(&json!({"click":{"handle":child(&sides[2])},"shift":true})).unwrap();
+    let selected: Vec<&str> = h
+        .app
+        .session
+        .selection
+        .iter()
+        .filter_map(|sel| match sel {
+            solidcraft_engine::Sel::SketchCurve { id, .. } | solidcraft_engine::Sel::ExternalSketchCurve { id, .. } => Some(id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(selected, vec![sides[0].as_str(), sides[1].as_str(), sides[2].as_str()], "Shift takes the member range");
+}
+
 /// A sketch a feature has consumed keeps its row (and its fold arrow), and its contents still
 /// expand from the solved state.
 #[test]
@@ -2288,7 +2358,9 @@ fn a_consumed_sketch_still_expands_to_its_contents() {
     h.app.ui.show_browser = true;
     h.app.run("sketch.create", json!({"plane":"XY","name":"Consumed"})).unwrap();
     let sketch = h.app.session.active_sketch.unwrap();
-    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    let out = h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    let figure = out["figure"].as_str().unwrap().to_string();
+    let sides: Vec<String> = out["curves"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
     h.app.finish_sketch();
     h.app.run("solid.extrude", json!({"sketch":"Consumed","distance":5})).unwrap();
     h.settle();
@@ -2297,15 +2369,18 @@ fn a_consumed_sketch_still_expands_to_its_contents() {
     h.step(&json!({"click":{"handle":"fold:Consumed"}})).unwrap();
     h.settle();
     let scope = format!("s:{sketch}");
-    assert!(handle_at(&format!("browser:sketch-contents-group:{scope}:lines")).is_some(), "the consumed sketch folds its contents open");
-    let lines = crate::scenario::handles(&format!("browser:sketch-contents-row:{scope}:lines:"));
-    assert_eq!(lines.len(), 4, "the rectangle's four lines are listed: {lines:?}");
+    assert!(handle_at(&format!("browser:sketch-contents-group:{scope}:figures")).is_some(), "the consumed sketch folds its contents open");
+    assert!(handle_at(&format!("browser:sketch-contents-row:{scope}:figures:{figure}")).is_some(), "the rectangle is one figure");
+    h.step(&json!({"click":{"handle":format!("browser:sketch-contents-fold:{scope}:figures:{figure}")}})).unwrap();
+    h.settle();
+    for side in &sides {
+        assert!(handle_at(&format!("browser:sketch-contents-row:{scope}:figures:{figure}:{side}")).is_some(), "missing side {side}");
+    }
     // Stage 3: its rows are external picks, and the viewport lights them through the external
     // path even though the sketch's own display is consumed (no eye is toggled to show it).
     let visibility = h.app.session.visibility.clone();
-    h.step(&json!({"click":{"handle":lines[0].0.clone()}})).unwrap();
-    let id = lines[0].0.rsplit(':').next().unwrap_or_default().to_string();
-    assert_eq!(h.app.session.selection, vec![Sel::ExternalSketchCurve { sketch, id }]);
+    h.step(&json!({"click":{"handle":format!("browser:sketch-contents-row:{scope}:figures:{figure}:{}", sides[0])}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::ExternalSketchCurve { sketch, id: sides[0].clone() }]);
     assert_eq!(h.app.session.visibility, visibility, "a consumed sketch's eye is left alone");
     assert!(!crate::browser::sketch_visible(&h.app, sketch));
     let highlight = crate::viewport::build_highlight(&h.app).merged();

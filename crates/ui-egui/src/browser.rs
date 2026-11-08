@@ -882,11 +882,20 @@ fn sels_of_key(app: &SolveApp, k: &str) -> Vec<Sel> {
 fn contents_key_sels(app: &SolveApp, key: &str) -> Option<Vec<Sel>> {
     let (head, id) = key.rsplit_once('/')?;
     let (scope, slug) = head.rsplit_once('/')?;
+    let sketch_of = |scope: &str| -> Option<u64> { scope.rsplit_once("/s:").map(|(_, id)| id).or_else(|| scope.strip_prefix("s:"))?.parse().ok() };
+    // A figure member's key has one more segment: `…/contents/figures/<figure>/<member>`.
+    if let Some((parent, group)) = scope.rsplit_once('/')
+        && let Some(parent) = parent.strip_suffix("/contents")
+        && let Some(sketch) = sketch_of(parent)
+        && group == "figures"
+    {
+        return Some(member_targets(app, sketch, id, app.session.active_sketch == Some(sketch)));
+    }
     let scope = scope.strip_suffix("/contents")?;
-    let sketch = scope.rsplit_once("/s:").map(|(_, id)| id).or_else(|| scope.strip_prefix("s:"))?;
-    let sketch: u64 = sketch.parse().ok()?;
+    let sketch = sketch_of(scope)?;
     let editable = app.session.active_sketch == Some(sketch);
     let kind = match slug {
+        "figures" => RowKind::Figure,
         "points" => RowKind::Point,
         "lines" => RowKind::Line,
         "arcs" => RowKind::Arc,
@@ -3302,11 +3311,14 @@ fn sketch_contents_rows(
             let row_key = format!("{key}/{}", row.id);
             app.tree.remember(&row_key);
             let selected = contents_row_selected(app, row, sketch, editable);
+            let has_children = !row.children.is_empty();
+            let figure_open = has_children && is_open(app, &row_key, false);
             let rr = draw_row(
                 ui,
                 ui.scope_id().with(("sketch_content", scope, slug, &row.id)),
                 &Row {
                     depth: depth + 1,
+                    fold: has_children.then_some(figure_open),
                     icon: row_icon(row.kind),
                     label: &row.label,
                     name: true,
@@ -3319,6 +3331,12 @@ fn sketch_contents_rows(
             let handle = format!("browser:sketch-contents-row:{scope}:{slug}:{}", row.id);
             if let Some(rect) = rr.rect {
                 crate::scenario::publish_handle(&handle, rect.center());
+            }
+            if let Some(at) = rr.fold_at {
+                crate::scenario::publish_handle(&format!("browser:sketch-contents-fold:{scope}:{slug}:{}", row.id), at);
+            }
+            if rr.fold {
+                toggle(app, &row_key, false);
             }
             if rr.clicked {
                 let mut targets = contents_row_targets(app, row, sketch, editable, true);
@@ -3333,7 +3351,7 @@ fn sketch_contents_rows(
                 let targets = contents_row_targets(app, row, sketch, editable, true);
                 let picked = !targets.is_empty() && targets.iter().all(|sel| app.session.selection.contains(sel));
                 if !picked {
-                    app.tree.content.current_mut().anchor = Some(row_key);
+                    app.tree.content.current_mut().anchor = Some(row_key.clone());
                     app.tree.picked_components.clear();
                     app.tree.picked_joints.clear();
                     if targets.is_empty() {
@@ -3345,11 +3363,64 @@ fn sketch_contents_rows(
                 let mut rows = selected_contents_rows(app, contents, sketch, editable);
                 // Rows that select the sketch (an offset or equation curve) must not lend
                 // their curve id to the menu: `ui.delete` would act on the sketch instead.
-                let names_entity = !targets.is_empty() && !matches!(row.kind, RowKind::Link | RowKind::Text);
+                // A figure row names its members, never the figure id.
+                let names_entity = !targets.is_empty() && !matches!(row.kind, RowKind::Link | RowKind::Text | RowKind::Figure);
                 if names_entity && !rows.iter().any(|id| id == &row.id) {
                     rows.push(row.id.clone());
                 }
                 acts.menu = Some((at, Target::SketchContents { sketch, rows, editable }));
+            }
+            if !figure_open {
+                continue;
+            }
+            for child in row.children.iter().take(CONTENTS_CAP) {
+                let child_key = format!("{row_key}/{}", child.id);
+                app.tree.remember(&child_key);
+                let selected = contents_row_selected(app, child, sketch, editable);
+                let cr = draw_row(
+                    ui,
+                    ui.scope_id().with(("sketch_content_child", scope, slug, &row.id, &child.id)),
+                    &Row {
+                        depth: depth + 2,
+                        icon: row_icon(child.kind),
+                        label: &child.label,
+                        name: true,
+                        selected,
+                        dim,
+                        count: &child.summary,
+                        ..Default::default()
+                    },
+                );
+                let handle = format!("browser:sketch-contents-row:{scope}:{slug}:{}:{}", row.id, child.id);
+                if let Some(rect) = cr.rect {
+                    crate::scenario::publish_handle(&handle, rect.center());
+                }
+                if cr.clicked {
+                    let mut targets = contents_row_targets(app, child, sketch, editable, true);
+                    if targets.is_empty() {
+                        targets.push(Sel::Feature { id: sketch });
+                    }
+                    click_select_sels(app, ui, child_key.clone(), &targets);
+                }
+                if let Some(at) = cr.secondary {
+                    let targets = contents_row_targets(app, child, sketch, editable, true);
+                    let picked = !targets.is_empty() && targets.iter().all(|sel| app.session.selection.contains(sel));
+                    if !picked {
+                        app.tree.content.current_mut().anchor = Some(child_key.clone());
+                        app.tree.picked_components.clear();
+                        app.tree.picked_joints.clear();
+                        if targets.is_empty() {
+                            let _ = app.run("select.set", json!({ "items": [Sel::Feature { id: sketch }] }));
+                        } else {
+                            let _ = app.run("select.set", json!({ "items": targets }));
+                        }
+                    }
+                    let mut rows = selected_contents_rows(app, contents, sketch, editable);
+                    if !rows.iter().any(|id| id == &child.id) {
+                        rows.push(child.id.clone());
+                    }
+                    acts.menu = Some((at, Target::SketchContents { sketch, rows, editable }));
+                }
             }
         }
         if shown < total {
@@ -3392,6 +3463,7 @@ fn contents_target(app: &SolveApp, kind: RowKind, id: &str, sketch: u64, editabl
         RowKind::Constraint | RowKind::Dimension if editable => vec![Sel::SketchConstraint { id }],
         RowKind::Constraint | RowKind::Dimension if expand || has_external_selection(app, sketch) => external_constraint_targets(app, sketch, &id),
         RowKind::Link | RowKind::Text => link_targets(app, sketch, &id, editable),
+        RowKind::Figure => figure_targets(app, sketch, &id, editable),
         // An equation curve's id is a curve id; a 3D curve has no selectable sketch curve.
         RowKind::Other => {
             let world = crate::open_meshing::session_world(&app.session);
@@ -3434,6 +3506,42 @@ fn link_targets(app: &SolveApp, sketch: u64, link: &str, editable: bool) -> Vec<
         .filter(|point| point.link.as_deref() == Some(link))
         .map(|point| if editable { Sel::SketchPoint { id: point.id.clone() } } else { Sel::ExternalSketchPoint { sketch, id: point.id.clone() } })
         .collect()
+}
+
+/// The entities a figure made: selecting the figure row lights the whole shape.
+fn figure_targets(app: &SolveApp, sketch: u64, figure: &str, editable: bool) -> Vec<Sel> {
+    let world = crate::open_meshing::session_world(&app.session);
+    let solved = world.sketch(sketch).map(|solved| &solved.sketch);
+    let stored = app.session.doc.sketch(sketch).ok();
+    let Some(sk) = solved.or(stored) else { return Vec::new() };
+    let Some(record) = sk.figures.iter().find(|record| record.id == figure) else { return Vec::new() };
+    let mut sels = Vec::new();
+    for id in record.curve_ids() {
+        sels.push(if editable { Sel::SketchCurve { id: id.clone(), sketch: None } } else { Sel::ExternalSketchCurve { sketch, id: id.clone() } });
+    }
+    for id in record.point_ids() {
+        sels.push(if editable { Sel::SketchPoint { id: id.clone() } } else { Sel::ExternalSketchPoint { sketch, id: id.clone() } });
+    }
+    sels
+}
+
+/// A figure's member row, by its entity id: a curve or a point.
+fn member_targets(app: &SolveApp, sketch: u64, id: &str, editable: bool) -> Vec<Sel> {
+    let world = crate::open_meshing::session_world(&app.session);
+    let solved = world.sketch(sketch).map(|solved| &solved.sketch);
+    let stored = app.session.doc.sketch(sketch).ok();
+    let Some(sk) = solved.or(stored) else { return Vec::new() };
+    if sk.curve_index(id).is_some() {
+        return vec![if editable {
+            Sel::SketchCurve { id: id.to_string(), sketch: None }
+        } else {
+            Sel::ExternalSketchCurve { sketch, id: id.to_string() }
+        }];
+    }
+    if sk.point_index(id).is_some() {
+        return vec![if editable { Sel::SketchPoint { id: id.to_string() } } else { Sel::ExternalSketchPoint { sketch, id: id.to_string() } }];
+    }
+    Vec::new()
 }
 
 /// Is any geometry of `sketch` selected as an external pick? Only then can an inactive constraint
@@ -3493,9 +3601,9 @@ fn selected_contents_rows(app: &SolveApp, contents: &SketchContents, sketch: u64
             if !contents_row_selected(app, row, sketch, editable) {
                 continue;
             }
-            // A link or text row stands for the geometry it made: the menu resolves ids as
-            // curves and points, and cannot resolve the link's own id.
-            let ids: Vec<String> = if matches!(row.kind, RowKind::Link | RowKind::Text) {
+            // A link, text or figure row stands for the geometry it made: the menu resolves ids
+            // as curves and points, and cannot resolve the link's or figure's own id.
+            let ids: Vec<String> = if matches!(row.kind, RowKind::Link | RowKind::Text | RowKind::Figure) {
                 contents_row_targets(app, row, sketch, editable, true)
                     .into_iter()
                     .filter_map(|sel| match sel {
@@ -3514,6 +3622,11 @@ fn selected_contents_rows(app: &SolveApp, contents: &SketchContents, sketch: u64
                     rows.push(id);
                 }
             }
+            for child in &row.children {
+                if contents_row_selected(app, child, sketch, editable) && !rows.iter().any(|seen| seen == &child.id) {
+                    rows.push(child.id.clone());
+                }
+            }
         }
     }
     rows
@@ -3522,6 +3635,7 @@ fn selected_contents_rows(app: &SolveApp, contents: &SketchContents, sketch: u64
 /// The stable key fragment of a group (`s:1/contents/lines`).
 fn group_slug(kind: GroupKind) -> &'static str {
     match kind {
+        GroupKind::Figures => "figures",
         GroupKind::Points => "points",
         GroupKind::Lines => "lines",
         GroupKind::Arcs => "arcs",
@@ -3541,6 +3655,7 @@ fn group_slug(kind: GroupKind) -> &'static str {
 /// The group's translated title; [`Row::name`] is false so the label is looked up as a message.
 fn group_title(kind: GroupKind) -> &'static str {
     match kind {
+        GroupKind::Figures => "sketch.contents.figures",
         GroupKind::Points => "sketch.contents.points",
         GroupKind::Lines => "sketch.contents.lines",
         GroupKind::Arcs => "sketch.contents.arcs",
@@ -3557,14 +3672,15 @@ fn group_title(kind: GroupKind) -> &'static str {
     }
 }
 
-/// Geometry groups start open; the constraint, dimension and derived groups start closed.
+/// Figures and geometry groups start open; the constraint, dimension and derived groups start closed.
 fn group_default_open(kind: GroupKind) -> bool {
-    matches!(kind, GroupKind::Lines | GroupKind::Arcs | GroupKind::Circles | GroupKind::Splines | GroupKind::Conics)
+    matches!(kind, GroupKind::Figures | GroupKind::Lines | GroupKind::Arcs | GroupKind::Circles | GroupKind::Splines | GroupKind::Conics)
 }
 
 /// The icon of a group row: an existing command icon, as the tree uses elsewhere.
 fn group_icon(kind: GroupKind) -> &'static str {
     match kind {
+        GroupKind::Figures => "rect",
         GroupKind::Points => "point",
         GroupKind::Lines => "line",
         GroupKind::Arcs => "arc3",
@@ -3584,6 +3700,7 @@ fn group_icon(kind: GroupKind) -> &'static str {
 /// The icon of one contents row.
 fn row_icon(kind: RowKind) -> &'static str {
     match kind {
+        RowKind::Figure => "rect",
         RowKind::Point => "point",
         RowKind::Line => "line",
         RowKind::Arc => "arc3",

@@ -1,6 +1,6 @@
-//! A sketch's contents as rows a browser can show: its points and curves, the constraints and
-//! dimensions that drive them, and the patterns, offsets, links, text and 3D curves stored beside
-//! them.
+//! A sketch's contents as rows a browser can show: the figures its commands drew, the points and
+//! curves they made, the constraints and dimensions that drive them, and the patterns, offsets,
+//! links, text and 3D curves stored beside them.
 //!
 //! The model is built from the stored [`Sketch`] and, when it has been evaluated, the solved one,
 //! so it costs no more than a walk over the sketch. It is pure data: no egui, no selection and no
@@ -10,7 +10,7 @@ use solidcore_record::Seg2;
 use solidcraft_engine::{
     doc::{Document, ModelState},
     geom::Vec2Geom,
-    sketch::{Constraint, ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch, SketchPatternKind},
+    sketch::{Constraint, ConstraintKind, CurveKind, Figure, LinkKind, LinkSource, Sketch, SketchPatternKind},
 };
 
 /// Everything the browser shows below one sketch row.
@@ -36,6 +36,7 @@ pub(crate) struct ContentsGroup {
 /// The groups a sketch's contents are split into, in the order the browser shows them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GroupKind {
+    Figures,
     Points,
     Lines,
     Arcs,
@@ -54,6 +55,7 @@ pub(crate) enum GroupKind {
 impl GroupKind {
     /// Every group, in display order.
     pub(crate) const ALL: &[GroupKind] = &[
+        GroupKind::Figures,
         GroupKind::Points,
         GroupKind::Lines,
         GroupKind::Arcs,
@@ -72,19 +74,20 @@ impl GroupKind {
     /// Position in [`GroupKind::ALL`], for bucketing rows in display order.
     fn index(self) -> usize {
         match self {
-            GroupKind::Points => 0,
-            GroupKind::Lines => 1,
-            GroupKind::Arcs => 2,
-            GroupKind::Circles => 3,
-            GroupKind::Splines => 4,
-            GroupKind::Conics => 5,
-            GroupKind::Constraints => 6,
-            GroupKind::Dimensions => 7,
-            GroupKind::Patterns => 8,
-            GroupKind::Offsets => 9,
-            GroupKind::Links => 10,
-            GroupKind::Text => 11,
-            GroupKind::Other => 12,
+            GroupKind::Figures => 0,
+            GroupKind::Points => 1,
+            GroupKind::Lines => 2,
+            GroupKind::Arcs => 3,
+            GroupKind::Circles => 4,
+            GroupKind::Splines => 5,
+            GroupKind::Conics => 6,
+            GroupKind::Constraints => 7,
+            GroupKind::Dimensions => 8,
+            GroupKind::Patterns => 9,
+            GroupKind::Offsets => 10,
+            GroupKind::Links => 11,
+            GroupKind::Text => 12,
+            GroupKind::Other => 13,
         }
     }
 }
@@ -92,6 +95,7 @@ impl GroupKind {
 /// What kind of entity a row is, for its icon and its actions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RowKind {
+    Figure,
     Point,
     Line,
     Arc,
@@ -117,6 +121,8 @@ pub(crate) struct ContentsRow {
     pub label: String,
     /// A short, unlocalised detail: a length, a radius, a value, a source.
     pub summary: String,
+    /// A figure's member rows; empty for every other row.
+    pub children: Vec<ContentsRow>,
 }
 
 /// Build the contents of one sketch.
@@ -132,6 +138,9 @@ pub(crate) fn build(doc: &Document, state: Option<&ModelState>, sketch: u64, act
     let Some(source) = source else {
         return SketchContents { sketch, editable: active, evaluated, groups: Vec::new() };
     };
+    // Entities a figure created are shown under that figure, not again as loose geometry.
+    // Adopted members stay in their groups: the user drew them as loose geometry first.
+    let figure_created = source.figure_created_ids();
 
     for (index, point) in source.points.iter().enumerate() {
         // Point 0 is always the fixed origin, not something the sketch drew: no row for it.
@@ -141,7 +150,7 @@ pub(crate) fn build(doc: &Document, state: Option<&ModelState>, sketch: u64, act
         // A link's generated geometry (projected edges, text outlines) is the link's row to
         // show: listing every generated point and curve again buries the local geometry, and
         // one text can make hundreds of them.
-        if point.link.is_some() {
+        if point.link.is_some() || figure_created.contains(point.id.as_str()) {
             continue;
         }
         let mut summary = format!("{}, {}", num(point.pos.x), num(point.pos.y));
@@ -152,7 +161,7 @@ pub(crate) fn build(doc: &Document, state: Option<&ModelState>, sketch: u64, act
     }
 
     for (index, curve) in source.curves.iter().enumerate() {
-        if curve.link.is_some() {
+        if curve.link.is_some() || figure_created.contains(curve.id.as_str()) {
             continue;
         }
         let (group, kind, word) = match &curve.kind {
@@ -165,6 +174,15 @@ pub(crate) fn build(doc: &Document, state: Option<&ModelState>, sketch: u64, act
         };
         let summary = curve_summary(doc, source, index, &curve.kind);
         buckets[group.index()].push(contents_row(&curve.id, kind, format!("{word} {}", curve.id), summary));
+    }
+
+    for figure in &source.figures {
+        let children: Vec<ContentsRow> = figure.curve_ids().chain(figure.point_ids()).filter_map(|id| member_row(doc, source, id)).collect();
+        let label = figure_label(&figure.kind, source, figure);
+        let summary = figure_summary(figure);
+        let mut row = contents_row(&figure.id, RowKind::Figure, label, summary);
+        row.children = children;
+        buckets[GroupKind::Figures.index()].push(row);
     }
 
     for constraint in &source.constraints {
@@ -234,7 +252,65 @@ pub(crate) fn build(doc: &Document, state: Option<&ModelState>, sketch: u64, act
 
 /// A row with an id of `id`.
 fn contents_row(id: &str, kind: RowKind, label: String, summary: String) -> ContentsRow {
-    ContentsRow { id: id.to_string(), kind, label, summary }
+    ContentsRow { id: id.to_string(), kind, label, summary, children: Vec::new() }
+}
+
+/// A figure's member as a row: the same label and summary the geometry groups would give it.
+fn member_row(doc: &Document, source: &Sketch, id: &str) -> Option<ContentsRow> {
+    if let Some(index) = source.curve_index(id) {
+        let curve = source.curves.get(index)?;
+        let (kind, word) = match &curve.kind {
+            CurveKind::Line { .. } => (RowKind::Line, "Line"),
+            CurveKind::Arc { .. } => (RowKind::Arc, "Arc"),
+            CurveKind::Circle { .. } => (RowKind::Circle, "Circle"),
+            CurveKind::Spline { .. } => (RowKind::Spline, "Spline"),
+            CurveKind::Ellipse { .. } => (RowKind::Conic, "Ellipse"),
+            CurveKind::Conic { .. } => (RowKind::Conic, "Conic"),
+        };
+        let summary = curve_summary(doc, source, index, &curve.kind);
+        return Some(contents_row(&curve.id, kind, format!("{word} {}", curve.id), summary));
+    }
+    let index = source.point_index(id)?;
+    let point = source.points.get(index)?;
+    let mut summary = format!("{}, {}", num(point.pos.x), num(point.pos.y));
+    if point.fixed {
+        summary.push_str(" · fixed");
+    }
+    Some(contents_row(&point.id, RowKind::Point, format!("Point {}", point.id), summary))
+}
+
+/// What a figure's row says: its kind, with the side count for a polygon.
+fn figure_label(kind: &str, source: &Sketch, figure: &Figure) -> String {
+    match kind {
+        "rectangle" => "Rectangle".into(),
+        "rectangle.center" => "Center Rectangle".into(),
+        "rectangle.rounded" => "Rounded Rectangle".into(),
+        "polygon" => {
+            let sides = figure
+                .curves
+                .iter()
+                .filter(|id| {
+                    source.curve_index(id).and_then(|i| source.curves.get(i)).is_some_and(|curve| matches!(curve.kind, CurveKind::Line { .. }))
+                })
+                .count();
+            if sides == 0 { "Polygon".into() } else { format!("Polygon ({sides})") }
+        }
+        "slot" => "Slot".into(),
+        "slot.arc" => "Arc Slot".into(),
+        _ => "Figure".into(),
+    }
+}
+
+/// A figure's row detail: how many entities it made.
+fn figure_summary(figure: &Figure) -> String {
+    let mut parts = Vec::new();
+    if !figure.curves.is_empty() {
+        parts.push(format!("{} curves", figure.curves.len()));
+    }
+    if !figure.points.is_empty() {
+        parts.push(format!("{} points", figure.points.len()));
+    }
+    if parts.is_empty() { figure.command.clone() } else { parts.join(" · ") }
 }
 
 /// What a curve measures: line length, arc radius and sweep, circle radius, ellipse radii,
@@ -619,6 +695,50 @@ mod tests {
         assert_eq!(row(&contents, GroupKind::Text, "link2").summary, "HELLO");
         assert_eq!(row(&contents, GroupKind::Other, "w1").summary, "3 points");
         assert_eq!(row(&contents, GroupKind::Other, "s1").summary, "y = sin(x)");
+    }
+
+    /// A rectangle's four points and four lines, as `sketch.rectangle.two_point` makes them.
+    fn rectangle(sk: &mut Sketch) -> (Vec<String>, Vec<String>) {
+        let corners: Vec<usize> =
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)].into_iter().map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+        let lines: Vec<usize> = (0..4).map(|i| sk.add_line_pts(corners[i], corners[(i + 1) % 4], None).unwrap()).collect();
+        let curves = lines.iter().map(|i| sk.curves[*i].id.clone()).collect();
+        let points = corners.iter().map(|i| sk.points[*i].id.clone()).collect();
+        (curves, points)
+    }
+
+    #[test]
+    fn a_figure_shows_its_members_once_and_keeps_loose_geometry_in_its_group() {
+        let mut sk = Sketch::new();
+        let (curves, points) = rectangle(&mut sk);
+        sk.add_figure("rectangle", "sketch.rectangle.two_point", &curves, &points, &[], &[]).unwrap();
+        let loose = sk.add_line(Vec2::new(20.0, 0.0), Vec2::new(30.0, 0.0), None, None, None).unwrap();
+        let loose_id = sk.curves[loose].id.clone();
+        let (doc, sketch) = document(sk);
+        let contents = build(&doc, None, sketch, true);
+
+        let figures = group(&contents, GroupKind::Figures);
+        assert_eq!(figures.rows.len(), 1);
+        assert_eq!(figures.rows[0].id, "fig1");
+        assert_eq!(figures.rows[0].kind, RowKind::Figure);
+        assert_eq!(figures.rows[0].label, "Rectangle");
+        assert_eq!(figures.rows[0].children.len(), 8, "four sides and four corners");
+        assert!(group(&contents, GroupKind::Lines).rows.iter().all(|r| !curves.contains(&r.id)), "figure sides stay off Lines");
+        assert!(group(&contents, GroupKind::Points).rows.iter().all(|r| !points.contains(&r.id)), "figure corners stay off Points");
+        assert!(group(&contents, GroupKind::Lines).rows.iter().any(|r| r.id == loose_id), "a loose line stays in Lines");
+    }
+
+    #[test]
+    fn an_adopted_member_stays_in_its_group_and_is_listed_under_the_figure() {
+        let mut sk = Sketch::new();
+        let (curves, points) = rectangle(&mut sk);
+        sk.add_figure("rectangle", "sketch.rectangle.two_point", &curves[..3], &points, &curves[3..], &[]).unwrap();
+        let (doc, sketch) = document(sk);
+        let contents = build(&doc, None, sketch, true);
+        let figure = &group(&contents, GroupKind::Figures).rows[0];
+        assert!(figure.children.iter().any(|r| r.id == curves[3]), "the adopted side is part of the figure");
+        assert!(group(&contents, GroupKind::Lines).rows.iter().any(|r| r.id == curves[3]), "but it stays in Lines");
+        assert!(group(&contents, GroupKind::Lines).rows.iter().all(|r| r.id != curves[0]));
     }
 
     #[test]
