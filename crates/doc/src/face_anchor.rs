@@ -136,7 +136,14 @@ impl Document {
     /// keeps that plane when exactly that face is still there: the name finds the face, made by
     /// the extrude the certificate names, on a body whose certified cap is nowhere else, a saved
     /// point lies on it, and it still lies in the saved plane. A moved or edited face stays lost.
-    fn old_cap_plane(&self, anchor: &FaceAnchor, name: Option<&str>, at: Vec3, saved: &Plane, state: &ModelState) -> Option<(Plane, Option<String>)> {
+    fn old_cap_plane(
+        &self,
+        anchor: &FaceAnchor,
+        name: Option<&str>,
+        at: solidcore_record::Vec3,
+        saved: &Plane,
+        state: &ModelState,
+    ) -> Option<(Plane, Option<String>)> {
         let target = &anchor.target;
         let Some(crate::config::FaceCertificate::ExtrudeCap { sketch, high, outer, holes }) = &target.certificate else { return None };
         if !anchor.path.is_empty() || !anchor.author_path.is_empty() || anchor.placement.is_some() {
