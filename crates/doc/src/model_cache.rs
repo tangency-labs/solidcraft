@@ -481,11 +481,13 @@ impl SavedModel {
         for s in list("sheets")? {
             sheets.push(serde_json::from_value::<crate::sheet::SheetBody>(s.clone()).map_err(|_| bad("saved model: sheet"))?);
         }
-        // Sheets made from surfaces: none in a model that holds none.
-        let mut surface_sheets = Vec::new();
+        // Sheets made from surfaces: none in a model that holds none. Each one's weight is what it
+        // costs to clone (its items and text), as a marking's is.
+        let (mut surface_sheets, mut surface_weight) = (Vec::new(), Vec::new());
         if records.get("surface_sheets").is_some() {
             for s in list("surface_sheets")? {
                 surface_sheets.push(serde_json::from_value::<crate::SurfaceSheet>(s.clone()).map_err(|_| bad("saved model: sheet"))?);
+                surface_weight.push(1usize.saturating_add(serde_json::to_vec(s).map_or(usize::MAX, |b| b.len()) / 64));
             }
         }
         let mut threads = Vec::new();
@@ -541,7 +543,12 @@ impl SavedModel {
                 held = held.saturating_add(thread_weight[end].saturating_sub(thread_weight[first]));
             }
             held = held.saturating_add(s.get("sheets").and_then(Json::as_array).map_or(0, Vec::len));
-            held = held.saturating_add(s.get("surface_sheets").and_then(Json::as_array).map_or(0, Vec::len));
+            // A sheet made from surfaces is cloned deeply into every state that lists it, as a
+            // marking is, so each counts by its weight: a large sheet listed again and again cannot
+            // exhaust memory.
+            for i in s.get("surface_sheets").and_then(Json::as_array).map_or(&[][..], Vec::as_slice) {
+                held = held.saturating_add(surface_weight.get(index(Some(i), surface_weight.len())?).copied().unwrap_or(usize::MAX));
+            }
             held = held.saturating_add(key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).map_or(0, BTreeMap::len));
             if held > MAX_HELD {
                 return Err(bad("saved model: states"));

@@ -2189,6 +2189,30 @@ mod tests {
         assert!(solidcraft_doc::Model::adopt(&s.doc, &hostile).is_err());
     }
 
+    /// A saved model whose states name one large sheet made from surfaces over and over is refused,
+    /// as a repeated marking is: every state holds its own copy of each sheet it lists.
+    #[test]
+    fn a_saved_model_repeating_a_large_surface_sheet_is_refused() {
+        let mut s = Session::new(Document::new("Sheet"));
+        let rule = json!({"name": "AL2", "thickness": "2 mm", "k_factor": "0.5", "bend_radius": "1 mm", "active": true});
+        s.execute("sheet.manage_rules", &rule).unwrap();
+        s.execute("sketch.create", &json!({"plane": "XY", "name": "Base"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [150, 100]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("sheet.flange", &json!({"sketch": "Base"})).unwrap();
+        let saved = saved_geometry(&s, &s.doc).unwrap();
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &saved).is_ok());
+        // A large sheet listed where it is held reads back.
+        let mut large = solidcraft_doc::SavedModel { records: saved.records.clone(), bodies: saved.bodies.clone() };
+        large.records["surface_sheets"][0]["body"] = json!("S".repeat(1 << 20));
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &large).is_ok());
+        // Listed 4,000 times in one state, it is refused before any copy is made.
+        let mut hostile = large;
+        let last = hostile.records["states"].as_array().unwrap().len() - 1;
+        hostile.records["states"][last]["surface_sheets"] = Value::Array(vec![json!(0); 4000]);
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &hostile).is_err());
+    }
+
     #[test]
     #[ignore = "manual native cache save benchmark; generate issue303-step.json first"]
     fn benchmark_native_cache_save() {
