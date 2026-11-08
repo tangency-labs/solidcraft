@@ -28,6 +28,7 @@ const CONTRACT: TypedContract<ExportParams> = TypedContract::new();
 const MAX_PATH_BYTES: usize = 4096;
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Sheet", crate::checked!("drawing.export", export))
+    .at("DRAWING REVIEW", "OUTPUT")
     .icon("export")
     .in_drawing()
     .noundo()
