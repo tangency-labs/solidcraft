@@ -26,6 +26,7 @@ fn strict_keeps_todays_errors() {
         // The kind of file is refused before anything else is read.
         ("file.insert_mesh", json!({"path": "x.step"})),
         ("file.insert_mesh", json!({"path": "x.step", "up": "q", "units": 5, "origin": 1})),
+        ("file.insert_mesh", json!({"path": "x.step", "name": 5})),
         // `up` is for a glTF file only, whatever it says.
         ("file.insert_mesh", json!({"path": "x.stl", "up": "y"})),
         ("file.insert_mesh", json!({"path": "x.stl", "up": "q"})),

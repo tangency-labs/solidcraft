@@ -162,7 +162,7 @@ fn leave_unread(value: &mut Value) {
     };
     if !solidcraft_io::is_mesh_path(&path) && !solidcraft_io::is_ply_path(&path) {
         // Refused for its kind before anything else is read.
-        for key in ["up", "names", "folder", "units", "origin"] {
+        for key in ["name", "up", "names", "folder", "units", "origin"] {
             keys.remove(key);
         }
         return;
