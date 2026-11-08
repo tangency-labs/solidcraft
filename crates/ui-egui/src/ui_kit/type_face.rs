@@ -4,7 +4,8 @@
 //!
 //! Host contract: before the kit draws, the context's fonts bind the weight families. A host with
 //! faces of its own binds them in its definitions (see [`with_weight_families`]); a host with none
-//! calls [`install`] once, and the kit draws every weight with egui's default faces.
+//! calls [`install_weight_families`] once, and the kit draws every weight with egui's default
+//! faces.
 
 use egui::{FontDefinitions, FontFamily, FontId, RichText};
 
@@ -49,7 +50,7 @@ pub fn with_weight_families(mut fonts: FontDefinitions) -> FontDefinitions {
 /// definitions through [`with_weight_families`] (or binds the weight families itself) instead.
 /// Without either, egui finds no face for a weight family (it logs the family as not bound) and
 /// draws no glyphs for the kit's weighted text.
-pub fn install(ctx: &egui::Context) {
+pub fn install_weight_families(ctx: &egui::Context) {
     ctx.set_fonts(with_weight_families(FontDefinitions::default()));
 }
 
@@ -305,12 +306,13 @@ mod tests {
         assert!(ctx.fonts_mut(|f| f.has_glyphs(&bold(14.0), "Chamfer")));
     }
 
-    /// A kit widget that sets its name in semibold draws it on a bare context after only [`install`]:
-    /// without that call the weight family is unbound and egui has no face to draw the name with.
+    /// A kit widget that sets its name in semibold draws it on a bare context after only
+    /// [`install_weight_families`]; without that call the weight family is unbound and egui has no
+    /// face to draw the name with.
     #[test]
-    fn a_kit_widget_draws_on_a_bare_context_after_install() {
+    fn a_kit_widget_draws_on_a_bare_context_once_the_weights_are_bound() {
         let ctx = egui::Context::default();
-        install(&ctx);
+        install_weight_families(&ctx);
         let mut name = None;
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let status = crate::ui_kit::StatusHeader { icon: "", text: "Fully constrained", complete: true, fraction: 1.0 };
