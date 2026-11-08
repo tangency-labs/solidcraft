@@ -104,6 +104,7 @@ pub mod render_shots;
 pub mod render_stage;
 pub mod render_surface_resources;
 pub mod render_ui;
+pub mod save;
 pub mod section;
 pub mod select;
 pub mod sheet;
