@@ -26,7 +26,6 @@ render.preflight
 render.scene
 render.start
 sheet.export_dxf
-sketch.dimension
 sketch.draw.dimensioned
 sketch.slot.center_to_center
 sketch.slot.overall
