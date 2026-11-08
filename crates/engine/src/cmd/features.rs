@@ -12,6 +12,7 @@ use solidcraft_geom::prelude::*;
 
 use super::{CommandSpec, not_in_sketch};
 use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
+use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams,
     FeatureNotice, FeatureResult, FilletParams, FilletResult, NoticeAction, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams,
@@ -27,6 +28,7 @@ const SPHERE_CONTRACT: TypedContract<SphereParams> = TypedContract::new();
 const TORUS_CONTRACT: TypedContract<TorusParams> = TypedContract::new();
 const CONE_CONTRACT: TypedContract<ConeParams> = TypedContract::new();
 const PIPE_CONTRACT: TypedContract<PipeParams> = TypedContract::new();
+const SWEEP_CONTRACT: TypedContract<SweepParams> = TypedContract::new();
 const BOUNDING_SOLID_CONTRACT: TypedContract<BoundingSolidParams> = TypedContract::new();
 const SCALE_CONTRACT: TypedContract<ScaleParams> = TypedContract::new();
 const COMBINE_CONTRACT: TypedContract<CombineParams> = TypedContract::new();
@@ -47,9 +49,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("revolve")
         .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world) | {type: world, axis: X|Y|Z} (as returned by timeline.inspect) | construction axis name (followed when edited) | {origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (Two Sides: the other side's angle); direction?: symmetric (angle split either side, independent of axis direction); convention?: sketch_normal|legacy_axis_start (default sketch_normal; legacy retains older angular starts); to?: [x,y,z] (To Object: turn until that face, vertex or point); sketch?, profiles? | face: [x,y,z] (a planar body face as the profile) and face_body?: name (whose face, where faces of several bodies meet), operation?, touching?, targets?, name?, body_name?"),
-    CommandSpec::new("solid.sweep", "Sweep", sweep)
+    CommandSpec::new("solid.sweep", "Sweep", crate::checked!("solid.sweep", sweep))
         .at("SOLID", "CREATE")
         .icon("sweep")
+        .contract(&SWEEP_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
     CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?"),
     CommandSpec::new("solid.box", "Box", crate::checked!("solid.box", prim_box))
@@ -3522,17 +3526,7 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
 pub(super) fn sweep_options(s: &Session, p: &Value, cmd: &str) -> Result<(SweepOrientation, Option<Expr>, Option<Expr>)> {
     let orientation = match p.get("orientation") {
         None | Some(Value::Null) => SweepOrientation::Perpendicular,
-        Some(Value::String(o)) if o.eq_ignore_ascii_case("perpendicular") => SweepOrientation::Perpendicular,
-        Some(Value::String(o)) if o.eq_ignore_ascii_case("parallel") => SweepOrientation::Parallel,
-        Some(v) => {
-            let d = vec3(v)
-                .or_else(|| v.get("direction").and_then(vec3))
-                .ok_or_else(|| bad(cmd, "`orientation` must be perpendicular, parallel or a direction [x, y, z]"))?;
-            if !(d.len() > 1e-9) {
-                return Err(bad(cmd, "the `orientation` direction must not be zero"));
-            }
-            SweepOrientation::Direction(Dir(d))
-        }
+        Some(v) => sweep_orientation(v).map_err(|e| bad(cmd, e))?,
     };
     let twist = match p.get("twist") {
         None | Some(Value::Null) => None,
@@ -3560,6 +3554,24 @@ pub(super) fn sweep_options(s: &Session, p: &Value, cmd: &str) -> Result<(SweepO
     Ok((orientation, twist, scale))
 }
 
+/// A sweep's `orientation` as given (not `null`): perpendicular or parallel (any case), or a
+/// non-zero direction `[x, y, z]`, `{x, y, z}` or `{direction: …}`. The error is the message.
+pub(crate) fn sweep_orientation(v: &Value) -> std::result::Result<SweepOrientation, &'static str> {
+    match v {
+        Value::String(o) if o.eq_ignore_ascii_case("perpendicular") => Ok(SweepOrientation::Perpendicular),
+        Value::String(o) if o.eq_ignore_ascii_case("parallel") => Ok(SweepOrientation::Parallel),
+        v => {
+            let d = vec3(v)
+                .or_else(|| v.get("direction").and_then(vec3))
+                .ok_or("`orientation` must be perpendicular, parallel or a direction [x, y, z]")?;
+            if !(d.len() > 1e-9) {
+                return Err("the `orientation` direction must not be zero");
+            }
+            Ok(SweepOrientation::Direction(Dir(d)))
+        }
+    }
+}
+
 /// A sweep's guide `rails` and `rail_fit` (solid.sweep and surface.sweep), checked: one or two
 /// rails, each a sketch (default: the path's) and 1…1000 of its curves; a fit of scale or
 /// stretch; and no orientation, twist or scale besides, since the rails set those.
@@ -3580,9 +3592,7 @@ pub(super) fn sweep_rails(s: &Session, p: &Value, cmd: &str, path_sketch: u64) -
 pub(super) fn guide_rails(s: &Session, p: &Value, cmd: &str, what: &str, default_sketch: Option<u64>) -> Result<(Vec<SweepRail>, RailFit)> {
     let rail_fit = match p.get("rail_fit") {
         None | Some(Value::Null) => RailFit::Scale,
-        Some(Value::String(f)) if f.eq_ignore_ascii_case("scale") => RailFit::Scale,
-        Some(Value::String(f)) if f.eq_ignore_ascii_case("stretch") => RailFit::Stretch,
-        Some(_) => return Err(bad(cmd, "`rail_fit` must be scale or stretch")),
+        Some(v) => rail_fit_form(v).map_err(|e| bad(cmd, e))?,
     };
     let given = match p.get("rails") {
         None | Some(Value::Null) => return Ok((Vec::new(), rail_fit)),
@@ -3606,6 +3616,16 @@ pub(super) fn guide_rails(s: &Session, p: &Value, cmd: &str, what: &str, default
         rails.push(SweepRail { sketch: SketchId(sketch), curves });
     }
     Ok((rails, rail_fit))
+}
+
+/// Guide rails' `rail_fit` as given (not `null`): scale or stretch, in any case. The error is
+/// the message.
+pub(crate) fn rail_fit_form(v: &Value) -> std::result::Result<RailFit, &'static str> {
+    match v {
+        Value::String(f) if f.eq_ignore_ascii_case("scale") => Ok(RailFit::Scale),
+        Value::String(f) if f.eq_ignore_ascii_case("stretch") => Ok(RailFit::Stretch),
+        _ => Err("`rail_fit` must be scale or stretch"),
+    }
 }
 
 fn loft(s: &mut Session, p: &Value) -> Result<Value> {
