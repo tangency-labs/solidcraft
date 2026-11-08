@@ -9,7 +9,7 @@ use super::{
     ListParams, ListResult, MoveBodiesParams, MoveBodiesResult, MoveFeaturesParams, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult,
     MoveSketchesToPartsParams, OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams,
     PasteNewResult, PropertiesParams, PropertiesResult, RenameParams, RenameResult, ReparentItemsParams, RevertPositionParams, RevertPositionResult,
-    UnlockParams, UnlockResult,
+    SetOriginParams, UnlockParams, UnlockResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
