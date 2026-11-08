@@ -210,7 +210,7 @@ fn elevate(rows: &[Vec<Point3>]) -> Vec<Vec<Point3>> {
     let degree = rows.len().saturating_sub(1);
     #[allow(clippy::cast_precision_loss)] // a degree, at most 32
     let up = degree as f64 + 1.0;
-    let mut out: Vec<Vec<Point3>> = Vec::with_capacity(rows.len() + 1);
+    let mut out: Vec<Vec<Point3>> = Vec::new();
     if let Some(first) = rows.first() {
         out.push(first.clone());
     }
@@ -323,7 +323,7 @@ pub fn section_blend(
     let step = 1.0 / (run - 1) as f64;
 
     // what each section holds along the run
-    let mut held: Vec<Held> = Vec::with_capacity(run);
+    let mut held: Vec<Held> = Vec::new();
     for (i, &c) in conditions.iter().enumerate() {
         let p: Vec<Point3> = (0..samples).map(|s| point(i, s)).collect::<Result<_>>()?;
         let mut d: [Vec<Vec3>; 3] = [Vec::new(), Vec::new(), Vec::new()];
