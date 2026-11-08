@@ -21,6 +21,17 @@ const MAX_SITES: f64 = 4_000_000.0;
 /// The most cells along each side of the grid that buckets the edges near each hole.
 const MAX_CELLS: f64 = 1024.0;
 
+/// How far inside its margin a hole may come and still be kept: a rounding, not room. The grid
+/// keeps a hole this close to an edge it keeps clear of, a bend zone's among them, so a hole may
+/// reach this far into such a zone and still lie on its panel (see
+/// [`crate::sheet_surface_perforation`]). The round holes' grid, [`crate::sheet::perforation_grid`],
+/// keeps the same 1e-9.
+pub(crate) const GRAZE: f64 = 1e-9;
+
+/// The chords a curve's nearest points are first looked for on, within this (mm) of the curve;
+/// Newton then finds them on the curve itself.
+const CHORD: f64 = 1e-3;
+
 /// The shape of a perforation field's holes. They lie along the grid's rows (the flat's X).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -216,6 +227,38 @@ impl ShapedPerforation<'_> {
         }
     }
 
+    /// Whether the hole round `c`, less [`GRAZE`] all round, and `region` overlap: a loop of the
+    /// region reaches into it, measured as the grid measures an edge (see [`Edge`]); else the hole
+    /// lies on one side of every loop, the side its centre is on, read from the curves themselves.
+    pub(crate) fn overlaps(&self, c: Vec2, region: &Region2) -> bool {
+        // The same hole, GRAZE in from every side.
+        let p = self.field;
+        let less = SheetPerforation {
+            feature: p.feature,
+            diameter: p.diameter - 2.0 * GRAZE,
+            pitch: p.pitch,
+            margin: p.margin,
+            square: p.square,
+            from_right: p.from_right,
+            outline: None,
+        };
+        let shape = match self.shape {
+            PerforationShape::Slot { length } => PerforationShape::Slot { length: length - 2.0 * GRAZE },
+            other => other,
+        };
+        let hole = ShapedPerforation { field: &less, shape, row_pitch: self.row_pitch };
+        let mut edges = Vec::new();
+        for l in region.loops() {
+            Edge::extend(l, &mut edges);
+        }
+        let clear = edges.iter().map(|e| hole.clearance(c, e)).fold(f64::INFINITY, f64::min);
+        if clear <= 0.0 || clear.is_nan() {
+            return true;
+        }
+        let inside = |l: &Loop2| crate::sheet_surface_cuts::holds(l, c);
+        inside(&region.outer) && !region.holes.iter().any(inside)
+    }
+
     /// The bar between a hole and the hole `o` away from it (0 or less where they meet).
     fn gap_to(&self, o: Vec2) -> f64 {
         let c = Vec2::default();
@@ -341,8 +384,11 @@ impl ShapedPerforation<'_> {
     /// grid, its rows `row_spacing` apart, from the lower-left corner of the flat (or of the
     /// outline's box, within the flat's) a hole's half width and the margin in, and its half
     /// height and the margin up. A hole is kept where its outline is at least the margin clear of
-    /// the material's edges and cut-outs, of the regions in `avoid` and of the outline, measured
-    /// exactly to lines and arcs, and to other curves' chords within 0.001 mm.
+    /// the material's edges and cut-outs, of the regions in `avoid` and of the outline (less
+    /// [`GRAZE`]), measured exactly: to lines and arcs in closed form, and to other curves on the
+    /// curves themselves (see [`Edge`]). Which region holds a hole's centre is read on chords within
+    /// 0.001 mm: a kept hole holds its centre at least half its width from every edge, more than
+    /// that for any hole over 0.002 mm across, so the chords can't put it on the wrong side.
     pub(crate) fn grid(&self, regions: &[Region2], avoid: &[Region2]) -> Result<Vec<Vec2>> {
         let p = self.field;
         self.check_spacing()?;
@@ -392,7 +438,7 @@ impl ShapedPerforation<'_> {
                 if regions.iter().any(|r| r.contains(c))
                     && p.outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
                     && !avoid.iter().any(|z| z.contains(c))
-                    && near.iter().all(|&k| edges.get(k).is_none_or(|e| self.clearance(c, e) >= margin - 1e-9))
+                    && near.iter().all(|&k| edges.get(k).is_none_or(|e| self.clearance(c, e) >= margin - GRAZE))
                 {
                     out.push(c);
                 }
@@ -404,12 +450,14 @@ impl ShapedPerforation<'_> {
     }
 }
 
-/// A piece of an edge that holes keep clear of: a line, or an arc of a circle. Other curves are
-/// their chords within 0.001 mm.
+/// A piece of an edge that holes keep clear of: a line, an arc of a circle, or any other curve (a
+/// conic or a Bézier), each measured on itself. A curve's nearest points are found on its chords
+/// within [`CHORD`] first, then on the curve by Newton from there, so a chord decides nothing.
 #[derive(Clone, Copy, Debug)]
 enum Edge {
     Line(Vec2, Vec2),
     Arc { center: Vec2, radius: f64, start: f64, sweep: f64 },
+    Curve(Seg2),
 }
 
 impl Edge {
@@ -419,10 +467,7 @@ impl Edge {
             match *s {
                 Seg2::Line { a, b } => out.push(Edge::Line(a, b)),
                 Seg2::Arc { center, radius, start, sweep } => out.push(Edge::Arc { center, radius, start, sweep }),
-                ref other => {
-                    let pts = other.polyline(1e-3);
-                    out.extend(pts.iter().zip(pts.iter().skip(1)).map(|(a, b)| Edge::Line(*a, *b)));
-                }
+                other => out.push(Edge::Curve(other)),
             }
         }
     }
@@ -431,6 +476,7 @@ impl Edge {
         match *self {
             Edge::Line(a, _) => a,
             Edge::Arc { center, radius, start, .. } => center + Vec2::from_angle(start) * radius,
+            Edge::Curve(s) => s.start(),
         }
     }
 
@@ -438,20 +484,29 @@ impl Edge {
         match *self {
             Edge::Line(_, b) => b,
             Edge::Arc { center, radius, start, sweep } => center + Vec2::from_angle(start + sweep) * radius,
+            Edge::Curve(s) => s.end(),
         }
     }
 
-    /// Its box: its ends, and the points of an arc's circle furthest along each axis that the arc
-    /// passes.
+    /// Its box: its ends, the points of an arc's circle furthest along each axis that the arc
+    /// passes, and a curve's turning points along each axis.
     fn bounds(&self) -> Aabb2 {
         let mut b: Aabb2 = [self.start(), self.end()].into_iter().collect();
-        if let Edge::Arc { center, radius, start, sweep } = *self {
-            for k in 0..4 {
-                let a = k as f64 * FRAC_PI_2;
-                if sweeps(start, sweep, a) {
-                    b.add(center + Vec2::from_angle(a) * radius);
+        match *self {
+            Edge::Arc { center, radius, start, sweep } => {
+                for k in 0..4 {
+                    let a = k as f64 * FRAC_PI_2;
+                    if sweeps(start, sweep, a) {
+                        b.add(center + Vec2::from_angle(a) * radius);
+                    }
                 }
             }
+            Edge::Curve(s) => {
+                for axis in [Vec2::new(1.0, 0.0), Vec2::new(-1.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(0.0, -1.0)] {
+                    b.add(furthest(&s, axis));
+                }
+            }
+            Edge::Line(..) => {}
         }
         b
     }
@@ -464,13 +519,16 @@ impl Edge {
                 let v = p - center;
                 if sweeps(start, sweep, v.angle()) { (v.len() - radius).abs() } else { p.dist(self.start()).min(p.dist(self.end())) }
             }
+            Edge::Curve(s) => s.point_at(s.closest_param(p)).dist(p),
         }
     }
 
     /// The distance from the segment `ab` (0 where they meet).
     fn distance_to_segment(&self, a: Vec2, b: Vec2) -> f64 {
-        let Edge::Arc { center, radius, start, sweep } = *self else {
-            return segment_distance(a, b, self.start(), self.end());
+        let (center, radius, start, sweep) = match *self {
+            Edge::Line(p, q) => return segment_distance(a, b, p, q),
+            Edge::Curve(s) => return curve_to_segment(&s, a, b),
+            Edge::Arc { center, radius, start, sweep } => (center, radius, start, sweep),
         };
         let d = b - a;
         let (dd, f) = (d.dot(d), a - center);
@@ -497,6 +555,104 @@ impl Edge {
         }
         m
     }
+}
+
+/// The point of the curve `s` furthest along the unit vector `axis`: the furthest of its chords'
+/// points, or the turning point Newton finds on the curve from there (where `s′ · axis` is 0), as
+/// far as that lies further.
+fn furthest(s: &Seg2, axis: Vec2) -> Vec2 {
+    let pts = s.polyline(CHORD);
+    let Some(far) = pts.iter().copied().max_by(|p, q| p.dot(axis).total_cmp(&q.dot(axis))) else { return s.start() };
+    let mut t = s.closest_param(far);
+    for _ in 0..50 {
+        let Some(d) = s.derivatives(t, 2) else { break };
+        let (Some(d1), Some(d2)) = (d.first(), d.get(1)) else { break };
+        let (f, df) = (d1.dot(axis), d2.dot(axis));
+        if df.abs() <= 1e-300 || !df.is_finite() {
+            break;
+        }
+        let next = (t - f / df).clamp(0.0, 1.0);
+        let done = (next - t).abs() < 1e-15;
+        t = next;
+        if done {
+            break;
+        }
+    }
+    let turn = s.point_at(t);
+    if turn.is_finite() && turn.dot(axis) > far.dot(axis) { turn } else { far }
+}
+
+/// The distance between the curve `s` and the segment `ab` (0 where they meet). The chords of `s`
+/// within [`CHORD`] find where it comes nearest the segment, to within that: each chord as near
+/// as the nearest one and twice that seeds Newton on the curve and the segment together, from the
+/// chord's point nearest the segment, and the ends of both are tried too.
+fn curve_to_segment(s: &Seg2, a: Vec2, b: Vec2) -> f64 {
+    let pts = s.polyline(CHORD);
+    let chords: Vec<(Vec2, Vec2, f64)> = pts.iter().zip(pts.iter().skip(1)).map(|(p, q)| (*p, *q, segment_distance(a, b, *p, *q))).collect();
+    let nearest = chords.iter().map(|c| c.2).fold(f64::INFINITY, f64::min);
+    let on = |p: Vec2| s.point_at(s.closest_param(p)).dist(p);
+    let mut best = on(a).min(on(b)).min(to_segment(s.start(), a, b)).min(to_segment(s.end(), a, b));
+    for &(p, q, d) in &chords {
+        if d <= nearest + 2.0 * CHORD {
+            best = best.min(settle(s, a, b, s.closest_param(nearest_on(p, q, a, b))));
+        }
+    }
+    best
+}
+
+/// The point of the chord `pq` nearest the segment `ab`: where they cross, else the nearer of
+/// each one's ends taken onto the other.
+fn nearest_on(p: Vec2, q: Vec2, a: Vec2, b: Vec2) -> Vec2 {
+    let (d, e) = (q - p, b - a);
+    let den = d.cross(e);
+    if den != 0.0 {
+        let (u, v) = ((a - p).cross(e) / den, (a - p).cross(d) / den);
+        if (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v) {
+            return p + d * u;
+        }
+    }
+    let onto = |x: Vec2, from: Vec2, to: Vec2| {
+        let w = to - from;
+        let l = w.dot(w);
+        from + w * if l > 0.0 { ((x - from).dot(w) / l).clamp(0.0, 1.0) } else { 0.0 }
+    };
+    // Each pair: the chord's point, and how far it is from the segment.
+    [(p, to_segment(p, a, b)), (q, to_segment(q, a, b)), (onto(a, p, q), to_segment(a, p, q)), (onto(b, p, q), to_segment(b, p, q))]
+        .into_iter()
+        .min_by(|x, y| x.1.total_cmp(&y.1))
+        .map_or(p, |x| x.0)
+}
+
+/// Newton on how far the curve `s` at its parameter `t` lies from the segment `ab`, both moving,
+/// from `t`: the distance it settles at. Where the distance is not convex in both, a step takes
+/// the curve's nearest point to the segment's, then the segment's to the curve's.
+fn settle(s: &Seg2, a: Vec2, b: Vec2, mut t: f64) -> f64 {
+    let e = b - a;
+    let ee = e.dot(e);
+    let foot = |x: Vec2| if ee > 0.0 { ((x - a).dot(e) / ee).clamp(0.0, 1.0) } else { 0.0 };
+    let mut u = foot(s.point_at(t));
+    for _ in 0..50 {
+        let Some(d) = s.derivatives(t, 2) else { break };
+        let (Some(&c1), Some(&c2)) = (d.first(), d.get(1)) else { break };
+        // The gradient and Hessian of half the squared distance in (u, t).
+        let gap = a + e * u - s.point_at(t);
+        let (gu, gt) = (gap.dot(e), -gap.dot(c1));
+        let (huu, hut, htt) = (ee, -e.dot(c1), c1.dot(c1) - gap.dot(c2));
+        let det = huu * htt - hut * hut;
+        let (nu, nt) = if huu > 0.0 && htt > 0.0 && det > 1e-12 * huu * htt {
+            ((u - (htt * gu - hut * gt) / det).clamp(0.0, 1.0), (t - (huu * gt - hut * gu) / det).clamp(0.0, 1.0))
+        } else {
+            let nt = s.closest_param(a + e * u);
+            (foot(s.point_at(nt)), nt)
+        };
+        let done = (nu - u).abs() < 1e-15 && (nt - t).abs() < 1e-15;
+        (u, t) = (nu, nt);
+        if done {
+            break;
+        }
+    }
+    let c = s.point_at(t);
+    c.dist(a + e * foot(c))
 }
 
 /// Whether an arc from the angle `start` sweeping `sweep` passes the direction at `angle`.
@@ -544,6 +700,11 @@ mod tests {
     /// A flat plate `w` × `h`, 1 thick, made from surfaces, with a round cut-out (centre, radius)
     /// when asked.
     fn plate(w: f64, h: f64, cut_out: Option<(Vec2, f64)>) -> crate::SurfaceSheet {
+        plate_with(w, h, cut_out.map(|(c, r)| Loop2::circle(c, r).reversed()).into_iter().collect())
+    }
+
+    /// A flat plate `w` × `h`, 1 thick, made from surfaces, with the cut-outs `holes` (clockwise).
+    fn plate_with(w: f64, h: f64, holes: Vec<Loop2>) -> crate::SurfaceSheet {
         let rule = crate::ConvertRule {
             thickness: 1.0,
             k_factor: 0.44,
@@ -555,7 +716,6 @@ mod tests {
             relief_depth: 0.5,
         };
         let outer = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(w, 0.0), Vec2::new(w, h), Vec2::new(0.0, h)]);
-        let holes = cut_out.map(|(c, r)| Loop2::circle(c, r).reversed()).into_iter().collect();
         match crate::SurfaceSheet::base("Plate", "Steel", &rule, Plane::XY, Region2 { outer, holes }, &[], 1) {
             Ok((sheet, _)) => sheet,
             Err(e) => panic!("{e}"),
@@ -654,6 +814,38 @@ mod tests {
             whole.perforations = s.perforations.clone();
             whole.perforation_shapes = s.perforation_shapes.clone();
             assert!(whole.shown().perforation_holes(f.field).len() > holes.len(), "{shape:?}");
+        }
+    }
+
+    /// The circle round `c` of radius `r` as four conic quarters (rational quadratics of weight
+    /// cos 45°) from 45°, counter-clockwise: a curve the grid measures as a curve, not as arcs.
+    fn conic_circle(c: Vec2, r: f64) -> Loop2 {
+        let at = |deg: f64, len: f64| c + Vec2::from_angle(deg.to_radians()) * len;
+        let quarter = |k: u8| {
+            let a = 45.0 + 90.0 * f64::from(k);
+            Seg2::Conic { a: at(a, r), apex: at(a + 45.0, r * 2f64.sqrt()), b: at(a + 90.0, r), w: std::f64::consts::FRAC_1_SQRT_2 }
+        };
+        Loop2 { segs: (0..4).map(quarter).collect() }
+    }
+
+    /// A cut-out whose edge is a curve other than a line or an arc (a circle drawn as conics, as an
+    /// ellipse is) keeps holes the margin clear of the curve itself. A slot (2 wide, 5 long, rows 3
+    /// apart, margin 1.5) has a hole at (28, 14.5), its straight part from x 26.5 to 29.5; the
+    /// cut-out's centre is 8 below it, so the hole keeps 8 − R − 1 from the circle. At R = 5.4998 that
+    /// is 1.5002 and the hole is kept; at R = 5.5002 it is 1.4998, inside the margin, and the hole is
+    /// gone. Measured on the circle's chords within 0.001 mm it was kept both times: the chord
+    /// below it lies 0.0009 inside the circle.
+    #[test]
+    fn holes_keep_the_margin_from_a_free_form_cut_out_by_the_curve_itself() {
+        let (centre, hole) = (Vec2::new(28.0, 6.5), Vec2::new(28.0, 14.5));
+        for (radius, kept) in [(5.5 - 2e-4, true), (5.5 + 2e-4, false)] {
+            let mut s = plate_with(50.0, 30.0, vec![conic_circle(centre, radius).reversed()]);
+            s.perforations.push(field(2.0, 6.0, 1.5));
+            s.perforation_shapes.push((1, PerforationShape::Slot { length: 5.0 }, Some(3.0)));
+            let s = s.shown();
+            let holes = s.perforation_holes(&s.perforations[0]);
+            assert!(holes.iter().any(|c| c.dist(Vec2::new(22.0, 14.5)) < 1e-9), "R {radius}: the row is laid out: {holes:?}");
+            assert_eq!(holes.iter().any(|c| c.dist(hole) < 1e-9), kept, "R {radius}: {holes:?}");
         }
     }
 

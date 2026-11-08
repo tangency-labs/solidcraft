@@ -453,7 +453,7 @@ fn plate_less_prisms(size: [f64; 3], centres: &[[f64; 2]], hole: f64, own: [f64;
 /// part (s long, 2 wide) and the two half discs of radius 1 at its ends, are
 /// 2s³/12 + πs²/4 + 4s/3 + π/4 along it and 8s/12 + π/4 across. Folded, a slot on the panel the
 /// fold turns up stands with it; unfolded, every slot lies in the flat. A fold made later through
-/// a hexagon is not integrated yet.
+/// the hexagons bends them with the sheet, and the flat keeps them (the last part).
 #[test]
 fn perforated_sheet_hexagonal_and_slotted_holes_come_off_as_prisms_of_their_outlines() {
     use std::f64::consts::{FRAC_PI_2, PI};
@@ -613,6 +613,55 @@ fn perforated_sheet_hexagon_beside_a_bends_end_lies_on_its_panel() {
     close(&result["total"]["volume_mm3"], before["total"]["volume_mm3"].as_f64().unwrap() - n as f64 * 2.0 * 3f64.sqrt() * 0.8);
 }
 
+/// A hexagon on a tab a cut leaves of a bend's zone lies flat with the tab's panel, as a round
+/// hole does (see `perforated_sheet_hole_on_a_tab_a_cut_leaves_of_a_bend_is_a_cylinder_through_it`):
+/// one hexagon 2 across its flats, corner up, round (27, yc), on the tab x 23.4…31, y 4…12, is a
+/// prism of 2√3 · 0.8 through the fixed panel's plane.
+#[test]
+fn perforated_sheet_hexagon_on_a_tab_a_cut_leaves_of_a_bend_is_a_prism_through_it() {
+    // Its outline's box from (25.5, 4.5), the margin 0.5 in: the hexagon reaches 1 along x and
+    // 2/√3 along y, so its centre is at (27, 5 + 2/√3).
+    let yc = 5.0 + 2.0 / 3f64.sqrt();
+    let fold = json!({"points": [[30, 0, 0], [30, 40, 0]], "angle": "90 deg", "radius": "8", "position": "centerline", "fixed": [5, 20, 0]});
+    let made = |field: bool| {
+        let mut s = Session::default();
+        panel_blank(&mut s, 60.0, 40.0);
+        if field {
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Spot"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [25.5, 4.5], "p1": [28.5, 2.0 * yc - 4.5]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "sheet.perforate", json!({"diameter": 2, "pitch": 30, "margin": 0.5, "pattern": "square", "shape": "hex", "sketch": "Spot"}));
+        }
+        run(&mut s, "sheet.fold", fold.clone());
+        run(&mut s, "sheet.unfold", json!({}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "C"}));
+        let c = json!([[22, 2], [33, 2], [33, 14], [22, 14], [22, 12], [31, 12], [31, 4], [22, 4]]);
+        run(&mut s, "sketch.line", json!({"points": c, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "C", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+        run(&mut s, "sheet.refold", json!({}));
+        s
+    };
+    let (mut perforated, mut plain) = (made(true), made(false));
+    let sheet = perforated.model.state().surface_sheets[0].shown();
+    let holes = sheet.perforation_holes(&sheet.perforations[0]);
+    assert!(holes.len() == 1 && holes[0].dist(Vec2::new(27.0, yc)) < 1e-9, "{holes:?}");
+    let (a, b) = (run(&mut perforated, "component.properties", json!({})), run(&mut plain, "component.properties", json!({})));
+    let (prism, face, round) = (2.0 * 3f64.sqrt() * 0.8, 2.0 * 3f64.sqrt(), 4.0 * 3f64.sqrt());
+    let (v0, a0) = (b["total"]["volume_mm3"].as_f64().unwrap(), b["total"]["area_mm2"].as_f64().unwrap());
+    let v = v0 - prism;
+    let area = a0 + round * 0.8 - 2.0 * face;
+    let got = (a["total"]["volume_mm3"].as_f64().unwrap(), a["total"]["area_mm2"].as_f64().unwrap());
+    assert!((got.0 - v).abs() < 1e-9 * v, "volume {} vs {v}", got.0);
+    assert!((got.1 - area).abs() < 1e-9 * area, "area {} vs {area}", got.1);
+    for (k, at) in [27.0, yc, 0.4].into_iter().enumerate() {
+        let c0 = b["total"]["center_of_mass"][k].as_f64().unwrap();
+        let want = (v0 * c0 - prism * at) / v;
+        let got = a["total"]["center_of_mass"][k].as_f64().unwrap();
+        assert!((got - want).abs() < 1e-8, "centre of mass {k}: {got} vs {want}");
+    }
+}
+
 #[test]
 fn properties_reject_hostile_identifiers_and_options() {
     let mut s = Session::default();
@@ -669,28 +718,34 @@ fn perforated_sheet_hole_a_later_fold_runs_through_weighs_as_the_same_hole_cut_a
             assert!((x - y).abs() < 1e-8, "{what}: centre of mass {k}: {x} vs {y}");
         }
         tensor_close(&a["total"]["inertia_g_mm2"], tensor(&b["total"]["inertia_g_mm2"]), 2e-4);
-        // Exactly: the folded plate's moments less the bent hole are those of the plate with the
-        // hole cut and folded, to 1e-4 of the hole's own inertia about its own centre of mass
-        // (SMLib integrates each body to 1e-8 of its own).
-        let (plate, want) = (exact_mass(&perforated), exact_mass(&cut));
-        let mut got = plate;
-        perforated.model.state().surface_sheets[0].correct_perforation_mass_properties(&mut got, &solidcraft_doc::IDENTITY).unwrap();
-        // The hole: what the plate loses, taken about the hole's own centre.
-        let shifted = solidcraft_geom::inertia::shifted;
-        let v = plate.volume - got.volume;
-        let at = (plate.centroid * plate.volume - got.centroid * got.volume) / v;
-        let mut lost = shifted(&plate.inertia, plate.volume, got.centroid - plate.centroid);
-        for (row, g) in lost.iter_mut().zip(got.inertia) {
-            for (x, y) in row.iter_mut().zip(g) {
-                *x -= y;
-            }
+        exact_hole_inertia(what, &perforated, &cut, (10.0, 30.0));
+    }
+}
+
+/// Exactly: the folded plate of `perforated`, its moments from SMLib less its perforation holes,
+/// has those of the plate of `cut`, the same holes cut and folded, to 1e-4 of what the holes take
+/// off about their own centre of mass (SMLib integrates each body to 1e-8 of its own).
+/// The holes' own inertia must lie strictly inside `bounds`: the tolerance scales with it, so a
+/// wrong hole can't widen the tolerance unseen.
+fn exact_hole_inertia(what: &str, perforated: &Session, cut: &Session, bounds: (f64, f64)) {
+    let (plate, want) = (exact_mass(perforated), exact_mass(cut));
+    let mut got = plate;
+    perforated.model.state().surface_sheets[0].correct_perforation_mass_properties(&mut got, &solidcraft_doc::IDENTITY).unwrap();
+    // The holes: what the plate loses, taken about their own centre.
+    let shifted = solidcraft_geom::inertia::shifted;
+    let v = plate.volume - got.volume;
+    let at = (plate.centroid * plate.volume - got.centroid * got.volume) / v;
+    let mut lost = shifted(&plate.inertia, plate.volume, got.centroid - plate.centroid);
+    for (row, g) in lost.iter_mut().zip(got.inertia) {
+        for (x, y) in row.iter_mut().zip(g) {
+            *x -= y;
         }
-        let own = shifted(&lost, -v, got.centroid - at);
-        let hole = own.iter().flatten().fold(0.0f64, |m, x| m.max(x.abs()));
-        assert!(hole > 10.0 && hole < 30.0, "{what}: the hole's own inertia {own:?}");
-        for (g, w) in got.inertia.iter().flatten().zip(want.inertia.iter().flatten()) {
-            assert!((g - w).abs() <= 1e-4 * hole, "{what}: inertia {:?} vs {:?} (the hole's own {hole})", got.inertia, want.inertia);
-        }
+    }
+    let own = shifted(&lost, -v, got.centroid - at);
+    let hole = own.iter().flatten().fold(0.0f64, |m, x| m.max(x.abs()));
+    assert!(hole > bounds.0 && hole < bounds.1, "{what}: the holes' own inertia {own:?}, not inside {bounds:?}");
+    for (g, w) in got.inertia.iter().flatten().zip(want.inertia.iter().flatten()) {
+        assert!((g - w).abs() <= 1e-4 * hole, "{what}: inertia {:?} vs {:?} (the holes' own {hole})", got.inertia, want.inertia);
     }
 }
 
@@ -841,8 +896,9 @@ fn perforated_sheet_hole_on_a_tab_a_cut_leaves_of_a_bend_is_a_cylinder_through_i
 /// (its zone about 13 wide) about x = 30, its joint along y, or about y = 20, along x; a hexagon 4
 /// across its flats, corner up, and a slot 4 wide and 10 long along x, so across the first fold
 /// and along the second: each wholly in the zone, and across its tangent line. Each field is a
-/// single hole, its outline a box round it. (The inertia of a body is a tessellation's, so that
-/// agrees to 2e-4.)
+/// single hole, its outline a box round it. Physical Properties takes a body's inertia from its
+/// tessellation, so its number agrees to 2e-4; the hole's inertia is checked on SMLib's exact
+/// moments of both bodies.
 #[test]
 fn perforated_sheet_hexagon_or_slot_a_later_fold_runs_through_weighs_as_the_same_hole_cut_and_folded() {
     let (m, root3) = (0.5, 3f64.sqrt());
@@ -902,6 +958,7 @@ fn perforated_sheet_hexagon_or_slot_a_later_fold_runs_through_weighs_as_the_same
                 assert!((x - y).abs() < 1e-8, "{what} at {xc}, {yc}: centre of mass {k}: {x} vs {y}");
             }
             tensor_close(&a["total"]["inertia_g_mm2"], tensor(&b["total"]["inertia_g_mm2"]), 2e-4);
+            exact_hole_inertia(&format!("{what} at {xc}, {yc}"), &perforated, &cut, (1.0, f64::INFINITY));
         }
     }
 }
