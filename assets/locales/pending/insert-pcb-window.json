@@ -1,26 +1,34 @@
 {
   "en": {
-    "cmd.file_gerber_files": "PCB Files"
+    "cmd.file_gerber_files": "PCB Files",
+    "ui.insert_pcb.web_zip": "Insert PCB on the web takes the board's files as one zip"
   },
   "ar": {
-    "cmd.file_gerber_files": "ملفات لوحة الدوائر"
+    "cmd.file_gerber_files": "ملفات لوحة الدوائر",
+    "ui.insert_pcb.web_zip": "إدراج لوحة الدوائر على الويب يأخذ ملفات اللوحة في ملف zip واحد"
   },
   "he": {
-    "cmd.file_gerber_files": "קובצי מעגל מודפס"
+    "cmd.file_gerber_files": "קובצי מעגל מודפס",
+    "ui.insert_pcb.web_zip": "הוספת מעגל מודפס ברשת מקבלת את קובצי הלוח כקובץ zip אחד"
   },
   "ja": {
-    "cmd.file_gerber_files": "基板ファイル"
+    "cmd.file_gerber_files": "基板ファイル",
+    "ui.insert_pcb.web_zip": "Web 版の PCB 挿入では、基板のファイルを 1 つの zip にまとめて選んでください"
   },
   "vi": {
-    "cmd.file_gerber_files": "Tệp mạch in"
+    "cmd.file_gerber_files": "Tệp mạch in",
+    "ui.insert_pcb.web_zip": "Chèn PCB trên web nhận các tệp của bo mạch dưới dạng một tệp zip"
   },
   "zh": {
-    "cmd.file_gerber_files": "电路板文件"
+    "cmd.file_gerber_files": "电路板文件",
+    "ui.insert_pcb.web_zip": "网页版插入 PCB 需要将电路板文件打包为一个 zip"
   },
   "de": {
-    "cmd.file_gerber_files": "Leiterplattendateien"
+    "cmd.file_gerber_files": "Leiterplattendateien",
+    "ui.insert_pcb.web_zip": "Leiterplatte einfügen nimmt im Web die Dateien der Platine als eine ZIP-Datei"
   },
   "ko": {
-    "cmd.file_gerber_files": "PCB 파일"
+    "cmd.file_gerber_files": "PCB 파일",
+    "ui.insert_pcb.web_zip": "웹에서 PCB 삽입은 보드 파일을 하나의 zip으로 받습니다"
   }
 }

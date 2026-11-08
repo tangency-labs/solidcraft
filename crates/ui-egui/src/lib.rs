@@ -2121,6 +2121,12 @@ impl SolveApp {
             let extensions: &[&str] = if cfg!(target_arch = "wasm32") { &["zip"] } else { &solidcraft_engine::io::BOARD_EXTENSIONS };
             self.pick_open_for(extensions, |app, path| {
                 if let Some(path) = path {
+                    // Some browsers (iPhone, iPad) don't filter the picker: anything but a zip
+                    // would be read with whatever else was uploaded before.
+                    if cfg!(target_arch = "wasm32") && !solidcraft_engine::io::is_zip_path(&path) {
+                        app.set_status(crate::i18n::tr("ui.insert_pcb.web_zip"), true);
+                        return;
+                    }
                     let mut request = file_load::Request::new(&path, file_load::Kind::Insert);
                     request.gerber = true;
                     if let Err(e) = file_load::begin_request(app, request) {
