@@ -1262,33 +1262,34 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
         let inner_width = (bounds.width() - frame.total_margin().sum().x).max(0.0);
         let inner_height = (bounds.height() - frame.total_margin().sum().y).max(0.0);
         let dragged = if grip(app) { crate::frame::dock_offset(ui.ctx(), DRAG_KEY) } else { egui::Vec2::ZERO };
-        let card = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::unique("sc_browser_card")).fixed_pos(bounds.min + dragged).show(ui.ctx(), |ui| {
-            let limits = Rect::from_min_max(available.min, pos2(available.right(), bounds.bottom()));
-            let response = ui
-                .scope(|ui| {
-                    ui.set_opacity(opacity);
-                    container.show_frame(ui, frame, limits, |ui| {
-                        ui.set_width(inner_width);
-                        ui.set_max_height(inner_height);
-                        if stacked {
-                            ui.set_min_height(inner_height);
-                            ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, vec2(inner_width, inner_height))));
-                        }
-                        if collapsed {
-                            browser_collapsed_rail(app, ui);
-                        } else {
-                            browser_contents(app, ui, true);
-                        }
+        let card =
+            Container::new(ui.ctx(), Surface::Panel).area(egui::Id::unique("sc_browser_card")).fixed_pos(bounds.min + dragged).show(ui.ctx(), |ui| {
+                let limits = Rect::from_min_max(available.min, pos2(available.right(), bounds.bottom()));
+                let response = ui
+                    .scope(|ui| {
+                        ui.set_opacity(opacity);
+                        container.show_frame(ui, frame, limits, |ui| {
+                            ui.set_width(inner_width);
+                            ui.set_max_height(inner_height);
+                            if stacked {
+                                ui.set_min_height(inner_height);
+                                ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, vec2(inner_width, inner_height))));
+                            }
+                            if collapsed {
+                                browser_collapsed_rail(app, ui);
+                            } else {
+                                browser_contents(app, ui, true);
+                            }
+                        })
                     })
-                })
-                .inner;
-            if reveals && opacity < 1.0 {
-                reveal_tab(ui, response.response.rect, 1.0 - opacity);
-            }
-            if !collapsed {
-                resize_column(app, ui, response.response.rect, width, "left-browser-rail");
-            }
-        });
+                    .inner;
+                if reveals && opacity < 1.0 {
+                    reveal_tab(ui, response.response.rect, 1.0 - opacity);
+                }
+                if !collapsed {
+                    resize_column(app, ui, response.response.rect, width, "left-browser-rail");
+                }
+            });
         let rect = card.response.rect;
         // Let go: before or after the parts library, then back to its place in that order.
         if dragged != egui::Vec2::ZERO && !ui.ctx().input(|i| i.pointer.any_down()) {

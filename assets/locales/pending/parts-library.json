@@ -1,5 +1,6 @@
 {
   "en": {
+    "help.view.parts_library": "Shows or hides the parts library. Drag a saved part from its folder into the design.",
     "library.choose": "Choose folder…",
     "library.empty": "No designs or parts here.",
     "library.hint": "Drag a part into the view to insert it; double-click or right-click one to open it on its own.",
@@ -33,6 +34,7 @@
     "library.inserted": "Inserted {name}"
   },
   "ar": {
+    "help.view.parts_library": "يُظهر مكتبة القطع أو يخفيها. اسحب قطعة محفوظة من مجلدها إلى التصميم.",
     "library.choose": "اختر مجلدًا…",
     "library.empty": "لا توجد تصاميم أو أجزاء هنا.",
     "library.hint": "اسحب جزءًا إلى العرض لإدراجه؛ انقر نقرًا مزدوجًا أو بزر الفأرة الأيمن على جزء لفتحه وحده.",
@@ -66,6 +68,7 @@
     "library.inserted": "تم إدراج {name}"
   },
   "de": {
+    "help.view.parts_library": "Zeigt oder verbirgt die Teilebibliothek. Ziehen Sie ein gespeichertes Teil aus seinem Ordner in das Design.",
     "library.choose": "Ordner wählen…",
     "library.empty": "Hier gibt es keine Konstruktionen oder Teile.",
     "library.hint": "Ziehen Sie ein Teil in die Ansicht, um es einzufügen; Doppel- oder Rechtsklick öffnet es für sich.",
@@ -99,6 +102,7 @@
     "library.inserted": "{name} eingefügt"
   },
   "he": {
+    "help.view.parts_library": "הצגה או הסתרה של ספריית החלקים. אפשר לגרור חלק שמור מהתיקייה שלו אל העיצוב.",
     "library.choose": "בחירת תיקייה…",
     "library.empty": "אין כאן תכנונים או חלקים.",
     "library.hint": "גררו חלק לתצוגה כדי להוסיף אותו; לחיצה כפולה או לחיצה ימנית פותחת אותו לבדו.",
@@ -132,6 +136,7 @@
     "library.inserted": "{name} נוסף"
   },
   "ja": {
+    "help.view.parts_library": "部品ライブラリを表示または非表示にします。フォルダーの保存済み部品をデザインにドラッグします。",
     "library.choose": "フォルダーを選択…",
     "library.empty": "設計も部品もありません。",
     "library.hint": "部品をビューへドラッグして挿入します。ダブルクリックか右クリックで単独で開きます。",
@@ -165,6 +170,7 @@
     "library.inserted": "{name} を挿入しました"
   },
   "ko": {
+    "help.view.parts_library": "부품 라이브러리를 표시하거나 숨깁니다. 폴더에서 저장된 부품을 디자인으로 끌어 놓습니다.",
     "library.choose": "폴더 선택…",
     "library.empty": "디자인이나 부품이 없습니다.",
     "library.hint": "부품을 뷰로 끌어 삽입합니다. 두 번 클릭하거나 마우스 오른쪽 버튼으로 클릭하면 따로 엽니다.",
@@ -198,6 +204,7 @@
     "library.inserted": "{name} 삽입됨"
   },
   "vi": {
+    "help.view.parts_library": "Hiện hoặc ẩn thư viện chi tiết. Kéo một chi tiết đã lưu từ thư mục của nó vào thiết kế.",
     "library.choose": "Chọn thư mục…",
     "library.empty": "Không có thiết kế hay chi tiết nào ở đây.",
     "library.hint": "Kéo một chi tiết vào khung nhìn để chèn; nhấp đúp hoặc nhấp chuột phải để mở riêng nó.",
@@ -231,6 +238,7 @@
     "library.inserted": "Đã chèn {name}"
   },
   "zh": {
+    "help.view.parts_library": "显示或隐藏零件库。将文件夹中已保存的零件拖入设计。",
     "library.choose": "选择文件夹…",
     "library.empty": "这里没有设计或零件。",
     "library.hint": "将零件拖入视图即可插入；双击或右键单击可单独打开。",

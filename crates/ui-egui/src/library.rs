@@ -35,11 +35,7 @@ const DRAG_KEY: &str = "sc_library_card";
 /// the dialog column start beside it. A card docked right of the Browser, or dragged away, takes
 /// none.
 pub(crate) fn left_inset(app: &SolveApp) -> f32 {
-    if docked(app) && app.library.moved == egui::Vec2::ZERO {
-        CARD_WIDTH + Container::for_layout(app.ui.layout, Surface::Panel).gap()
-    } else {
-        0.0
-    }
+    if docked(app) && app.library.moved == egui::Vec2::ZERO { CARD_WIDTH + Container::for_layout(app.ui.layout, Surface::Panel).gap() } else { 0.0 }
 }
 
 /// The card is open and docked beside the Browser (at the left edge or right of it), so the two
@@ -373,11 +369,23 @@ fn drop_point(app: &SolveApp, proj: &crate::viewport::Proj, pos: egui::Pos2) -> 
     Vec3::ZERO
 }
 
-/// Put the part at `path` in the open design at `at` (mm).
+/// Put the part at `path` in the open design at `at` (mm): a card the user dragged or picked, so
+/// a design on a server share is the user's choice and its server is allowed for the insert,
+/// as Insert Design's file dialog allows it.
 pub fn insert(app: &mut SolveApp, path: &Path, at: Vec3) -> Result<(), String> {
+    let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path.to_string_lossy()).into_iter().collect();
+    insert_allowing(app, path, at, &hosts)
+}
+
+/// [`insert`], allowing only the servers in `hosts` (none for `ui.library`, whose folder the
+/// caller may have set: a share then needs the server allowed as any other path does).
+fn insert_allowing(app: &mut SolveApp, path: &Path, at: Vec3, hosts: &[String]) -> Result<(), String> {
     let p = path.to_string_lossy().to_string();
     match Kind::of(path) {
-        Some(Kind::Design) => app.run("component.insert_design", json!({"path": p, "translate": [at.x, at.y, at.z], "reuse": true})).map(|_| ()),
+        Some(Kind::Design) => solidcraft_engine::io::vfs::allowing_hosts(hosts, || {
+            app.run("component.insert_design", json!({"path": p, "translate": [at.x, at.y, at.z], "reuse": true}))
+        })
+        .map(|_| ()),
         Some(Kind::Step | Kind::Mesh) => {
             app.insert_path_async(&p);
             Ok(())
@@ -476,9 +484,12 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     // was drawn last (less a drag of its own), or where it will be drawn.
     let browser_drag = crate::frame::dock_offset(&ctx, crate::browser::DRAG_KEY);
     let tree = app.shell.browser.map(|b| b.translate(-browser_drag));
-    let column_right = app.shell.dialog_column.or(tree).map(|r| r.right()).or_else(|| {
-        app.ui.show_browser.then(|| bounds.left() + crate::browser::browser_width(app.preferences.browser_width))
-    });
+    let column_right = app
+        .shell
+        .dialog_column
+        .or(tree)
+        .map(|r| r.right())
+        .or_else(|| app.ui.show_browser.then(|| bounds.left() + crate::browser::browser_width(app.preferences.browser_width)));
     // Right of the Browser, top-aligned with it.
     let beside = column_right.map(|right| clamp(egui::vec2(right + gap - bounds.left(), 0.0)));
     // Under the tree: only a Browser already out of the card's way has that spot.
@@ -969,7 +980,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
                 )
             })
             .unwrap_or(Vec3::ZERO);
-        insert(app, &e.path, at)?;
+        insert_allowing(app, &e.path, at, &[])?;
     }
     let kind = |k: Kind| match k {
         Kind::Folder => "folder",
@@ -1297,7 +1308,10 @@ mod tests {
         let tree = h.app.shell.browser.expect("the Browser");
         let beside = h.app.library.shown.expect("the card");
         assert!(h.app.preferences.library_after_browser, "the order is remembered");
-        assert!((beside.left() - tree.right() - gap).abs() < 1.5 && (beside.top() - tree.top()).abs() < 1.5, "right of the Browser: {tree:?} {beside:?}");
+        assert!(
+            (beside.left() - tree.right() - gap).abs() < 1.5 && (beside.top() - tree.top()).abs() < 1.5,
+            "right of the Browser: {tree:?} {beside:?}"
+        );
         assert!(tree.left() < card.right(), "the Browser keeps the left edge: {tree:?}");
         assert_eq!(left_inset(&h.app), 0.0);
         // It stays there through frames (no hand-off back and forth with the Browser).

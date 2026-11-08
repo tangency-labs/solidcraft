@@ -682,9 +682,14 @@ mod tests {
                 assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
             }
         }
-        for (id, key) in
-            [("view.tool.zoom", "on"), ("view.spin", "on"), ("view.grid", "on"), ("view.ground_shadow", "on"), ("view.navigation_bar", "visible"), ("view.parts_library", "visible")]
-        {
+        for (id, key) in [
+            ("view.tool.zoom", "on"),
+            ("view.spin", "on"),
+            ("view.grid", "on"),
+            ("view.ground_shadow", "on"),
+            ("view.navigation_bar", "visible"),
+            ("view.parts_library", "visible"),
+        ] {
             assert_eq!(s.execute(id, &json!({})).unwrap(), json!({}));
             assert_eq!(s.execute(id, &Value::Null).unwrap(), json!({}));
             for on in [false, true] {

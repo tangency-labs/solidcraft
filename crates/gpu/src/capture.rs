@@ -380,6 +380,18 @@ pub fn headless_rgba(scene: &Scene, cam: &Camera, width: u32, height: u32) -> st
             if !(1..=MAX_SIDE).contains(&width) || !(1..=MAX_SIDE).contains(&height) {
                 return Err(format!("a picture is 1 to {MAX_SIDE} pixels a side, not {width} × {height}"));
             }
+            if scene.transparent {
+                // No backdrop, as the GPU draws it: over transparent black, so the colours come
+                // premultiplied by their alpha.
+                let mut canvas = solidcraft_render::render_transparent(scene, cam, width as usize, height as usize);
+                for px in canvas.rgba.as_chunks_mut::<4>().0 {
+                    let a = u32::from(px[3]);
+                    for v in &mut px[..3] {
+                        *v = ((u32::from(*v) * a + 127) / 255) as u8;
+                    }
+                }
+                return Ok((canvas.rgba, "cpu"));
+            }
             let canvas = solidcraft_render::render(scene, cam, width as usize, height as usize);
             Ok((canvas.rgba, "cpu"))
         }
