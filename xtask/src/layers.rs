@@ -72,6 +72,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("ui-registry", Class::Shared),
     // message catalogs' machinery and bidirectional text: lookup, formatting, language choice (#13290)
     ("ui-text", Class::Shared),
+    // the MCP server machinery: JSON-RPC over stdio, lifecycle, tool schemas and argument checks; apps register their tools (#12947)
+    ("mcp-server", Class::Shared),
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),
