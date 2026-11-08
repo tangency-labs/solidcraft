@@ -40,7 +40,6 @@ mod profile;
 pub mod section;
 pub mod simplify;
 pub mod spline_space;
-pub mod srgb;
 pub mod stderr;
 pub mod tess;
 pub mod title_block;

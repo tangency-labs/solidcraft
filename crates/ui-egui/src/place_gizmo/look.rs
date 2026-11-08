@@ -12,7 +12,7 @@
 use egui::{Color32, Pos2, Stroke, Vec2, vec2};
 
 use crate::motion::Transition;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// The handles' core: the icon highlight (white in every theme), so the blue preview they sit on
 /// does not hide them. They carry no meaning, only contrast, so it is the same hot or not.

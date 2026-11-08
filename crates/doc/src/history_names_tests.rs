@@ -171,3 +171,21 @@ fn a_linked_designs_face_names_keep_their_pieces_and_nothing_else() {
         let _ = role(n);
     }
 }
+
+/// A face that was split when a name was stored and is whole again (#11731): the stored piece
+/// is all of it, when the face still touches the faces that told the piece apart.
+#[test]
+fn a_piece_name_finds_its_face_once_it_is_whole_again() {
+    let faces = named(&["top", "left", "right", "start"]);
+    let names = qualify(faces, &[(0, 1), (0, 3)]);
+    assert_eq!(names.faces[0], "top");
+    assert_eq!(matches(&names, 0, "top#[left]"), Some(Match::Piece));
+    assert_eq!(matches(&names, 0, "top#[left,start]"), Some(Match::Piece));
+    // It no longer touches a face the qualifier names: some other piece, gone since.
+    assert_eq!(matches(&names, 0, "top#[right]"), Some(Match::Stem));
+    assert_eq!(matches(&names, 0, "top#[left]@F9.1"), None, "a copy's piece");
+    // A numbered piece (nothing told it apart, or a tie) says nothing about which part it was.
+    assert_eq!(matches(&names, 0, "top#1"), Some(Match::Stem));
+    assert_eq!(matches(&names, 0, "top#[left]#2"), Some(Match::Stem));
+    assert_eq!(matches(&names, 0, "top#[]"), Some(Match::Stem));
+}

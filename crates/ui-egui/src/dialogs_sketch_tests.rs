@@ -174,7 +174,7 @@ fn equation_curve_window_gives_the_variable_its_ranges_unit() {
     *start = "a".into();
     *end = "3 * a".into();
     h.settle();
-    let handle = format!("dialog:{}", crate::i18n::tr("ui.equation_variable_unit"));
+    let handle = format!("dialog:{}", solidcraft_ui_text::tr("ui.equation_variable_unit"));
     h.step(&json!({"click": {"handle": handle}})).unwrap();
     h.settle();
     let Some(Kind::SketchModify(Mod::Equation { range_unit, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("no equation window") };

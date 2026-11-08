@@ -14,8 +14,8 @@ use super::markdown::{self, Block, Span};
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId, Margin, RichText, Stroke, vec2};
 
-use crate::i18n::tr;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
+use solidcraft_ui_text::tr;
 
 /// The parsed blocks of `src`, kept in the context's temporary memory under `slot` (the item's
 /// index) and replaced when the text changes.

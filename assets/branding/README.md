@@ -38,7 +38,7 @@ Other colours, all already used in the project:
 | Colour | Hex | Where it comes from |
 |---|---|---|
 | Wordmark blue | `#15499e` | loading logo `--word` |
-| Interface accent | `#2678da` | light theme `accent` token (`assets/styles/ui/palettes.rs`) |
+| Interface accent | `#2678da` | light theme `accent` token (`crates/theme/src/palettes.rs`) |
 | Light background | `#e8ebf0` | web loading screen (`assets/styles/web/loading.css`) |
 | Dark background | `#1f232b` | dark theme `file_background` token |
 | Black / white | `#000000` / `#ffffff` | one-colour versions only |

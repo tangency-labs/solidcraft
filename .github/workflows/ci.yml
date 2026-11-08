@@ -505,9 +505,15 @@ jobs:
           key: native-tests
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Set up compiler cache
+        id: sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.16.0
+        # A failed download of sccache (GitHub release outages answer 504) must not fail the build.
+        continue-on-error: true
+      - name: Build without the compiler cache if it could not be set up
+        if: steps.sccache.outcome == 'failure'
+        run: echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-nextest
@@ -528,7 +534,7 @@ jobs:
           compression-level: 0
       - name: Compiler cache statistics
         if: always()
-        run: sccache --show-stats
+        run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
 
   tests:
     name: Native Linux tests
@@ -576,9 +582,15 @@ jobs:
           key: native-tests
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Set up compiler cache
+        id: sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.16.0
+        # A failed download of sccache (GitHub release outages answer 504) must not fail the build.
+        continue-on-error: true
+      - name: Build without the compiler cache if it could not be set up
+        if: steps.sccache.outcome == 'failure'
+        run: echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-nextest
@@ -619,7 +631,7 @@ jobs:
           cargo xtask known-failing --junit "$junit"
       - name: Compiler cache statistics
         if: always()
-        run: sccache --show-stats
+        run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
       - name: Upload test timings
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -692,9 +704,15 @@ jobs:
           key: native-gpu
           save-if: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && matrix.shard == 1 }}
       - name: Set up compiler cache
+        id: sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.16.0
+        # A failed download of sccache (GitHub release outages answer 504) must not fail the build.
+        continue-on-error: true
+      - name: Build without the compiler cache if it could not be set up
+        if: steps.sccache.outcome == 'failure'
+        run: echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-nextest
@@ -715,7 +733,7 @@ jobs:
           cargo xtask known-failing --junit "$junit"
       - name: Compiler cache statistics
         if: always()
-        run: sccache --show-stats
+        run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
       - name: Upload test timings
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -848,9 +866,15 @@ jobs:
           key: doc-tests
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Set up compiler cache
+        id: sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.16.0
+        # A failed download of sccache (GitHub release outages answer 504) must not fail the build.
+        continue-on-error: true
+      - name: Build without the compiler cache if it could not be set up
+        if: steps.sccache.outcome == 'failure'
+        run: echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
       # nextest does not run doc tests.
       - name: Doc tests
         env:
@@ -906,9 +930,15 @@ jobs:
           key: oracle
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Set up compiler cache
+        id: sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.16.0
+        # A failed download of sccache (GitHub release outages answer 504) must not fail the build.
+        continue-on-error: true
+      - name: Build without the compiler cache if it could not be set up
+        if: steps.sccache.outcome == 'failure'
+        run: echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
       - name: Build the command line
         run: cargo build -p solidcraft-cli --profile ci --locked
       - name: Replay tests/oracle and compare with expected.json
