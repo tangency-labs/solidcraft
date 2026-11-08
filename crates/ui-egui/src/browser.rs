@@ -897,6 +897,7 @@ fn contents_key_sels(app: &SolveApp, key: &str) -> Option<Vec<Sel>> {
     let kind = match slug {
         "figures" => RowKind::Figure,
         "points" => RowKind::Point,
+        "curve-points" => RowKind::Point,
         "lines" => RowKind::Line,
         "arcs" => RowKind::Arc,
         "circles" => RowKind::Circle,
@@ -3637,6 +3638,7 @@ fn group_slug(kind: GroupKind) -> &'static str {
     match kind {
         GroupKind::Figures => "figures",
         GroupKind::Points => "points",
+        GroupKind::CurvePoints => "curve-points",
         GroupKind::Lines => "lines",
         GroupKind::Arcs => "arcs",
         GroupKind::Circles => "circles",
@@ -3657,6 +3659,7 @@ fn group_title(kind: GroupKind) -> &'static str {
     match kind {
         GroupKind::Figures => "sketch.contents.figures",
         GroupKind::Points => "sketch.contents.points",
+        GroupKind::CurvePoints => "sketch.contents.curve_points",
         GroupKind::Lines => "sketch.contents.lines",
         GroupKind::Arcs => "sketch.contents.arcs",
         GroupKind::Circles => "sketch.contents.circles",
@@ -3682,6 +3685,7 @@ fn group_icon(kind: GroupKind) -> &'static str {
     match kind {
         GroupKind::Figures => "rect",
         GroupKind::Points => "point",
+        GroupKind::CurvePoints => "point",
         GroupKind::Lines => "line",
         GroupKind::Arcs => "arc3",
         GroupKind::Circles => "circle",

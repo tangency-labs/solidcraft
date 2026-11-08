@@ -38,6 +38,7 @@ pub(crate) struct ContentsGroup {
 pub(crate) enum GroupKind {
     Figures,
     Points,
+    CurvePoints,
     Lines,
     Arcs,
     Circles,
@@ -57,6 +58,7 @@ impl GroupKind {
     pub(crate) const ALL: &[GroupKind] = &[
         GroupKind::Figures,
         GroupKind::Points,
+        GroupKind::CurvePoints,
         GroupKind::Lines,
         GroupKind::Arcs,
         GroupKind::Circles,
@@ -76,18 +78,19 @@ impl GroupKind {
         match self {
             GroupKind::Figures => 0,
             GroupKind::Points => 1,
-            GroupKind::Lines => 2,
-            GroupKind::Arcs => 3,
-            GroupKind::Circles => 4,
-            GroupKind::Splines => 5,
-            GroupKind::Conics => 6,
-            GroupKind::Constraints => 7,
-            GroupKind::Dimensions => 8,
-            GroupKind::Patterns => 9,
-            GroupKind::Offsets => 10,
-            GroupKind::Links => 11,
-            GroupKind::Text => 12,
-            GroupKind::Other => 13,
+            GroupKind::CurvePoints => 2,
+            GroupKind::Lines => 3,
+            GroupKind::Arcs => 4,
+            GroupKind::Circles => 5,
+            GroupKind::Splines => 6,
+            GroupKind::Conics => 7,
+            GroupKind::Constraints => 8,
+            GroupKind::Dimensions => 9,
+            GroupKind::Patterns => 10,
+            GroupKind::Offsets => 11,
+            GroupKind::Links => 12,
+            GroupKind::Text => 13,
+            GroupKind::Other => 14,
         }
     }
 }
@@ -141,6 +144,12 @@ pub(crate) fn build(doc: &Document, state: Option<&ModelState>, sketch: u64, act
     // Entities a figure created are shown under that figure, not again as loose geometry.
     // Adopted members stay in their groups: the user drew them as loose geometry first.
     let figure_created = source.figure_created_ids();
+    // Points a curve owns are not loose points: line ends, spline fit/control points, conic
+    // vertices, circle and arc centres and ellipse axes belong to their curve.
+    let mut curve_points = std::collections::BTreeSet::new();
+    for curve in &source.curves {
+        curve_points.extend(curve.kind.point_ids());
+    }
 
     for (index, point) in source.points.iter().enumerate() {
         // Point 0 is always the fixed origin, not something the sketch drew: no row for it.
@@ -157,7 +166,8 @@ pub(crate) fn build(doc: &Document, state: Option<&ModelState>, sketch: u64, act
         if point.fixed {
             summary.push_str(" · fixed");
         }
-        buckets[GroupKind::Points.index()].push(contents_row(&point.id, RowKind::Point, format!("Point {}", point.id), summary));
+        let group = if curve_points.contains(&index) { GroupKind::CurvePoints } else { GroupKind::Points };
+        buckets[group.index()].push(contents_row(&point.id, RowKind::Point, format!("Point {}", point.id), summary));
     }
 
     for (index, curve) in source.curves.iter().enumerate() {
@@ -525,7 +535,7 @@ mod tests {
         assert_eq!(
             kinds(&contents),
             vec![
-                GroupKind::Points,
+                GroupKind::CurvePoints,
                 GroupKind::Lines,
                 GroupKind::Arcs,
                 GroupKind::Circles,
@@ -537,10 +547,10 @@ mod tests {
             "empty groups are omitted and the rest keep display order"
         );
 
-        // 1 origin (omitted) + 2 line points + 3 arc points + 1 circle centre + 4 spline points
-        // + 2 ellipse points + 3 conic points.
-        assert_eq!(group(&contents, GroupKind::Points).rows.len(), 15);
-        let start = row(&contents, GroupKind::Points, "l1.start");
+        // 2 line points + 3 arc points + 1 circle centre + 4 spline points + 2 ellipse points
+        // + 3 conic points: every point a curve owns, and no standalone points.
+        assert_eq!(group(&contents, GroupKind::CurvePoints).rows.len(), 15);
+        let start = row(&contents, GroupKind::CurvePoints, "l1.start");
         assert_eq!(start.label, "Point l1.start");
         assert_eq!(start.summary, "0, 0");
 
@@ -724,7 +734,7 @@ mod tests {
         assert_eq!(figures.rows[0].label, "Rectangle");
         assert_eq!(figures.rows[0].children.len(), 8, "four sides and four corners");
         assert!(group(&contents, GroupKind::Lines).rows.iter().all(|r| !curves.contains(&r.id)), "figure sides stay off Lines");
-        assert!(group(&contents, GroupKind::Points).rows.iter().all(|r| !points.contains(&r.id)), "figure corners stay off Points");
+        assert!(contents.groups.iter().flat_map(|group| &group.rows).all(|r| !points.contains(&r.id)), "figure corners stay off the geometry groups");
         assert!(group(&contents, GroupKind::Lines).rows.iter().any(|r| r.id == loose_id), "a loose line stays in Lines");
     }
 
@@ -776,8 +786,8 @@ mod tests {
         let (doc, sketch) = document(sk);
         let contents = build(&doc, None, sketch, true);
 
-        assert_eq!(kinds(&contents), vec![GroupKind::Points, GroupKind::Lines]);
-        assert_eq!(group(&contents, GroupKind::Points).rows.len(), 744, "two points per line, origin left out");
+        assert_eq!(kinds(&contents), vec![GroupKind::CurvePoints, GroupKind::Lines]);
+        assert_eq!(group(&contents, GroupKind::CurvePoints).rows.len(), 744, "two points per line, origin left out");
         assert_eq!(group(&contents, GroupKind::Lines).rows.len(), 372);
         let rows: usize = contents.groups.iter().map(|group| group.rows.len()).sum();
         assert_eq!(rows, 744 + 372);
@@ -819,7 +829,10 @@ mod tests {
         let contents = build(&doc, None, sketch, true);
 
         assert!(group(&contents, GroupKind::Lines).rows.iter().all(|row| row.id != linked_curve), "a linked line is not a local line");
-        assert!(group(&contents, GroupKind::Points).rows.iter().all(|row| !linked_points.contains(&row.id)), "a linked point is not a local point");
+        assert!(
+            contents.groups.iter().flat_map(|group| &group.rows).all(|row| !linked_points.contains(&row.id)),
+            "a linked point is not a local point"
+        );
         assert_eq!(row(&contents, GroupKind::Text, "text1").kind, RowKind::Text);
     }
 

@@ -2241,7 +2241,7 @@ fn expanding_a_sketch_shows_its_contents_groups_and_geometry_rows() {
 
     h.step(&json!({"click":{"handle":"fold:Contents"}})).unwrap();
     h.settle();
-    for slug in ["points", "lines", "circles", "dimensions"] {
+    for slug in ["curve-points", "lines", "circles", "dimensions"] {
         assert!(handle_at(&group(slug)).is_some(), "missing {slug}: {:?}", crate::scenario::handles("browser:sketch-contents-group"));
     }
     assert!(handle_at(&format!("browser:sketch-contents-row:{scope}:lines:l1")).is_some(), "the line row shows with its lines group");
@@ -2257,7 +2257,7 @@ fn expanding_a_sketch_shows_its_contents_groups_and_geometry_rows() {
             }
         });
     }
-    for want in ["Points", "Lines", "Circles", "Dimensions", "Line l1"] {
+    for want in ["Curve Points", "Lines", "Circles", "Dimensions", "Line l1"] {
         assert!(texts.iter().any(|text| text == want), "no `{want}` in {texts:?}");
     }
 
@@ -2408,9 +2408,9 @@ fn a_large_sketch_caps_its_groups_until_show_all() {
     let scope = format!("s:{sketch}");
     let shown = |slug: &str| crate::scenario::count_of(&format!("browser:sketch-contents-shown:{scope}:{slug}"));
     assert_eq!(shown("lines"), Some(200.0), "the lines group is capped");
-    h.app.tree.expanded.insert(format!("s:{sketch}/contents/points"));
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents/curve-points"));
     h.settle();
-    assert_eq!(shown("points"), Some(200.0), "the points group is capped");
+    assert_eq!(shown("curve-points"), Some(200.0), "the curve points group is capped");
 
     h.app.tree.expanded.insert(format!("s:{sketch}/contents/lines/all"));
     h.settle();
