@@ -1126,16 +1126,46 @@ fn ruled_with_end_weight_ratios_that_differ_is_c1_straight_and_reaches_any_dista
             let l = c.derivs(1.0, Side::Left, 1).unwrap()[1];
             let r = c.derivs(1.0, Side::Right, 1).unwrap()[1];
             assert!(l.distance(r) < 1e-12 * l.length(), "{v}: {l:?} {r:?}");
-            // straight past it: every point on the line through the joint along S_u
+            // straight past it: every point on the chord from the joint to the far end (along
+            // S_u, with C1 above), to the rounding of making and evaluating the net
+            let bound = straightness_bound(b.gw_nurb().unwrap());
             let p0 = e.surface.evaluate_point(&k(), Vec2::new(1.0, v)).unwrap();
+            let chord = e
+                .surface
+                .evaluate_point(&k(), Vec2::new(d.max().x, v))
+                .unwrap()
+                - p0;
             for i in 1..=8 {
                 let u = 1.0 + (d.max().x - 1.0) * f64::from(i) / 8.0;
                 let p = e.surface.evaluate_point(&k(), Vec2::new(u, v)).unwrap();
-                let off = (p - p0).cross(l).length() / l.length();
-                assert!(off < 1e-12 * (1.0 + distance), "{v} {u}: {p:?} off {off}");
+                let off = (p - p0).cross(chord).length() / chord.length();
+                assert!(off <= bound, "{v} {u}: {p:?} off {off}, bound {bound}");
             }
         }
     }
+}
+
+/// The most a point of an extension's row past the joint can be off the chord through two others
+/// of the row, from rounding: the exact rows are straight, the Ruled points `X1 + t X2` (or
+/// `H_n + t D`) are each `lin`s of a product and a sum (`gamma_4` of the homogeneous coordinates,
+/// over the least weight), and evaluating the net at a point is the kernel's de Boor,
+/// `16 (p + q + 2)` operations of the 3D size as [`crate::surface::implicit`]'s form checks
+/// take it. Three points each within that of a common line put the middle one within three
+/// times it of the chord of the others.
+fn straightness_bound(net: &Net) -> f64 {
+    use crate::nurbs::math::gamma;
+    let (mut h, mut w_min, mut size) = (0.0_f64, f64::INFINITY, 0.0_f64);
+    for c in net.rows().flatten() {
+        let w = if c.w == NOW { 1.0 } else { c.w };
+        h = h.max(c.x.abs()).max(c.y.abs()).max(c.z.abs());
+        w_min = w_min.min(w);
+        size = size
+            .max((c.x / w).abs())
+            .max((c.y / w).abs())
+            .max((c.z / w).abs());
+    }
+    let (p, q) = net.degrees();
+    3.0 * (gamma(4) * h / w_min + gamma(16 * (p + q + 2)) * size)
 }
 
 /// A rational net of degree 2 both ways, of 3 spans in v (one knot double), whose weights are
@@ -1224,12 +1254,16 @@ fn the_ruled_product_form_past_every_side_keeps_the_source_and_every_row_is_stra
                 l.distance(r) < 1e-9 * l.length(),
                 "{side:?} {t}: {l:?} {r:?}"
             );
+            // straight past it, as for the row pair: on the chord to the far end, to the
+            // rounding of making and evaluating the net
+            let bound = straightness_bound(net);
             let p0 = e.surface.evaluate_point(&k(), uv(joint, t)).unwrap();
+            let chord = e.surface.evaluate_point(&k(), uv(far, t)).unwrap() - p0;
             for i in 1..=8 {
                 let a = joint + (far - joint) * f64::from(i) / 8.0;
                 let p = e.surface.evaluate_point(&k(), uv(a, t)).unwrap();
-                let off = (p - p0).cross(l).length() / l.length();
-                assert!(off < 1e-9, "{side:?} {t} {a}: off {off}");
+                let off = (p - p0).cross(chord).length() / chord.length();
+                assert!(off <= bound, "{side:?} {t} {a}: off {off}, bound {bound}");
             }
         }
     }
