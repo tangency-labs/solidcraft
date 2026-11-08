@@ -753,7 +753,7 @@ fn label_marked(k: &ConstraintKind, radius_mark: bool, expr: Option<&str>, drive
     let plain = expr.is_none_or(|e| {
         let e = e.trim();
         let e = ["mm", "cm", "in", "ft", "m", "deg", "rad", "°"].iter().find_map(|unit| e.strip_suffix(unit)).unwrap_or(e);
-        crate::prefs::parse_number(e).is_some()
+        crate::ui_kit::parse_number(e).is_some()
     });
     let text = if plain { num } else { format!("fx: {num}") };
     if driven { format!("({text})") } else { text }

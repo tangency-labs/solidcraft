@@ -42,6 +42,7 @@ mod preferences_layout;
 mod preferences_navigation;
 mod preferences_small;
 mod radial;
+pub(crate) mod recent_colors;
 mod reports;
 mod review;
 mod search;

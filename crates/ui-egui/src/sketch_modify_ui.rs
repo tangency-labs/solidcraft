@@ -614,10 +614,10 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             // The size in millimetres follows the factor and the other way round; the aspect is kept.
             if let Some((_, size)) = frame {
                 for (label, natural) in [("Width", size[0]), ("Height", size[1])] {
-                    let k = crate::prefs::parse_number(factor.trim()).filter(|k| *k > 0.0).unwrap_or(1.0);
+                    let k = crate::ui_kit::parse_number(factor.trim()).filter(|k| *k > 0.0).unwrap_or(1.0);
                     let mut shown = format!("{} mm", crate::sketch_transform_ui::plain(natural * k));
                     if number(ui, label, &mut shown)
-                        && let Some(mm) = crate::prefs::parse_number(shown.trim_end_matches("mm").trim())
+                        && let Some(mm) = crate::ui_kit::parse_number(shown.trim_end_matches("mm").trim())
                         && mm > 0.0
                         && natural > 1e-9
                     {

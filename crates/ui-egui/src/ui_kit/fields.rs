@@ -8,12 +8,55 @@ use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use egui::{Response, RichText, Ui, vec2};
+use std::sync::Arc;
 
 /// One alignment policy for every kit text input. Align the galley itself rather than
 /// approximating font metrics with integer margins (Plex Mono and Sans differ).
 pub(super) fn text_input(edit: egui::TextEdit<'_>) -> egui::TextEdit<'_> {
     let t = Tokens::get();
     edit.align(egui::Align2::LEFT_CENTER).margin(vec2(t.form_inset, 0.0)).min_size(vec2(0.0, t.control_height))
+}
+
+/// The host's expression language, as the kit's value fields use it. The kit draws and edits the
+/// text; it never parses expressions itself. The host installs one per context with
+/// [`install_expressions`]. Without one, a field's label drag changes nothing (no text is a
+/// literal) and an editor offers no completion or stepping.
+pub trait Expressions: Send + Sync {
+    /// Whether the trimmed `text` is a plain literal: a number with an optional unit ("20 mm",
+    /// "-1.5 in"), not a parameter or a formula. Only a literal can be changed by a label drag.
+    fn is_literal(&self, text: &str) -> bool;
+    /// Whether `unit`, the text after a literal's number as written (" mm", "in", ""), is a unit
+    /// of the language. An empty unit is a unit-less number.
+    fn is_unit(&self, unit: &str) -> bool;
+    /// Offer completion and stepping for this frame under the editor `response` over `text`.
+    /// Returns true when either changed the text; that frame's Enter then accepts the change
+    /// instead of submitting.
+    fn complete(&self, ui: &mut Ui, response: &Response, text: &mut String) -> bool;
+}
+
+/// Where a context keeps its installed [`Expressions`].
+fn expressions_id() -> egui::Id {
+    egui::Id::unique("sc_kit_expressions")
+}
+
+/// Give every kit value field in `ctx` the host's expression language. Installing again replaces it.
+pub fn install_expressions(ctx: &egui::Context, expressions: Arc<dyn Expressions>) {
+    ctx.data_mut(|data| data.insert_temp(expressions_id(), expressions));
+}
+
+/// The expression language installed in `ctx`, if any.
+pub(crate) fn expressions(ctx: &egui::Context) -> Option<Arc<dyn Expressions>> {
+    ctx.data(|data| data.get_temp::<Arc<dyn Expressions>>(expressions_id()))
+}
+
+/// A plain number typed into a field, with a decimal point or a decimal comma (#1347): "2.5"
+/// and "2,5" are both 2.5, as a numeric keypad types either depending on the locale. Spaces are
+/// ignored and "−" is a minus, as in egui's own parser. A comma beside a point ("1.234,5") or a
+/// second comma is not guessed at: the text is not a number.
+pub(crate) fn parse_number(text: &str) -> Option<f64> {
+    let t: String = text.chars().filter(|c| !c.is_whitespace()).map(|c| if c == '\u{2212}' { '-' } else { c }).collect();
+    let t = if !t.contains('.') && t.matches(',').count() == 1 { t.replacen(',', ".", 1) } else { t };
+    t.parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 /// Expression editor with the application's existing completion and number-focus behaviour.
@@ -140,18 +183,20 @@ struct Literal {
 /// The largest value a label drag reads or writes.
 const LITERAL_CAP: f64 = 1e12;
 
-/// `text` as a [`Literal`], or None for anything else: a parameter, a formula, an empty field.
-/// Dragging never rewrites an expression, so a driving parameter stays driving.
-fn literal(text: &str) -> Option<Literal> {
+/// `text` as a [`Literal`] of the `expressions` language, or None for anything else: a parameter,
+/// a formula, an empty field. Dragging never rewrites an expression, so a driving parameter stays driving.
+fn literal(expressions: &dyn Expressions, text: &str) -> Option<Literal> {
     let text = text.trim();
-    if !solidcraft_engine::doc::expr::is_literal(text) {
+    if !expressions.is_literal(text) {
         return None;
     }
     let sign = usize::from(text.starts_with(['-', '+']));
     let end = text.char_indices().skip(sign).find(|(_, c)| !(c.is_ascii_digit() || *c == '.' || *c == ',')).map_or(text.len(), |(at, _)| at);
     let (number, unit) = (text.get(..end)?, text.get(end..)?);
     // An exponent ("1e3") or anything else that is not a unit is left alone.
-    solidcraft_engine::doc::expr::unit_info(unit)?;
+    if !expressions.is_unit(unit) {
+        return None;
+    }
     let comma = number.contains(',');
     let number: f64 = number.replace(',', ".").parse().ok().filter(|n: &f64| n.is_finite() && n.abs() < LITERAL_CAP)?;
     Some(Literal { number, unit: unit.to_owned(), comma })
@@ -200,7 +245,7 @@ struct Scrub {
 /// holding an expression or a parameter is left alone. Returns whether the text changed.
 pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
     let id = label.id.with("sc_scrub");
-    let Some(now) = literal(value).filter(|_| ui.is_enabled()) else {
+    let Some(now) = expressions(ui.ctx()).and_then(|e| literal(e.as_ref(), value)).filter(|_| ui.is_enabled()) else {
         ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
         return false;
     };
@@ -834,7 +879,7 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     });
     super::layout::publish_geometry(ui, &response);
     // A completion's Enter accepts the suggestion, rather than submitting the dialog.
-    let completed = completion && crate::params_dialog::complete(ui, &response, value);
+    let completed = completion && expressions(ui.ctx()).is_some_and(|e| e.complete(ui, &response, value));
     (!completed && response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)), response.changed(), response)
 }
 
@@ -1158,7 +1203,7 @@ pub(crate) fn number_pair<T: egui::emath::Numeric>(
 /// Retains the established 0.01 step, fractional range and locale parser.
 /// Locale-aware variable-radius position editor. Tokens: `scope control/font tokens`.
 pub(crate) fn fraction_field(ui: &mut Ui, value: &mut f64) -> Response {
-    let response = ui.add(egui::DragValue::new(value).speed(0.01).range(0.01..=0.99).fixed_decimals(2).custom_parser(crate::prefs::parse_number));
+    let response = ui.add(egui::DragValue::new(value).speed(0.01).range(0.01..=0.99).fixed_decimals(2).custom_parser(parse_number));
     solidcraft_ui_registry::publish_target(&format!("dialog:fraction:{}", label(ui)), response.rect);
     response
 }
@@ -1581,7 +1626,7 @@ fn scalar_field_impl(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusi
     let before = *value;
     let parsed = std::cell::Cell::new(false);
     let field = egui::DragValue::new(value).range(range).speed(0.01).custom_parser(|text| {
-        let value = crate::prefs::parse_number(text);
+        let value = parse_number(text);
         parsed.set(value.is_some());
         value
     });
@@ -1640,7 +1685,7 @@ pub(crate) fn angle_field(ui: &mut Ui, value: &mut f64) -> Response {
     if let Some(last) = ui.data(|d| d.get_temp::<f64>(set)).filter(|last| (last - shown).abs() <= 1e-9 * last.abs().max(1.0)) {
         shown = last;
     }
-    let response = ui.add(egui::DragValue::new(&mut shown).speed(1.0).suffix(" deg").custom_parser(crate::prefs::parse_number));
+    let response = ui.add(egui::DragValue::new(&mut shown).speed(1.0).suffix(" deg").custom_parser(parse_number));
     if response.changed() {
         *value = shown;
         ui.data_mut(|d| d.insert_temp(set, shown));
@@ -1725,12 +1770,7 @@ fn bounded_number_field<T: egui::emath::Numeric>(
     clamp_existing: bool,
 ) -> Response {
     let response = ui.add(
-        egui::DragValue::new(value)
-            .range(range)
-            .clamp_existing_to_range(clamp_existing)
-            .speed(speed)
-            .suffix(suffix)
-            .custom_parser(crate::prefs::parse_number),
+        egui::DragValue::new(value).range(range).clamp_existing_to_range(clamp_existing).speed(speed).suffix(suffix).custom_parser(parse_number),
     );
     if response.has_focus() {
         super::settings_search::note_key_sink(ui.ctx());
@@ -1804,7 +1844,7 @@ pub(crate) fn track_number(ui: &mut Ui, value: &mut f64, speed: f64, decimals: u
     response
 }
 
-/// A value typed as a sum of numbers (`crate::prefs::parse_number` each), added to `now` when it
+/// A value typed as a sum of numbers (`parse_number` each), added to `now` when it
 /// starts with a sign: "+30" moves the value by 30, "0-5" is −5.
 fn relative_number(text: &str, now: f64) -> Option<f64> {
     let text: String = text.chars().filter(|c| !c.is_whitespace()).map(|c| if c == '\u{2212}' { '-' } else { c }).collect();
@@ -1813,13 +1853,13 @@ fn relative_number(text: &str, now: f64) -> Option<f64> {
     let mut prev = ' ';
     for c in text.chars() {
         if (c == '+' || c == '-') && !term.is_empty() && !matches!(prev, 'e' | 'E') {
-            total += crate::prefs::parse_number(&term)?;
+            total += parse_number(&term)?;
             term.clear();
         }
         term.push(c);
         prev = c;
     }
-    total += crate::prefs::parse_number(&term)?;
+    total += parse_number(&term)?;
     total.is_finite().then_some(total)
 }
 

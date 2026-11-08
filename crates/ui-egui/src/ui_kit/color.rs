@@ -1,6 +1,6 @@
 //! Document RGB and optional separate opacity editing. Interface paint uses tokens; gradients are colour data.
+use super::recent_colors::{MAX_RECENT_COLORS, recent_colors, remember_color};
 use super::{layout::label, metrics::dimension};
-use crate::recent_colors::{MAX_RECENT_COLORS, recent_colors, remember_color};
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use crate::{i18n, theme::Tokens};
@@ -296,7 +296,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         }
     });
     // A colour joins the recent list once an edit is finished: a drag or a held step button is
-    // released, a typed value is entered. Every picker shares the list (`crate::recent_colors`).
+    // released, a typed value is entered. Every picker shares the list (`super::recent_colors`).
     // While the popover stays open, fine-tuning replaces the colour it added rather than filling
     // the list with each step; a colour taken from the list starts a new entry.
     let session_id = id.with("recent_session");
@@ -405,7 +405,7 @@ fn spin_channel(ui: &mut Ui, name: &str, tip: Option<&str>, value: &mut f64, spi
                 egui::DragValue::new(value)
                     .range(0.0..=max)
                     .speed(speed)
-                    .custom_parser(crate::prefs::parse_number)
+                    .custom_parser(super::parse_number)
                     .custom_formatter(move |v, _| format!("{v:.decimals$}")),
             );
             response.widget_info(|| {
