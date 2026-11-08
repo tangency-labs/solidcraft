@@ -98,6 +98,14 @@ impl GerberSet {
     }
 }
 
+/// The extensions a board's files are picked by: a zip, the Gerber layers by their names
+/// (Protel-style and Eagle's), Gerber's own, the drill files' and the job file's. Any file in the
+/// board's folder will do, whatever the picker shows.
+pub const BOARD_EXTENSIONS: [&str; 26] = [
+    "zip", "gbr", "ger", "pho", "art", "gtl", "gbl", "gts", "gbs", "gto", "gbo", "gko", "gm1", "gml", "cmp", "sol", "stc", "sts", "plc", "pls",
+    "dim", "drl", "xln", "exc", "txt", "gbrjob",
+];
+
 /// Whether a path names a zip, by its extension.
 pub fn is_zip_path(path: &str) -> bool {
     std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("zip"))

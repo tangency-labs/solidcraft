@@ -32,6 +32,15 @@ fn file_names_give_the_layers() {
         ("notes.gbr", SetRole::Other),
     ] {
         assert_eq!(roles(&set(&[(name, GERBER)])), [(name, role)], "{name}");
+        // The picker shows every file whose extension gives its layer.
+        if role != SetRole::Other && name.rsplit_once('.').is_some_and(|(_, e)| e != "gbr") {
+            assert!(BOARD_EXTENSIONS.contains(&ext_of(name).as_str()), "{name}");
+        }
+    }
+    for ext in
+        ["gtl", "gbl", "gts", "gbs", "gto", "gbo", "gko", "gm1", "gml", "cmp", "sol", "stc", "sts", "plc", "pls", "dim", "drl", "gbrjob", "zip"]
+    {
+        assert!(BOARD_EXTENSIONS.contains(&ext), "{ext}");
     }
 }
 
