@@ -20,7 +20,9 @@ pub(super) fn text_input(edit: egui::TextEdit<'_>) -> egui::TextEdit<'_> {
 /// The host's expression language, as the kit's value fields use it. The kit draws and edits the
 /// text; it never parses expressions itself. The host installs one per context with
 /// [`install_expressions`]. Without one, a field's label drag changes nothing (no text is a
-/// literal) and an editor offers no completion or stepping.
+/// literal), an editor offers no completion or stepping, and a length field edits plain
+/// millimetres: scale 1.0 and suffix "mm", shown with `decimals` places and read back as a
+/// plain number.
 pub trait Expressions: Send + Sync {
     /// Whether the trimmed `text` is a plain literal: a number with an optional unit ("20 mm",
     /// "-1.5 in"), not a parameter or a formula. Only a literal can be changed by a label drag.
@@ -32,6 +34,15 @@ pub trait Expressions: Send + Sync {
     /// Returns true when either changed the text; that frame's Enter then accepts the change
     /// instead of submitting.
     fn complete(&self, ui: &mut Ui, response: &Response, text: &mut String) -> bool;
+    /// The display unit for the design unit name `units`: units per millimetre and the unit's
+    /// name, as a length field's suffix shows it.
+    fn unit_scale(&self, units: &str) -> (f64, &'static str);
+    /// The millimetre length `mm` as a number in the display unit `unit`, without the unit,
+    /// with `decimals` places (the language may show more where the unit needs them).
+    fn length_number(&self, mm: f64, unit: &str, decimals: u8) -> String;
+    /// The length typed as `text` in millimetres: a bare number is in the display unit (`scale`
+    /// units per millimetre), an explicit unit is honoured. None when `text` is not a length.
+    fn parse_length_mm(&self, text: &str, scale: f64) -> Option<f64>;
 }
 
 /// Where a context keeps its installed [`Expressions`].
@@ -1654,7 +1665,7 @@ fn scalar_field_impl(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusi
 /// Length held in millimetres, dragged or typed in the design's units ("0.5 in", "2 cm + 3 mm" parse).
 /// Tokens: control_height, scope control/font tokens.
 pub(crate) fn length_field(ui: &mut Ui, value: &mut f64, units: &str, decimals: u8) -> Response {
-    let response = ui.add(length_drag(value, units, decimals));
+    let response = ui.add(length_drag(ui, value, units, decimals));
     Tokens::get().input_bevel(ui, &response);
     solidcraft_ui_registry::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
     response
@@ -1669,7 +1680,7 @@ pub(crate) fn bounded_length_field(
     range: std::ops::RangeInclusive<f64>,
     speed: f64,
 ) -> Response {
-    let response = ui.add(length_drag(value, units, decimals).range(range).speed(speed));
+    let response = ui.add(length_drag(ui, value, units, decimals).range(range).speed(speed));
     solidcraft_ui_registry::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
     response
 }
@@ -1884,13 +1895,18 @@ pub(crate) fn message_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint:
 
 /// Edit a millimetre value through a control expressed in the current design units.
 /// Keep the stored value untouched unless the user actually changes the field.
-fn length_drag<'a>(value: &'a mut f64, units: &str, decimals: u8) -> egui::DragValue<'a> {
-    let (scale, unit) = crate::prefs::unit_scale(units);
-    egui::DragValue::new(value)
-        .speed(0.5)
-        .suffix(format!(" {unit}"))
-        .custom_formatter(move |mm, _| crate::prefs::length_number(mm, unit, decimals))
-        .custom_parser(move |text| crate::prefs::parse_length_mm(text, scale))
+/// The units, formatting and parsing come from the host's [`Expressions`]; without one the
+/// field edits plain millimetres.
+fn length_drag<'a>(ui: &Ui, value: &'a mut f64, units: &str, decimals: u8) -> egui::DragValue<'a> {
+    let drag = egui::DragValue::new(value).speed(0.5);
+    let Some(host) = expressions(ui.ctx()) else {
+        return drag.suffix(" mm").custom_formatter(move |mm, _| format!("{mm:.*}", usize::from(decimals.min(8)))).custom_parser(parse_number);
+    };
+    let (scale, unit) = host.unit_scale(units);
+    let parser = Arc::clone(&host);
+    drag.suffix(format!(" {unit}"))
+        .custom_formatter(move |mm, _| host.length_number(mm, unit, decimals))
+        .custom_parser(move |text| parser.parse_length_mm(text, scale))
 }
 
 /// Small model-anchored value editor. Retains its focus ID and native hit height so it does
