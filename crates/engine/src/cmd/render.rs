@@ -9,8 +9,8 @@ use solidcraft_doc::render_settings::{RenderSettings, RenderSetup};
 use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::render_camera::{CameraApplied, CameraFitted, CameraInfo, CameraSet, RenderCamera};
-use crate::schema::render_settings::{RenderSettingsGot, RenderSettingsInfo, RenderSettingsSaved, SETUP_FIELDS, SetupFields, set_message};
 use crate::schema::render_info::{Bounds, CpuResourceProfile, RenderBackends, RenderObject, RenderSceneInfo, SceneBody};
+use crate::schema::render_settings::{RenderSettingsGot, RenderSettingsInfo, RenderSettingsSaved, SETUP_FIELDS, SetupFields, set_message};
 use crate::{Result, Session};
 
 mod clear_coat;
