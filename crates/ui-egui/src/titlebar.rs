@@ -3,11 +3,8 @@
 //! Linux without OS decorations ([`SolveApp::custom_titlebar`]) the application bar is the title
 //! bar, and on macOS it runs under the traffic lights ([`SolveApp::integrated_titlebar`]).
 
-use crate::window_chrome::{self, WindowAction};
-pub use crate::window_chrome::{
-    Caption, TRAFFIC_LIGHTS, WIDTH, dpi_scaled_size, drag_area, resize_border_px, resize_hit, resize_zones, toggle_maximize,
-};
-use egui::{Rect, Ui};
+use crate::window_chrome::WindowAction;
+pub use crate::window_chrome::{Caption, dpi_scaled_size, resize_border_px, resize_hit, resize_zones, toggle_maximize};
 
 use crate::SolveApp;
 
@@ -18,7 +15,8 @@ pub fn window_action(app: &mut SolveApp, ctx: &egui::Context, action: &str) -> R
     Ok(())
 }
 
-fn run(app: &mut SolveApp, ctx: &egui::Context, action: WindowAction) {
+/// Runs a title-bar action as SolidCraft does.
+pub(crate) fn run(app: &mut SolveApp, ctx: &egui::Context, action: WindowAction) {
     if action == WindowAction::Close {
         // Unsaved designs are asked about first; the window closes once they are answered.
         crate::documents::request_quit(app);
@@ -29,19 +27,11 @@ fn run(app: &mut SolveApp, ctx: &egui::Context, action: WindowAction) {
     action.send(ctx);
 }
 
-/// Minimize, Maximize/Restore and Close at the right end of `bar` (the application bar's
-/// rect), run as SolidCraft runs them.
-pub fn caption_buttons(app: &mut SolveApp, ui: &mut Ui, bar: Rect) {
-    if let Some(action) = window_chrome::caption_buttons(ui, bar) {
-        run(app, &ui.ctx().clone(), action);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::window_chrome::{BUTTON_WIDTH, CAPTIONS, caption_id};
-    use egui::{Event, PointerButton, Pos2, RawInput, ResizeDirection, ViewportCommand, ViewportId, pos2, vec2};
+    use egui::{Event, PointerButton, Pos2, RawInput, Rect, ResizeDirection, ViewportCommand, ViewportId, pos2, vec2};
     use solidcraft_engine::Session;
     use solidcraft_theme::Tokens;
 
