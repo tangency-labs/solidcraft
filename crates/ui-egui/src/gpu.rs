@@ -519,12 +519,18 @@ fn offscreen_adapter(policy: solidcraft_gpu::select::Policy) -> Option<wgpu::Ada
 /// The test process's offscreen device, for an offscreen render or check: started once, on
 /// [`offscreen_own_device`], and shared by every test after it (#13395). A new device for every
 /// render also compiled the viewport's pipelines anew: 28 renders took 55 s, on one device 4 s.
-/// `None` when [`offscreen_own_device`] is. A test that loses its device, or changes how the
-/// device reports errors or its loss, takes [`offscreen_own_device`] instead.
+/// `None` when [`offscreen_own_device`] is; only a device is kept, so after a failed start (a GPU
+/// briefly out of memory) the next test tries again rather than every later one skipping. A test
+/// that loses its device, or changes how the device reports errors or its loss, takes
+/// [`offscreen_own_device`] instead.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn offscreen_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
-    static SHARED: std::sync::OnceLock<Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)>> = std::sync::OnceLock::new();
-    SHARED.get_or_init(offscreen_own_device).clone()
+    static SHARED: std::sync::Mutex<Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)>> = std::sync::Mutex::new(None);
+    let mut shared = SHARED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if shared.is_none() {
+        *shared = offscreen_own_device();
+    }
+    shared.clone()
 }
 
 /// A device of its own for an offscreen test (`None` without a GPU adapter the `SOLIDCRAFT_GPU`
