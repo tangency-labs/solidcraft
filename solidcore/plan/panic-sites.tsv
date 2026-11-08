@@ -3,15 +3,15 @@
 # SolidError (checked arithmetic, .get(), a length check) and drop its row. `proven` marks
 # a site that cannot panic, with the reason; it is exempt from the ratchet.
 file	fn	pattern	n	status	code	reason
-crates/solidcore/src/blend/blend_corner/ball.rs	ball_corner_edge_geom	with_capacity	1	open	Vec::with_capacity(n)	
+crates/solidcore/src/blend/blend_corner/ball.rs	ball_corner_edge_geom	with_capacity	1	proven	Vec::with_capacity(n)	n = contacts.len(), an in-memory collection
 crates/solidcore/src/blend/blend_corner/ball.rs	ball_inverse	int-rem	1	proven	(j + 1) % 3	constant non-zero divisor
 crates/solidcore/src/blend/blend_corner/ball.rs	ball_inverse	int-rem	2	proven	(j + 2) % 3	constant non-zero divisor
 crates/solidcore/src/blend/blend_corner/ball.rs	ball_inverse	int-rem	3	proven	(i + 1) % 3	constant non-zero divisor
 crates/solidcore/src/blend/blend_corner/ball.rs	ball_inverse	int-rem	4	proven	(i + 2) % 3	constant non-zero divisor
 crates/solidcore/src/blend/blend_corner/ball.rs	ball_triangle_patch	int-rem	1	proven	(pole + 1) % 3	constant non-zero divisor
 crates/solidcore/src/blend/blend_corner/ball.rs	ball_triangle_patch	int-rem	2	proven	(pole + 2) % 3	constant non-zero divisor
-crates/solidcore/src/blend/blend_corner/ball.rs	classify_ball	with_capacity	1	open	Vec::with_capacity(n)	
-crates/solidcore/src/blend/blend_corner/ball.rs	classify_ball	with_capacity	2	open	Vec::with_capacity(n)	
+crates/solidcore/src/blend/blend_corner/ball.rs	classify_ball	with_capacity	1	proven	Vec::with_capacity(n)	n = all_eus.len(), an in-memory slice
+crates/solidcore/src/blend/blend_corner/ball.rs	classify_ball	with_capacity	2	proven	Vec::with_capacity(n)	n = all_eus.len(), an in-memory slice
 crates/solidcore/src/blend/blend_corner/ball.rs	ring_faces	int-rem	1	proven	(ii + n - 1) % n	inside faces.iter_mut().enumerate() with faces = vec![None; n], so n > 0
 crates/solidcore/src/blend/blend_corner/chamfer.rs	bilinear_face	int-rem	1	proven	(i + 1) % 4	constant non-zero divisor
 crates/solidcore/src/blend/blend_corner/chamfer.rs	chamfer_corner_edge_geom	int-rem	1	proven	(i + 1) % count	inside xs.iter().enumerate(), so count = xs.len() > 0
@@ -31,8 +31,8 @@ crates/solidcore/src/blend/blend_corner/chamfer.rs	ring_faces	int-rem	1	proven	(
 crates/solidcore/src/blend/blend_corner/end.rs	fit_of_end_past_side_edges	int-rem	1	proven	(fil + total - 1) % total	returns early when total < 3
 crates/solidcore/src/blend/blend_corner/end.rs	fit_of_end_past_side_edges	int-rem	2	proven	(fil + 1) % total	total >= 3: the function returns above when not
 crates/solidcore/src/blend/blend_corner/mixed/algebra.rs	boehm	Vec::insert	1	open	insert(k + 1, t)	
-crates/solidcore/src/blend/blend_corner/mixed/algebra.rs	srf_to_bspline	int-div	1	open	ii / srf.du	
-crates/solidcore/src/blend/blend_corner/mixed/algebra.rs	srf_to_bspline	int-div	2	open	jj / srf.dv	
+crates/solidcore/src/blend/blend_corner/mixed/algebra.rs	srf_to_bspline	int-div	1	proven	ii / srf.du	srf.du > 0: the function returns above when it is 0
+crates/solidcore/src/blend/blend_corner/mixed/algebra.rs	srf_to_bspline	int-div	2	proven	jj / srf.dv	srf.dv > 0: the function returns above when it is 0
 crates/solidcore/src/blend/blend_corner/mixed/algebra.rs	tensor_u	split_at	1	open	split_at_mut(k)	
 crates/solidcore/src/blend/blend_corner/setback.rs	build_setback_fill	int-rem	1	open	(m + ee) % n	
 crates/solidcore/src/blend/blend_corner/setback.rs	build_setback_fill	with_capacity	1	open	Vec::with_capacity(n)	
@@ -190,8 +190,8 @@ crates/solidcore/src/blend/fillet_corner/topology.rs	FilletCorner::make_nx2_corn
 crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	int-rem	1	proven	(ii + n - 1) % n	inside for ii in 0..n, so n > 0 (n = all.len(), not reassigned)
 crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	int-rem	2	proven	(ii + n - 1) % n	inside for ii in 0..n, so n > 0 (n = all.len(), not reassigned)
 crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	int-rem	3	proven	(ii + 1) % n	inside for ii in 0..n, so n > 0 (n = all.len(), not reassigned)
-crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	with_capacity	1	open	Vec::with_capacity(n)	
-crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	with_capacity	2	open	Vec::with_capacity(n)	
+crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	with_capacity	1	proven	Vec::with_capacity(n)	n = all.len(), an in-memory collection
+crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	with_capacity	2	proven	Vec::with_capacity(n)	n = all.len(), an in-memory collection
 crates/solidcore/src/blend/fillet_corner/topology/concave_nxn.rs	FilletCorner::make_concave_nxn_corner_topology	Vec::insert	1	open	insert(jj, extra)	
 crates/solidcore/src/blend/fillet_corner/topology/concave_nxn.rs	FilletCorner::make_concave_nxn_corner_topology	int-rem	1	proven	(jj + 1) % total	total starts at all.len() and all.last() is Some (returns above when not); it only grows
 crates/solidcore/src/blend/fillet_corner/topology/end_corners.rs	FilletCorner::make_4x3_corner_topology	int-rem	1	proven	i % total_eus	total_eus > 0: the function returns above when it is 0
@@ -221,7 +221,7 @@ crates/solidcore/src/blend/fillet_executive/session/band_cuts.rs	section_breaks_
 crates/solidcore/src/blend/fillet_executive/session/band_cuts.rs	section_breaks_through	with_capacity	1	open	Vec::with_capacity(meets.len() + 2)	
 crates/solidcore/src/blend/fillet_executive/session/cliff_overflow.rs	FilletSession::holds_its_law	int-rem	1	proven	c % 2	constant non-zero divisor
 crates/solidcore/src/blend/fillet_executive/session/cliff_overflow.rs	FilletSession::holds_its_law	int-rem	2	proven	c % 2	constant non-zero divisor
-crates/solidcore/src/blend/fillet_executive/session/crossing_rails.rs	FilletSession::collect_rails	with_capacity	1	open	Vec::with_capacity(SAMPLES)	
+crates/solidcore/src/blend/fillet_executive/session/crossing_rails.rs	FilletSession::collect_rails	with_capacity	1	proven	Vec::with_capacity(SAMPLES)	constant capacity (SAMPLES = 9)
 crates/solidcore/src/blend/fillet_executive/session/fit_size.rs	corner_takes_per_radius	int-rem	1	proven	(i + 1) % 3	constant non-zero divisor
 crates/solidcore/src/blend/fillet_executive/session/fit_size.rs	corner_takes_per_radius	int-rem	2	proven	(i + 2) % 3	constant non-zero divisor
 crates/solidcore/src/blend/fillet_executive/session/keep_features.rs	FilletSession::keep_features_on	with_capacity	1	proven	Vec::with_capacity(rim.len())	rim.len(), an in-memory collection
