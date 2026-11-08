@@ -181,10 +181,8 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
     let face_h = |f: usize| sizes.get(f).map_or(rules.max_len, |(h, _)| *h);
     // A flat face asks for no size (infinite): an edge between flat faces is whole, one beside
     // a curved face takes the curved face's size, so both meet at the same nodes.
-    let edge_h: Vec<f64> = edge_faces
-        .iter()
-        .map(|fs| if fs.is_empty() { rules.max_len } else { fs.iter().map(|&f| face_h(f)).fold(f64::INFINITY, f64::min) })
-        .collect();
+    let edge_h: Vec<f64> =
+        edge_faces.iter().map(|fs| if fs.is_empty() { rules.max_len } else { fs.iter().map(|&f| face_h(f)).fold(f64::INFINITY, f64::min) }).collect();
     let jobs: Vec<(usize, f64)> = edge_h.into_iter().enumerate().collect();
     let solved = b.edges.iter().filter(|e| matches!(e.curve, Curve::SurfaceIntersection { .. })).count();
     let mut nodes: Vec<edges::Nodes> = crate::par::map("edge nodes", &jobs, solved >= PARALLEL_CURVES || jobs.len() >= PARALLEL_EDGES, |(e, h)| {

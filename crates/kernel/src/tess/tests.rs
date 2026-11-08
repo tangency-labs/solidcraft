@@ -90,7 +90,8 @@ fn a_box_is_two_triangles_a_face() {
 fn flat_faces_beside_curved_ones_stay_watertight_and_within_the_chord() {
     let tol = 0.01;
     let bx = ok(crate::box_solid(Vec3::ZERO, Vec3::new(20.0, 10.0, 5.0)));
-    let rounded = ok(crate::fillet(&bx, &[Vec3::new(10.0, 0.0, 5.0), Vec3::new(20.0, 5.0, 5.0), Vec3::new(10.0, 10.0, 5.0), Vec3::new(0.0, 5.0, 5.0)], 1.5));
+    let rounded =
+        ok(crate::fillet(&bx, &[Vec3::new(10.0, 0.0, 5.0), Vec3::new(20.0, 5.0, 5.0), Vec3::new(10.0, 10.0, 5.0), Vec3::new(0.0, 5.0, 5.0)], 1.5));
     let pin = ok(crate::cylinder(Vec3::new(10.0, 5.0, -1.0), Vec3::Z, 2.0, 7.0));
     let holed = cut(&bx, &pin);
     for (name, body) in [("filleted box", &rounded), ("box with a hole", &holed)] {

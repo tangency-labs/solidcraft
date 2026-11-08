@@ -9179,10 +9179,9 @@ mod tests {
         for style in 0..4 {
             app.ui.visual_style = style;
             let scene = build_scene(&app).merged();
-            // Twelve edges per placed box, in the saved mesh's pieces: no side longer than a fifth
-            // of the 30 mm diagonal, so the eight 20 mm edges in four and the four 10 mm ones in
-            // two, 40 segments.
-            let lines = if style == 1 { 0 } else { 2 * 40 * crate::gpu::LINE_SIZE };
+            // Twelve edges per placed box, each one segment (a flat face needs no nodes along its
+            // edges), 24 segments.
+            let lines = if style == 1 { 0 } else { 2 * 12 * crate::gpu::LINE_SIZE };
             assert_eq!(scene.lines.len(), lines, "style {style}: twelve edges per placed box");
             assert_eq!(scene.hidden.len(), if style == 3 { lines } else { 0 });
             assert_eq!(scene.tris.is_empty(), style == 2, "wireframe draws only the edges");
