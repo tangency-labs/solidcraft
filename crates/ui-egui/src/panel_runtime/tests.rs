@@ -2480,6 +2480,7 @@ struct RawPanelHost {
     ctx: egui::Context,
     time: f64,
     capacity: LogicalRect,
+    window_focused: bool,
     native_pixels_per_point: Option<f32>,
     foreign_cover: Option<egui::Rect>,
     foreign_responses: Vec<egui::Response>,
@@ -2514,6 +2515,7 @@ impl RawPanelHost {
             ctx,
             time: 0.0,
             capacity: capacity(),
+            window_focused: true,
             native_pixels_per_point: None,
             foreign_cover: None,
             foreign_responses: Vec::new(),
@@ -2555,7 +2557,7 @@ impl RawPanelHost {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.capacity.size.width, self.capacity.size.height))),
             events,
             time: Some(self.time),
-            focused: true,
+            focused: self.window_focused,
             ..Default::default()
         };
         if let Some(dpi) = self.native_pixels_per_point {
@@ -13064,6 +13066,15 @@ fn modal_dismissal_keys_preserve_passive_content_restore_but_foreign_focus_wins(
             raw.late_modal = true;
             raw.frame(Vec::new(), false);
             raw.frame(Vec::new(), false);
+            raw.window_focused = false;
+            raw.frame(vec![egui::Event::WindowFocused(false)], false);
+            raw.frame(Vec::new(), false);
+            assert_ne!(raw.ctx.memory(|memory| memory.focused()), Some(editor.0));
+            assert_eq!(trace.borrow().editors.last().unwrap().3, before);
+            raw.window_focused = true;
+            raw.frame(vec![egui::Event::WindowFocused(true)], false);
+            assert_ne!(raw.ctx.memory(|memory| memory.focused()), Some(editor.0));
+            assert_eq!(trace.borrow().editors.last().unwrap().3, before);
             raw.frame(vec![host_key(egui::Key::Escape, true)], false);
             raw.late_modal = false;
             if foreign {

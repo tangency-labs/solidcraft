@@ -1064,7 +1064,7 @@ impl WorkspacePanelHost {
             }
         }
         let logical_focus_eligible = self.restore_content_focus
-            && ui.input(|input| input.focused)
+            && (ui.input(|input| input.focused) || ui_kit::Container::modal_input_blocked(ui.ctx()))
             && self.content_focus.as_ref().is_some_and(|bookmark| bookmark.logically_presented(runtime));
         // A passive return cannot outlive deliberate hiding or owner/focus loss.
         // A modal may still wait while that logical presentation remains valid.
