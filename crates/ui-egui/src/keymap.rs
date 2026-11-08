@@ -187,7 +187,8 @@ impl Keymap {
         Value::Object(self.custom.iter().map(|(id, keys)| (id.clone(), keys_value(keys))).collect())
     }
     pub fn load(&mut self, v: &Value) {
-        self.custom = v.as_object().map(|o| o.iter().take(2000).filter_map(|(k, v)| Some((k.clone(), saved_keys(v)?))).collect()).unwrap_or_default();
+        self.custom =
+            v.as_object().map(|o| o.iter().take(2000).filter_map(|(k, v)| Some((k.clone(), saved_keys(k, v)?))).collect()).unwrap_or_default();
     }
 }
 
@@ -201,7 +202,7 @@ pub(crate) fn keys_value(keys: &[String]) -> Value {
 }
 
 /// A command's saved keys: `""` (none), one key, or a list of them.
-pub(crate) fn saved_keys(v: &Value) -> Option<Vec<String>> {
+pub(crate) fn saved_keys(id: &str, v: &Value) -> Option<Vec<String>> {
     let raw: Vec<&str> = match v {
         Value::String(key) => vec![key.as_str()],
         Value::Array(keys) => keys.iter().filter_map(Value::as_str).filter(|k| !k.is_empty()).take(MAX_KEYS).collect(),
@@ -213,7 +214,7 @@ pub(crate) fn saved_keys(v: &Value) -> Option<Vec<String>> {
     }
     let mut keys = Vec::new();
     for key in raw.into_iter().filter(|key| !key.is_empty()) {
-        let Some(key) = canonical_key(key).filter(|key| !RESERVED.contains(&key.as_str())) else {
+        let Some(key) = canonical_key(key).filter(|key| !reserved_for(id, key)) else {
             log::warn!("invalid or reserved saved shortcut ignored");
             continue;
         };
@@ -224,10 +225,41 @@ pub(crate) fn saved_keys(v: &Value) -> Option<Vec<String>> {
     Some(keys)
 }
 
+/// Panel bindings own arrows only while shared chrome has actual keyboard focus.
+/// Every other application-reserved key remains protected for every command.
+fn reserved_for(id: &str, key: &str) -> bool {
+    RESERVED.contains(&key)
+        && !(solidcraft_engine::panels::ContextualPanelAction::from_command_id(id).is_some()
+            && key.rsplit('+').next().is_some_and(|name| matches!(name, "Left" | "Right" | "Up" | "Down")))
+}
+
+/// Effective registered chords for the host's deferred, focus-checked input path.
+pub(crate) fn panel_shortcuts(app: &SolveApp) -> Vec<(solidcraft_engine::panels::ContextualPanelAction, egui::KeyboardShortcut)> {
+    use solidcraft_engine::panels::ContextualPanelAction;
+    ContextualPanelAction::ALL
+        .into_iter()
+        .flat_map(|action| {
+            keys(app, action.command_id()).into_iter().take(MAX_KEYS).filter_map(move |key| {
+                let mut shortcut = chord(&key)?;
+                // Ctrl is the existing primary-modifier alias; explicit Ctrl+Cmd
+                // continues to require both physical modifiers.
+                if shortcut.modifiers.command && !shortcut.modifiers.mac_cmd {
+                    shortcut.modifiers.ctrl = false;
+                }
+                Some((action, shortcut))
+            })
+        })
+        .collect()
+}
+
 /// Read the same chord that recording a key produces, independent of case and modifier order.
 /// The last token is the key; the preceding tokens are modifiers. Keep the historical primary
 /// Ctrl/Cmd alias, explicit Control+Command chords and old physical modifier-key names.
 fn canonical_key(text: &str) -> Option<String> {
+    chord(text).map(|shortcut| key_name(shortcut.logical_key, shortcut.modifiers))
+}
+
+fn chord(text: &str) -> Option<egui::KeyboardShortcut> {
     if text.len() > 256 {
         return None;
     }
@@ -265,7 +297,7 @@ fn canonical_key(text: &str) -> Option<String> {
         "return" => egui::Key::Enter,
         _ => egui::Key::ALL.iter().copied().find(|key| key.name().eq_ignore_ascii_case(name)).or_else(|| egui::Key::from_name(name))?,
     };
-    Some(key_name(key, mods))
+    Some(egui::KeyboardShortcut::new(mods, key))
 }
 
 /// A key press as a shortcut name: `E`, `Shift+E`, `Ctrl+Alt+K`, `F5`, `Delete`.
@@ -441,7 +473,9 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     let enabled: Vec<&'static str> = commands_for(app, key)
         .into_iter()
         .filter(|id| {
-            (scope(id) != Scope::Render || here == Scope::Render)
+            // Shared panel bindings run only in the host's late input path.
+            solidcraft_engine::panels::ContextualPanelAction::from_command_id(id).is_none()
+                && (scope(id) != Scope::Render || here == Scope::Render)
                 && (here != Scope::Render || scope(id) != Scope::Sketch)
                 && solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
         })
@@ -520,7 +554,7 @@ pub fn bind_at(app: &mut SolveApp, id: &str, slot: Option<usize>, key: &str, rep
     let spec = solidcraft_engine::find_command(id).ok_or_else(|| format!("no command `{id}`"))?;
     let canonical = if key.is_empty() { String::new() } else { canonical_key(key).ok_or("unknown shortcut key")? };
     let key = canonical.as_str();
-    if RESERVED.contains(&key) {
+    if reserved_for(id, key) {
         return Err(format!("{key} is used by SolidCraft itself"));
     }
     let mut list = keys(app, id);
@@ -1049,6 +1083,45 @@ pub fn capturing(app: &SolveApp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn panel_bindings_preserve_contextual_arrows_and_rebind_clear_conflict_and_reset() {
+        use solidcraft_engine::panels::ContextualPanelAction;
+        let mut a = app();
+        let defaults = panel_shortcuts(&a);
+        assert_eq!(defaults.len(), 4);
+        for (action, shortcut) in defaults {
+            assert_eq!(shortcut.modifiers, egui::Modifiers::NONE);
+            assert!(keys(&a, action.command_id()).contains(&shortcut.logical_key.name().to_string()));
+            assert_eq!(command_for(&a, shortcut.logical_key.name()), None, "arrows stay out of global dispatch");
+        }
+        bind(&mut a, "panel.sash.left", "Ctrl+Shift+Left", false).unwrap();
+        assert!(bind(&mut a, "solid.box", "Ctrl+Left", true).is_err());
+        assert!(bind(&mut a, "panel.focus.next", "Escape", true).is_err());
+        assert!(bind(&mut a, "panel.focus.next", "Ctrl+Z", true).is_err());
+        assert!(bind(&mut a, "panel.focus.next", "Right", false).is_err(), "existing sash binding conflicts");
+        bind(&mut a, "panel.focus.next", "Right", true).unwrap();
+        assert!(keys(&a, "panel.sash.right").is_empty());
+        bind(&mut a, "panel.toggle", "Ctrl+Alt+F12", true).unwrap();
+        assert_eq!(command_for(&a, "Ctrl+Alt+F12"), None);
+        let saved = a.keymap.prefs();
+        let mut restored = app();
+        restored.keymap.load(&saved);
+        assert_eq!(restored.keymap.prefs(), saved);
+        assert_eq!(keys(&restored, "panel.sash.left"), ["Ctrl+Shift+Left"]);
+        bind(&mut restored, "panel.sash.left", "", false).unwrap();
+        assert!(!panel_shortcuts(&restored).iter().any(|(action, _)| *action == ContextualPanelAction::ResizeLeft));
+        reset(&mut restored, Some("panel.sash.left"));
+        assert_eq!(keys(&restored, "panel.sash.left"), ["Left"]);
+        reset(&mut restored, None);
+        assert_eq!(panel_shortcuts(&restored).len(), 4);
+        assert!(keys(&restored, "panel.focus.next").is_empty());
+        let saved = json!({"panel.sash.up":"Ctrl+Up", "solid.box":"Ctrl+Up", "panel.toggle":"Ctrl+S"});
+        restored.keymap.load(&saved);
+        assert_eq!(keys(&restored, "panel.sash.up"), ["Ctrl+Up"]);
+        assert!(keys(&restored, "solid.box").is_empty());
+        assert!(keys(&restored, "panel.toggle").is_empty());
+    }
 
     #[test]
     fn assistant_shortcut_can_be_rebound_cleared_saved_and_reset() {
