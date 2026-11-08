@@ -63,6 +63,8 @@ pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;
 
 #[cfg(test)]
+mod noisy_round_tests;
+#[cfg(test)]
 mod test_corpus;
 #[cfg(test)]
 mod tests;

@@ -126,6 +126,17 @@ give the same class, and the net lies on that class's surface derived from the s
 parametrisation's: the net reversed, swapped, split or trimmed is still on S, so those edits
 carry it.
 
+A round of the `Circle` class is certified on its own torus. The class is read within the body's
+tolerance, so supports only that close to it (a plane 1e-13 off square to a cylinder's axis, as a
+record can carry them) have no torus that touches both exactly, and the round the solver builds,
+tangent to the supports as they are, lies on a torus of its own. Its definition is that torus: the
+torus of the net's own form (`own_torus`: a revolution's axis and generating arc, or a torus's
+label), which the form is proved to lie on (`lies_on`), at bound 0; and the distance from it to the
+class's torus derived from the supports, stated (`ExactRound::supports_distance`: the axes' angle
+times the reach, the centres' distance and the radii's differences) and refused past the tolerance
+the class was read within. Supports exactly of the class give a distance at rounding. The supports
+are never moved to fit.
+
 ### 3.4 The blend definition
 
 `ProceduralBlend` holds the net (`net`, a `BSplineSurface`) and the definition
