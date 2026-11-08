@@ -491,7 +491,7 @@ fn small_button(ui: &mut egui::Ui, label: &str, handle: &str) -> bool {
 }
 
 fn segment_button(ui: &mut egui::Ui, label: &str, handle: &str, previous: bool) -> bool {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(t.space_24), egui::Sense::hover());
     let response = if previous {
         crate::ui_kit::mirrored_icon_button_at(ui, rect, "chevron_right", label)
