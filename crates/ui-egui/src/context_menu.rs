@@ -276,6 +276,21 @@ fn touched_bodies(app: &SolveApp) -> Vec<String> {
     v
 }
 
+/// What Save As Mesh and Send to Slicer take from the selection: the bodies it touches, then
+/// the bodies of each selected component placement, each once.
+fn mesh_bodies(app: &SolveApp) -> Vec<String> {
+    let mut v = touched_bodies(app);
+    for s in &app.session.selection {
+        let Sel::Occurrence { path } = s else { continue };
+        for b in app.session.occurrence_bodies(path, true).unwrap_or_default() {
+            if !v.contains(&b) {
+                v.push(b);
+            }
+        }
+    }
+    v
+}
+
 fn body_feature(app: &SolveApp, body: &str) -> Option<u64> {
     crate::open_meshing::session_world(&app.session).body(body).map(|b| b.feature)
 }
@@ -476,7 +491,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
     // A selected browser body saves or sends the whole selection, as Appearance below acts on it;
     // a row outside the selection still takes only the body that was right-clicked.
     if let Target::Body { name } = target {
-        let bodies = touched_bodies(app);
+        let bodies = mesh_bodies(app);
         if bodies.contains(name) {
             each_item(&mut v, &mut |item: &mut Item| {
                 if matches!(item.id.as_str(), "ui.saveMesh" | "ui.sendToSlicer") {
@@ -659,7 +674,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.appearance", "Appearance", "appearance").key("A"));
         v.push(act("ui.properties", "Properties", "measure").with(json!({ "bodies": [face] })));
         // Every body selected goes, not only the one right-clicked.
-        let bodies = touched_bodies(app);
+        let bodies = mesh_bodies(app);
         v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": bodies })));
         v.push(act("ui.sendToSlicer", "Send to Slicer", "export").with(json!({ "bodies": bodies })).on(crate::dialogs_save_mesh::available(app)));
         v.push(Item::sep());
@@ -681,7 +696,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [body] })));
         v.push(Item::sep());
         v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": body })));
-        v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": touched_bodies(app) })));
+        v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": mesh_bodies(app) })));
         v.push(Item::sep());
         v.push(act("ui.tangentChain", "Select Tangent Chain", "chain"));
         v.push(cmd(app, "inspect.measure", "Measure"));
