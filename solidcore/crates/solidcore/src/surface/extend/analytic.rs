@@ -597,6 +597,13 @@ fn joint_removed(out: &Net, side: BoxSide, joint: f64) -> Result<Net> {
 /// curve: every homogeneous control point in a plane normal to the axis (a parallel) or
 /// through it (a meridian, a tube), within its rounding; a ruling is straight by its
 /// degree. Refused as not exact otherwise.
+///
+/// The limit, `8 gamma_32` times the point's own size (`|c|` plus the frame's size times
+/// `|w|`) plus the plane's height times `|w|`, has the shape of a rounding bound but its
+/// factor is tuned, not derived: `8` and `32` count no operations of `extract_iso_crv`, the
+/// dot product or the height. It is held to that size by a test (refused at twice it,
+/// accepted at half), and measured well inside it (largest off / limit 0.0123 over the
+/// offset and extension goldens); deriving it is open.
 fn certify_iso(
     s: &BSplineSurface,
     side: BoxSide,
@@ -914,4 +921,118 @@ fn slot_mut(cp: &mut [Vec<CPoint>], is_u: bool, a: usize, r: usize) -> Result<&m
     cp.get_mut(i)
         .and_then(|x| x.get_mut(j))
         .ok_or_else(|| SolidError::sm_err(OP))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )]
+
+    use super::*;
+    use crate::surface::cone::p1::Cone;
+
+    /// The limit `certify_iso` holds a parallel's homogeneous control point `c` to: the
+    /// rounding at the point's own size and the frame's, `8 gamma_32 (|c| + size |w| +
+    /// |height| |w|)` (written out here so that a change to the limit's size fails).
+    fn limit(c: &CPoint, size: f64, height: f64) -> f64 {
+        let w = if c.w == NOW { 1.0 } else { c.w };
+        let mag = c.x.abs().max(c.y.abs()).max(c.z.abs()) + size * w.abs();
+        8.0 * gamma(32) * (mag + height.abs() * w.abs())
+    }
+
+    /// A cylinder of radius 1 about z, 60 degrees round, 1000 long: rows far larger than
+    /// the turn's own points, so a limit taken at the rows' size would be about 1000 times
+    /// the one at the iso's.
+    fn long_cylinder() -> BSplineSurface {
+        let k = Kernel::default();
+        let s = Surface::from(Cone::new_cylinder_bounded(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            1.0,
+            0.0,
+            60.0,
+            1000.0,
+            false,
+            false,
+            false,
+        ));
+        crate::blend::fillet_section::station::as_b_spline(&k, &s)
+            .unwrap()
+            .unwrap()
+            .into_owned()
+    }
+
+    /// The net with every control point of index `i` along the iso across `side` moved
+    /// `delta` along the axis (its homogeneous `delta w`): the iso's point `i` moves by
+    /// `delta`, the rest stay.
+    fn moved(form: &BSplineSurface, side: BoxSide, i: usize, delta: f64) -> BSplineSurface {
+        let net = form.gw_nurb().unwrap();
+        let mut cpts = net.cpts();
+        for (a, row) in cpts.iter_mut().enumerate() {
+            for (b, c) in row.iter_mut().enumerate() {
+                let along = if side.is_u() { a } else { b };
+                if along == i {
+                    let w = if c.w == NOW { 1.0 } else { c.w };
+                    c.z += delta * w;
+                }
+            }
+        }
+        let (p, q) = net.degrees();
+        BSplineSurface::from_gw_nurb(
+            &Net::new(cpts, p, q, net.u_knots().to_vec(), net.v_knots().to_vec()).unwrap(),
+        )
+    }
+
+    /// `certify_iso` refuses a parallel whose control point is off its plane by twice the
+    /// limit at the point's own size and passes one off by half of it: the limit's size is
+    /// pinned, and a limit taken at the net's rows (1000 here) would pass both.
+    #[test]
+    fn the_turn_certificate_holds_the_iso_to_its_own_size() {
+        let form = long_cylinder();
+        let frame = Frame {
+            origin: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::new(0.0, 0.0, 1.0),
+            apex: None,
+            size: 1.0,
+            quarter: 0.0,
+            tube_left: 0.0,
+        };
+        let dom = knot_box(&form).unwrap();
+        let mut tested = 0;
+        for side in BoxSide::ALL {
+            let middle = side.point(&dom, 0.5);
+            let (t, dir) = if side.is_u() {
+                (middle.y, Direction::U)
+            } else {
+                (middle.x, Direction::V)
+            };
+            let iso = extract_iso_crv(form.gw_nurb().unwrap(), t, dir).unwrap();
+            let pts = iso.cpts();
+            // the parallel: every point at one height (the other side's iso is a ruling)
+            let z = |c: &CPoint| c.z / if c.w == NOW { 1.0 } else { c.w };
+            if pts.len() < 3 || pts.iter().any(|c| (z(c) - z(&pts[0])).abs() > 1e-9) {
+                continue;
+            }
+            assert!(certify_iso(&form, side, middle, &frame, Iso::Parallel).is_ok());
+            let lim = limit(&pts[1], frame.size, z(&pts[0]));
+            let w1 = if pts[1].w == NOW { 1.0 } else { pts[1].w };
+            let over = moved(&form, side, 1, 2.0 * lim / w1);
+            assert!(
+                certify_iso(&over, side, middle, &frame, Iso::Parallel).is_err(),
+                "{side:?}: twice the limit passes"
+            );
+            let under = moved(&form, side, 1, 0.5 * lim / w1);
+            assert!(
+                certify_iso(&under, side, middle, &frame, Iso::Parallel).is_ok(),
+                "{side:?}: half the limit is refused"
+            );
+            tested += 1;
+        }
+        assert!(tested > 0, "no side's iso is the parallel");
+    }
 }
