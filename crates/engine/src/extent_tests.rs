@@ -234,3 +234,74 @@ fn cut_to_the_far_side_of_a_curved_wall() {
     assert!((removed - want).abs() < want * 2e-2, "removed {removed}, want {want}");
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
 }
+
+/// A tube r 20 outside, 18 inside, 20 high, named "Tube".
+fn tube() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 20, "body_name": "Tube"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Bore"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 18}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Bore", "distance": 20, "operation": "cut"}));
+    s
+}
+
+/// A 6 x 4 window sketched on the plane y = `y`, facing the tube: x in [-3, 3], z in [8, 12].
+fn window(s: &mut Session, y: f64) {
+    run(s, "sketch.create", json!({"plane": {"origin": [0, y, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Window"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [-3, 8], "p1": [3, 12]}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// The volume of the window's prism between the cylinders of radii `r0` and `r1` about Z (the
+/// wall of the tube under the window is `wall_between(18, 20)`), by a sum over x.
+fn wall_between(r0: f64, r1: f64) -> f64 {
+    let n = 2000;
+    let wall = |x: f64, r: f64| (r * r - x * x).sqrt();
+    (0..n).map(|i| -3.0 + 6.0 * (i as f64 + 0.5) / n as f64).map(|x| (wall(x, r1) - wall(x, r0)) * 4.0 * 6.0 / n as f64).sum()
+}
+
+/// #12617: a To offset on a curved face ends the extent that far past the face along the
+/// travel, or that far short of it when negative, on the near face and on the far face alike.
+/// Cuts from outside the tube: to the outside face 1 past it, and to the inside face 1 short
+/// of it, both take the wall between r 19 and 20; to the inside face 1 past it takes the wall
+/// (the bore is air); to the outside face 1 short of it takes nothing, with no error.
+#[test]
+fn a_to_offset_on_a_curved_face_ends_that_far_past_it() {
+    let volume = |s: &mut Session| body(s, "Tube")["volume_mm3"].as_f64().unwrap_or(0.0);
+    let cut = |to: [f64; 3], to_offset: f64| -> f64 {
+        let mut s = tube();
+        let whole = volume(&mut s);
+        window(&mut s, -30.0);
+        run(&mut s, "solid.extrude", json!({"sketch": "Window", "to": to, "to_offset": to_offset, "operation": "cut"}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "to {to:?} offset {to_offset}: {:?}", s.model.results);
+        whole - volume(&mut s)
+    };
+    let outer_mm = wall_between(19.0, 20.0);
+    let past_outer = cut([0.0, -20.0, 10.0], 1.0);
+    assert!((past_outer - outer_mm).abs() < outer_mm * 2e-2, "1 past the outside face removed {past_outer}, want {outer_mm}");
+    let short_of_inner = cut([0.0, -18.0, 10.0], -1.0);
+    assert!((short_of_inner - outer_mm).abs() < outer_mm * 2e-2, "1 short of the inside face removed {short_of_inner}, want {outer_mm}");
+    let wall = wall_between(18.0, 20.0);
+    let past_inner = cut([0.0, -18.0, 10.0], 1.0);
+    assert!((past_inner - wall).abs() < wall * 2e-2, "1 past the inside face removed {past_inner}, want the wall {wall}");
+    let short_of_outer = cut([0.0, -20.0, 10.0], -1.0);
+    assert!(short_of_outer.abs() < 1e-6, "1 short of the outside face removed {short_of_outer}");
+}
+
+/// #12617: a Join To Object on a curved face with a negative offset stops that far short of
+/// the face: a post from y = -30 to the tube's outside face 2 short of it fills up to r 22.
+#[test]
+fn a_join_to_a_curved_face_with_an_offset_stops_that_far_short() {
+    let volume = |s: &mut Session| body(s, "Tube")["volume_mm3"].as_f64().unwrap_or(0.0);
+    let mut s = tube();
+    let whole = volume(&mut s);
+    window(&mut s, -30.0);
+    run(&mut s, "solid.extrude", json!({"sketch": "Window", "to": [0.0, -20.0, 10.0], "to_offset": -2.0, "operation": "join"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let added = volume(&mut s) - whole;
+    let n = 2000;
+    let want: f64 =
+        (0..n).map(|i| -3.0 + 6.0 * (i as f64 + 0.5) / n as f64).map(|x| (30.0 - (22.0f64 * 22.0 - x * x).sqrt()) * 4.0 * 6.0 / n as f64).sum();
+    assert!((added - want).abs() < want * 2e-2, "added {added}, want {want}");
+}
