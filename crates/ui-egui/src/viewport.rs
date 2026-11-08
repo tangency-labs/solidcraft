@@ -7237,7 +7237,7 @@ pub(crate) fn axis_rect(app: &SolveApp, rect: Rect) -> Rect {
 /// The camera's view axes, as the view compass takes them.
 fn view_axes(cam: &Camera) -> crate::view_compass::ViewAxes {
     let (right, up, back) = cam.basis();
-    crate::view_compass::ViewAxes { right, up, back }
+    crate::view_compass::ViewAxes { right: right.into(), up: up.into(), back: back.into() }
 }
 
 /// Six signed world axes, sorted back to front so overlapping tips have one owner (for checks).
@@ -7249,14 +7249,11 @@ fn axis_tips(cam: &Camera, c: Pos2) -> Vec<crate::view_compass::Tip> {
 /// The six signed world axes as `cam` poses them, for the navigator figure in Preferences: each
 /// one's screen direction (right and down) and depth along the camera's back.
 pub(crate) fn navigator_axes(cam: &Camera) -> [crate::ui_kit::NavigatorAxis; 6] {
-    let (right, up, back) = cam.basis();
-    let axis = |name: &'static str, d: Vec3| crate::ui_kit::NavigatorAxis {
-        name,
-        direction: d.into(),
-        screen: vec2(d.dot(right) as f32, -d.dot(up) as f32),
-        depth: d.dot(back),
-    };
-    [axis("x", Vec3::X), axis("-x", -Vec3::X), axis("y", Vec3::Y), axis("-y", -Vec3::Y), axis("z", Vec3::Z), axis("-z", -Vec3::Z)]
+    let axes = view_axes(cam);
+    crate::view_compass::AXES.map(|(name, direction)| {
+        let ([x, y], depth) = axes.pose(direction);
+        crate::ui_kit::NavigatorAxis { name, direction, screen: vec2(x as f32, y as f32), depth }
+    })
 }
 
 #[cfg(test)]
@@ -7347,7 +7344,8 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         home_label: solidcraft_ui_text::tr_label("Home view").to_owned(),
     };
     match crate::view_compass::show(ui, &compass) {
-        Some(crate::view_compass::ViewAction::Snap { direction: d, .. }) => {
+        Some(crate::view_compass::ViewAction::Snap { direction, .. }) => {
+            let d = Vec3::from(direction);
             let frame = app.cam.to_frame(d);
             let dir = if app.cam.back().dot(d) > 0.9999 { -d } else { d };
             let mut to = app.cam.looking_from(dir);

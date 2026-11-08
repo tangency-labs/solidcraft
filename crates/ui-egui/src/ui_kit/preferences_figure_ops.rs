@@ -356,7 +356,7 @@ pub(crate) fn paint_navigation_axes(p: &Painter, rect: Rect, axes: &[NavigatorAx
         if index == 3 {
             p.circle(c, 3.6 * scale, t.text.gamma_multiply(0.9), Stroke::new(1.4 * scale, t.panel));
         }
-        crate::icons::navigation::axis_tip_scaled(&p, c, axis.name, &axis.direction.into(), *at, axis.depth, false, t, scale);
+        crate::icons::navigation::axis_tip_scaled(&p, c, axis.name, axis.direction, *at, axis.depth, false, t, scale);
     }
 }
 
