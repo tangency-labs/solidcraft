@@ -1153,6 +1153,7 @@ fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
     ));
 }
 
+/// The Offset Face dialog sends the body clicked where two bodies touch flush, so that body moves.
 #[test]
 fn offset_face_dialog_moves_the_body_clicked_where_two_bodies_touch_flush() {
     use solidcraft_engine::doc::naming;

@@ -545,6 +545,7 @@ fn flush_boxes(s: &mut Session) {
     run(s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [10, -10, 5], "operation": "new", "body_name": "Small"}));
 }
 
+/// The exact volume of the body called `name`, after a rebuild.
 fn body_volume(s: &mut Session, name: &str) -> f64 {
     s.refresh();
     let state = s.model.state();
@@ -552,6 +553,8 @@ fn body_volume(s: &mut Session, name: &str) -> f64 {
     solidcraft_kernel::measure(&b.body).unwrap().volume
 }
 
+/// A point-only pick on the face two flush boxes share (the call in #12385) warns, naming both
+/// bodies and the one changed, instead of changing the first body silently.
 #[test]
 fn a_face_pick_on_coincident_faces_of_two_bodies_warns_and_names_them() {
     let mut s = Session::default();
@@ -565,6 +568,7 @@ fn a_face_pick_on_coincident_faces_of_two_bodies_warns_and_names_them() {
     assert!((body_volume(&mut s, "Small") - 500.0).abs() < 1e-6);
 }
 
+/// With `body` given, a pick on a shared face changes that body, shown or hidden.
 #[test]
 fn a_named_body_takes_a_pick_on_coincident_faces_even_when_hidden() {
     let mut s = Session::default();
@@ -580,6 +584,8 @@ fn a_named_body_takes_a_pick_on_coincident_faces_even_when_hidden() {
     assert!((body_volume(&mut s, "Small") - 600.0).abs() < 1e-6);
 }
 
+/// A pick on one body's own face, with several bodies in the design, saves that body in the
+/// feature, so rebuilds don't depend on which body is nearest.
 #[test]
 fn a_face_pick_on_one_body_of_several_saves_that_body_in_the_feature() {
     let mut s = Session::default();
@@ -594,6 +600,7 @@ fn a_face_pick_on_one_body_of_several_saves_that_body_in_the_feature() {
     assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
 }
 
+/// A point where two round walls touch along a line is on both bodies, decided exactly.
 #[test]
 fn a_face_pick_where_two_round_walls_touch_on_a_line_is_on_both() {
     // Two discs touching along the line x = 10 (gears in mesh): a point there is on both walls
@@ -612,6 +619,7 @@ fn a_face_pick_where_two_round_walls_touch_on_a_line_is_on_both() {
     assert!((body_volume(&mut s, "B") - PI * 400.0 * 5.0).abs() < 1.0);
 }
 
+/// Replace Face on a flush face moves the named body, and warns when no body is named.
 #[test]
 fn replace_face_moves_the_named_body_of_a_flush_face_and_warns_for_an_unnamed_one() {
     let target = json!({"origin": [0, -3, 0], "normal": [0, 1, 0]});
