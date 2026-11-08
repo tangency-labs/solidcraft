@@ -601,8 +601,8 @@ fn bernstein_value(c: &[f64], s: f64) -> Option<f64> {
 
 /// The Bernstein coefficients of the polynomial `c` on `[0, 1/2]` and `[1/2, 1]`.
 fn bernstein_halves(c: &[f64]) -> (Vec<f64>, Vec<f64>) {
-    let mut left = Vec::with_capacity(c.len());
-    let mut right = Vec::with_capacity(c.len());
+    let mut left = Vec::new();
+    let mut right = Vec::new();
     let mut b = c.to_vec();
     while let (Some(&f), Some(&l)) = (b.first(), b.last()) {
         left.push(f);
@@ -899,7 +899,7 @@ pub fn tangent_all_along(
         .collect();
     while let Some((s0, s1, splits)) = stack.pop() {
         let margin = pair.margin(k, s0, s1)?;
-        let mut nodes = Vec::with_capacity(pair.nodes);
+        let mut nodes = Vec::new();
         for t in chebyshev(s0, s1, pair.nodes) {
             nodes.push(pair.node(t)?);
         }
