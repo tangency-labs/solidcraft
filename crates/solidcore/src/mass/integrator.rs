@@ -23,7 +23,9 @@
 //! scales/accuracy and unused initial values retain their upstream behavior. The step
 //! arrays (`ytemp`, `ak2`..`ak6`, `yerr`) are kept across the steps of one integration
 //! instead of allocated per step; they are zeroed or overwritten as the fresh ones
-//! were, so the values are the same.
+//! were, so the values are the same. Not upstream: [`OdeOptions::rate`] holds each step to its
+//! share of the whole range, not to the integral so far, so the steps' errors together stay
+//! within the accuracy (the curve length; `plan/findings/curve.curve_p5--curve-length-global-error-moves-cases-2026-11-08.md`).
 
 use crate::geom::tol::are_same;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ};
@@ -1356,6 +1358,72 @@ mod tests {
     /// rounds to `0.30000000000000004`, past the end, where an integrand whose end is a
     /// knot (a curve's span, a face's iso-u piece) would read the span beyond it. Every
     /// node lies within `[x1, x2]`, and the step that ends the integration ends at `x2`.
+    #[test]
+    fn a_rate_that_is_not_a_finite_nonnegative_number_is_refused() {
+        for rate in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -1.0,
+            -f64::MIN_POSITIVE,
+        ] {
+            let mut y = [0.0];
+            let result = OdeIntegrator::default().integrate(
+                &mut y,
+                0.0,
+                1.0,
+                OdeOptions {
+                    accuracy: 1e-6,
+                    initial_step: 0.1,
+                    minimum_step: 0.0,
+                    scale: None,
+                    quadrature: true,
+                    rounding: None,
+                    rate: Some(rate),
+                },
+                |_, _, _| panic!("a refused control must not evaluate"),
+            );
+            assert!(result.is_err(), "rate {rate} was accepted");
+            assert_eq!(y, [0.0], "rate {rate} wrote the result");
+        }
+    }
+
+    /// The integral of `t^4` over `[0, 1]` is 1/5 and `|y'|` integrates to the same, so
+    /// with `rate = 1/5` the steps' errors may sum to at most
+    /// `accuracy * (rate * 1 + 1/5)`: the bound `rate` documents, held at every accuracy
+    /// however many steps it takes.
+    #[test]
+    fn a_rate_holds_the_steps_errors_to_the_accuracy_over_the_whole_range() {
+        for accuracy in [1e-4, 1e-6, 1e-8, 1e-10] {
+            let mut y = [0.0];
+            let counts = OdeIntegrator::default()
+                .integrate(
+                    &mut y,
+                    0.0,
+                    1.0,
+                    OdeOptions {
+                        accuracy,
+                        initial_step: 0.5,
+                        minimum_step: 0.0,
+                        scale: None,
+                        quadrature: true,
+                        rounding: None,
+                        rate: Some(0.2),
+                    },
+                    |t, _, dy| {
+                        dy[0] = t.powi(4);
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            let error = (y[0] - 0.2).abs();
+            assert!(
+                error <= accuracy * (0.2 + 0.2),
+                "accuracy {accuracy}: error {error:e}, {counts:?}"
+            );
+        }
+    }
+
     #[test]
     fn the_final_step_ends_at_the_interval_end_exactly() {
         let (x1, x2) = (-0.1_f64, 0.3_f64);
