@@ -14,6 +14,8 @@
 //!
 //! Create Hole › Several holes on one face (`hole_several`): a pick elsewhere on a face that already
 //! has a hole adds another hole there (rather than moving it), and a pick on a hole takes it out.
+//! Create Hole › Group holes made together (`hole_group`): the holes one Hole dialog makes, two or
+//! more, go into a feature folder in History, closed at first.
 
 use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
@@ -347,6 +349,42 @@ pub(crate) fn pick_several(app: &SolveApp, d: &mut Dialog, sel: &Sel) -> bool {
     }
     set_places(s, d, places);
     true
+}
+
+/// The features the Hole commands among `replies` made, in order.
+pub(crate) fn holes_made(replies: &[(String, serde_json::Value)]) -> Vec<u64> {
+    replies.iter().filter(|(id, _)| id == "solid.hole").filter_map(|(_, reply)| reply.get("feature").and_then(serde_json::Value::as_u64)).collect()
+}
+
+/// With Group holes made together on (Preferences), the holes one Hole dialog made (two or more)
+/// go into a feature folder in History, closed at first: opened, each hole is edited on its own.
+/// The folder sits where the holes went (inside the folder they were added to, if any).
+pub(crate) fn group_made(app: &mut SolveApp, d: &Dialog, made: Vec<u64>) {
+    if !app.preferences.hole_group || d.editing.is_some() || !matches!(d.kind, Kind::Hole { .. }) || made.len() < 2 {
+        return;
+    }
+    let parent = made.first().and_then(|first| app.session.doc.timeline_groups.iter().find(|g| g.features.contains(first))).map(|g| g.id);
+    let made_count = made.len();
+    match app.run("timeline.group", serde_json::json!({"name": "Holes", "features": made, "parent": parent})) {
+        Ok(reply) => {
+            if let Some(id) = reply.get("group").and_then(serde_json::Value::as_u64) {
+                crate::timeline_folders::set_open(app, id, false);
+            }
+            // Keep one Undo step for all holes from this dialog, with folder creation after it.
+            let undo = &mut app.session.undo;
+            let first_hole =
+                undo.len().checked_sub(made_count + 1).filter(|&first| undo[first..undo.len() - 1].iter().all(|step| step.label == "Hole"));
+            if let Some(first_hole) = first_hole {
+                let folder_step = undo.pop();
+                if let Some(folder_step) = folder_step {
+                    drop(undo.drain(first_hole + 1..));
+                    undo.push(folder_step);
+                }
+            }
+        }
+        // The holes stand; only the folder is missing.
+        Err(error) => app.set_status(error, true),
+    }
 }
 
 /// The hovered face's snap marks, and the face places' handles when holes move by dragging.

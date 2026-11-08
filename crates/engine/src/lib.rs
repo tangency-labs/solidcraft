@@ -2321,16 +2321,7 @@ impl Session {
     }
 
     fn run_script_with(&mut self, script: &Value, profile: Option<bool>, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Option<Value>)> {
-        let list = match script {
-            Value::Array(a) => a.clone(),
-            Value::Object(o) => {
-                o.get("commands").and_then(Value::as_array).cloned().ok_or_else(|| EngineError::Other("script: missing `commands` array".into()))?
-            }
-            _ => return Err(EngineError::Other("script must be a JSON array or {\"commands\": [...]}".into())),
-        };
-        if list.len() > 100_000 {
-            return Err(EngineError::Other("script too long".into()));
-        }
+        let list = script_steps(script)?;
         let mut out = Vec::new();
         let mut steps = Vec::new();
         let clock = timing::Clock::start();
@@ -2356,6 +2347,21 @@ impl Session {
         let timings = profile.map(|_| serde_json::json!({"timings": steps, "total_ms": timing::round_ms(clock.ms())}));
         Ok((out, timings))
     }
+}
+
+/// A script's steps: the JSON array itself, or the `commands` array of an object; at most 100 000.
+pub fn script_steps(script: &Value) -> Result<&Vec<Value>> {
+    let list = match script {
+        Value::Array(a) => a,
+        Value::Object(o) => {
+            o.get("commands").and_then(Value::as_array).ok_or_else(|| EngineError::Other("script: missing `commands` array".into()))?
+        }
+        _ => return Err(EngineError::Other("script must be a JSON array or {\"commands\": [...]}".into())),
+    };
+    if list.len() > 100_000 {
+        return Err(EngineError::Other("script too long".into()));
+    }
+    Ok(list)
 }
 
 #[cfg(test)]
