@@ -118,6 +118,14 @@ pub struct SketchPreview {
     pub wires: Vec<usize>,
 }
 
+/// The two flange panels of a corner in the actual computed preview mesh.
+pub struct FlangeCornerFaces {
+    pub sources: [solidcraft_engine::doc::SheetEdgeName; 2],
+    pub body: String,
+    pub mesh: Arc<Mesh>,
+    pub faces: [Vec<usize>; 2],
+}
+
 /// A computed preview: the scene to draw and the bodies it stands in for.
 pub struct Built {
     pub interaction: Option<JointInteraction>,
@@ -154,6 +162,8 @@ pub struct Built {
     pub placed: Option<serde_json::Value>,
     /// Source-rim pairs offered by the evaluated flange command.
     pub flange_corners: Vec<[solidcraft_engine::doc::SheetEdgeName; 2]>,
+    /// Current mesh faces for those source-rim pairs.
+    pub flange_faces: Vec<FlangeCornerFaces>,
     /// Bodies the preview only moves, drawn moved on the GPU instead of built where they land
     /// (a Move). `scene` is not read then.
     pub layer: Option<Layer>,
@@ -295,6 +305,8 @@ pub struct PreviewState {
     pub centrelines: Vec<crate::dialogs_frame::Centreline>,
     /// Flange corners from the successful preview of the current inputs only.
     pub flange_corners: Vec<[solidcraft_engine::doc::SheetEdgeName; 2]>,
+    pub flange_faces: Vec<FlangeCornerFaces>,
+    pub hovered_corner: Option<usize>,
     straight: crate::extrude_preview::StraightPreview,
     moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
@@ -343,6 +355,13 @@ impl PreviewState {
     /// Bodies the model scene should hide for the preview (empty while rolled back).
     pub fn effective_replaced(&self) -> &[String] {
         if self.rolled_back { &[] } else { &self.replaced }
+    }
+
+    pub(crate) fn corner_hover(&self) -> Option<&FlangeCornerFaces> {
+        if !self.active || self.rolled_back || self.error.is_some() {
+            return None;
+        }
+        self.flange_faces.get(self.hovered_corner?)
     }
 
     /// The key of the [`Layer`] scenes shown: a result for the same key leaves them out.
@@ -410,6 +429,8 @@ impl PreviewState {
         self.drop_layer();
         self.interaction = None;
         self.flange_corners.clear();
+        self.flange_faces.clear();
+        self.hovered_corner = None;
         if self.active || !self.replaced.is_empty() {
             self.active = false;
             self.bounds = Aabb3::EMPTY;
@@ -533,6 +554,8 @@ impl PreviewState {
                 self.set_pose(b.joints);
                 self.centrelines = b.centrelines;
                 self.flange_corners = if self.error.is_none() { b.flange_corners } else { Vec::new() };
+                self.flange_faces = if self.error.is_none() { b.flange_faces } else { Vec::new() };
+                self.hovered_corner = None;
                 match b.layer {
                     // The scenes of this key are up: only the motion changes, nothing is uploaded.
                     Some(Layer { key, scenes: None, motion }) if self.layer_shown() == Some(key) => self.layer = Some((key, motion)),
@@ -595,6 +618,8 @@ impl PreviewState {
             // picks it would describe the wrong rule, so the dialog falls back to the saved design.
             self.placed = None;
             self.flange_corners.clear();
+            self.flange_faces.clear();
+            self.hovered_corner = None;
         }
         if let Some((k, rx)) = &self.running {
             let k = *k;
@@ -619,6 +644,8 @@ impl PreviewState {
                     self.apply(k, job);
                     if k != key {
                         self.flange_corners.clear();
+                        self.flange_faces.clear();
+                        self.hovered_corner = None;
                     }
                 }
             }
@@ -986,6 +1013,24 @@ fn compute_candidate(scratch: &Session, cmds: &[(String, Value)], colors: Colors
     result
 }
 
+fn flange_faces(after: &ModelState, sources: &[[solidcraft_engine::doc::SheetEdgeName; 2]]) -> Vec<FlangeCornerFaces> {
+    sources
+        .iter()
+        .filter_map(|sources| {
+            let mut candidates = after.surface_sheets.iter().filter_map(|sheet| {
+                let body = after.body(&sheet.body)?;
+                let faces = sources.each_ref().map(|source| sheet.bend_face_indices(&body.body, source));
+                if faces.iter().any(Vec::is_empty) {
+                    return None;
+                }
+                Some(FlangeCornerFaces { sources: sources.clone(), body: body.name.clone(), mesh: body.mesh(), faces })
+            });
+            let corner = candidates.next()?;
+            candidates.next().is_none().then_some(corner)
+        })
+        .collect()
+}
+
 /// Evaluate the commands on the scratch session and build the preview scene.
 /// Features that add or remove a tool body (extrude, revolve, primitives with join, cut or
 /// intersect) show the tool itself: tinted for join, see-through red for cut. Other features
@@ -1057,6 +1102,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
                     || command == "timeline.redefine" && params.get("command").and_then(Value::as_str) == Some("sheet.flange")
                 {
                     b.flange_corners = crate::dialogs_sheet::flange_corner_sources(&p.before, &p.after, editing);
+                    b.flange_faces = flange_faces(&p.after, &b.flange_corners);
                 }
             }
             Ok(b)
@@ -1308,6 +1354,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         points: Vec::new(),
         placed: None,
         flange_corners: Vec::new(),
+        flange_faces: Vec::new(),
         layer: None,
         joints: Vec::new(),
         plugin_view: None,
@@ -1631,6 +1678,7 @@ fn build_scene(
         points,
         placed: None,
         flange_corners: Vec::new(),
+        flange_faces: Vec::new(),
         layer: None,
         joints: Vec::new(),
         plugin_view: None,
@@ -2111,6 +2159,7 @@ mod tests {
             points: Vec::new(),
             placed: None,
             flange_corners: Vec::new(),
+            flange_faces: Vec::new(),
             layer: None,
             joints: Vec::new(),
             plugin_view: None,

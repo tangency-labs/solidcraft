@@ -294,6 +294,16 @@ pub fn expr_row_positive(ui: &mut Ui, label: &str, value: &mut String) -> bool {
     })
 }
 
+/// Expression row with a checked field; preserves completion, Enter and label scrubbing.
+pub(crate) fn checked_expr_row(ui: &mut Ui, label: &str, value: &mut String, flagged: bool) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value);
+        }
+        super::checked_field(ui, value, "", flagged).0
+    })
+}
+
 /// Whole-number count row with step arrows; retains completion and accepted Enter. Tokens: `row, count_field`.
 pub fn count_row(ui: &mut Ui, label: &str, value: &mut String, limits: &super::Count<'_>) -> bool {
     row(ui, label, |ui| super::count_field(ui, value, limits))
