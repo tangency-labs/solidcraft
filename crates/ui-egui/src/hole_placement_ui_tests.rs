@@ -785,7 +785,8 @@ fn cylinder_with_cluster(sketch: Value, at: [f64; 2], view: &str) -> Cluster {
         gap.x.max(gap.y).max(gap.z) <= 1e-3
     };
     let (body_tris, face_tris, near_tris) = (m.triangles.len(), face.len(), face.iter().filter(|t| near_points(t)).count());
-    assert!(body_tris >= 2 * face_tris, "the body has other faces: {body_tris} and {face_tris} triangles");
+    // Other faces exist (the flat caps are two triangles each now, so the curved side can be most of the body).
+    assert!(body_tris > face_tris, "the body has other faces: {body_tris} and {face_tris} triangles");
     Cluster { h, many, click, body_tris, face_tris, near_tris }
 }
 
