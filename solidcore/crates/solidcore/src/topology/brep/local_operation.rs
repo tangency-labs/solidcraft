@@ -2092,6 +2092,36 @@ mod tests {
         );
     }
 
+    /// A body whose volume's sign is not proved is refused as such: the quarter shell R 10,
+    /// t 1e-6 passes the check, but its faces' boundaries lie apart by about its thickness,
+    /// so the strips between them hold 0 in its enclosure whatever its cells become.
+    #[test]
+    fn the_gate_refuses_a_body_whose_sign_it_cannot_prove() {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_cylindrical_box(
+            &mut k,
+            Point3::ZERO,
+            10.0,
+            10.0,
+            10.0 + 1e-6,
+            0.0,
+            90.0,
+        )
+        .unwrap();
+        let input =
+            validation::standing(&mut k, &mut b.clone_standing_for_self().unwrap()).unwrap();
+        let e = refuse_unsound(&mut k, &b, &input).unwrap_err();
+        assert!(
+            matches!(
+                e.failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Offset(OffsetFailure::Unsound {
+                    what: crate::error::offset::Unsoundness::VolumeUndecided
+                }))
+            ),
+            "{e}"
+        );
+    }
+
     /// A body whose pointer check fails is not checked further (`AssertValid` is skipped):
     /// the gate refuses it even where its input failed the pointer check alike, rather
     /// than finding nothing beyond the input's failures.

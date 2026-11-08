@@ -20,6 +20,10 @@
 //!   interval proves positive only over small boxes) decides, around the round's volume:
 //!   as a bare net, and as a procedural blend whose net is certified within a bound above 0
 //!   of its definition, read on its net (#3170 widens by that bound).
+//! - The quarter shell R 10, t 1e-6 passes the check, but its faces' boundaries lie apart
+//!   by about its thickness: the sign is undecided, early (the strips between them hold 0
+//!   whatever the cells become), and `is_outward_solid` reads that as "not a solid". A box
+//!   with an offset-surface face cannot be read at all: an error, not a sign.
 //! - `nurb_fillet.smb` (a sphere with a pocket) decides positive: its sphere face's loop
 //!   closes along the pole, from trim ends a unit in the last place off the net's last
 //!   knot, a segment whose 3D length is of the order of rounding.
@@ -30,12 +34,18 @@ use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
-use solidcore::mass::enclosure::{enclose_volume, volume_sign, VolumeEnclosure, VolumeSign};
+use solidcore::mass::enclosure::{
+    enclose_volume, volume_sign, VolumeEnclosure, VolumeSign, CELL_BUDGET,
+};
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylindrical_box, create_sphere};
 use solidcore::query::api_queries::edge_closest_point;
+use solidcore::surface::offset_surface::OffsetSurface;
+use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::is_outward_solid;
 use solidcore::topology::brep::p1::{faces, regions};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::SolidError;
 use solidcore::{Brep, Kernel};
 
 /// The quarter shell between radii `r` and `r + t` about Z, length 10.
@@ -275,4 +285,38 @@ fn a_g2_round_decides_around_its_volume() {
         let s = volume_sign(&k, &mut b).unwrap();
         assert!(matches!(s, VolumeSign::Positive(_)), "{name}: {s:?}");
     }
+}
+
+#[test]
+fn a_gap_as_large_as_the_volume_leaves_the_sign_undecided() {
+    let mut k = Kernel::default();
+    let shell = |k: &mut Kernel| quarter_shell(k, 10.0, 1e-6);
+    let mut b = shell(&mut k);
+    let c = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert!(c.lines().is_empty(), "{:?}", c.lines());
+    let v = shell_volume(10.0, 1e-6);
+    let mut b = shell(&mut k);
+    match volume_sign(&k, &mut b).unwrap() {
+        // undecided long before the budget: the strips settle
+        VolumeSign::Undecided(e) => {
+            assert!(holds(&e, v) && e.counts.cells < CELL_BUDGET / 4, "{e:?}");
+        }
+        other => panic!("{other:?}"),
+    }
+    // undecided is "not a solid" on purpose
+    let mut b = shell(&mut k);
+    assert!(!is_outward_solid(&mut k, &mut b).unwrap());
+}
+
+#[test]
+fn a_face_without_a_nurbs_form_is_an_error_not_a_sign() {
+    let mut k = Kernel::default();
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 4.0, 5.0, 6.0).unwrap();
+    // one side's plane as an offset surface at distance 0: the same box
+    let f = faces(&b, None).unwrap()[0];
+    let base = b.face(f).unwrap().surface.as_ref().unwrap().clone();
+    let off = OffsetSurface::new(&k, 0.0, base, true, 0).unwrap();
+    b.face_mut(f).unwrap().surface = Some(Surface::from(off));
+    let r = volume_sign(&k, &mut b);
+    assert!(matches!(r, Err(SolidError::Unsupported { .. })), "{r:?}");
 }

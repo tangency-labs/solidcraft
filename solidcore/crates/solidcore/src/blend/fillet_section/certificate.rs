@@ -2220,6 +2220,23 @@ mod tests {
     /// both sides (the third u-partial jumps at the knot), which one piece continued over the
     /// box does not; a knot of too low a continuity, and a box past the knots, are refused.
     #[test]
+    fn a_box_past_its_span_keeps_the_unclipped_weight() {
+        // the control weights bound the weight only inside the span: a box across the knot at
+        // u = 1 is enclosed as `nurbs_partials_over_piece` encloses it
+        let mut n = cubic_with_knot(1);
+        // weights from 1 to 4.5: the weight continued past the span leaves their range
+        for (i, w) in n.pw.chunks_mut(4).enumerate() {
+            let k = 1.0 + 0.5 * i as f64;
+            for c in w.iter_mut() {
+                *c *= k;
+            }
+        }
+        let a = nurbs_partials_within_span(&n, 3, 1, 0.9, 1.1, 0.2, 0.3, 3).unwrap();
+        let b = nurbs_partials_over_piece(&n, 3, 1, 0.9, 1.1, 0.2, 0.3, 3).unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
     fn a_box_across_a_knot_line_is_enclosed_piece_by_piece() {
         let n = cubic_with_knot(1);
         let (ua, ub, va, vb) = (0.9, 1.1, 0.2, 0.3);
