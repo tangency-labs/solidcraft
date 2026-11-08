@@ -3042,3 +3042,52 @@ fn a_curve_style_beside_a_surface_style_does_not_colour_the_solid() {
     t += TAIL;
     assert_eq!(step_import(&t).unwrap().bodies[0].color, None);
 }
+
+/// `text` with the frame of every cone turned by `angle` (radians) about its own axis: the same
+/// shape, its angle parameter measured from `angle` further on, so a seam that was on a quarter
+/// line of the frame lies `angle` before one.
+fn cone_frames_turned(text: &str, angle: f64) -> String {
+    // the references a record makes (after its own `#id=`)
+    let refs = |s: &str| -> Vec<u64> { s.split_once('=').map_or("", |(_, r)| r).split('#').skip(1).filter_map(|t| t.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()).collect() };
+    let lines: HashMap<u64, &str> = text
+        .lines()
+        .filter_map(|l| {
+            let (id, _) = l.strip_prefix('#')?.split_once('=')?;
+            Some((id.trim().parse().ok()?, l))
+        })
+        .collect();
+    let numbers = |l: &str| -> Vec<f64> { l.rsplit_once("((").or_else(|| l.rsplit_once(",(")).map_or(vec![], |(_, r)| r.trim_end_matches([')', ';']).split(',').filter_map(|x| x.trim().parse().ok()).collect()) };
+    let mut out = text.to_string();
+    for l in lines.values().filter(|l| l.contains("=CONICAL_SURFACE(")) {
+        let placement = refs(l)[0];
+        let [_, z, x] = refs(lines[&placement])[..] else { panic!("placement {placement}") };
+        let (zd, xd) = (numbers(lines[&z]), numbers(lines[&x]));
+        let (z, x) = (Vec3::new(zd[0], zd[1], zd[2]), Vec3::new(xd[0], xd[1], xd[2]));
+        let t = x * angle.cos() + z.cross(x) * angle.sin();
+        let id = refs(lines[&placement])[2];
+        out = out.replace(lines[&id], &format!("#{id}=DIRECTION('',({:?},{:?},{:?}));", t.x, t.y, t.z));
+    }
+    out
+}
+
+/// A whole-turn face's NURBS form closes on the face's own seam: the face is read with its frame
+/// turned so that the seam is on a quarter line, or, where the seam is on one to within rounding,
+/// from that line. A block 9 x 24 x 18 with a stepped hole tapered 4 degrees (r 1.35 over 5, then
+/// r 2.65 over 3.5) has two whole-turn cone faces; with their frames turned a hair one way or the
+/// other the shape is the same, and so is its volume. Before, a seam a hair BEFORE a quarter line
+/// (measured: 1e-7 to 1e-5 rad) put the form's start a quarter early, the seam inside the form, and
+/// the solid read back 5.9 to 21.0 mm3 light; a seam that same hair AFTER one read back right.
+/// (A seam off its line by rounding alone, 1e-12, does the same in a file whose angles come back
+/// that way; turning a frame here by 1e-12 is lost in the file's digits, so `form`'s own test
+/// covers that case.)
+#[test]
+fn whole_turn_cone_faces_close_on_their_seam_beside_a_quarter_line() {
+    let text = include_str!("testdata/stepped_tapered_hole.step");
+    let slope = 4.0_f64.to_radians().tan();
+    let frustum = |r: f64, h: f64| std::f64::consts::PI * h * (r * r + r * (r + h * slope) + (r + h * slope).powi(2)) / 3.0;
+    let exact = 9.0 * 24.0 * 18.0 - frustum(1.35, 5.0) - frustum(2.65, 3.5);
+    for angle in [0.0, 1e-12, 1e-7, 1e-6, 1e-5, -1e-6, -1e-5] {
+        let v = schema_4_volume(&cone_frames_turned(text, angle));
+        assert!((v - exact).abs() < 1e-6 * exact, "frames turned {angle:e}: volume {v} vs {exact}");
+    }
+}

@@ -61,12 +61,25 @@ fn quarters([a0, a1]: [f64; 2], reach: f64) -> Option<(f64, usize)> {
     if !(a0.is_finite() && a1.is_finite() && a1 > a0 && a1 - a0 <= TAU * (1.0 + 1e-9)) {
         return None;
     }
+    if a1 - a0 >= TAU * (1.0 - 1e-9) {
+        // A whole turn closes on its seam, which must be the form's own seam: on a quarter line
+        // to within rounding ([`TURN_ROUNDING`]) it fits the four quarters from there; further off,
+        // by however little, it spills into a fifth (so the importer turns its frame onto a line),
+        // since a seam inside the form, a hair past a quarter's end, is not where the form closes.
+        let line = (a0 / FRAC_PI_2).round() * FRAC_PI_2;
+        return Some(if (a0 - line).abs() <= TURN_ROUNDING { (quarter_of(line), 4) } else { (quarter_of(a0), 5) });
+    }
     let (a0, a1) = (on_quarter_line(a0, reach), on_quarter_line(a1, reach));
     let q0 = quarter_of(a0);
     let q1 = (a1 / FRAC_PI_2 - SLACK).ceil();
     let n = (q1 - q0).max(1.0) as usize;
     (n <= 5).then_some((q0, n))
 }
+
+/// How far (radians) a whole turn's start may lie from a quarter line and be on it: rounding in
+/// the angle a boundary is measured at (a seam at angle 0 comes back as -1.6e-12), well inside any
+/// tolerance. A whole turn further off spills ([`quarters`]) and the importer turns its frame.
+const TURN_ROUNDING: f64 = 1e-9;
 
 /// An angle within `reach` of a quarter's end, on it; another as it is.
 fn on_quarter_line(a: f64, reach: f64) -> f64 {
@@ -83,7 +96,9 @@ fn on_quarter_line(a: f64, reach: f64) -> f64 {
 /// it).
 fn face_quarters(a: [f64; 2], reach: f64) -> Option<((f64, usize), [f64; 2])> {
     if a[1] - a[0] >= TAU * (1.0 - 1e-9) {
-        let q0 = quarter_of(on_quarter_line(a[0], reach));
+        // within rounding of a quarter line, the line it is on; further off, `quarters` spills and
+        // the importer turns the frame onto a line first, so a seam is never snapped by `reach`
+        let q0 = quarter_of(on_quarter_line(a[0], TURN_ROUNDING));
         return Some(((q0, 4), [q0, q0 + 4.0]));
     }
     let grid = quarters(a, reach)?;
@@ -713,4 +728,19 @@ pub fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Optio
         }
     }
     (lo[0] < hi[0] && lo[1] < hi[1]).then_some([[lo[0], hi[0]], [lo[1], hi[1]]])
+}
+
+#[cfg(test)]
+mod whole_turn_tests {
+    use super::*;
+
+    /// A whole turn starts on a quarter line when it is there to within rounding, either side of
+    /// it; a hair further off it spills, so the importer turns its frame onto one.
+    #[test]
+    fn a_whole_turn_starts_on_the_quarter_line_its_seam_is_on() {
+        for (start, q0, n) in [(0.0, 0.0, 4), (-1.6e-12, 0.0, 4), (1.6e-12, 0.0, 4), (FRAC_PI_2 - 1e-12, 1.0, 4), (-1e-6, -1.0, 5), (1e-6, 0.0, 5)] {
+            assert_eq!(quarters([start, start + TAU], 1e-5), Some((q0, n)), "start {start:e}");
+        }
+        assert_eq!(face_quarters([-1.6e-12, TAU - 1.6e-12], 1e-5), Some(((0.0, 4), [0.0, 4.0])));
+    }
 }
