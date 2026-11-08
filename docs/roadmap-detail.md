@@ -413,7 +413,7 @@ completed drawings publish atomically. The browser still exports synchronously.
 - Print faces (#8429) are held like sketches on faces, so the same limit applies: after a shell
   of a body that is already shelled, no face of that body has an exact name, and none can be
   marked (`body.print_face` says so). Fixing it needs the shell to report its face history,
-  which is kernel work, paused for now (CONTRIBUTING.md, "Kernel work is paused").
+  which is kernel work, done in `solidcore/` (CONTRIBUTING.md, "Kernel work goes in solidcore/").
 - G2 fillets: exact quintic blends of straight edges between planar faces, with one planar
   end face at each end, including sloped ends (#2708). The UI and `solid.fillet` expose
   `curvature` (alias `g2`); the size is an equivalent circular setback. Curved faces/edges,

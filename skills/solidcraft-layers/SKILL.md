@@ -23,5 +23,5 @@ The authority is `solidcore/docs/layers.md`; this is its short form. Every job l
 ## Working in solidcore/
 - Follow `solidcore/AGENTS.md` and the reference doc for the area (`solidcore/docs/`). A change there needs a code owner's review (`.github/CODEOWNERS`) and runs SolidCore checks (its tests, goldens, kernel rig, clippy, fmt, panic sites) in `.github/workflows/ci.yml`.
 - New kernel cases go in `solidcore/crates/solidcore/tests/kernel_cases/`, never in SolidCraft (`cargo xtask lists`).
-- The kernel pause in CONTRIBUTING.md ("Kernel work is paused") still applies to `solidcore/`.
+- Kernel work goes here: CONTRIBUTING.md, "Kernel work goes in solidcore/". Kernel-only PRs target the `kernel` branch.
 - Issues and claims for solidcore are in this repository, like any other change (`skills/solidcraft-contributing/SKILL.md`): the vendored tree is mirrored to tangency-labs/solidcore by `.github/workflows/solidcore-mirror.yml`, so pull requests are not opened there.

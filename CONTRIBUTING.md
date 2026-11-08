@@ -17,15 +17,17 @@ Before choosing a task, check the [command inventory](docs/features.md) and
 
 Questions, ideas or want to say what you're working on? Join the [Discord](https://discord.gg/FtU4NQNVDH).
 
-## Kernel work is paused
+## Kernel work goes in solidcore/
 
-We're moving to a new geometry kernel. Until that's done, please don't open pull requests that
-change `crates/kernel/`, `crates/geom/` or the vendored kernel in `solidcore/`, or issues and discussions about kernel
-work: booleans, fillets, chamfers, shell, offsets, sweeps and lofts, threads and holes, STEP/IGES
-import and export, or tessellation. The pinned issue on the tracker explains it. New ones get the
-`kernel-paused` label (`.github/workflows/kernel-paused.yml`) and a maintainer answers them. Crashes
-and data loss are still taken as issues. Pull requests outside those directories carry on as normal,
-including the dialogs and tools for these features.
+Kernel and geometry work is welcome: booleans, fillets, chamfers, shell, offsets, sweeps and lofts,
+threads and holes, STEP/IGES import and export, tessellation. It goes in `solidcore/`, the vendored
+solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.md) and
+`skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
+`crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
+
+A kernel-only pull request targets the `kernel` branch. A change that touches the kernel and the
+app goes to `main` as one pull request, with a code owner approving the `solidcore/` part.
+Crashes and data loss are still taken first.
 
 ### Updating a PR that was moved from solidcore
 
