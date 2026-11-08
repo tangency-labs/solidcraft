@@ -95,6 +95,11 @@ not modelling a part through MCP.
 - **Do not parallelize what depends on itself.** A fix and the test that proves it, a
   refactor and the callers it breaks, two edits to the same file: those stay sequential.
   One subagent per independent unit of work, and no two units may write the same file.
+- **Keep the cost down.** Keep one long-running agent session instead of restarting it.
+  Don't `--resume` a session after its prompt cache has gone cold: a cold resume re-reads the
+  whole history at full price. Act on CodeRabbit comments only when they're about crashes,
+  wrong results, data loss or security, and ignore style nitpicks. Don't push just to
+  re-trigger a review.
 
 ## 1. Check the environment
 
