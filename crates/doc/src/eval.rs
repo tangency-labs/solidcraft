@@ -2241,7 +2241,10 @@ impl Feature {
                 for id in features {
                     let src =
                         source_feature(doc, *id).ok().filter(|src| numeric_tool(&src.kind) && hole_references(src).is_empty() && by_name(src))?;
-                    read.extend(operated(feature_op(src))?);
+                    // As `replay` picks them: the source's targets, else its participants.
+                    let (op, targets) = feature_op(src);
+                    let targets = if targets.is_empty() { src.participants.clone() } else { targets };
+                    read.extend(operated((op, targets))?);
                 }
                 read.sort_unstable();
                 read.dedup();

@@ -479,6 +479,28 @@ fn a_cut_of_another_components_body_follows_it() {
     assert_eq!(summary(&m.state()), from_scratch(&doc));
 }
 
+/// A pattern of a cut reads the bodies its source cuts, as the copies cut them: the source's
+/// participants, though the pattern names none and that body is in another component. The plate
+/// lies clear of every copy at first; moved into one by `w`, it must be cut again.
+#[test]
+fn a_pattern_reads_the_bodies_its_source_cuts() {
+    let mut doc = two_parts(&["Plate"]);
+    if let Some(f) = doc.features.iter_mut().find(|f| f.name == "Plate") {
+        f.kind = serde_json::from_value(
+            serde_json::json!({"type": "box", "corner": ["-20", "w", "0"], "length": "40", "width": "30", "height": "5", "operation": "new_body"}),
+        )
+        .unwrap();
+    }
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+    // The copy turned a quarter round now reaches the plate.
+    doc.set_param("w", "4 mm", None, None).unwrap();
+    m.evaluate(&doc);
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+}
+
 /// A cut of several bodies cuts again only those that changed: the rod, which `w` does not
 /// move, keeps the very body its earlier cut gave, while the cap `w` sizes is cut again.
 #[test]
