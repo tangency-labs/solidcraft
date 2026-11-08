@@ -24,10 +24,14 @@ use crate::schema::motion::{
 use crate::schema::motion_play::{
     DriveReport, ExportParams, PartPose, PlayParams, Pose, StudyExport, StudyExported, StudyPlayed, StudySample, UnmovedJoint,
 };
+use crate::schema::motion_trace::{EditTraceParams, KeepTraceParams, MotionTraceEdited, MotionTraceKept, MotionTraced, TraceParams, TraceRun};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const FIND_LIMITS_CONTRACT: TypedContract<FindLimitsParams> = TypedContract::new();
+const TRACE_CONTRACT: TypedContract<TraceParams> = TypedContract::new();
+const KEEP_TRACE_CONTRACT: TypedContract<KeepTraceParams> = TypedContract::new();
+const EDIT_TRACE_CONTRACT: TypedContract<EditTraceParams> = TypedContract::new();
 
 #[path = "motion_analysis.rs"]
 mod analysis;
@@ -144,21 +148,35 @@ pub static COMMANDS: &[CommandSpec] = &[
          path, format, frames, width, height, fps (GIF), bytes, renderer, stopped_at, stopped_by_loop, stopped_by_contact (the \
          design is not changed, nor its placements)",
     ),
-    CommandSpec::new("motion.trace", "Motion Trace", trace).at("SOLID", "ASSEMBLE").icon("trace").noundo().params(concat!(
-        trace_doc!(),
-        " → points: [[x,y,z]…] world positions, samples (taken), stopped_at (the sample where the motion stopped short; the trace \
+    CommandSpec::new("motion.trace", "Motion Trace", crate::checked!("motion.trace", trace))
+        .at("SOLID", "ASSEMBLE")
+        .icon("trace")
+        .noundo()
+        .contract(&TRACE_CONTRACT)
+        .output(output_schema_for::<MotionTraced>)
+        .params(concat!(
+            trace_doc!(),
+            " → points: [[x,y,z]…] world positions, samples (taken), stopped_at (the sample where the motion stopped short; the trace \
          ends there), stopped_by_loop, stopped_by_contact (the design is not changed)"
-    )),
-    CommandSpec::new("motion.trace.keep", "Keep Motion Trace", keep_trace).icon("trace").params(concat!(
-        trace_doc!(),
-        "; name? (default Motion TraceN); auto_update?: bool (default true); point_ref?: joint origin snap - keeps the trace as a \
+        )),
+    CommandSpec::new("motion.trace.keep", "Keep Motion Trace", crate::checked!("motion.trace.keep", keep_trace))
+        .icon("trace")
+        .contract(&KEEP_TRACE_CONTRACT)
+        .output(output_schema_for::<MotionTraceKept>)
+        .params(concat!(
+            trace_doc!(),
+            "; name? (default Motion TraceN); auto_update?: bool (default true); point_ref?: joint origin snap - keeps the trace as a \
          root 3D sketch spline. Associative curves follow mechanism and driving-input edits; false keeps a fixed curve. \
          point_ref retains a geometry snap; otherwise point is retained in component coordinates → sketch, name, curves, points"
-    )),
-    CommandSpec::new("motion.trace.edit", "Edit Motion Trace", associative::edit).icon("trace").params(
-        "sketch: id|name; joint? with from and to, or study?; index?; samples? (2…500); auto_update?: false to detach. \
+        )),
+    CommandSpec::new("motion.trace.edit", "Edit Motion Trace", crate::checked!("motion.trace.edit", associative::edit))
+        .icon("trace")
+        .contract(&EDIT_TRACE_CONTRACT)
+        .output(output_schema_for::<MotionTraceEdited>)
+        .params(
+            "sketch: id|name; joint? with from and to, or study?; index?; samples? (2…500); auto_update?: false to detach. \
          Edits a saved associative trace's driving conditions in one undo step",
-    ),
+        ),
     CommandSpec::new("motion.plot", "Plot Motion Study", analysis::plot).icon("graph").noundo().params(analysis::PLOT_DOC),
     CommandSpec::new("motion.interference", "Motion Interference", analysis::interference)
         .icon("interference")
@@ -977,7 +995,7 @@ fn path_world(t: &Session, path: &[u64], cmd: &str) -> Result<Mat> {
 /// positions, sampled on a copy (the design is not changed). Each sample is driven from the one
 /// before, so closed loops follow on their branch and contact sets stop them; the trace ends at
 /// the sample where the motion stops short. Returns the points and the answer without them.
-fn sample_trace(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<Vec3>, Value)> {
+fn sample_trace(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<Vec3>, TraceRun)> {
     let (path, local) = traced_point(s, p, cmd)?;
     let mut t = s.scratch();
     // Traced from where the parts are placed: moves only shown (an exploded view, a move not
@@ -987,19 +1005,21 @@ fn sample_trace(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<Vec3>, Value)>
     let (default, given, plan) = motion_plan(s, p, cmd)?;
     let n = sample_count(p, default.min(MAX_TRACE), MAX_TRACE, cmd)?;
     let mut points = Vec::new();
-    let mut stop = (Value::Null, Value::Null, Value::Null);
+    let mut stop = (None, Value::Null, Value::Null);
     for k in 0..n {
         let want = plan(&t, k, n);
         let (r, _) = drive_with_contact(&mut t, &want, &given)?;
         points.push(solidcraft_doc::apply_point(&world(&t)?, local));
         if r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() {
-            stop = (json!(k), r["stopped_by_loop"].clone(), r["stopped_by_contact"].clone());
+            stop = (Some(k), r["stopped_by_loop"].clone(), r["stopped_by_contact"].clone());
             break;
         }
     }
     let name = s.doc.occurrences.iter().find(|o| Some(&o.id) == path.last()).map_or_else(|| "root".to_string(), |o| o.name.clone());
-    let out = json!({"occurrence": name, "samples": points.len(), "stopped_at": stop.0, "stopped_by_loop": stop.1, "stopped_by_contact": stop.2});
-    Ok((points, out))
+    let stopped_by_loop = serde_json::from_value(stop.1).map_err(|e| bad(cmd, e.to_string()))?;
+    let stopped_by_contact = serde_json::from_value(stop.2).map_err(|e| bad(cmd, e.to_string()))?;
+    let run = TraceRun { occurrence: name, samples: points.len(), stopped_at: stop.0, stopped_by_loop, stopped_by_contact };
+    Ok((points, run))
 }
 
 /// `samples`, 2…`max`, or `default` without it.
@@ -1060,9 +1080,9 @@ fn motion_plan(s: &Session, p: &Value, cmd: &str) -> Result<(usize, BTreeSet<(u6
 }
 
 fn trace(s: &mut Session, p: &Value) -> Result<Value> {
-    let (points, mut out) = sample_trace(s, p, "motion.trace")?;
-    out["points"] = points.iter().map(|v| json!([v.x, v.y, v.z])).collect();
-    Ok(out)
+    let (points, run) = sample_trace(s, p, "motion.trace")?;
+    let points = points.iter().map(|v| [v.x, v.y, v.z]).collect();
+    typed_reply("motion.trace", MotionTraced { run, points, param_warnings: Vec::new() })
 }
 
 /// The trace as a 3D sketch spline, in one undo step: a new sketch of the root component (the
@@ -1070,12 +1090,12 @@ fn trace(s: &mut Session, p: &Value) -> Result<Value> {
 fn keep_trace(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "motion.trace.keep";
     let source = if bool_(p, "auto_update") != Some(false) { Some(associative::source(s, p, cmd)?) } else { None };
-    let (mut points, out) = sample_trace(s, p, cmd)?;
+    let (mut points, run) = sample_trace(s, p, cmd)?;
     finish_trace(&mut points);
     if points.len() < 2 {
         return Err(bad(cmd, "the point does not move: there is no trace to keep"));
     }
-    keep_sampled_trace(s, p, cmd, points, out, source)
+    keep_sampled_trace(s, p, cmd, points, run, source)
 }
 
 fn finish_trace(points: &mut Vec<Vec3>) {
@@ -1100,7 +1120,7 @@ fn keep_sampled_trace(
     p: &Value,
     cmd: &str,
     points: Vec<Vec3>,
-    mut out: Value,
+    run: TraceRun,
     source: Option<solidcraft_doc::motion::MotionTrace>,
 ) -> Result<Value> {
     let name = match str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
@@ -1122,24 +1142,17 @@ fn keep_sampled_trace(
     (s.active_sketch, s.active_component, s.active_occurrence_path) = before;
     s.revision += 1;
     let (made, spline) = made?;
-    let sketch = made.get("sketch").cloned().unwrap_or(Value::Null);
-    out["sketch"] = sketch.clone();
-    out["name"] = made.get("name").cloned().unwrap_or(Value::Null);
-    out["curves"] = spline.get("curves").cloned().unwrap_or(Value::Null);
-    out["points"] = json!(points.len());
+    let sketch = made.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "trace sketch is missing"))?;
+    let name = made.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
+    let curves: Vec<String> =
+        spline.get("curves").and_then(Value::as_array).map(|c| c.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
     if let Some(mut source) = source {
-        source.sketch = sketch.as_u64().ok_or_else(|| bad(cmd, "trace sketch is missing"))?;
-        source.wire = spline
-            .get("curves")
-            .and_then(Value::as_array)
-            .and_then(|v| v.first())
-            .and_then(Value::as_str)
-            .ok_or_else(|| bad(cmd, "trace curve is missing"))?
-            .to_string();
+        source.sketch = sketch;
+        source.wire = curves.first().cloned().ok_or_else(|| bad(cmd, "trace curve is missing"))?;
         associative::remember(s, &source);
         s.doc_mut().assembly.traces.push(source);
     }
-    Ok(out)
+    typed_reply(cmd, MotionTraceKept { run, sketch, name, curves, points: points.len(), param_warnings: Vec::new() })
 }
 
 fn list_studies(s: &mut Session, _p: &Value) -> Result<Value> {

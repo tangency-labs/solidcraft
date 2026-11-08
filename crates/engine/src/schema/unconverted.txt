@@ -33,9 +33,6 @@ mesh.convert
 motion.export_animation
 motion.interference
 motion.plot
-motion.trace
-motion.trace.edit
-motion.trace.keep
 occurrence.copy
 occurrence.drag
 occurrence.ground
