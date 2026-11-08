@@ -371,6 +371,23 @@ pub fn render_transparent(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Ca
     out
 }
 
+/// A picture as the GPU draws it: [`render`], or for a scene with no backdrop
+/// ([`Scene::transparent`]) [`render_transparent`] with its colours premultiplied by their alpha,
+/// as a GPU picture drawn over transparent black comes back.
+pub fn render_picture(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
+    if !scene.transparent {
+        return render(scene, cam, w, h);
+    }
+    let mut canvas = render_transparent(scene, cam, w, h);
+    for px in canvas.rgba.as_chunks_mut::<4>().0 {
+        let a = u32::from(px[3]);
+        for v in &mut px[..3] {
+            *v = ((u32::from(*v) * a + 127) / 255) as u8;
+        }
+    }
+    canvas
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,6 +443,14 @@ mod tests {
         assert_eq!(t.rgba[3], 0, "a corner is clear");
         assert_eq!(t.rgba[i + 3], 255, "the centre is opaque");
         assert!(t.rgba[i] > t.rgba[i + 1] + 50, "and red: {:?}", &t.rgba[i..i + 4]);
+        // As a picture: the same, premultiplied (clear pixels are all zero); with a backdrop, `render`.
+        let mut clear = scene;
+        clear.transparent = true;
+        let p = render_picture(&clear, &cam, 64, 64);
+        assert_eq!(&p.rgba[..4], &[0, 0, 0, 0], "a clear corner is transparent black");
+        assert_eq!(&p.rgba[i..i + 4], &t.rgba[i..i + 4], "an opaque pixel is unchanged");
+        clear.transparent = false;
+        assert_eq!(render_picture(&clear, &cam, 64, 64).rgba, render(&clear, &cam, 64, 64).rgba);
     }
 
     /// A square panel facing the front camera (which looks along +Y), 20 × 20 about the origin

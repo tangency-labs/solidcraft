@@ -220,8 +220,31 @@ fn cpu_picture(
     w: u32,
     h: u32,
 ) -> solidcraft_engine::capture::Picture {
-    let canvas = solidcraft_engine::render::render(scene, cam, w as usize, h as usize);
+    // A scene with no backdrop (a parts library card) comes back premultiplied, as from the GPU.
+    let canvas = solidcraft_engine::render::render_picture(scene, cam, w as usize, h as usize);
     solidcraft_engine::capture::Picture { rgba: canvas.rgba, renderer: "cpu" }
+}
+
+#[cfg(test)]
+mod cpu_picture_tests {
+    /// The CPU stand-in for the GPU (device lost, or no GPU at all) draws a picture with no
+    /// backdrop over transparent pixels, as the GPU does: a part's library card shows no backdrop.
+    #[test]
+    fn a_cpu_picture_with_no_backdrop_is_clear_around_the_part() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &serde_json::json!({"length": 20, "width": 20, "height": 20})).unwrap();
+        let cam = solidcraft_engine::view::home_camera(&s).unwrap();
+        // As a library card draws it (`home::cutout`): no grid or axes.
+        let guides = solidcraft_engine::view::Guides { grid: false, axes: false };
+        let mut scene = solidcraft_engine::view::scene_with_guides(&s, &cam, s.section, guides).unwrap();
+        let backdrop = super::cpu_picture(&scene, &cam, 64, 64);
+        assert_eq!(backdrop.rgba[3], 255, "with a backdrop, every pixel is opaque");
+        scene.transparent = true;
+        let p = super::cpu_picture(&scene, &cam, 64, 64);
+        assert_eq!(&p.rgba[..4], &[0, 0, 0, 0], "a corner is clear");
+        let centre = (32 * 64 + 32) * 4;
+        assert_eq!(p.rgba[centre + 3], 255, "the part is opaque");
+    }
 }
 
 #[cfg(test)]
