@@ -12964,6 +12964,17 @@ fn editor_focus_survives_floating_sizing_unless_a_live_foreign_control_takes_it(
             assert_eq!(egui::TextEdit::load_state(&raw.ctx, editor).unwrap().cursor.char_range(), caret);
             assert_eq!(trace.borrow().editors.last().unwrap().3, draft);
             assert_eq!(raw.content.commands.calls, 0);
+
+            // A retained bookmark must not keep its editor focused after the
+            // owning content becomes unavailable, even before another paint.
+            trace.borrow_mut().unavailable.insert(key.clone());
+            raw.content.tick().unwrap();
+            assert_ne!(raw.content.runtime.layout().availability(&key.instance), Availability::Available);
+            assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(editor));
+            raw.host.reconcile_scope(&raw.content.runtime);
+            assert_ne!(raw.ctx.memory(|memory| memory.focused()), Some(editor));
+            assert_eq!(egui::TextEdit::load_state(&raw.ctx, editor).unwrap().cursor.char_range(), caret);
+            assert_eq!(trace.borrow().editors.last().unwrap().3, draft);
         }
     }
 }

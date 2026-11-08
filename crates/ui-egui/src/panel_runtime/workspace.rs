@@ -226,6 +226,17 @@ struct ContentFocus {
     selection: Option<egui::text::CCursorRange>,
 }
 impl ContentFocus {
+    fn logically_presented(&self, runtime: &PanelRuntime) -> bool {
+        let service = runtime.layout();
+        self.scope == runtime_scope(runtime)
+            && runtime.instance_owner(&self.key.instance).is_ok_and(|owner| owner == self.key.owner)
+            && service.availability(&self.key.instance) == Availability::Available
+            && service.layout().instance(&self.key.instance).is_ok_and(|instance| instance.requested_open)
+            && service.layout().containing(&self.key.instance).is_ok_and(|section| {
+                let availability: AvailabilityMap = section.tabs.iter().map(|instance| (instance.clone(), service.availability(instance))).collect();
+                !section.collapsed && presented_tab(section, &availability) == Some(&self.key.instance)
+            })
+    }
     fn restore_selection(&self, ctx: &egui::Context) {
         if let Some(selection) = self.selection
             && let Some(mut state) = egui::TextEdit::load_state(ctx, self.id)
@@ -600,6 +611,16 @@ impl WorkspacePanelHost {
             }
             self.scope = Some(identity);
         }
+        if let Some(bookmark) = &self.content_focus
+            && self.owned_focus == Some(bookmark.id)
+            && !bookmark.logically_presented(runtime)
+        {
+            self.restore_content_focus = false;
+            self.owned_focus = None;
+            if let Some(ctx) = &self.egui_context {
+                ctx.memory_mut(|memory| memory.surrender_focus(bookmark.id));
+            }
+        }
     }
     pub(crate) fn note_reply(&mut self, reply: &LayoutReply) {
         for effect in &reply.effects {
@@ -952,10 +973,7 @@ impl WorkspacePanelHost {
                 self.restore_content_focus |= self.content_focus.as_ref().is_some_and(|bookmark| {
                     self.owned_focus == Some(bookmark.id)
                         && ui.memory(|memory| memory.focused()) == Some(bookmark.id)
-                        && bookmark.scope == scope
-                        && runtime.instance_owner(&bookmark.key.instance).is_ok_and(|owner| owner == bookmark.key.owner)
-                        && runtime.layout().availability(&bookmark.key.instance) == Availability::Available
-                        && runtime.layout().layout().instance(&bookmark.key.instance).is_ok_and(|instance| instance.requested_open)
+                        && bookmark.logically_presented(runtime)
                         && hidden_sections.iter().any(|section| section.instance == bookmark.key.instance && !section.collapsed)
                 });
             }
@@ -1047,13 +1065,7 @@ impl WorkspacePanelHost {
         }
         let logical_focus_eligible = self.restore_content_focus
             && ui.input(|input| input.focused)
-            && self.content_focus.as_ref().is_some_and(|bookmark| {
-                bookmark.scope == scope
-                    && runtime.instance_owner(&bookmark.key.instance).is_ok_and(|owner| owner == bookmark.key.owner)
-                    && runtime.layout().availability(&bookmark.key.instance) == Availability::Available
-                    && runtime.layout().layout().instance(&bookmark.key.instance).is_ok_and(|instance| instance.requested_open)
-                    && frame.layout.sections.iter().any(|section| section.instance == bookmark.key.instance && !section.collapsed)
-            });
+            && self.content_focus.as_ref().is_some_and(|bookmark| bookmark.logically_presented(runtime));
         // A passive return cannot outlive deliberate hiding or owner/focus loss.
         // A modal may still wait while that logical presentation remains valid.
         self.restore_content_focus &= logical_focus_eligible;

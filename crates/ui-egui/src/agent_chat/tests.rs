@@ -4869,6 +4869,8 @@ fn shared_assistant_wide_and_compact_present_real_regions_without_losing_the_com
     let conversation = crate::scenario::rect_of("agent_chat:conversation").unwrap();
     let composer = crate::scenario::rect_of("agent_chat:composer_footer").unwrap();
     assert!(composer.right() <= conversation.left(), "Wide mirrors the two real regions in RTL");
+    assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(input), "RTL keeps the composer focused");
+    assert_eq!(egui::TextEdit::load_state(&h.ctx, input).unwrap().cursor.char_range(), caret);
     h.app.preferences.language = "en".into();
     h.app
         .dispatch_panel_layout(LayoutAction::Apply {
