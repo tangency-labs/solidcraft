@@ -19,7 +19,7 @@ use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, CursorIcon, Id, LayerId, Order, PointerButton, Pos2, Rect, ResizeDirection, Sense, Stroke, Ui, ViewportCommand, pos2, vec2};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// One caption button: as wide as the native Windows ones.
 pub const BUTTON_WIDTH: f32 = 46.0;
@@ -287,9 +287,9 @@ mod tests {
 
     #[test]
     fn every_bar_control_uses_translucent_hover_chrome() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let mut w = Win::new(1600.0);
             w.app.home.open = false;
             w.frame(vec![]);
@@ -329,7 +329,7 @@ mod tests {
                 );
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]

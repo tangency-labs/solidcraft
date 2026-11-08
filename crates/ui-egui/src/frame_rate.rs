@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 use solidcraft_ui_text::tr;
 
 /// Weight of the newest frame in the running mean (roughly the last 20 frames count).

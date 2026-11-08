@@ -2218,6 +2218,7 @@
   "material.editor.preserved_appearance": "المظهر المحفوظ",
   "material.editor.public_reference": "مرجع عام",
   "material.editor.reference": "مرجع",
+  "material.editor.remove": "إزالة",
   "material.editor.save_or_discard": "احفظ مسودة المادة أو تجاهلها قبل تعيين مادة.",
   "material.editor.saved": "حُفظت المادة. تعيينات الأجسام لم تتغير.",
   "material.editor.scope": "الحفظ يخزّن هذه المادة دون تعيينها للأجسام. الخصائص والشروط الفارغة تبقى غير معروفة. كثافة البطاقة لا تغيّر الكثافة المعيّنة ولا الكتلة.",

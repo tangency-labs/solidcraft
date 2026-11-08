@@ -2,7 +2,8 @@
 use crate::ui_kit::{Container, LayoutMode, SHELL_GAP, Surface, within};
 use egui::{Rect, pos2};
 
-use crate::{SolveApp, theme::Tokens};
+use crate::SolveApp;
+use solidcraft_theme::Tokens;
 
 /// The viewport's top corners are rounded concentrically with the cards: the card margin plus the
 /// card radius.

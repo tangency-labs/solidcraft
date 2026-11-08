@@ -1395,6 +1395,7 @@
   "material.editor.preserved_appearance": "Preserved appearance",
   "material.editor.public_reference": "Public reference",
   "material.editor.reference": "Reference",
+  "material.editor.remove": "Remove",
   "material.editor.save_or_discard": "Save or discard the material draft before assigning a material.",
   "material.editor.saved": "Material saved. Body assignments are unchanged.",
   "material.editor.scope": "Save stores this material without assigning it to bodies. Blank properties and conditions remain unknown. Card density does not change assigned density or mass.",

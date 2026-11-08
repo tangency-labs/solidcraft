@@ -265,7 +265,7 @@ fn theme_options_profiles_restore_replace_and_preserve_stale_values() {
     assert_eq!(out["skipped"], json!([]));
     assert_eq!(serde_json::to_value(&h.app.preferences.theme_options).unwrap(), options);
     h.frames(2);
-    assert_eq!(crate::theme::Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
+    assert_eq!(solidcraft_theme::Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
     run(&mut h, "settings.profile.apply", json!({"name":"Empty"}));
     assert!(h.app.preferences.theme_options.is_empty());
     run(&mut h, "settings.profile.apply", json!({"name":"Options"}));
@@ -482,7 +482,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
                 .unwrap();
             let count = crate::scenario::rect_of("dialog:section:Profiles:count").unwrap();
             assert!((count.left() - title.right() - 12.0).abs() < 1.1, "{theme}: count follows the painted title");
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let rule = h
                 .shapes
                 .iter()
@@ -600,7 +600,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
         let active = crate::scenario::rect_of("prefs:profile:Desk:active").unwrap();
         assert!(desk.contains_rect(active));
         assert!((active.height() - 18.0).abs() < 0.5);
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == desk && rect.fill == t.selected_bg && rect.stroke.color == t.form_primary)));
         assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if desk.contains(text.pos) && text.galley.job.text == "Desk" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::fonts::semibold(t.font_label)))));
         let body = crate::scenario::rect_of("prefs:page_body").unwrap();

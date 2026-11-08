@@ -1,8 +1,8 @@
 //! Navigation drawing definitions. Camera projection and picking remain in the UI widgets.
-use crate::theme::Tokens;
 use egui::{Color32, FontId, Pos2, Rect, Shape, Stroke, pos2, vec2};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::Ring;
+use solidcraft_theme::Tokens;
 pub(crate) struct Facet {
     pub(crate) direction: Vec3,
     pub(crate) points: Ring<Pos2>,
@@ -196,7 +196,7 @@ pub(crate) fn axis_tip_scaled(painter: &egui::Painter, c: Pos2, name: &str, d: &
         // On a hovered (white) disc the letter takes the axis colour.
         let letter = if hovered { col } else { t.on_accent };
         let label = name.to_uppercase();
-        let galley = painter.layout_no_wrap(label, crate::fonts::bold(crate::theme::Tokens::get().font_compass * scale), letter);
+        let galley = painter.layout_no_wrap(label, crate::fonts::bold(solidcraft_theme::Tokens::get().font_compass * scale), letter);
         let origin = at - galley.size() / 2.0;
         let ppp = painter.ctx().pixels_per_point().max(0.5);
         let origin = pos2((origin.x * ppp).round() / ppp, (origin.y * ppp).round() / ppp);

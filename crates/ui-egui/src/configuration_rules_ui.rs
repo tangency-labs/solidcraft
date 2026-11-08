@@ -111,7 +111,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
                 RuleEffect::AllowParameterValues { parameter, expressions } => format!("Restricts {parameter}: {}", expressions.join(", ")),
             };
             let actions_width = ["Edit", "↑", "↓", "Delete"].iter().map(|label| ui_kit::ContentWidth::button(ui, label)).sum::<f32>()
-                + crate::theme::Tokens::get().space_4 * 3.0;
+                + solidcraft_theme::Tokens::get().space_4 * 3.0;
             let mut enabled = rule.enabled;
             if ui_kit::summary_row(ui, &rule.name, &summary, &mut enabled, actions_width, |ui| {
                 if ui_kit::button(ui, solidcraft_ui_text::tr_label("Edit"), ui_kit::Button::Normal).clicked() {

@@ -2218,6 +2218,7 @@
   "material.editor.preserved_appearance": "מראה שנשמר",
   "material.editor.public_reference": "ייחוס ציבורי",
   "material.editor.reference": "ייחוס",
+  "material.editor.remove": "הסרה",
   "material.editor.save_or_discard": "יש לשמור או לבטל את טיוטת החומר לפני הקצאת חומר.",
   "material.editor.saved": "החומר נשמר. הקצאות הגופים לא השתנו.",
   "material.editor.scope": "השמירה מאחסנת את החומר הזה בלי להקצות אותו לגופים. תכונות ותנאים ריקים נשארים לא ידועים. צפיפות הכרטיס אינה משנה את הצפיפות המוקצית או את המסה.",

@@ -1,7 +1,8 @@
 //! Description-driven details content. No tool, document or command knowledge lives here.
+use crate::fonts::RichTextExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{fonts::RichTextExt as _, theme::Tokens};
 use egui::{RichText, Ui};
+use solidcraft_theme::Tokens;
 
 const FIELD_FOCUS: &str = "details_field_focus";
 const CONTROL_FOCUS: &str = "details_control_focus";

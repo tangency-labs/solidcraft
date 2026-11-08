@@ -36,10 +36,10 @@ mod theme_picker;
 mod tools;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::tool_modifiers::ModifierCombo;
 use crate::ui_kit;
 use crate::viewport::NavMode;
+use solidcraft_theme::Tokens;
 
 pub const UNITS: &[&str] = &["mm", "cm", "m", "in", "ft"];
 pub const OPENSCAD_NAV: &str = "openscad";
@@ -1533,7 +1533,7 @@ preference_settings! {
     /// panels, the compass and the navigation bar, as before.
     home_fit_size: f32 = 1.0, PAGE_NAVIGATION, accept(0.1..=1.0);
     /// Colour vision mode (#778): `off`, `protan`, `deutan` or `tritan`.
-    color_vision: crate::theme::ColorVision = crate::theme::ColorVision::Off, PAGE_APPEARANCE;
+    color_vision: solidcraft_theme::ColorVision = solidcraft_theme::ColorVision::Off, PAGE_APPEARANCE;
     /// Check for updates at start and once a day (docs/updates.md).
     check_updates: bool = true, 0;
     /// When the last update check ran, and the versions skipped or put off (`update::Memo`).
@@ -2318,7 +2318,7 @@ pub fn desktop_prefers_dark(appearance: Option<u32>, gnome: Option<&str>, gtk_th
 /// the interface scale.
 /// Tell the native window which appearance to take (#8983): the operating system's while the
 /// theme follows it, otherwise the theme's own, so the title bar matches. egui's own window sync
-/// (`Options::sync_window_theme`) went by the egui theme, which [`crate::theme::apply`] always
+/// (`Options::sync_window_theme`) went by the egui theme, which [`solidcraft_theme::apply`] always
 /// sets to light or dark. A macOS window told to be light stays light and no longer reports the
 /// system appearance changing, so a theme following the system never turned with it.
 fn sync_window_theme(app: &mut SolveApp, ctx: &egui::Context, follows_system: bool) {
@@ -2379,11 +2379,11 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     // Custom Day/Night palettes still need native OS appearance notifications. Fixing
     // the native window to the slot's tone can stop those notifications on macOS.
     let follows_system = app.preferences.theme == "system" && followed_theme(&app.preferences, &app.prefs_window.follow).is_none();
-    if crate::theme::set_custom(custom) {
+    if crate::theme::set_file_palette(custom) {
         app.styled = false;
     }
     sync_window_theme(app, ctx, follows_system);
-    if crate::theme::set_logo_accent(app.preferences.logo_accent) {
+    if solidcraft_theme::set_logo_accent(app.preferences.logo_accent) {
         app.styled = false;
     }
     // egui's end-of-frame shortcuts only change its context; the saved preference would
@@ -3663,7 +3663,12 @@ fn export_theme_file(file: &crate::theme_files::ThemeFile) -> serde_json::Value 
     if !file.options.is_empty() || !file.overlays.is_empty() || !file.tabs.is_empty() || file.needs_newer() {
         crate::theme_files::export_file(file)
     } else {
-        crate::theme_files::export(&file.name, file.base, &crate::theme_files::resolve(file))
+        crate::theme_files::export(
+            &file.name,
+            file.base,
+            &crate::theme_files::resolve(file),
+            crate::theme_files::resolve_icon_palette(file, &Default::default()),
+        )
     }
 }
 
@@ -3935,8 +3940,8 @@ fn theme_file(app: &SolveApp, id: &str, system_dark: bool) -> serde_json::Value 
     let id = if id == "system" { theme_picker::slot_id(&app.preferences, system_dark) } else { id };
     match find(id, &app.preferences.custom_themes) {
         Some(f) => export_theme_file(f),
-        None if id == "dark" => export("Dark", Base::Dark, &crate::theme::Tokens::dark()),
-        None => export("Light", Base::Light, &crate::theme::Tokens::light()),
+        None if id == "dark" => export("Dark", Base::Dark, &solidcraft_theme::Tokens::dark(), None),
+        None => export("Light", Base::Light, &solidcraft_theme::Tokens::light(), None),
     }
 }
 
@@ -4095,7 +4100,7 @@ fn prepare_preferences(
     }
     // Saved preferences read an unknown mode as the default; asked for here, it is an error.
     if let Some(v) = p.get("color_vision")
-        && v.as_str().and_then(crate::theme::ColorVision::from_id).is_none()
+        && v.as_str().and_then(solidcraft_theme::ColorVision::from_id).is_none()
     {
         return Err("`color_vision` must be off, protan, deutan or tritan".into());
     }
@@ -4279,7 +4284,7 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
         // Match the tolerance used by the colour-vision sample geometry checks.
         let visible = crate::scenario::rect_of(handle)
             .map(|r| page.expand(1.0).contains_rect(r))
-            .unwrap_or_else(|| crate::scenario::handle_at(handle).is_some_and(|p| page.shrink(crate::theme::Tokens::get().space_16).contains(p)));
+            .unwrap_or_else(|| crate::scenario::handle_at(handle).is_some_and(|p| page.shrink(solidcraft_theme::Tokens::get().space_16).contains(p)));
         if visible {
             return;
         }
@@ -4894,7 +4899,7 @@ mod tests {
 
     #[test]
     fn navigation_bar_inspector_header_reserves_one_line_for_actions() {
-        let t = crate::theme::Tokens::light();
+        let t = solidcraft_theme::Tokens::light();
         for width in [0.0, 80.0, 200.0, 520.0, 640.0, 760.0, 880.0] {
             for remove_width in [75.0, 160.0] {
                 let bounds = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(width, t.control_height));
@@ -5001,7 +5006,7 @@ mod tests {
                 for _ in 0..2 {
                     let body = crate::scenario::rect_of("prefs:page_body").unwrap();
                     let window = crate::scenario::rect_of("prefs:window").unwrap();
-                    let t = crate::theme::Tokens::get();
+                    let t = solidcraft_theme::Tokens::get();
                     let inset = t.space_24 - t.space_2 + crate::ui_kit::navigation_popup_frame().stroke.width;
                     assert!((body.right() - (window.right() - inset)).abs() < 0.5, "{width}: {page}");
                     for key in sections {
@@ -5520,9 +5525,9 @@ mod tests {
 
     #[test]
     fn mouse3d_device_card_uses_content_height_and_paints_status_and_actions_at_its_top() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let t = Tokens::get();
             for width in [280.0, 646.0] {
                 for (drivers, status_id) in [
@@ -5582,7 +5587,7 @@ mod tests {
                 }
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]
@@ -5809,7 +5814,7 @@ mod tests {
             let question = text("ui.3d_mouse_restore_ask");
             match crate::scenario::rect_of("dialog:hint:space_mouse_restore_ask") {
                 Some(note) => {
-                    let t = crate::theme::Tokens::get();
+                    let t = solidcraft_theme::Tokens::get();
                     let needed = h.ctx.fonts_mut(|fonts| {
                         fonts.layout(question.clone(), egui::FontId::proportional(t.font_small), egui::Color32::WHITE, note.width()).size().y
                     });
@@ -5853,7 +5858,7 @@ mod tests {
     fn the_offers_buttons_fit_the_narrowest_card_in_every_language() {
         let ctx = crate::fonts::test_context();
         ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
-        let font = egui::FontId::proportional(crate::theme::Tokens::get().font_label);
+        let font = egui::FontId::proportional(solidcraft_theme::Tokens::get().font_label);
         let mut wide = Vec::new();
         for catalog in crate::i18n::LOCALES {
             use crate::space_mouse_offer::Action;
@@ -7025,8 +7030,8 @@ mod tests {
     /// preferences. With a theme file on, the view takes the built-in Light or Dark colours.
     #[test]
     fn the_3d_view_takes_the_light_or_dark_themes_colours() {
-        use crate::theme::{ColorVision, Tokens};
         use serde_json::json;
+        use solidcraft_theme::{ColorVision, Tokens};
         let mut h = crate::scenario::Harness::new();
         for (theme, view, dark, view_dark) in
             [("light", "theme", false, false), ("dark", "light", true, false), ("dark", "dark", true, true), ("light", "dark", false, true)]
@@ -7062,8 +7067,8 @@ mod tests {
     /// the gradient.
     #[test]
     fn the_3d_view_takes_a_background_colour_of_its_own() {
-        use crate::theme::{ColorVision, Tokens};
         use serde_json::json;
+        use solidcraft_theme::{ColorVision, Tokens};
         let mut h = crate::scenario::Harness::new();
         assert_eq!(h.app.preferences.viewport_background, None);
         for (theme, view_dark) in [("light", false), ("dark", true)] {
@@ -7188,9 +7193,9 @@ mod tests {
 
     #[test]
     fn a_followed_theme_file_applies_reloads_keeps_the_last_good_theme_and_the_flag_is_not_saved() {
-        use crate::theme::Tokens;
         use egui::Color32;
         use serde_json::json;
+        use solidcraft_theme::Tokens;
         let mut h = crate::scenario::Harness::new();
         assert_eq!(h.app.preferences.theme_follow, "", "off by default");
         let out = h.call("ui.prefs", json!({}));
@@ -7315,7 +7320,7 @@ mod tests {
                 assert_eq!(h.app.preferences.viewport_theme, crate::theme::ViewportTheme::Theme);
                 assert!(!h.app.preferences.logo_accent);
                 assert!(h.app.preferences.theme_follow.is_empty() && h.app.preferences.ui_font.is_empty());
-                assert_eq!(h.app.preferences.color_vision, crate::theme::ColorVision::Off);
+                assert_eq!(h.app.preferences.color_vision, solidcraft_theme::ColorVision::Off);
                 h.call("ui.prefs", json!({"button":"cancel"}));
             }
         }
@@ -7654,8 +7659,8 @@ mod tests {
         assert_eq!(rows[0].reason.as_deref(), Some("Unavailable on this device"));
         // The internal fixture goes through the real kit. No fake provider is shipped.
         for dark in [false, true] {
-            crate::theme::set_custom(None);
-            crate::theme::set_dark(dark);
+            crate::theme::set_file_palette(None);
+            solidcraft_theme::set_dark(dark);
             let mut values = crate::theme_files::effective_values(&file, &BTreeMap::new()).0;
             let before = values.clone();
             let ctx = crate::fonts::test_context();
@@ -7693,8 +7698,8 @@ mod tests {
         let source: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-blur.json")).unwrap();
         let file = crate::theme_files::from_value(&source).unwrap();
         for dark in [false, true] {
-            crate::theme::set_custom(None);
-            crate::theme::set_dark(dark);
+            crate::theme::set_file_palette(None);
+            solidcraft_theme::set_dark(dark);
             for available in [Availability::Available, Availability::Unavailable("prefs.theme_options_unavailable")] {
                 let rows = theme_option_rows(&file, "en", crate::theme_options::PROVIDERS, available);
                 for radius in [0.0, 1.0, 8.0, 9.0, 18.0, 33.0, 40.0, 18.25] {
@@ -8477,8 +8482,8 @@ mod tests {
 
     #[test]
     fn theme_files_import_apply_export_save_and_remove() {
-        use crate::theme::{ColorVision, Tokens};
         use serde_json::json;
+        use solidcraft_theme::{ColorVision, Tokens};
         let mut h = crate::scenario::Harness::new();
         let out = h.call("ui.prefs", json!({"theme": "gruvbox-dark-hard"}));
         assert_eq!(out["result"]["theme"], "gruvbox-dark", "{out}");

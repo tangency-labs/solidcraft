@@ -1,6 +1,7 @@
 //! Shared chord keycaps and the Preferences title-bar search field.
-use crate::{icons, theme::Tokens};
+use crate::icons;
 use egui::{FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 fn chord_parts(chord: &str) -> Vec<&str> {
     // A literal plus key follows the separator, as in Ctrl++; keep its own full keycap.

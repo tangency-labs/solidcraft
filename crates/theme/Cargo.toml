@@ -1,0 +1,15 @@
+[package]
+name = "solidcraft-theme"
+description = "The token contract UI components draw with: SolidCraft's light and dark tokens, colour vision, tab accents and the theme state a host sets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+egui = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+solidcraft-color = { workspace = true }

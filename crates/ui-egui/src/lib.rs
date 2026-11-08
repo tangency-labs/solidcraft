@@ -838,9 +838,9 @@ impl Drop for SolveApp {
 
 impl SolveApp {
     /// Publish this frame's tab accent from the open tab, the sketch being edited and the active
-    /// tool or dialog, the three values [`theme::TabAccent::publish`] takes.
+    /// tool or dialog, the three values [`theme::publish_tab`] takes.
     pub(crate) fn publish_tab_accent(&self, ctx: &egui::Context) {
-        theme::TabAccent::publish(&self.ui.tab, self.session.active_sketch.is_some(), self.tool.is_some() || self.dialog.is_some(), ctx);
+        theme::publish_tab(&self.ui.tab, self.session.active_sketch.is_some(), self.tool.is_some() || self.dialog.is_some(), ctx);
     }
 
     pub fn new(mut session: Session, services: Services) -> Self {
@@ -3282,12 +3282,12 @@ impl SolveApp {
         }
         prefs::apply(self, ctx);
         // The view's own dark or light only changes tokens, not egui's visuals: no restyle.
-        theme::set_viewport_dark(self.preferences.viewport_theme.dark());
-        theme::set_viewport_background(self.preferences.viewport_background);
-        if !self.styled || theme::is_dark() != self.ui.dark || theme::vision() != self.preferences.color_vision {
-            theme::set_dark(self.ui.dark);
-            theme::set_vision(self.preferences.color_vision);
-            theme::apply(ctx);
+        solidcraft_theme::set_viewport_dark(self.preferences.viewport_theme.dark());
+        solidcraft_theme::set_viewport_background(self.preferences.viewport_background);
+        if !self.styled || solidcraft_theme::is_dark() != self.ui.dark || solidcraft_theme::vision() != self.preferences.color_vision {
+            solidcraft_theme::set_dark(self.ui.dark);
+            solidcraft_theme::set_vision(self.preferences.color_vision);
+            solidcraft_theme::apply(ctx);
             self.styled = true;
         }
         self.publish_tab_accent(ctx);
@@ -3587,7 +3587,7 @@ impl SolveApp {
                     viewport_ui.disable();
                 }
                 self.show_workspace(&mut viewport_ui);
-                shell::paint_top_corners(ui.painter(), full, theme::Tokens::get().app_bar);
+                shell::paint_top_corners(ui.painter(), full, solidcraft_theme::Tokens::get().app_bar);
                 toolbar::toolbar(self, ui);
                 self.publish_tab_accent(ui.ctx());
             }

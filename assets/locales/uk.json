@@ -2199,6 +2199,7 @@
   "material.editor.preserved_appearance": "Збережений вигляд",
   "material.editor.public_reference": "Публічний довідник",
   "material.editor.reference": "Посилання",
+  "material.editor.remove": "Вилучити",
   "material.editor.save_or_discard": "Збережіть або відхиліть чернетку матеріалу перед призначенням матеріалу.",
   "material.editor.saved": "Матеріал збережено. Призначення тілам не змінилися.",
   "material.editor.scope": "Збереження записує цей матеріал, не призначаючи його тілам. Порожні властивості й умови лишаються невідомими. Густина в картці не змінює призначену густину чи масу.",

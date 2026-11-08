@@ -3,9 +3,10 @@ use egui::{Align2, FontId, Id, Rect, Response, Sense, Stroke, Ui, UiBuilder, pos
 use serde_json::json;
 use solidcraft_engine::panels::{Layout, SectionLocation, Zone, commands};
 
+use crate::SolveApp;
 use crate::panel_runtime::{LayoutPreferenceEntry, LayoutPreferencesView};
 use crate::ui_kit::{self, BackingTooltipExt as _, Container, Surface};
-use crate::{SolveApp, theme::Tokens};
+use solidcraft_theme::Tokens;
 use std::sync::Arc;
 
 const STATE: &str = "sc_preferences_panel_layout";

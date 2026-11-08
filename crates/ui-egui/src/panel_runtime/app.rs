@@ -1081,7 +1081,11 @@ impl crate::SolveApp {
         // not panel paint/input regions. Cover the native GPU clear through the
         // shared viewport surface without changing any declared panel geometry.
         let backdrop = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Viewport);
-        crate::ui_kit::Container::paint_frame(ui.painter(), backdrop.edge_frame(crate::theme::Tokens::get().panel), ui.available_rect_before_wrap());
+        crate::ui_kit::Container::paint_frame(
+            ui.painter(),
+            backdrop.edge_frame(solidcraft_theme::Tokens::get().panel),
+            ui.available_rect_before_wrap(),
+        );
         crate::timeline::follow_view_pick(self);
         crate::render_ui::focus_shortcut(self, ui);
         crate::dialogs::sync_feature_edit(self);

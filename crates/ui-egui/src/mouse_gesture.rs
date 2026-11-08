@@ -28,8 +28,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::SolveApp;
 use crate::context_menu::{act, cmd};
-use crate::theme::Tokens;
 use crate::ui_kit::Item;
+use solidcraft_theme::Tokens;
 
 /// Most tools one ring may hold.
 pub(crate) const MAX_TOOLS: usize = 12;

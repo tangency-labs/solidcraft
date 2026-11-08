@@ -47,8 +47,8 @@ use crate::dialogs::Dialog;
 pub(crate) use crate::dialogs::vec3_of;
 use crate::motion;
 pub(crate) use crate::selection::point_value as pt;
-use crate::theme::Tokens;
 use crate::viewport::{Hit, Proj};
+use solidcraft_theme::Tokens;
 
 /// One tool's use of the handles.
 ///

@@ -1,12 +1,12 @@
 //! Measured single-row navigation bar. Commands own all view changes.
 use crate::navigation::NavCaps;
 use crate::navigation_bar::{self, Labels, MenuDisplay, NavigationBar, Position, Slot};
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{self, Container, NavigationEdge, NavigationIdle, NavigationKind, Surface};
 use crate::{SolveApp, viewport::NavMode};
 use egui::{Align2, Rect, pos2, vec2};
 use serde_json::json;
+use solidcraft_theme::Tokens;
 
 pub(crate) struct BarLayout {
     pub rect: Rect,

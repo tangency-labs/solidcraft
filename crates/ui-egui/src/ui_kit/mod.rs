@@ -1,6 +1,6 @@
 //! Tokenised dense card library. Import elements through `crate::ui_kit`.
 //! `Panel` owns card composition; rows own aligned label/control columns and retain egui focus.
-//! Geometry, typography and colours come from `theme::Tokens`. See `docs/ui-kit.md`.
+//! Geometry, typography and colours come from `solidcraft_theme::Tokens`. See `docs/ui-kit.md`.
 mod actions;
 mod assistant;
 mod assistant_entry;

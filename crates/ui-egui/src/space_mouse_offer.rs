@@ -557,7 +557,7 @@ mod preferences_tests {
         let button = |i: usize| crate::scenario::rect_of(&format!("toast:space_mouse_offer:button:{i}")).unwrap();
         let (calibrate, direct, never) = (button(0), button(1), button(2));
         assert!((calibrate.right() - (card.right() - 12.0)).abs() < 0.5, "flush right: {calibrate:?} in {card:?}");
-        let gap = crate::theme::Tokens::get().space_8;
+        let gap = solidcraft_theme::Tokens::get().space_8;
         assert!((calibrate.left() - direct.right() - gap).abs() < 0.5, "{direct:?} then {calibrate:?}");
         assert!((direct.left() - never.right() - gap).abs() < 0.5, "{never:?} then {direct:?}");
         assert!(never.left() >= card.left() + 28.0 - 0.5, "inside the row: {never:?} in {card:?}");

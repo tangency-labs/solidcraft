@@ -665,7 +665,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut action: Option<(String, &str)> = None;
     ui_kit::scope(ui, |ui| {
         if !filtering {
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let edit_label = if app.keymap.read_only { app.tr_label("Edit shortcuts") } else { app.tr("install.done") };
             let actions_width = ui_kit::ContentWidth::button(ui, edit_label)
                 + ui_kit::icon_label_width(ui, app.tr("prefs.profile_export"), Some("export_tray"), false)
@@ -897,7 +897,7 @@ fn shortcut_row(
     label: &str,
     filtering: bool,
 ) -> Option<(String, &'static str)> {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let editing = !app.keymap.read_only;
     let capturing = app.keymap.capturing.as_deref() == Some(command.id);
     let mut slots: Vec<(usize, String, bool)> = keys.iter().enumerate().map(|(slot, key)| (slot, display(key), true)).collect();
@@ -1919,7 +1919,7 @@ mod card_tests {
                                 .job
                                 .sections
                                 .iter()
-                                .all(|section| section.format.font_id.size == crate::theme::Tokens::get().font_page_heading);
+                                .all(|section| section.format.font_id.size == solidcraft_theme::Tokens::get().font_page_heading);
                     }
                 });
             }
