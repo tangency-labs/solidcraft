@@ -478,6 +478,7 @@ mod tests {
         for (family, size, length) in [
             ("socket_head_cap_screw", "M5", Some(20.0)),
             ("button_head_cap_screw", "M5", Some(20.0)),
+            ("countersunk_socket_screw", "M5", Some(20.0)),
             ("hex_bolt", "M5", Some(20.0)),
             ("hex_nut", "M5", None),
             ("washer", "M5", None),
