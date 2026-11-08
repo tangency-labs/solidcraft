@@ -559,9 +559,7 @@ fn flat_degree_one_bspline_faces_import_as_planes() {
         ((0, 1, 0), (0, 0, 1), (1, 0, 0)),
         ((0, 0, 0), (0, 0, 1), (0, 1, 0)),
     ];
-    let at = |o: (i32, i32, i32), a: (i32, i32, i32), b: (i32, i32, i32)| {
-        format!("({}.,{}.,{}.)", o.0 + a.0 + b.0, o.1 + a.1 + b.1, o.2 + a.2 + b.2)
-    };
+    let at = |o: (i32, i32, i32), a: (i32, i32, i32), b: (i32, i32, i32)| format!("({}.,{}.,{}.)", o.0 + a.0 + b.0, o.1 + a.1 + b.1, o.2 + a.2 + b.2);
     let zero = (0, 0, 0);
     for (f, (o, a, b)) in patches.into_iter().enumerate() {
         let base = 400 + f * 20;
