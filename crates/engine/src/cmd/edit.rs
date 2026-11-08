@@ -1390,11 +1390,15 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
         super::features::stable_profiles(s, &mut nf.kind, false)?;
     }
-    // A body Pattern's copy names move with the bodies they copy (#12114). A pattern of several
-    // bodies whose names were not yet stored as its copies have them (a design made in memory,
-    // before a command stored them) takes its copies' names first, so each moves with its own.
+    // A body Pattern's copy names move with the bodies they copy (#12114). Names the edit gives
+    // are in the order the copies are made, as they always were: they are read that way, and
+    // stored source by source once the pattern has run. A pattern of several bodies whose names
+    // were not yet stored as its copies have them (a design made in memory, before a command
+    // stored them) takes its copies' names first, so each moves with its own.
     if let FeatureKind::Pattern { bodies: old, .. } = &f.kind {
-        if f.pins_every_body_name() && !f.pattern_names_in_order {
+        if nf.body_names != f.body_names {
+            nf.pattern_names_in_order = nf.pins_every_body_name();
+        } else if f.pins_every_body_name() && !f.pattern_names_in_order {
             let made: Vec<String> = s
                 .model
                 .result(id)
