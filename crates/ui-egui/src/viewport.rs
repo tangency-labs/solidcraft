@@ -7281,7 +7281,7 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
     if orbit.grabbed || orbit.released {
         app.viewport.orbit_free = None;
     }
-    if let Some(crate::view_compass::ViewAction::Orbit { dx, dy, snap }) = orbit.action {
+    if let Some(crate::view_compass::OrbitStep { dx, dy, snap }) = orbit.step {
         app.cancel_view_animation();
         orbit_drag(app, rect, dx, dy, None, snap, false);
     }
@@ -7344,18 +7344,19 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         home_label: solidcraft_ui_text::tr_label("Home view").to_owned(),
     };
     // The compass returns a tip or Home; its drag came from `axis_view_orbit` above.
-    let action = crate::view_compass::show(ui, &compass);
-    if let Some(crate::view_compass::ViewAction::Snap { direction, .. }) = action {
-        let d = Vec3::from(direction);
-        let frame = app.cam.to_frame(d);
-        let dir = if app.cam.back().dot(d) > 0.9999 { -d } else { d };
-        let mut to = app.cam.looking_from(dir);
-        if frame.z.abs() > 0.5 {
-            to.yaw = nearest_quarter_turn(app.cam.yaw);
+    match crate::view_compass::show(ui, &compass) {
+        Some(crate::view_compass::ViewAction::Snap { direction, .. }) => {
+            let d = Vec3::from(direction);
+            let frame = app.cam.to_frame(d);
+            let dir = if app.cam.back().dot(d) > 0.9999 { -d } else { d };
+            let mut to = app.cam.looking_from(dir);
+            if frame.z.abs() > 0.5 {
+                to.yaw = nearest_quarter_turn(app.cam.yaw);
+            }
+            app.animate_turn(to);
         }
-        app.animate_turn(to);
-    } else if action == Some(crate::view_compass::ViewAction::Home) {
-        app.animate_view("home");
+        Some(crate::view_compass::ViewAction::Home) => app.animate_view("home"),
+        None => {}
     }
 }
 

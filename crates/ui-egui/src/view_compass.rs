@@ -1,6 +1,7 @@
 //! The view compass as a component: the six signed world axes drawn as the camera's view axes
 //! pose them, a Home chip, and a drag anywhere on it to orbit. It takes plain inputs
-//! ([`Compass`], [`ViewAxes`]) and returns the [`ViewAction`] chosen; the app turns the camera.
+//! ([`Compass`], [`ViewAxes`]) and returns the [`ViewAction`] chosen, and [`orbit`] returns a drag's
+//! [`OrbitStep`]; the app turns the camera.
 //! Every tip publishes its handle (`axis_view:<axis>`) to the widget registry while it is drawn.
 use crate::icons::navigation::AXIS_RADIUS;
 use crate::ui_kit::BackingTooltipExt as _;
@@ -49,16 +50,22 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 /// and depth along the camera's back.
 pub type Tip = (&'static str, [f64; 3], Pos2, f64);
 
-/// What the user chose on the compass.
+/// What the user chose on the compass: a tip or Home.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ViewAction {
     /// Look along an axis: a tip was clicked (`direction`: the tip's world direction).
     Snap { axis: &'static str, direction: [f64; 3] },
     /// The Home chip was clicked.
     Home,
-    /// The compass was dragged by `(dx, dy)` screen points this frame (`snap`: Shift was held).
-    /// Only [`orbit`] returns it.
-    Orbit { dx: f64, dy: f64, snap: bool },
+}
+
+/// One frame's step of a drag on a view navigator: `(dx, dy)` screen points (`snap`: Shift was
+/// held).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct OrbitStep {
+    pub dx: f64,
+    pub dy: f64,
+    pub snap: bool,
 }
 
 /// One frame of the compass.
@@ -103,8 +110,7 @@ pub fn hit(tips: &[Tip], p: Pos2) -> Option<usize> {
     tips.iter().enumerate().rev().find(|(_, (_, _, at, _))| at.distance(p) <= AXIS_RADIUS).map(|(i, _)| i)
 }
 
-/// Draw the compass; a tip or Home clicked this frame (never [`ViewAction::Orbit`]: a drag is
-/// [`orbit`]'s).
+/// Draw the compass; a tip or Home clicked this frame (a drag on it is [`orbit`]'s).
 pub fn show(ui: &mut egui::Ui, compass: &Compass) -> Option<ViewAction> {
     let t = Tokens::get();
     let c = compass.centre;
@@ -180,12 +186,12 @@ pub struct Orbit {
     pub released: bool,
     /// The drag is turning the view.
     pub orbiting: bool,
-    pub action: Option<ViewAction>,
+    pub step: Option<OrbitStep>,
 }
 
 /// Track a drag on a view navigator. A press may start one (`may_start`: the pointer is over the
 /// view and free to act) where `starts_at` says the navigator is; once the drag is decided each
-/// frame's motion is a [`ViewAction::Orbit`]. The cube and the custom body share it.
+/// frame's motion is an [`OrbitStep`]. The cube and the custom body share it.
 pub fn orbit(ui: &egui::Ui, drag: &mut Drag, may_start: bool, starts_at: impl Fn(Pos2) -> bool) -> Orbit {
     let mut out = Orbit::default();
     let (pressed, down, decided, origin, pos, shift) = ui.input(|i| {
@@ -217,7 +223,7 @@ pub fn orbit(ui: &egui::Ui, drag: &mut Drag, may_start: bool, starts_at: impl Fn
             }
             _ => last,
         };
-        out.action = Some(ViewAction::Orbit { dx: f64::from(p.x - from.x), dy: f64::from(p.y - from.y), snap: shift });
+        out.step = Some(OrbitStep { dx: f64::from(p.x - from.x), dy: f64::from(p.y - from.y), snap: shift });
         drag.at = Some(p);
         // The OS stops feeding movement once the cursor is pinned at the screen edge, so an
         // orbit toward that edge would stall: warp the cursor back to the window centre and
@@ -293,18 +299,15 @@ mod tests {
         let start = pos2(180.0, 215.0);
         run(&ctx, vec![Event::PointerMoved(start)], Some(start), &mut drag);
         let (_, pressed) = run(&ctx, crate::test_support::pointer(start, true), Some(start), &mut drag);
-        assert!(pressed.grabbed && pressed.action.is_none());
+        assert!(pressed.grabbed && pressed.step.is_none());
         let mut steps = Vec::new();
         for x in [190.0, 200.0, 230.0] {
             let at = pos2(x, 205.0);
             let (snap, orbit) = run(&ctx, vec![Event::PointerMoved(at)], Some(at), &mut drag);
             assert_eq!(snap, None, "dragging over a tip does not snap");
-            steps.extend(orbit.action);
+            steps.extend(orbit.step);
         }
-        let travel = steps.iter().fold((0.0, 0.0, false), |(x, y, held), step| match step {
-            ViewAction::Orbit { dx, dy, snap } => (x + dx, y + dy, held || *snap),
-            _ => (x, y, held),
-        });
+        let travel = steps.iter().fold((0.0, 0.0, false), |(x, y, held), s| (x + s.dx, y + s.dy, held || s.snap));
         assert!(!steps.is_empty());
         assert_eq!(travel, (50.0, -10.0, false), "the steps add up to the pointer's travel once the drag is decided");
         let end = pos2(230.0, 205.0);
