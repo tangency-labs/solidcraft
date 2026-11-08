@@ -14,6 +14,7 @@ raytrace-cpu = ["dep:robust"]
 
 [dependencies]
 solidcore-record = { workspace = true }
+solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

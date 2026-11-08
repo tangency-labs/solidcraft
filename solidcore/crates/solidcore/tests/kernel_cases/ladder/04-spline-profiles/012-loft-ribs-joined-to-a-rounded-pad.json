@@ -1,0 +1,218 @@
+{
+  "area": "ladder/04-spline-profiles",
+  "bodies": {
+    "b53": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b56": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b53"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b54"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b54"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b55"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b56"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b57"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b57"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b58"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b55"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b59"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b58"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b60"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b59",
+        "b60"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b61"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "012-loft-ribs-joined-to-a-rounded-pad",
+  "expected": {
+    "bbox": {
+      "max": [
+        30,
+        42,
+        64
+      ],
+      "min": [
+        -30,
+        -20,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "the pad (X -8..8, Y 18..25, Z 36..59) overlaps the body, ribs and ring, so the join is one connected solid. Pieces, each an interval in y at given (x, z): the neck r18 (z 0..21); the ruled loft from the circle r18 to the ellipse 30 x 20 (an affine image of the circle, so each section is the ellipse of semi-axes 18 + 12 s, 18 + 2 s, s = (z-21)/17); the chamber (ellipse 30 x 20, z 38..64); the ring (disc r12 about y 30, z 47, x -5..5); the two ribs (x -8..-4 and 4..8; their outline of three lines and three r1.5 corner arcs is convex); the pad (y 18..25, x -8..8, z 36..59, r3 corners). V = 2 int_0^30 int_0^64 |union of the intervals| dz dx (Gauss on panels split at x 4, 5, 8, 18 and the z bounds; it converges to 1e-6) = 100193.017956. Bbox: the chamber's ellipse (x +-30, y -20), the ring's top y 42, z 0..64",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4092"
+    ],
+    "tolerance": {
+      "rel": 0.0001
+    },
+    "volume_mm3": 100193.017956313,
+    "what": "the same without the top flange: the join fails with 'boolean Union: no result'"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 13275.842713531902,
+      "body_count": 1,
+      "edges": 86,
+      "faces": 31,
+      "vertices": 57,
+      "volume_mm3": 100193.00303538967
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 93,
+      "faces": 32,
+      "vertices": 63
+    }
+  },
+  "records": "012-loft-ribs-joined-to-a-rounded-pad.bodies.json.gz",
+  "result": [
+    {
+      "body": "NATIVE_CAP_BODY",
+      "made": "b61"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 13275.84271415217,
+      "body_count": 1,
+      "edges": 86,
+      "faces": 31,
+      "vertices": 57,
+      "volume_mm3": 100193.00305213696
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4092"
+  ],
+  "traced_ops": [
+    "extrude",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "the same without the top flange: the join fails with 'boolean Union: no result'",
+  "why_not": []
+}

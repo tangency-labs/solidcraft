@@ -61,9 +61,9 @@ pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
     }
     let Some(i) = t.dims.iter().position(|b| b.label == "Length") else { return };
     let Some(length_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))) else { return };
-    let tokens = crate::theme::Tokens::get();
+    let tokens = solidcraft_theme::Tokens::get();
     let has_length = typed_length(t).is_some();
-    let reason = crate::i18n::tr("ui.construction.normal_needs_length");
+    let reason = solidcraft_ui_text::tr("ui.construction.normal_needs_length");
     let refused = [Some(reason), Some(reason)];
     // The Sketch Palette's own line type names, which `segmented` translates.
     let options = ["Construction", "Normal"];
@@ -102,7 +102,7 @@ pub fn hint(id: &str) -> String {
         "bisector" => "ui.construction.bisector_hint",
         _ => "ui.construction.point_hint",
     };
-    crate::i18n::tr(key).to_owned()
+    solidcraft_ui_text::tr(key).to_owned()
 }
 
 fn arg(point: &(Vec2, Option<String>), preview: bool) -> Value {
@@ -200,7 +200,7 @@ pub fn place_point(app: &mut SolveApp, t: &mut Tool, at: (Vec2, Option<String>))
     if (matches!(mode, "free" | "angle" | "tangent_external") || picks_side) && t.pts.is_empty() {
         t.pts.push(at);
         if picks_side {
-            app.set_status(crate::i18n::tr("ui.construction.side_hint").to_owned(), false);
+            app.set_status(solidcraft_ui_text::tr("ui.construction.side_hint").to_owned(), false);
         }
         return;
     }
@@ -228,7 +228,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let Some(ss) = app.session.active_sketch.and_then(|sid| state.sketch(sid)) else { return };
     let Ok(lines) = construction_line_solutions(&ss.sketch, &p, mode) else { return };
     let chosen = construction_line_choice(&lines, &p).ok();
-    let tokens = crate::theme::Tokens::get();
+    let tokens = solidcraft_theme::Tokens::get();
     let center = ss.plane.to_local(app.cam.target);
     let extent = app.cam.half_height().max(1.0) * 20.0;
     let length = p.get("length").and_then(Value::as_f64);

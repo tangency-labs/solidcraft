@@ -3,9 +3,9 @@ use super::{
     metrics::dimension,
     text::{paint_text, paint_text_aligned},
 };
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Align2, FontId, InnerResponse, Rect, Response, Sense, Stroke, TextureId, Ui, Vec2, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) struct RecoveryMessage<'a> {
     pub title: &'a str,

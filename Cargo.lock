@@ -4051,7 +4051,6 @@ dependencies = [
 [[package]]
 name = "solidcore"
 version = "1.0.1"
-source = "git+https://github.com/tangency-labs/solidcore?rev=a445bdaac60a980b0e9d1dba3ee28eb7ada44f50#a445bdaac60a980b0e9d1dba3ee28eb7ada44f50"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -4060,7 +4059,6 @@ dependencies = [
 [[package]]
 name = "solidcore-record"
 version = "0.1.0"
-source = "git+https://github.com/tangency-labs/solidcore?rev=a445bdaac60a980b0e9d1dba3ee28eb7ada44f50#a445bdaac60a980b0e9d1dba3ee28eb7ada44f50"
 dependencies = [
  "serde",
  "serde_json",
@@ -4075,7 +4073,6 @@ dependencies = [
  "eframe",
  "egui",
  "embed-resource",
- "getrandom 0.3.4",
  "hidapi",
  "keyring",
  "libc",
@@ -4093,10 +4090,13 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcraft-3dx-client",
+ "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",
+ "solidcraft-theme",
  "solidcraft-ui-egui",
+ "solidcraft-ui-text",
  "ureq",
  "windows-sys 0.61.2",
  "winit",
@@ -4124,6 +4124,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-color"
+version = "0.40.0-rc.3"
+
+[[package]]
+name = "solidcraft-control"
+version = "0.40.0-rc.3"
+dependencies = [
+ "getrandom 0.3.4",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "solidcraft-control-egui"
+version = "0.40.0-rc.3"
+dependencies = [
+ "egui",
+ "image",
+ "serde_json",
+ "solidcraft-control",
+]
+
+[[package]]
 name = "solidcraft-derive"
 version = "0.40.0-rc.3"
 dependencies = [
@@ -4141,6 +4164,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solidcore-record",
+ "solidcraft-color",
  "solidcraft-derive",
  "solidcraft-geom",
  "solidcraft-kernel",
@@ -4173,6 +4197,8 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "solidcore-record",
+ "solidcraft-color",
+ "solidcraft-control",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-io",
@@ -4207,6 +4233,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcore-record",
+ "solidcraft-color",
  "solidcraft-engine",
  "solidcraft-geom",
  "solidcraft-io",
@@ -4234,6 +4261,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solidcore-record",
+ "solidcraft-color",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-kernel",
@@ -4268,8 +4296,17 @@ version = "0.40.0-rc.3"
 dependencies = [
  "image",
  "serde_json",
+ "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-mcp-server",
+]
+
+[[package]]
+name = "solidcraft-mcp-server"
+version = "0.40.0-rc.3"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
@@ -4293,6 +4330,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solidcore-record",
+ "solidcraft-color",
  "solidcraft-geom",
  "web-time",
  "weezl",
@@ -4346,6 +4384,16 @@ name = "solidcraft-testkit"
 version = "0.40.0-rc.3"
 
 [[package]]
+name = "solidcraft-theme"
+version = "0.40.0-rc.3"
+dependencies = [
+ "egui",
+ "serde",
+ "serde_json",
+ "solidcraft-color",
+]
+
+[[package]]
 name = "solidcraft-ui-egui"
 version = "0.40.0-rc.3"
 dependencies = [
@@ -4355,6 +4403,7 @@ dependencies = [
  "image",
  "log",
  "minisign-verify",
+ "muda",
  "nix 0.31.3",
  "pollster 0.4.0",
  "proc-macro2",
@@ -4363,18 +4412,39 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solidcore-record",
+ "solidcraft-color",
+ "solidcraft-control",
+ "solidcraft-control-egui",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",
+ "solidcraft-theme",
+ "solidcraft-ui-registry",
+ "solidcraft-ui-text",
  "syn 2.0.119",
- "sys-locale",
  "tiny-skia",
  "toml",
  "ttf-parser",
- "unicode-bidi",
  "web-time",
  "winreg",
  "zip",
+]
+
+[[package]]
+name = "solidcraft-ui-registry"
+version = "0.40.0-rc.3"
+dependencies = [
+ "egui",
+]
+
+[[package]]
+name = "solidcraft-ui-text"
+version = "0.40.0-rc.3"
+dependencies = [
+ "log",
+ "serde_json",
+ "sys-locale",
+ "unicode-bidi",
 ]
 
 [[package]]
@@ -4387,8 +4457,10 @@ dependencies = [
  "log",
  "percent-encoding",
  "serde_json",
+ "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-ui-egui",
+ "solidcraft-ui-text",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",

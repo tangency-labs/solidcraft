@@ -375,6 +375,14 @@ pub enum TangentMade {
         constraints: Vec<String>,
         /// The sketch's solve: `{solved, dof}`.
         sketch: Value,
+        /// `true` when they already held and other constraints already determined them: they are
+        /// kept, shown as redundant (not when `if_redundant` is `refuse`, which refuses the call
+        /// instead). Absent otherwise.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        redundant: Option<bool>,
+        /// With `redundant`: the constraints that determine the Tangent, as "id (Name)".
+        #[serde(skip_serializing_if = "Option::is_none")]
+        determined_by: Option<Vec<String>>,
     },
 }
 

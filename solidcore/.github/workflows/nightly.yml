@@ -1,0 +1,50 @@
+name: Nightly
+
+# Slow checks that are too expensive for every pull request.
+# Runs on GitHub's runners, like Run workflow in ci.yml.
+on:
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  slow:
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upstream sources (TestFiles)
+        uses: ./.github/actions/upstream
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+          key: goldens
+
+      # Owner-approved (2026-10-26): a regression too slow for every PR (~3 min): the
+      # tiny-scale torus booleans finish under MAX_SOLVE_BRANCHES (geom::global_solver).
+      - name: Slow regressions
+        if: ${{ !cancelled() }}
+        run: cargo test -p solidcore --release --test max_solve_branches_tiny_torus -- --ignored
+
+      # Owner-approved (2026-10-27): the SolidCraft whole-corpus harness checks (every
+      # case reaches a verdict; every deferral names a plan unit) take minutes even
+      # optimised, so they run here instead of on every pull request.
+      - name: SolidCraft corpus harness checks
+        if: ${{ !cancelled() }}
+        run: >-
+          cargo test --profile goldens -p goldens --lib -- --ignored --exact
+          solidcraft::tests::every_case_reaches_a_verdict_without_a_harness_error
+          solidcraft::tests::deferrals_name_a_plan_unit

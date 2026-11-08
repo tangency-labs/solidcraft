@@ -35,7 +35,7 @@ mod native_crash;
 mod native_crash_macos;
 #[cfg(target_os = "windows")]
 mod native_frame;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 mod native_menu;
 mod nav_bridge;
 #[cfg(target_os = "macos")]
@@ -468,7 +468,7 @@ fn case_variants(exts: &[&str]) -> Vec<String> {
 fn content_ui(app: &mut SolveApp, ui: &mut egui::Ui) {
     let content = ui.ctx().content_rect();
     let above = egui::Rect::from_min_max(ui.max_rect().min, egui::pos2(ui.max_rect().right(), content.top()));
-    ui.painter().rect_filled(above, 0.0, solidcraft_ui_egui::theme::Tokens::get().app_bar);
+    ui.painter().rect_filled(above, 0.0, solidcraft_theme::Tokens::get().app_bar);
     ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| app.ui(ui));
 }
 
@@ -518,7 +518,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             // The groups come from the format registry, so a new format joins this dialog by itself.
             let mut everything = io::formats::open_extensions(true);
             everything.extend(["dxf", "svg"]);
-            dialog = dialog.add_filter(solidcraft_ui_egui::i18n::tr("file.open.drawing_filter"), &case_variants(&everything));
+            dialog = dialog.add_filter(solidcraft_ui_text::tr("file.open.drawing_filter"), &case_variants(&everything));
             for (label, exts) in io::formats::import_filters(true) {
                 dialog = dialog.add_filter(label, &case_variants(&exts));
             }
@@ -913,17 +913,7 @@ fn app_viewport(custom_titlebar: bool) -> Result<egui::ViewportBuilder, eframe::
     #[cfg(not(target_os = "macos"))]
     let icon =
         egui::IconData { rgba: app_icon::rgba(64).map_err(|e| eframe::Error::AppCreation(std::io::Error::other(e).into()))?, width: 64, height: 64 };
-    Ok(egui::ViewportBuilder::default()
-        .with_title("SolidCraft")
-        .with_icon(icon)
-        .with_inner_size([1600.0, 1000.0])
-        .with_min_inner_size([960.0, 600.0])
-        .with_drag_and_drop(true)
-        .with_decorations(!custom_titlebar)
-        .with_fullsize_content_view(true)
-        .with_titlebar_shown(false)
-        .with_title_shown(false)
-        .with_app_id(APP_ID))
+    Ok(solidcraft_ui_egui::window_chrome::viewport("SolidCraft", APP_ID, custom_titlebar).with_icon(icon))
 }
 
 /// The window's app id: it names the desktop entry, so it is the packages' reverse-DNS id.
@@ -945,6 +935,7 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
+    solidcraft_ui_egui::i18n::install();
     // On OCLP-patched Macs, wgpu picks a Metal Shading Language standard that the system's
     // compiler refuses (`invalid value 'metal3.2'`), because the patched OS reports a newer
     // macOS version than the GPU's Metal compiler supports. Re-launching with
@@ -1221,7 +1212,7 @@ fn main() -> eframe::Result {
             mark("viewport pipelines");
             // `--control`/the environment name a port; otherwise the preference (on by default)
             // opens the default one (docs/control-protocol.md).
-            if let Some(listen_on) = solidcraft_engine::control_auth::plan(control_port, app.preferences.agent_control) {
+            if let Some(listen_on) = solidcraft_control::auth::plan(control_port, app.preferences.agent_control) {
                 let rx = control_server::start(listen_on, cc.egui_ctx.clone());
                 app = app.with_control(rx);
             }

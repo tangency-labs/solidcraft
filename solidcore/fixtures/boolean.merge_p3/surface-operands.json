@@ -1,0 +1,700 @@
+{
+  "coverage": "BooleanLists (family 2) with surface operands (shim kinds 2 plane and 3 sphere). Upstream copies a surface list with the base copy constructor, which slices every surface to a geometry-less SmSurface (WR-196): CreateFaceFromSurface on that copy fails at the base Evaluate / EvaluatePoint, so any list that has surfaces and no B-rep ends the call with SM_ERR (1001), whichever surfaces, operation or options; the cases cover each list position, both kinds, a shell vertex and a box as the other operand, an empty other list, an invalid operation, options and extreme scales. A list that has B-reps ignores its surfaces (upstream reads the surface list only when the B-rep list is empty), so the three mixed cases compare real results. expected_status is what both engines return.",
+  "cases": [
+    {
+      "name": "plane_list_vs_plane_list",
+      "inputs": {
+        "family": 2,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  1,
+                  0
+                ]
+              }
+            }
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 1001,
+      "note": "Both lists are surfaces: list 1's first copy is base-sliced (WR-196) and CreateFaceFromSurface fails on it, SM_ERR."
+    },
+    {
+      "name": "sphere_list_vs_sphere_list",
+      "inputs": {
+        "family": 2,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "sphere": {
+                "radius": 2.0
+              }
+            }
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              1,
+              0,
+              0
+            ],
+            "surface": {
+              "sphere": {
+                "radius": 2.0
+              }
+            }
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 1001
+    },
+    {
+      "name": "two_planes_vs_box",
+      "inputs": {
+        "family": 2,
+        "operation": 3,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          },
+          {
+            "point": [
+              0,
+              0,
+              5
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  0,
+                  -1
+                ]
+              }
+            }
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              2,
+              3,
+              4
+            ]
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 1001,
+      "note": "The surface list fails before the B-rep list is copied."
+    },
+    {
+      "name": "box_vs_plane",
+      "inputs": {
+        "family": 2,
+        "operation": 2,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              2,
+              3,
+              4
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              1,
+              1,
+              1
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  1,
+                  1,
+                  1
+                ]
+              }
+            }
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 1001,
+      "note": "List 1 is copied and stitched; list 2's surface copy fails: SM_ERR."
+    },
+    {
+      "name": "box_vs_sphere",
+      "inputs": {
+        "family": 2,
+        "operation": 4,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              2,
+              3,
+              4
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              1,
+              1,
+              1
+            ],
+            "surface": {
+              "sphere": {
+                "radius": 1.5
+              }
+            }
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 1001
+    },
+    {
+      "name": "shell_vertex_vs_plane",
+      "inputs": {
+        "family": 2,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 1001
+    },
+    {
+      "name": "plane_vs_nothing",
+      "inputs": {
+        "family": 2,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          }
+        ],
+        "b": [],
+        "tree": []
+      },
+      "expected_status": 1001,
+      "note": "List 1's surface copy fails first; the empty list 2 is never looked at (the same SM_ERR either way)."
+    },
+    {
+      "name": "nothing_vs_plane",
+      "inputs": {
+        "family": 2,
+        "operation": 1,
+        "options": null,
+        "a": [],
+        "b": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 1001,
+      "note": "No brep OR surface in list 1: SM_ERR before list 2."
+    },
+    {
+      "name": "planes_invalid_operation",
+      "inputs": {
+        "family": 2,
+        "operation": -1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  1,
+                  0
+                ]
+              }
+            }
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 1001,
+      "note": "Both lists are built before the operation is checked, so the sliced copy's SM_ERR comes first."
+    },
+    {
+      "name": "planes_with_options",
+      "inputs": {
+        "family": 2,
+        "operation": 1,
+        "options": 21,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  1,
+                  0
+                ]
+              }
+            }
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 1001
+    },
+    {
+      "name": "planes_scale_1e-9",
+      "inputs": {
+        "family": 2,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1e-09,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  0,
+                  1e-09
+                ]
+              }
+            }
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              0,
+              1e-09,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  1e-09,
+                  0
+                ]
+              }
+            }
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 1001
+    },
+    {
+      "name": "spheres_scale_1e12",
+      "inputs": {
+        "family": 2,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1000000000000.0,
+              0,
+              0
+            ],
+            "surface": {
+              "sphere": {
+                "radius": 1000000000000.0
+              }
+            }
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              0,
+              1000000000000.0,
+              0
+            ],
+            "surface": {
+              "sphere": {
+                "radius": 1000000000000.0
+              }
+            }
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 1001
+    },
+    {
+      "name": "box_and_plane_in_one_list_vs_box",
+      "inputs": {
+        "family": 2,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              2,
+              3,
+              4
+            ]
+          },
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              1,
+              1,
+              1
+            ],
+            "size": [
+              2,
+              3,
+              4
+            ]
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 0,
+      "note": "A list with B-reps ignores its surfaces (upstream reads the surface list only when the B-rep list is empty): a real union is compared."
+    },
+    {
+      "name": "plane_and_box_in_one_list_vs_sphere_and_box",
+      "inputs": {
+        "family": 2,
+        "operation": 3,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          },
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              4,
+              4,
+              4
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              2,
+              2,
+              2
+            ],
+            "surface": {
+              "sphere": {
+                "radius": 1.0
+              }
+            }
+          },
+          {
+            "point": [
+              1,
+              1,
+              1
+            ],
+            "size": [
+              1,
+              1,
+              1
+            ]
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 0,
+      "note": "Surfaces in both lists are ignored next to B-reps: a real difference is compared."
+    },
+    {
+      "name": "two_boxes_and_sphere_vs_shell_vertex_and_plane",
+      "inputs": {
+        "family": 2,
+        "operation": 2,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              2,
+              2,
+              2
+            ]
+          },
+          {
+            "point": [
+              5,
+              0,
+              0
+            ],
+            "size": [
+              2,
+              2,
+              2
+            ]
+          },
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "sphere": {
+                "radius": 1.0
+              }
+            }
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "surface": {
+              "plane": {
+                "normal": [
+                  1,
+                  0,
+                  0
+                ]
+              }
+            }
+          }
+        ],
+        "tree": []
+      },
+      "expected_status": 0,
+      "note": "Two B-reps are combined into list 1's copy and the surfaces are ignored on both sides: a real xor is compared."
+    }
+  ]
+}

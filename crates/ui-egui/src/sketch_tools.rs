@@ -3,11 +3,12 @@
 //! tools for free-form curves and slots, text placement, and constraint glyphs. Like `tools`,
 //! these are UI state only: every action runs a command.
 
-use crate::i18n::{tr, tr_engine_error};
+use crate::i18n::tr_engine_error;
 use crate::icons::markers::glyph_icon;
 use crate::icons::markers::glyph_letter;
 use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_ui_text::tr;
 use std::cell::{Cell, RefCell};
 
 use egui::{Pos2, Stroke};
@@ -226,7 +227,7 @@ fn next_measure(order: Continuity) -> Option<(&'static str, &'static str, &'stat
 fn continuity_label(app: &SolveApp, seam: &Value) -> String {
     let deg = |key: &str| seam[key]["value"].as_f64().map(|x| format!("{x:.3}\u{b0}")).unwrap_or_default();
     let order = seam["order"].as_str().and_then(Continuity::parse);
-    let class = crate::i18n::tr(order_class(order));
+    let class = solidcraft_ui_text::tr(order_class(order));
     match order {
         None => format!("{class} {}", seam["gap_mm"]["value"].as_f64().map(|g| crate::prefs::show_mm(app, g, 1)).unwrap_or_default()),
         Some(g) => {
@@ -244,7 +245,7 @@ fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         MARKS.with(|m| m.borrow_mut().clear());
         return;
     }
-    let tk = crate::theme::Tokens::get();
+    let tk = solidcraft_theme::Tokens::get();
     MARKS.with(|m| {
         for (at, label) in m.borrow().iter() {
             let Some(q) = proj.to_screen(*at) else { continue };
@@ -255,7 +256,7 @@ fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 q + egui::vec2(12.0, -12.0),
                 egui::Align2::LEFT_BOTTOM,
                 label,
-                egui::FontId::proportional(crate::theme::Tokens::get().font_body),
+                egui::FontId::proportional(solidcraft_theme::Tokens::get().font_body),
                 tk.text,
             );
             painter.rect_filled(r.expand(3.0), tk.radius_sm.saturating_sub(1), tk.panel.gamma_multiply(0.85));
@@ -263,7 +264,7 @@ fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 q + egui::vec2(12.0, -12.0),
                 egui::Align2::LEFT_BOTTOM,
                 label,
-                egui::FontId::proportional(crate::theme::Tokens::get().font_body),
+                egui::FontId::proportional(solidcraft_theme::Tokens::get().font_body),
                 tk.text,
             );
         }
@@ -323,12 +324,12 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         let Ok(v) = app.run(id, json!({})) else { return false };
         let summary = &v["summary"];
         // Each class in the legend's words, best first.
-        let gaps = summary["gap"].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", crate::i18n::tr(order_class(None))));
+        let gaps = summary["gap"].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", solidcraft_ui_text::tr(order_class(None))));
         let counts: Vec<String> = Continuity::ALL
             .into_iter()
             .rev()
             .filter_map(|g| {
-                summary["orders"][g.as_str()].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", crate::i18n::tr(order_class(Some(g)))))
+                summary["orders"][g.as_str()].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", solidcraft_ui_text::tr(order_class(Some(g)))))
             })
             .chain(gaps)
             .collect();
@@ -444,7 +445,7 @@ fn comb_options_card(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
     if app.tool.as_ref().map(|t| t.cmd) != Some("inspect.curvature_comb") {
         return;
     }
-    let tk = crate::theme::Tokens::get();
+    let tk = solidcraft_theme::Tokens::get();
     let available = crate::shell::workspace_content(app, crate::shell::content_rect(app, proj.rect));
     let width = tk.form_card_width.min(available.width() - 2.0 * tk.space_16).max(0.0);
     let mut options = comb_options();
@@ -490,7 +491,7 @@ fn combs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if crate::dim_view::preview_world(app).is_some() {
         return;
     }
-    let tk = crate::theme::Tokens::get();
+    let tk = solidcraft_theme::Tokens::get();
     for comb in &shown.teeth {
         let mut tips: Vec<Pos2> = Vec::new();
         for [a, b] in comb {
@@ -924,8 +925,8 @@ pub fn hint(id: &str) -> Option<String> {
             "inspect.center_of_mass" => "Center of mass of all bodies; click a body for its own",
             "inspect.isocurve" => "Isocurves: click faces",
             "inspect.continuity" => "Continuity: click an edge for its numbers (the button again turns the colours off)",
-            "canvas.insert" => crate::i18n::tr("canvas.place_hint"),
-            "canvas.decal" => crate::i18n::tr("canvas.decal_place_hint"),
+            "canvas.insert" => solidcraft_ui_text::tr("canvas.place_hint"),
+            "canvas.decal" => solidcraft_ui_text::tr("canvas.decal_place_hint"),
             "sketch.trim" => tr("sketch.hint.trim"),
             "sketch.extend" => tr("sketch.hint.extend"),
             "sketch.break" => tr("sketch.hint.break"),
@@ -1640,7 +1641,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = st.sketch(sid) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
-    let tk = crate::theme::Tokens::get();
+    let tk = solidcraft_theme::Tokens::get();
     if let Some(crate::viewport::Hit::SketchCurve { sketch, id, .. }) = &app.viewport.hover
         && let Some(piece) = trim_hover_piece(app, *sketch, id)
     {
@@ -1805,7 +1806,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         GLYPHS.with(|g| g.borrow_mut().clear());
         return;
     }
-    let tk = crate::theme::Tokens::get();
+    let tk = solidcraft_theme::Tokens::get();
     let picked = PICKED.with(|p| p.borrow().clone());
     // Where each glyph goes: beside its entity (to its left, away from the line), every entity
     // of a two-entity constraint getting one; glyphs that would overlap step along. A glyph
@@ -1914,7 +1915,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
                     *sp,
                     egui::Align2::CENTER_CENTER,
                     glyph_letter(c.kind.name()),
-                    egui::FontId::proportional(crate::theme::Tokens::get().font_panel),
+                    egui::FontId::proportional(solidcraft_theme::Tokens::get().font_panel),
                     col,
                 );
             }
@@ -1931,7 +1932,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
             format!("{} ({ids})", c.kind.name())
         };
         let at = h + egui::vec2(12.0, 12.0);
-        let g = painter.layout_no_wrap(label, egui::FontId::proportional(crate::theme::Tokens::get().font_small), tk.text);
+        let g = painter.layout_no_wrap(label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small), tk.text);
         painter.rect_filled(egui::Rect::from_min_size(at, g.size()).expand(3.0), tk.radius_sm.saturating_sub(1), tk.panel);
         painter.galley(at, g, tk.text);
     }
@@ -2010,7 +2011,7 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return };
     let Some(sp) = proj.to_screen(ss.plane.to_world(p)) else { return };
-    let tk = crate::theme::Tokens::get();
+    let tk = solidcraft_theme::Tokens::get();
     // A dotted guide from each point the snap lined the cursor up with (#7828).
     let guides = LINED.with(|l| l.borrow().as_ref().filter(|(at, _)| at.dist(p) < 1e-9).map(|(_, lined)| lined.clone()).unwrap_or_default());
     for from in guides.iter().filter_map(|l| proj.to_screen(ss.plane.to_world(l.at))) {
@@ -2019,7 +2020,7 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     crate::scenario::publish_count("sketch_align_guides", guides.len() as f64);
     let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
     painter.rect_filled(r, tk.radius_sm.saturating_sub(1), tk.accent_soft);
-    painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(crate::theme::Tokens::get().font_micro), tk.text);
+    painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro), tk.text);
 }
 
 /// Per frame, after the viewport is drawn: constraint glyphs, snap hints and analysis marks.

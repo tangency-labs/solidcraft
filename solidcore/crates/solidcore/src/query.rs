@@ -1,0 +1,21 @@
+//! Read-only queries on B-reps and geometry: closest point, point
+//! classification, bounding boxes, adjacency lookups, manifold checks.
+//!
+//! Upstream: `SmPointClass`, `SmRayTracer`, `SmExtent*`, `SmPseudoBox`,
+//! `SmTopologyTraverser` in `source/SMLib`, and `SM_API/SmApiQueries`.
+
+pub mod api_queries;
+pub mod brep;
+pub mod distance_bound;
+pub mod edge;
+#[cfg(test)]
+pub(crate) mod exact;
+pub mod face;
+mod face_surface;
+pub mod r#loop;
+pub mod normal;
+pub mod poly;
+pub mod poly_properties;
+pub mod tess;
+
+pub use face_surface::face_surface_intersect;

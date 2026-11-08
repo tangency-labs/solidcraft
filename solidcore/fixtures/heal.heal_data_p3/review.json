@@ -1,0 +1,1262 @@
+{
+  "cases": [
+    {
+      "name": "review_forged_done_6_unsized_voxels",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 6
+          },
+          {
+            "step": "update_targets",
+            "op": 6,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_forged_done_8_unsized_voxels",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 8
+          },
+          {
+            "step": "update_targets",
+            "op": 8,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_forged_done_9_unsized_voxels",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 9
+          },
+          {
+            "step": "update_targets",
+            "op": 9,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_forged_done_16_unsized_voxels",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 16
+          },
+          {
+            "step": "update_targets",
+            "op": 16,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_forged_done_26_unsized_voxels",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 26
+          },
+          {
+            "step": "update_targets",
+            "op": 26,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_valid_initialized_voxels",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "cache_coin_vertices"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 6
+          },
+          {
+            "step": "update_targets",
+            "op": 6,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_valid_no_prior_targets",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 6
+          },
+          {
+            "step": "update_targets",
+            "op": 6,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_valid_below_coin_through",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 6
+          },
+          {
+            "step": "update_targets",
+            "op": 5,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_valid_below_coin_done",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 5
+          },
+          {
+            "step": "update_targets",
+            "op": 6,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_valid_remove_all_prior_vertices",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 6
+          },
+          {
+            "step": "update_targets",
+            "op": 6,
+            "remove": [
+              [
+                9,
+                0
+              ],
+              [
+                9,
+                1
+              ],
+              [
+                9,
+                2
+              ],
+              [
+                9,
+                3
+              ],
+              [
+                9,
+                4
+              ],
+              [
+                9,
+                5
+              ],
+              [
+                9,
+                6
+              ],
+              [
+                9,
+                7
+              ]
+            ],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_null_face_fix_degen_faces",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "seed_face_problems",
+            "null_face": true
+          },
+          {
+            "step": "fix_degen_faces"
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_null_face_fix_split_edges_at_seam",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "seed_face_problems",
+            "null_face": true
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_null_face_fix_split_face_at_seams",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "seed_face_problems",
+            "null_face": true
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_crossed_neither_updates_flags",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "seed_face_problems",
+            "null_face": false
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_wire_forged_done_6_unsized_voxels",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0.0,
+                0.0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                1e-06,
+                2e-06,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                3e-06,
+                1e-06,
+                1e-06,
+                -1.7976931348623157e+308
+              ],
+              [
+                4e-06,
+                0.0,
+                2e-06,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 3,
+            "u": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "t0": 0.2,
+          "t1": 0.7
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 6
+          },
+          {
+            "step": "update_targets",
+            "op": 6,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_wire_forged_done_8_unsized_voxels",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0.0,
+                0.0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                1e-06,
+                2e-06,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                3e-06,
+                1e-06,
+                1e-06,
+                -1.7976931348623157e+308
+              ],
+              [
+                4e-06,
+                0.0,
+                2e-06,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 3,
+            "u": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "t0": 0.2,
+          "t1": 0.7
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 8
+          },
+          {
+            "step": "update_targets",
+            "op": 8,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_wire_forged_done_9_unsized_voxels",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0.0,
+                0.0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                1e-06,
+                2e-06,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                3e-06,
+                1e-06,
+                1e-06,
+                -1.7976931348623157e+308
+              ],
+              [
+                4e-06,
+                0.0,
+                2e-06,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 3,
+            "u": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "t0": 0.2,
+          "t1": 0.7
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 9
+          },
+          {
+            "step": "update_targets",
+            "op": 9,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_wire_forged_done_16_unsized_voxels",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0.0,
+                0.0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                1e-06,
+                2e-06,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                3e-06,
+                1e-06,
+                1e-06,
+                -1.7976931348623157e+308
+              ],
+              [
+                4e-06,
+                0.0,
+                2e-06,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 3,
+            "u": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "t0": 0.2,
+          "t1": 0.7
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 16
+          },
+          {
+            "step": "update_targets",
+            "op": 16,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_wire_forged_done_26_unsized_voxels",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0.0,
+                0.0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                1e-06,
+                2e-06,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                3e-06,
+                1e-06,
+                1e-06,
+                -1.7976931348623157e+308
+              ],
+              [
+                4e-06,
+                0.0,
+                2e-06,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 3,
+            "u": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "t0": 0.2,
+          "t1": 0.7
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 26
+          },
+          {
+            "step": "update_targets",
+            "op": 26,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    },
+    {
+      "name": "review_wire_valid_below_coin_through_4",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0.0,
+                0.0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                1e-06,
+                2e-06,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                3e-06,
+                1e-06,
+                1e-06,
+                -1.7976931348623157e+308
+              ],
+              [
+                4e-06,
+                0.0,
+                2e-06,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 3,
+            "u": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "t0": 0.2,
+          "t1": 0.7
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 26
+          },
+          {
+            "step": "update_targets",
+            "op": 4,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam"
+    }
+  ]
+}
