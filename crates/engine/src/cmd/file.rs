@@ -1875,6 +1875,8 @@ mod tests {
         }
         let saved = saved_geometry(&s, &s.doc).unwrap();
         let records = &saved.records;
+        // Every sheet here is made from surfaces: the flat model's list stays empty.
+        assert_eq!(records["sheets"].as_array().map(Vec::len), Some(0), "no record in the flat model's list");
         let sheets = records["surface_sheets"].as_array().unwrap();
         let texts: std::collections::HashSet<String> = sheets.iter().map(Value::to_string).collect();
         assert_eq!(texts.len(), sheets.len(), "each sheet once");
@@ -2056,13 +2058,13 @@ mod tests {
         let per_feature = (size(&many) - size(&few)) / 10;
         assert!(per_feature * 2 < sheet, "each later feature adds {per_feature} bytes, the sheet is {sheet}");
         // Taken from the file as saved: the sheet is the one evaluated.
-        let flat = many.model.state().surface_sheets.clone();
+        let sheets = many.model.state().surface_sheets.clone();
         let path = std::env::temp_dir().join(format!("solidcraft-sheet-cache-{}.solidcraft", std::process::id()));
         std::fs::write(&path, many.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap()).unwrap();
         let mut reopened = Session::default();
         reopened.execute("doc.open", &json!({"path":path})).unwrap();
         assert!(reopened.model.results.iter().zip(&many.model.results).all(|(a, b)| a.ms == b.ms), "taken from the file, not evaluated");
-        assert_eq!(serde_json::to_value(&reopened.model.state().surface_sheets).unwrap(), serde_json::to_value(&flat).unwrap());
+        assert_eq!(serde_json::to_value(&reopened.model.state().surface_sheets).unwrap(), serde_json::to_value(&sheets).unwrap());
         std::fs::remove_file(path).unwrap();
     }
 
