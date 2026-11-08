@@ -2,13 +2,43 @@
 
 The public contracts are `solidcraft_engine::panels` and
 `solidcraft_ui_egui::panel_runtime`. The #11305 host is explicitly enabled and
-uses synthetic controllers to exercise shared behaviour. Production Browser,
-History, Assistant, Render, Sketch, feature forms and BOM adapters are sibling
-work. The shipping shell, content, preferences and Classic behaviour retain
-their existing defaults. A specimen is not production migration or visual evidence.
-The current migration boundary permits only existing docked Browser, History and
-Assistant content and their allowed Render counterparts in future sibling work.
+uses synthetic controllers to exercise shared behaviour. Preferences → Layout →
+Use shared panel layout mounts the existing Browser, History, Assistant and Render
+Scene Browser content in that host. Apply enables the setting; clearing it returns
+to the existing Classic placement. Classic remains the shipping default.
+Sketch, feature forms, BOM and the other Render panels remain separate work.
+A specimen is not production migration or visual evidence.
 Draggable tool windows and the existing native Assistant retain their legacy hosts.
+
+## Initial real-content integration
+
+The shared runtime owns placement and small presentation descriptors. Existing
+`SolveApp` document state, Browser semantic rows, History playback and `AgentChat`
+continue to own content. A frame-scoped callback invokes the existing renderers
+inside the shared host's stable content identity and current focus-report service.
+It retains no application reference beyond that paint call. Immutable host
+geometry remains visible to content commands throughout the call.
+
+Hidden bodies do not render. History playback and Assistant polling stay in their
+existing application paths. Closing an Assistant panel does not stop its backend
+or clear its draft. Popped Assistant windows keep the legacy path. Combined
+Browser/History uses the existing content preference and suppresses the separate
+History body. Render Inspector, Shots and appearances keep their existing hosts
+and contribute their actual footprints to navigation and camera fitting.
+
+Visible bodies report their natural scroll content and fixed control bands.
+A sole production panel hugs that content until column capacity requires scrolling;
+Assistant declares Fill to use the full available side height. A newly visible unmeasured
+width starts at capacity until its first real paint supplies its natural extent.
+No hidden body is rendered to obtain a measurement.
+
+Bottom History declares a fixed, symmetrically padded icon row. It has no collapse
+or height-resize control; commands enforce the same bounds. A new side column
+inherits the current source column's width, or the registered standard width when
+the source has no column. The standard width matches Classic Browser's default.
+Existing columns and explicit resizing keep their width.
+The full responsive/native acceptance matrix remains roadmap work. This initial
+integration does not close the parent rollout issue.
 
 ## Ownership
 

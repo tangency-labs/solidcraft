@@ -56,6 +56,39 @@ const PREVIEW_MAX: (f32, f32) = (560.0, 380.0);
 
 /// Show or hide the panel (a folded panel unfolds first).
 pub fn toggle(app: &mut SolveApp) {
+    use solidcraft_engine::panels::{LayoutAction, Mutation};
+
+    let shared = app.panel_runtime().filter(|_| !app.preferences.agent_chat_popped).and_then(|runtime| {
+        let layout = runtime.layout().layout();
+        let panel = layout.instances.iter().find(|panel| panel.kind.0 == "solidcraft.assistant")?;
+        let section = layout.containing(&panel.id).ok();
+        let reveal = !app.agent_chat.open || !panel.requested_open || section.is_some_and(|section| section.collapsed || section.active != panel.id);
+        let mutations = if reveal {
+            let section = section.map_or_else(|| panel.memory.section.clone(), |section| section.id.clone());
+            let mut mutations = Vec::new();
+            if !panel.requested_open {
+                mutations.push(Mutation::Open { kind: panel.kind.clone(), instance: panel.id.clone(), destination: None });
+            }
+            mutations.push(Mutation::Collapse { section, collapsed: false });
+            mutations.push(Mutation::Activate { instance: panel.id.clone() });
+            mutations
+        } else {
+            vec![Mutation::Close { instance: panel.id.clone() }]
+        };
+        Some((reveal, LayoutAction::Apply { expected_revision: None, mutations }))
+    });
+    if let Some((reveal, action)) = shared {
+        let was_open = app.agent_chat.open;
+        if reveal {
+            app.agent_chat.open = true;
+        }
+        if let Err(reason) = app.dispatch_panel_layout(action) {
+            app.agent_chat.open = was_open;
+            let _ = crate::panel_runtime::refresh_production(app);
+            app.set_status(solidcraft_engine::panels::commands::error_text(reason), true);
+        }
+        return;
+    }
     let c = &mut app.agent_chat;
     if !c.open {
         c.open = true;
@@ -80,7 +113,8 @@ pub fn tip(app: &SolveApp) -> String {
 /// panel in this window, never label selections belonging to another native viewport.
 /// Called before layout so even a click and a shortcut in the same frame are routed here.
 pub(crate) fn owns_keyboard_input(app: &mut SolveApp, ctx: &egui::Context) -> bool {
-    let rect = app.agent_chat.panel_rect.filter(|_| shown(app) && app.agent_chat.open && !app.preferences.agent_chat_minimized);
+    let shared = app.universal_panel_host_enabled() && !app.preferences.agent_chat_popped;
+    let rect = app.agent_chat.panel_rect.filter(|_| shown(app) && app.agent_chat.open && (shared || !app.preferences.agent_chat_minimized));
     let Some(rect) = rect else {
         app.agent_chat.keyboard_owned = false;
         return false;
@@ -113,12 +147,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !(app.agent_chat.open && app.preferences.agent_chat_popped) {
         app.agent_chat.window_placed = false;
     }
-    // New chat, when the chat has focus (its input, or the pointer over the panel).
-    let in_chat = ctx.memory(|m| m.has_focus(Id::unique("sc_agent_chat_input")))
-        || ctx.pointer_hover_pos().is_some_and(|p| app.agent_chat.panel_rect.is_some_and(|r| r.contains(p)));
-    if app.agent_chat.open && in_chat && ctx.input_mut(|i| i.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
-        request_new_chat(app);
-    }
+    new_chat_shortcut(app, &ctx);
     if !app.agent_chat.open {
         return;
     }
@@ -178,6 +207,48 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if w.is_finite() && (MIN_WIDTH..=MAX_WIDTH).contains(&w) {
         app.preferences.agent_chat_width = w;
     }
+}
+
+/// Prepare the shared docked presentation without polling its retained service.
+/// Read the previous visible rectangle before clearing this frame's geometry.
+pub(crate) fn prepare_shared(app: &mut SolveApp, ctx: &egui::Context) {
+    if shown(app) {
+        new_chat_shortcut(app, ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        if app.agent_chat.open && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
+            refresh(app, ctx);
+        }
+    }
+    app.agent_chat.panel_rect = None;
+    app.agent_chat.drop_rect = None;
+    app.agent_chat.dock_space = None;
+    app.agent_chat.window_placed = false;
+}
+
+/// Independent viewers and drop feedback keep their existing window policy.
+pub(crate) fn finish_shared(app: &mut SolveApp, ctx: &egui::Context) {
+    if !shown(app) || !app.agent_chat.open {
+        app.agent_chat.keyboard_owned = false;
+        return;
+    }
+    if app.agent_chat.panel_rect.is_none() {
+        app.agent_chat.keyboard_owned = false;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    gallery_window(app, ctx);
+    show_drop_hint(app, ctx);
+}
+
+/// Existing Assistant controls and conversation, inside the shared host's body.
+pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let rect = ui.max_rect().intersect(ui.clip_rect());
+    if !shown(app) || !app.agent_chat.open || !rect.is_finite() || !rect.is_positive() {
+        return;
+    }
+    app.agent_chat.panel_rect = Some(rect);
+    app.agent_chat.drop_rect = Some(rect);
+    crate::scenario::publish_rect("agent_chat:panel", rect);
+    ui_kit::scope(ui, |ui| content(app, ui));
 }
 
 /// Horizontal room reserved before the history and browser when Assistant is on the left.
@@ -532,11 +603,19 @@ pub const NEW_CHAT_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::L);
 
 /// Clear the chat, asking first when something would be lost.
-fn request_new_chat(app: &mut SolveApp) {
+pub(crate) fn request_new_chat(app: &mut SolveApp) {
     if new_chat_needs_confirm(app) {
         app.agent_chat.confirm_new = true;
     } else {
         new_chat(app);
+    }
+}
+
+fn new_chat_shortcut(app: &mut SolveApp, ctx: &egui::Context) {
+    let in_chat = ctx.memory(|m| m.has_focus(Id::unique("sc_agent_chat_input")))
+        || ctx.pointer_hover_pos().is_some_and(|p| app.agent_chat.panel_rect.is_some_and(|r| r.contains(p)));
+    if app.agent_chat.open && in_chat && ctx.input_mut(|i| i.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
+        request_new_chat(app);
     }
 }
 
@@ -825,6 +904,10 @@ fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response, left: boo
 
 fn body(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
     header(app, ui, left);
+    content(app, ui);
+}
+
+fn content(app: &mut SolveApp, ui: &mut egui::Ui) {
     #[cfg(not(target_arch = "wasm32"))]
     ui_kit::assistant_controls(ui, |ui| switcher(app, ui));
     #[cfg(target_arch = "wasm32")]
@@ -837,6 +920,8 @@ fn body(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let top = ui.cursor().top();
+    let shared = crate::panel_runtime::shared_content_measurement(ui.ctx());
     if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
         refresh(app, ui.ctx());
     }
@@ -861,19 +946,29 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     // Discovery/install guidance must leave room for the pinned composer even when
     // several agents are listed, or when a long message grows the editor.
-    egui::ScrollArea::vertical()
+    let picker_max = if shared {
+        let t = Tokens::get();
+        let composer = crate::panel_runtime::shared_content_composer_height(ui.ctx())
+            .unwrap_or(48.0 + t.control_height * 3.0 + t.space_8 * 2.0 + t.space_6 * 3.0);
+        (ui.available_height() - composer).max(0.0)
+    } else {
+        ui.available_height() / 3.0
+    };
+    let picker = egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_picker_scroll")
-        .max_height(ui.available_height() / 3.0)
+        .min_scrolled_height(0.0)
+        .max_height(picker_max)
         .auto_shrink([false, true])
         .show(ui, |ui| picker(app, ui));
     if state == State::NeedsAuth {
         inset(ui, |ui| auth_box(app, ui));
     }
+    let top_height = ui.cursor().top() - top - picker.inner_rect.height().min(picker.content_size.y) + picker.content_size.y;
     // The input sits at the bottom of the panel and grows upwards: a long message makes its box
     // taller up to `edit_max`, then it scrolls, and the conversation takes what is left above. It
     // is a panel of its own at the bottom, as high as its content this frame, so the buttons under
     // the box are always in view.
-    let edit_max = (ui.available_height() * 0.4).clamp(48.0, 160.0);
+    let edit_max = if shared { 160.0 } else { (ui.available_height() * 0.4).clamp(48.0, 160.0) };
     let busy = state == State::Busy;
     // Enter sends (queues while the agent works); Ctrl/Cmd+Enter sends now; Esc stops. They are
     // read before the field sees them so no newline is typed.
@@ -887,7 +982,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut remove_picked_at = None;
     let frame = Container::new(ui.ctx(), Surface::Viewport).edge_frame(egui::Color32::TRANSPARENT);
     let composer = Container::new(ui.ctx(), Surface::Viewport).edge("sc_agent_chat_composer", Edge::Bottom);
-    composer.resizable(false).show_separator_line(false).frame(frame).show(ui, |ui| {
+    let composer = composer.resizable(false).show_separator_line(false).frame(frame).show(ui, |ui| {
         let footer = ui_kit::assistant_composer_footer(ui, |ui| {
             let boxed = ui_kit::assistant_composer(ui, focused, |ui| {
                 // What Pick context chose for this message, each item with an ×.
@@ -907,7 +1002,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .max_height(edit_max)
                     // Grow the bottom panel to the editor's scroll limit instead of letting
                     // its previous short-message height clip the action rows below it.
-                    .min_scrolled_height(edit_max)
+                    .min_scrolled_height(if shared { 48.0 } else { edit_max })
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
                         ui_kit::assistant_input(
@@ -919,6 +1014,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     })
                     .inner;
                 crate::scenario::publish_rect("agent_chat:input", r.rect);
+                crate::panel_runtime::register_content_focus(ui.ctx(), &r);
                 // macOS shows a window's cursors only while it is the active window: over the text box of a
                 // chat window that isn't, the pointer stays an arrow. Coming from the main window, the chat
                 // window becomes active, so the text cursor shows and the first click places the caret.
@@ -1032,14 +1128,16 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         crate::scenario::publish_rect("agent_chat:composer_footer", footer.response.rect);
     });
+    crate::panel_runtime::report_content_composer_height(ui.ctx(), composer.response.rect.height());
     if let Some(at) = remove_picked_at {
         remove_picked(app, at);
     }
     if pick_clicked {
         start_pick(app);
     }
-    egui::ScrollArea::vertical()
+    let conversation = egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_scroll")
+        .min_scrolled_height(0.0)
         .max_height(ui.available_height())
         .auto_shrink([false, false])
         .stick_to_bottom(true)
@@ -1051,6 +1149,8 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Last, so the scroll goes to this area and not to one nested in the conversation.
             scroll_while_selecting(ui);
         });
+    crate::scenario::publish_rect("agent_chat:conversation", conversation.inner_rect);
+    crate::panel_runtime::report_content_extent(ui, top, top_height + composer.response.rect.height() + conversation.content_size.y, false);
     if esc || stop_clicked {
         cancel(app);
     }
@@ -1931,6 +2031,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (Some((i, _)), Some(buf)) if *i == n => {
                     let te = ui_kit::message_field(ui, Id::unique(("sc_agent_pending_input", n)), buf, "");
                     crate::scenario::publish_rect("agent_chat:pending_input", te.rect);
+                    crate::panel_runtime::register_content_focus(ui.ctx(), &te);
                     ui.horizontal(|ui| {
                         if ui_kit::button(ui, tr("ui.agent_chat_save"), ui_kit::Button::Normal).clicked() {
                             edit_done = Some((n, Some(buf.clone())));

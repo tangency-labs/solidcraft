@@ -159,7 +159,12 @@ pub(crate) fn panel_host_control_label_opacity(
         };
         let icon_rect = egui::Rect::from_center_size(center, egui::vec2(extent, extent));
         if chrome.icon_only {
-            crate::icons::paint_ink(&painter, icon_rect, icon, ink);
+            if let Some(transport) = icon.strip_prefix("timeline_").filter(|name| matches!(*name, "first" | "back" | "play" | "forward" | "last")) {
+                let glyph = if transport == "play" && chrome.selected { "pause" } else { transport };
+                crate::icons::glyphs::transport_glyph(&painter, icon_rect.center(), glyph, ink);
+            } else {
+                crate::icons::paint_ink(&painter, icon_rect, icon, ink);
+            }
         } else {
             crate::icons::paint_icon(&painter, icon_rect, icon, if chrome.enabled { 1.0 } else { 0.5 });
         }

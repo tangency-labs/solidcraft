@@ -1362,6 +1362,14 @@ fn render_card(app: &mut SolveApp, ui: &mut egui::Ui) {
     );
     if let Some(rect) = rect {
         crate::scenario::publish_rect("browser:card", rect);
+    }
+    render_appearances(app, ui, rect);
+}
+
+/// Keep the existing appearances companion below either Browser host.
+pub(crate) fn render_appearances(app: &mut SolveApp, ui: &mut egui::Ui, browser: Option<Rect>) {
+    if let Some(rect) = browser {
+        let bounds = crate::shell::panel_bounds(app, ui.available_rect_before_wrap());
         crate::render_workspace::appearances_card(app, ui, crate::ui_kit::Panel::stack_next_bounds(bounds, rect));
     } else {
         crate::shell::register_panel(app, "render:appearances", None, None);
@@ -1429,8 +1437,27 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
         t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top() + 1.0, t.toolbar.lerp_to_gamma(t.border, 0.5));
         ui.add_space(t.space_3);
     }
+    rows_contents(app, ui, collapsible && !stacked);
+}
+
+/// Existing Browser content without placement, title or collapse chrome.
+pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
+    sync_reveals(app);
+    let render = crate::render_workspace::active(app);
+    if render {
+        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_compact_tree"), true));
+    }
+    if !crate::render_workspace::browser_mode(app, ui) {
+        rows_contents(app, ui, true);
+    }
+    if render {
+        ui.ctx().data_mut(|data| data.remove::<bool>(egui::Id::unique("sc_compact_tree")));
+    }
+}
+
+fn rows_contents(app: &mut SolveApp, ui: &mut egui::Ui, shrink_height: bool) {
     crate::edit_in_place::browser_strip(app, ui);
-    if collapsible && !stacked {
+    if shrink_height {
         browser_rows_hugging(app, ui);
     } else {
         browser_rows(app, ui);
@@ -1569,7 +1596,8 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
     prepare_model(app);
     let mut cache = app.tree.cache.take().unwrap_or_default();
     cache.prepare(app);
-    egui::ScrollArea::vertical()
+    let top = ui.cursor().top();
+    let output = egui::ScrollArea::vertical()
         // The card may animate all the way down to its header.
         .min_scrolled_height(0.0)
         .auto_shrink([false, shrink_height])
@@ -1586,6 +1614,7 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
                 component_rows(app, ui, 0, 0, acts, &mut cache);
             }
         });
+    crate::panel_runtime::report_content_extent(ui, top, output.content_size.y, true);
     app.tree.cache = Some(cache);
 }
 
@@ -3100,6 +3129,7 @@ fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, label_left: f
     ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
     let id = ui.scope_id().with(("browser_rename", &e.row_key));
     let response = crate::ui_kit::inline_name(ui, edit_rect, id, &mut rename.text);
+    crate::panel_runtime::register_content_focus(ui.ctx(), &response);
     crate::scenario::publish_handle(&format!("rename:{}", e.key), edit_rect.center());
     let was_focused = rename.focused;
     if !rename.focused {

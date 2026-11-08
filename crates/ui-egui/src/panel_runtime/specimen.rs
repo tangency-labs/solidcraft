@@ -170,6 +170,7 @@ fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
             },
             features: PanelFeatures { multi_instance: !editor, popout: false, hot_closable: editor, ..PanelFeatures::default() },
             side_height_policy: if fill { SideHeightPolicy::Fill } else { SideHeightPolicy::Content },
+            fixed_bottom_height: None,
             header_actions: if editor {
                 vec![HeaderActionSpec { id: ControlId::new("apply")?, label_key: "ui.panel_fixture.apply".into(), icon: "list".into() }]
             } else {

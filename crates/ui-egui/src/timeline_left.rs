@@ -332,13 +332,21 @@ pub fn left_timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top(), t.border);
     ui.add_space(t.space_3);
-    egui::ScrollArea::vertical()
+    panel_contents(app, ui);
+}
+
+/// Side History rows retain their own scroll state without legacy transport chrome.
+pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let names = names_fit(ui.available_width());
+    let top = ui.cursor().top();
+    let output = egui::ScrollArea::vertical()
         .id_salt("sc_left_timeline_scroll")
         // The animated card owns its height, including the last few closing frames.
         .min_scrolled_height(0.0)
         .auto_shrink([false, false])
         .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: true, mouse_wheel: true, ..egui::scroll_area::ScrollSource::NONE })
         .show(ui, |ui| vertical_features(app, ui, names));
+    crate::panel_runtime::report_content_extent(ui, top, output.content_size.y, true);
 }
 
 fn timeline_transport(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
@@ -1058,6 +1066,7 @@ fn timeline_group_name(
     let edit_rect = Rect::from_min_max(pos2(left, rect.top() + 1.0), pos2(rect.right() - 3.0, rect.bottom() - 1.0));
     let edit_id = ui.scope_id().with(("timeline_group_rename", group.id));
     let response = crate::ui_kit::inline_name(ui, edit_rect, edit_id, &mut rename.text);
+    crate::panel_runtime::register_content_focus(ui.ctx(), &response);
     crate::scenario::publish_handle(&format!("timeline-folder-rename:{}", group.name), edit_rect.center());
     if !rename.focused {
         if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), edit_id) {

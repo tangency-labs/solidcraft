@@ -1298,6 +1298,8 @@ preference_settings! {
     language: String = "system".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.
     layout: crate::shell::LayoutMode = Default::default(), PAGE_LAYOUT;
+    /// Mount existing docked content in the shared layout; Classic stays available.
+    shared_panel_layout: bool = false, PAGE_LAYOUT;
     /// Ordered view controls and their appearance.
     #[serde(default)]
     navigation_bar: crate::navigation_bar::NavigationBar = Default::default(), PAGE_LAYOUT;
@@ -2794,7 +2796,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     match button {
         Some("defaults") => defaults(app, app.prefs_window.section),
-        Some("apply") if app.prefs_window.panel_restore_error.is_none() => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") if app.prefs_window.panel_restore_error.is_none() => match crate::panel_runtime::sync_production_setting(app) {
+            Ok(()) => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+            Err(reason) => app.prefs_window.panel_restore_error = Some(solidcraft_engine::panels::commands::error_text(reason)),
+        },
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
         _ if closed => close(app, true),
@@ -3308,7 +3313,10 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     match button.as_ref().and_then(|b| b.as_str()) {
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
-        Some("apply") if app.prefs_window.panel_restore_error.is_none() => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") if app.prefs_window.panel_restore_error.is_none() => {
+            crate::panel_runtime::sync_production_setting(app).map_err(solidcraft_engine::panels::commands::error_text)?;
+            app.prefs_window.snapshot = Some(Snapshot::take(app));
+        }
         Some("apply") => {}
         Some("defaults") => defaults(app, app.prefs_window.section),
         Some(b) => return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults)")),

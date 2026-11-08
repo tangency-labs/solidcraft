@@ -2127,7 +2127,7 @@ fn allocation_full_domain_and_short_wide_inline_roles_keep_real_usable_contours_
         let card = &host.sections[0];
         assert!(card.inline && card.body.is_none() && card.footer.is_none());
         assert_eq!(card.header, card.outer, "one total row is shared by controls and inline content");
-        let controls = [card.actions[0].1, card.menu, card.collapse, card.close.unwrap()];
+        let controls = [card.actions[0].1, card.menu, card.collapse.unwrap(), card.close.unwrap()];
         for pair in controls.windows(2) {
             assert!(if direction == Direction::Ltr { pair[0].origin.x < pair[1].origin.x } else { pair[0].origin.x > pair[1].origin.x });
         }
@@ -2291,7 +2291,7 @@ fn assert_host_geometry(h: &PanelMountHarness, host: &HostLayout) {
             .chain(card.tabs.iter().map(|tab| tab.bounds))
             .chain(card.tab_overflow)
             .chain(card.actions.iter().map(|(_, bounds)| *bounds))
-            .chain([card.menu, card.collapse])
+            .chain([card.menu, card.collapse.unwrap()])
             .chain(card.close)
             .chain(card.inline_content)
             .collect();
@@ -10159,7 +10159,7 @@ fn raw_inline_title_actions_editor_and_system_slots_mirror_and_keep_editor_ident
             assert!(card.inline && card.body.is_none() && card.footer.is_none());
             assert_eq!(card.outer.size.height, 64.0);
             let shared_title = card.title.expect("inline composition retains the actual shared title/grip");
-            let slots = [shared_title, card.actions[0].1, card.inline_content.unwrap(), card.menu, card.collapse, card.close.unwrap()];
+            let slots = [shared_title, card.actions[0].1, card.inline_content.unwrap(), card.menu, card.collapse.unwrap(), card.close.unwrap()];
             for pair in slots.windows(2) {
                 if direction == Direction::Ltr {
                     assert!(pair[0].origin.x + pair[0].size.width <= pair[1].origin.x);
@@ -12971,4 +12971,357 @@ fn late_modal_reentry_surrenders_content_focused_after_mount() {
         assert_eq!(egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap().cursor.char_range(), caret);
         assert_eq!(raw.content.commands.calls, 0);
     }
+}
+
+fn production_content_harness(combined_history: bool, assistant: bool) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.ui.show_timeline = true;
+    h.app.preferences.timeline_left = false;
+    h.app.preferences.history_in_browser = combined_history;
+    h.app.preferences.ai_features = assistant;
+    h.app.agent_chat.open = assistant;
+    for name in ["First", "Second"] {
+        h.app.run("sketch.create", serde_json::json!({"plane":"XY","name":name})).unwrap();
+        h.app.run("sketch.finish", serde_json::json!({})).unwrap();
+    }
+    h.app.preferences.shared_panel_layout = true;
+    super::production::enable_production(&mut h.app).unwrap();
+    h.frames(3);
+    h
+}
+
+fn production_controller_keys(app: &crate::SolveApp) -> Vec<ControllerKey> {
+    let runtime = app.panel_runtime().unwrap();
+    ["browser", "history", "assistant", "render-browser"]
+        .into_iter()
+        .filter_map(|name| {
+            let instance = id(name);
+            let owner = runtime.instance_owner(&instance).unwrap();
+            let key = ControllerKey { instance, owner };
+            runtime.state(&key).map(|_| key)
+        })
+        .collect()
+}
+
+#[test]
+fn production_browser_and_history_mount_existing_content_once_and_preserve_combined_history() {
+    for combined in [false, true] {
+        let h = production_content_harness(combined, false);
+        let frame = h.app.universal_panel_frame().expect("real content uses the shared host");
+        assert!(frame.layout.sections.iter().any(|card| card.instance == id("browser")));
+        assert_eq!(frame.layout.sections.iter().any(|card| card.instance == id("history")), !combined);
+        let rows = crate::browser::drawn_rows();
+        for name in ["First", "Second"] {
+            assert_eq!(rows.iter().filter(|row| row.0 == name).count(), 1, "{name} has one canonical Browser presentation");
+            assert_eq!(crate::scenario::handle_at(&format!("timeline:{name}")).is_some(), !combined);
+        }
+        if combined {
+            assert!(rows.iter().any(|row| row.0 == crate::i18n::tr("ui.history_title")), "combined History keeps its real Browser folder");
+        } else {
+            let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
+            assert!(history.inline, "Bottom History uses the generic one-row composition");
+            let body = egui_rect(history.inline_content.unwrap());
+            let first = crate::scenario::handle_at("timeline:First").unwrap();
+            assert!(body.contains(first), "the real feature chips are inside the shared inline slot");
+        }
+        assert!(h.app.panel_runtime().unwrap().update_errors().is_empty());
+    }
+}
+
+#[test]
+fn production_tab_collapse_and_move_keep_real_selection_document_camera_and_retained_owners() {
+    let mut h = production_content_harness(false, false);
+    let feature = h.app.session.doc.features[0].id;
+    h.app.run("select.set", serde_json::json!({"items":[solidcraft_engine::Sel::Feature { id: feature }]})).unwrap();
+    h.frames(2);
+    let session = h.app.session.uid;
+    let document = h.app.session.doc.clone();
+    let model = h.app.session.model.state();
+    let camera = h.app.cam;
+    let selection = h.app.session.selection.clone();
+    let revision = h.app.session.revision;
+    let undo = h.app.session.undo.len();
+    let dirty = h.app.session.is_dirty();
+    let keys = production_controller_keys(&h.app);
+    let controllers = h.app.panel_runtime().unwrap().controller_count();
+    let browser_section = h.app.panel_runtime().unwrap().layout().layout().containing(&id("browser")).unwrap().id.clone();
+    h.app
+        .dispatch_panel_layout(transaction(vec![
+            Mutation::Move { instance: id("history"), destination: Destination::JoinTab { section: browser_section.clone(), index: 1 } },
+            Mutation::Activate { instance: id("history") },
+        ]))
+        .unwrap();
+    h.frames(3);
+    assert!(crate::browser::drawn_rows().is_empty(), "an inactive Browser does not render a hidden body");
+    assert!(crate::scenario::handle_at("timeline:First").is_some(), "History switches to its existing side rows");
+    h.app.dispatch_panel_layout(transaction(vec![Mutation::Activate { instance: id("browser") }])).unwrap();
+    h.frames(2);
+    assert!(crate::browser::drawn_rows().iter().any(|row| row.0 == "First"));
+    for collapsed in [true, false] {
+        h.app.dispatch_panel_layout(transaction(vec![Mutation::Collapse { section: browser_section.clone(), collapsed }])).unwrap();
+        h.frames(2);
+        assert_eq!(crate::browser::drawn_rows().is_empty(), collapsed, "collapse controls real body work");
+    }
+    h.app
+        .dispatch_panel_layout(transaction(vec![Mutation::Move {
+            instance: id("browser"),
+            destination: Destination::NewSection {
+                section: section("moved-browser"),
+                index: 0,
+                location: SectionLocation::Dock { zone: Zone::Right },
+                size: Size { width: 300.0, height: 320.0 },
+            },
+        }]))
+        .unwrap();
+    h.frames(3);
+    let card = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|card| card.instance == id("browser")).unwrap();
+    assert_eq!(card.zone, Zone::Right);
+    assert!(crate::browser::drawn_rows().iter().any(|row| row.0 == "First"));
+    assert_eq!(production_controller_keys(&h.app), keys);
+    assert_eq!(h.app.panel_runtime().unwrap().controller_count(), controllers);
+    assert_eq!(h.app.session.uid, session);
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &document));
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.model.state(), &model));
+    assert_eq!(h.app.cam, camera);
+    assert_eq!(h.app.session.selection, selection);
+    assert_eq!(h.app.session.revision, revision);
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.is_dirty(), dirty);
+}
+
+#[test]
+fn production_browser_and_assistant_refuse_bottom_without_changing_live_content() {
+    let mut h = production_content_harness(false, true);
+    h.app.agent_chat.input = "keep this unsent draft".into();
+    let document = h.app.session.doc.clone();
+    let camera = h.app.cam;
+    let controllers = h.app.panel_runtime().unwrap().controller_count();
+    for instance in ["browser", "assistant"] {
+        let before = h.app.panel_runtime().unwrap().layout().inspect();
+        let result = h.app.dispatch_panel_layout(transaction(vec![Mutation::Move {
+            instance: id(instance),
+            destination: Destination::NewSection {
+                section: section("forbidden-bottom"),
+                index: 0,
+                location: SectionLocation::Dock { zone: Zone::Bottom },
+                size: Size { width: 400.0, height: 120.0 },
+            },
+        }]));
+        assert_eq!(result.unwrap_err().rule, Rule::Placement, "only product History permits Bottom");
+        assert_eq!(h.app.panel_runtime().unwrap().layout().inspect(), before);
+        h.frames(2);
+        assert_eq!(h.app.agent_chat.input, "keep this unsent draft");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &document));
+        assert_eq!(h.app.cam, camera);
+        assert_eq!(h.app.panel_runtime().unwrap().controller_count(), controllers);
+    }
+}
+
+#[test]
+fn production_setting_cancel_preserves_classic_and_apply_enables_the_real_host() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    assert!(!h.app.preferences.shared_panel_layout);
+    assert!(h.app.panel_runtime().is_none());
+    crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Layout"})).unwrap();
+    h.app.preferences.shared_panel_layout = true;
+    h.frames(2);
+    assert!(h.app.panel_runtime().is_none(), "an unapplied checkbox cannot replace Classic during the Preferences preview");
+    crate::prefs::control(&mut h.app, &serde_json::json!({"button":"cancel"})).unwrap();
+    h.frames(2);
+    assert!(!h.app.preferences.shared_panel_layout);
+    assert!(h.app.panel_runtime().is_none());
+    crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Layout"})).unwrap();
+    h.app.preferences.shared_panel_layout = true;
+    crate::prefs::control(&mut h.app, &serde_json::json!({"button":"apply"})).unwrap();
+    assert!(h.app.prefs_window.open, "Apply keeps Preferences open");
+    assert!(h.app.panel_runtime().is_some(), "Apply accepts the production-host preference");
+    h.app.preferences.shared_panel_layout = false;
+    crate::prefs::control(&mut h.app, &serde_json::json!({"button":"cancel"})).unwrap();
+    h.frames(3);
+    assert!(h.app.preferences.shared_panel_layout, "Cancel restores the last applied setting");
+    assert!(h.app.universal_panel_frame().is_some());
+    let saved = h.app.prefs();
+    let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+    restored.load_prefs(&saved);
+    assert!(restored.preferences.shared_panel_layout, "the opt-in setting survives the existing preference envelope");
+}
+
+#[test]
+fn production_assistant_actions_use_the_existing_confirmation_and_close_retains_its_draft_and_queue() {
+    let mut h = production_content_harness(false, true);
+    h.app.agent_chat.input = "unsent composer draft".into();
+    h.app.agent_chat.items.push(crate::agent_chat::Item::Agent { thought: false, text: "retained transcript".into() });
+    h.app.agent_chat.pending.push(crate::agent_chat::Pending {
+        text: "queued instruction".into(),
+        image: false,
+        context: Default::default(),
+        files: Vec::new(),
+    });
+    let pending = h.app.agent_chat.pending.clone();
+    let state = h.app.agent_chat.state();
+    let keys = production_controller_keys(&h.app);
+    let controllers = h.app.panel_runtime().unwrap().controller_count();
+    h.app.panel_content_action(&id("assistant"), &ControlId::new("new-chat").unwrap()).unwrap();
+    super::production::drain_production_actions(&mut h.app).unwrap();
+    assert!(h.app.agent_chat.confirm_new, "the real New Chat confirmation protects queued instructions");
+    assert_eq!(h.app.agent_chat.items.len(), 1);
+    assert_eq!(h.app.agent_chat.pending, pending);
+    h.app.agent_chat.confirm_new = false;
+    h.frames(2);
+    h.app.dispatch_panel_layout(transaction(vec![Mutation::Close { instance: id("assistant") }])).unwrap();
+    h.frames(2);
+    assert!(!h.app.universal_panel_frame().unwrap().layout.sections.iter().any(|card| card.instance == id("assistant")));
+    assert_eq!(h.app.agent_chat.input, "unsent composer draft");
+    assert_eq!(h.app.agent_chat.pending, pending);
+    assert_eq!(h.app.agent_chat.items.len(), 1);
+    assert_eq!(h.app.agent_chat.state(), state, "closing presentation does not restart or cancel the retained chat service");
+    h.app.start("ui.assistant");
+    h.frames(2);
+    assert!(h.app.agent_chat.panel_rect.is_some(), "the existing Assistant button reopens the shared body after quick close");
+    let section = h.app.panel_runtime().unwrap().layout().layout().containing(&id("assistant")).unwrap().id.clone();
+    h.app.dispatch_panel_layout(transaction(vec![Mutation::Collapse { section: section.clone(), collapsed: true }])).unwrap();
+    h.frames(2);
+    assert!(h.app.agent_chat.panel_rect.is_none());
+    crate::agent_chat::toggle(&mut h.app);
+    h.frames(2);
+    assert!(h.app.agent_chat.panel_rect.is_some(), "the keyboard toggle expands a shared collapsed Assistant");
+    h.app.dispatch_panel_layout(transaction(vec![Mutation::Collapse { section, collapsed: true }])).unwrap();
+    h.app.dispatch_panel_layout(transaction(vec![Mutation::Close { instance: id("assistant") }])).unwrap();
+    h.frames(2);
+    h.app.start("ui.assistant");
+    h.frames(2);
+    assert!(h.app.agent_chat.panel_rect.is_some(), "opening a panel remembered as collapsed expands it atomically");
+    h.app.start("ui.assistant");
+    h.frames(2);
+    assert!(h.app.agent_chat.panel_rect.is_none(), "the existing Assistant button closes an expanded shared Assistant");
+    crate::agent_chat::toggle(&mut h.app);
+    h.frames(2);
+    assert!(h.app.agent_chat.panel_rect.is_some());
+    assert_eq!(h.app.agent_chat.input, "unsent composer draft");
+    assert_eq!(h.app.agent_chat.pending, pending);
+    assert_eq!(production_controller_keys(&h.app), keys);
+    assert_eq!(h.app.panel_runtime().unwrap().controller_count(), controllers);
+    h.app.agent_chat.pending.clear();
+    h.app.panel_content_action(&id("assistant"), &ControlId::new("new-chat").unwrap()).unwrap();
+    super::production::drain_production_actions(&mut h.app).unwrap();
+    assert!(!h.app.agent_chat.confirm_new);
+    assert!(h.app.agent_chat.items.is_empty(), "the same New Chat action clears the real transcript when no confirmation is needed");
+    assert_eq!(h.app.agent_chat.input, "unsent composer draft");
+}
+
+#[test]
+fn production_render_browser_reuses_real_lens_search_and_retains_explicit_layout_workspace() {
+    let mut h = production_content_harness(false, false);
+    let workspace = h.app.panel_runtime().unwrap().layout().layout().workspace.clone();
+    let document = h.app.session.doc.clone();
+    let camera = h.app.cam;
+    h.app.ui.tab = "RENDER".into();
+    h.frames(3);
+    let frame = h.app.universal_panel_frame().unwrap();
+    assert!(frame.layout.sections.iter().any(|card| card.instance == id("render-browser")));
+    assert!(!frame.layout.sections.iter().any(|card| card.instance == id("browser")));
+    h.app.panel_content_action(&id("render-browser"), &ControlId::new("by-look").unwrap()).unwrap();
+    super::production::drain_production_actions(&mut h.app).unwrap();
+    h.frames(2);
+    assert!(h.app.render_workspace.view.by_look);
+    h.app.panel_content_action(&id("render-browser"), &ControlId::new("search").unwrap()).unwrap();
+    super::production::drain_production_actions(&mut h.app).unwrap();
+    h.frames(2);
+    assert!(h.app.render_workspace.view.search_objects);
+    let search = h.app.panel_runtime().unwrap().instance_presentation(&id("render-browser")).unwrap();
+    assert_eq!(search.actions.iter().find(|action| action.id.0 == "search").unwrap().pressed, Some(true));
+    assert_eq!(h.app.panel_runtime().unwrap().layout().layout().workspace, workspace, "changing ribbon tabs never selects a layout workspace");
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &document));
+    assert_eq!(h.app.cam, camera);
+    h.app.ui.tab = "SOLID".into();
+    h.frames(2);
+    assert!(h.app.universal_panel_frame().unwrap().layout.sections.iter().any(|card| card.instance == id("browser")));
+    h.app.ui.tab = "RENDER".into();
+    h.frames(2);
+    assert!(h.app.render_workspace.view.by_look && h.app.render_workspace.view.search_objects);
+}
+
+#[test]
+fn production_short_render_assistant_keeps_conversation_above_the_pinned_composer() {
+    let mut h = production_content_harness(false, true);
+    h.call("ui.resize", serde_json::json!({"width":1600,"height":720}));
+    h.app.ui.tab = "RENDER".into();
+    h.frames(3);
+    let conversation = crate::scenario::rect_of("agent_chat:conversation").unwrap();
+    let composer = crate::scenario::rect_of("agent_chat:composer_footer").unwrap();
+    assert!(conversation.height() < 64.0, "exercise the short viewport that formerly expanded over the composer");
+    assert!(
+        !conversation.is_positive() || conversation.bottom() <= composer.top() + 1.0,
+        "a short transcript viewport must not paint or scroll over the composer"
+    );
+    assert!(crate::scenario::rect_of("agent_chat:input").is_some());
+}
+
+#[test]
+fn production_sole_content_tracks_real_tree_folds_and_stops_at_column_capacity() {
+    let mut h = production_content_harness(false, true);
+    h.frames(6);
+    let frame = h.app.universal_panel_frame().unwrap();
+    let browser = frame.layout.sections.iter().find(|card| card.instance == id("browser")).unwrap();
+    let original_height = browser.outer.size.height;
+    assert!(original_height < frame.layout.capacity.size.height - 20.0);
+    let assistant = frame.layout.sections.iter().find(|card| card.instance == id("assistant")).unwrap();
+    let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
+    let available = history.outer.origin.y - frame.layout.metrics.gap - assistant.outer.origin.y;
+    assert!((assistant.outer.size.height - available).abs() < 1.0, "Assistant fills its available column height even with an empty conversation");
+    let root = crate::browser::drawn_rows().first().unwrap().0.clone();
+    let point = h.call("ui.at", serde_json::json!({"chevron":root}));
+    h.call("ui.click", serde_json::json!({"x":point["result"][0],"y":point["result"][1]}));
+    h.frames(6);
+    let folded = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|card| card.instance == id("browser")).unwrap().outer.size.height;
+    assert!(folded < original_height - 20.0, "folding real content releases the unused space");
+    let point = h.call("ui.at", serde_json::json!({"chevron":root}));
+    h.call("ui.click", serde_json::json!({"x":point["result"][0],"y":point["result"][1]}));
+    h.call("ui.resize", serde_json::json!({"width":1600,"height":350}));
+    h.frames(6);
+    let frame = h.app.universal_panel_frame().unwrap();
+    let browser = frame.layout.sections.iter().find(|card| card.instance == id("browser")).unwrap();
+    let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
+    let available = history.outer.origin.y - frame.layout.metrics.gap - browser.outer.origin.y;
+    assert!((browser.outer.size.height - available).abs() < 1.0, "long content is capped above Bottom History and its gap");
+}
+
+#[test]
+fn production_bottom_history_has_fixed_height_without_collapse_or_height_changes() {
+    let mut h = production_content_harness(false, false);
+    h.frames(6);
+    let frame = h.app.universal_panel_frame().unwrap();
+    let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
+    let spec = h.app.panel_runtime().unwrap().layout().registry().get(&PanelKind::new("solidcraft.history").unwrap()).unwrap();
+    assert_eq!(history.outer.size.height, spec.fixed_bottom_height.unwrap());
+    assert!(history.collapse.is_none());
+    let before = h.app.panel_runtime().unwrap().layout().inspect();
+    assert!(h.app.run_panel_command("panel.collapse", &serde_json::json!({"target":{"type":"instance","id":"history"},"collapsed":true})).is_err());
+    assert!(
+        h.app
+            .run_panel_command(
+                "panel.resize",
+                &serde_json::json!({"target":{"type":"instance","id":"history"},"size":{"width":760,"height":100},"thickness_only":true})
+            )
+            .is_err()
+    );
+    assert_eq!(h.app.panel_runtime().unwrap().layout().inspect(), before);
+}
+
+#[test]
+fn production_fixed_bottom_history_ignores_a_legacy_collapsed_preference() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_timeline = true;
+    h.app.preferences.timeline_left = false;
+    h.app.preferences.timeline_collapsed = true;
+    h.app.preferences.shared_panel_layout = true;
+    super::production::enable_production(&mut h.app).unwrap();
+    h.frames(6);
+    let section = h.app.panel_runtime().unwrap().layout().layout().containing(&id("history")).unwrap();
+    assert_eq!(section.location.zone(), Zone::Bottom);
+    assert!(!section.collapsed);
 }

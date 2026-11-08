@@ -206,6 +206,25 @@ pub enum ContentSlot {
     Inline,
 }
 
+/// A frame-scoped content binding. Application bodies may borrow their existing
+/// owner for this paint without storing that borrow in a retained controller.
+/// The host supplies the same bounded slot and focus services as ordinary content.
+pub trait FramePanelContent {
+    fn render(
+        &mut self,
+        slot: ContentSlot,
+        ui: &mut egui::Ui,
+        context: &PanelContext,
+        content: &mut dyn super::PanelController,
+        services: &mut super::ContentServices<'_>,
+    ) -> PanelResult<()> {
+        if slot == ContentSlot::Inline { content.render_inline(ui, context, services) } else { content.render(slot, ui, context, services) }
+    }
+}
+
+pub(super) struct ControllerFrameContent;
+impl FramePanelContent for ControllerFrameContent {}
+
 /// Shared host adapter seam. Geometry is resolved by the host; content chooses
 /// its own scrolling within slots. The egui adapter below owns one kit Container.
 pub trait PanelHost {

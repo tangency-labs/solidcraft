@@ -1424,6 +1424,16 @@ pub fn host_drop_targets(service: &LayoutService, layout: &HostLayout, instance:
     }
     service.availability(instance).require()?;
     let source = service.layout().containing(instance)?;
+    // A side column supplies its current width. A wide Bottom or floating
+    // presentation must not stretch a newly created side column to that width.
+    let column_width = if source.location.zone().side() {
+        let column = source.column.as_ref().ok_or_else(|| error(Rule::Placement, "side source has no column"))?;
+        service.layout().column(column)?.width
+    } else {
+        let panel = service.layout().instance(instance)?;
+        service.registry().get(&panel.kind)?.default_size.width
+    };
+    let column_size = Size { width: column_width, ..source.size };
     let new_section = if source.tabs.len() == 1 {
         source.id.clone()
     } else {
@@ -1472,7 +1482,7 @@ pub fn host_drop_targets(service: &LayoutService, layout: &HostLayout, instance:
                         placement,
                         new_section: new_section.clone(),
                         new_column: Some(new_column.clone()),
-                        size: source.size,
+                        size: column_size,
                     },
                     3,
                     Some((true, at)),
@@ -1579,11 +1589,16 @@ pub fn host_drop_targets(service: &LayoutService, layout: &HostLayout, instance:
                 placement: RelativePlacement::BeforeColumn,
                 new_section: new_section.clone(),
                 new_column: Some(new_column.clone()),
-                size: source.size,
+                size: column_size,
             }
         } else {
             let index = service.layout().sections.iter().filter(|section| !(section.id == source.id && source.tabs.len() == 1)).count();
-            Destination::NewSection { section: new_section.clone(), index, location: SectionLocation::Dock { zone }, size: source.size }
+            Destination::NewSection {
+                section: new_section.clone(),
+                index,
+                location: SectionLocation::Dock { zone },
+                size: if zone.side() { column_size } else { source.size },
+            }
         };
         let zone_key = match zone {
             Zone::Left => "Left",

@@ -753,6 +753,19 @@ impl WorkspacePanelHost {
         native: &mut dyn NativeHostAdapter,
         services: &mut ContentServices<'_>,
     ) -> PanelResult<()> {
+        self.show_deferred_with_content(ui, runtime, native, services, &mut super::host::ControllerFrameContent)
+    }
+
+    /// Paint using content borrowed only for this frame. Layout, chrome and
+    /// current-pass focus provenance remain owned by the shared host.
+    pub fn show_deferred_with_content(
+        &mut self,
+        ui: &mut egui::Ui,
+        runtime: &mut PanelRuntime,
+        native: &mut dyn NativeHostAdapter,
+        services: &mut ContentServices<'_>,
+        frame_content: &mut dyn FramePanelContent,
+    ) -> PanelResult<()> {
         if !ui.is_visible() || ui.is_sizing_pass() {
             self.invalidate_context();
             return runtime.mount_in_app(&ResolvedLayout::default(), &mut EmptyPanelHost, services);
@@ -847,7 +860,7 @@ impl WorkspacePanelHost {
                             .layout()
                             .instance(id)
                             .and_then(|panel| runtime.layout().registry().get(&panel.kind))
-                            .is_ok_and(|spec| spec.features.collapsible)
+                            .is_ok_and(|spec| spec.collapsible_in(section.location.zone()))
                     })
                 }),
                 _ => true,
@@ -876,6 +889,7 @@ impl WorkspacePanelHost {
         self.content_reports.clear();
         let mut renderer = WorkspaceContentHost {
             ui,
+            frame_content,
             layout: &frame.layout,
             move_source: self.interaction.move_source(),
             open_menu: self.menu.as_ref(),
@@ -2153,6 +2167,7 @@ pub(super) fn rule_key(rule: Rule) -> &'static str {
 
 struct WorkspaceContentHost<'a> {
     ui: &'a mut egui::Ui,
+    frame_content: &'a mut dyn FramePanelContent,
     layout: &'a HostLayout,
     move_source: Option<&'a InstanceId>,
     open_menu: Option<&'a HostMenu>,
@@ -2428,6 +2443,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                             context,
                             content,
                             services,
+                            self.frame_content,
                             self.content_reports,
                             wanted_focus,
                             &mut failure,
@@ -2442,6 +2458,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                             context,
                             content,
                             services,
+                            self.frame_content,
                             self.content_reports,
                             wanted_focus,
                             &mut failure,
@@ -2455,6 +2472,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                             context,
                             content,
                             services,
+                            self.frame_content,
                             self.content_reports,
                             wanted_focus,
                             &mut failure,
@@ -2521,6 +2539,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                             context,
                             content,
                             services,
+                            self.frame_content,
                             self.content_reports,
                             wanted_focus,
                             &mut failure,
@@ -2566,6 +2585,7 @@ fn render_slot(
     context: &PanelContext,
     content: &mut dyn PanelController,
     services: &mut ContentServices<'_>,
+    frame_content: &mut dyn FramePanelContent,
     reports: &mut egui::IdMap<ContentFocus>,
     wanted_focus: Option<egui::Id>,
     failure: &mut Option<PanelError>,
@@ -2597,11 +2617,7 @@ fn render_slot(
         reports,
     };
     let mut services = ContentServices { models: services.models, commands: &mut *services.commands, local: &mut local };
-    let result = if slot == ContentSlot::Inline {
-        content.render_inline(&mut child, context, &mut services)
-    } else {
-        content.render(slot, &mut child, context, &mut services)
-    };
+    let result = frame_content.render(slot, &mut child, context, content, &mut services);
     if let Err(reason) = result {
         *failure = Some(reason);
     }
@@ -2794,7 +2810,12 @@ impl WorkspacePanelHost {
                                 ui.label(status);
                             }
                         }
-                        let mut actions = vec![HostSharedAction::Focus, HostSharedAction::Collapse];
+                        let mut actions = vec![HostSharedAction::Focus];
+                        if runtime.layout().layout().containing(instance).is_ok_and(|section| {
+                            section_collapsible(runtime.layout().layout(), runtime.layout().registry(), section).unwrap_or(false)
+                        }) {
+                            actions.push(HostSharedAction::Collapse);
+                        }
                         actions.extend([Zone::Left, Zone::Right, Zone::Bottom, Zone::Floating].into_iter().map(HostSharedAction::Move));
                         actions.extend(
                             runtime
