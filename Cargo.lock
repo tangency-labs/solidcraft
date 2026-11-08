@@ -4405,6 +4405,7 @@ dependencies = [
  "image",
  "log",
  "minisign-verify",
+ "muda",
  "nix 0.31.3",
  "pollster 0.4.0",
  "proc-macro2",

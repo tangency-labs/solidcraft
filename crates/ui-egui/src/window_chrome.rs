@@ -28,6 +28,8 @@ use egui::{
 };
 use solidcraft_theme::Tokens;
 
+pub mod native_menu;
+
 /// One caption button: as wide as the native Windows ones.
 pub const BUTTON_WIDTH: f32 = 46.0;
 /// The three caption buttons together.
