@@ -1,211 +1,49 @@
-//! The window's own title bar on Windows and Linux, where the window has no OS decorations
-//! ([`SolveApp::custom_titlebar`]): empty space in the application bar drags the window and a
-//! double-click there maximizes or restores it, caption buttons at the far right minimize,
-//! maximize/restore and close, and thin invisible zones along the window's edges resize it.
-//! Dragging uses the OS's own move loop, so Windows snapping (to the screen edges and corners)
-//! works as with a native title bar.
-//!
-//! The resize zones are as wide as Windows' own resize border at the window's scale
-//! ([`resize_border_px`]), corners win where they overlap the edges ([`resize_hit`]). On Windows
-//! the desktop app answers the system's hit test with them (`apps/solidcraft/src/native_frame.rs`),
-//! so the OS shows its resize cursors and resizes from the first frame; elsewhere egui zones above
-//! everything else start an OS resize ([`resize_zones`]). macOS keeps its traffic lights over the bar
-//! ([`SolveApp::integrated_titlebar`]); the web build has neither.
-//!
-//! Adapted from VectorCraft's `crates/ui-egui/src/titlebar.rs` (MIT OR Apache-2.0).
+//! SolidCraft's window title bar: the shared window chrome ([`crate::window_chrome`]) with the
+//! app's own answers. Closing asks about unsaved designs first ([`window_action`]); on Windows and
+//! Linux without OS decorations ([`SolveApp::custom_titlebar`]) the application bar is the title
+//! bar, and on macOS it runs under the traffic lights ([`SolveApp::integrated_titlebar`]).
 
-use crate::icons::glyphs::paint_glyph;
-use crate::ui_kit::BackingTooltipExt as _;
-use egui::{Color32, CursorIcon, Id, LayerId, Order, PointerButton, Pos2, Rect, ResizeDirection, Sense, Stroke, Ui, ViewportCommand, pos2, vec2};
+use crate::window_chrome::{self, WindowAction};
+pub use crate::window_chrome::{
+    Caption, TRAFFIC_LIGHTS, WIDTH, dpi_scaled_size, drag_area, resize_border_px, resize_hit, resize_zones, toggle_maximize,
+};
+use egui::{Rect, Ui};
 
 use crate::SolveApp;
-use solidcraft_theme::Tokens;
-
-/// One caption button: as wide as the native Windows ones.
-pub const BUTTON_WIDTH: f32 = 46.0;
-/// The three caption buttons together.
-pub const WIDTH: f32 = 3.0 * BUTTON_WIDTH;
-/// Room for the macOS traffic lights at the bar's left end.
-pub const TRAFFIC_LIGHTS: f32 = 76.0;
-/// Windows' resize border at 100 % (96 DPI): `SM_CXSIZEFRAME` + `SM_CXPADDEDBORDER`, 4 + 4 px.
-pub const RESIZE_BORDER_AT_96_DPI: f32 = 8.0;
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Caption {
-    Minimize,
-    Maximize,
-    Close,
-}
-
-/// Left to right.
-pub const CAPTIONS: [Caption; 3] = [Caption::Minimize, Caption::Maximize, Caption::Close];
-
-/// Caption button ids (stable, so tests and agents can find them).
-pub fn caption_id(c: Caption) -> Id {
-    Id::unique(("titlebar-caption", c as u8))
-}
-
-fn maximized(ctx: &egui::Context) -> bool {
-    ctx.input(|i| i.viewport().maximized.unwrap_or(false))
-}
-
-pub fn toggle_maximize(ctx: &egui::Context) {
-    ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized(ctx)));
-}
 
 /// Window actions for the control channel (`ui.window`): minimize, maximize, restore, toggle
 /// (maximize or restore), close.
 pub fn window_action(app: &mut SolveApp, ctx: &egui::Context, action: &str) -> Result<(), String> {
-    match action {
-        "minimize" => ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
-        "maximize" => ctx.send_viewport_cmd(ViewportCommand::Maximized(true)),
-        "restore" => ctx.send_viewport_cmd(ViewportCommand::Maximized(false)),
-        "toggle" => toggle_maximize(ctx),
-        "close" => {
-            // Unsaved designs are asked about first; the window closes once they are answered.
-            crate::documents::request_quit(app);
-            if app.quit_requested {
-                ctx.send_viewport_cmd(ViewportCommand::Close);
-            }
-        }
-        other => return Err(format!("unknown window action `{other}` (minimize, maximize, restore, toggle, close)")),
-    }
+    run(app, ctx, WindowAction::parse(action)?);
     Ok(())
 }
 
-/// The bar's background: a press-and-drag on empty space moves the window, a double-click
-/// toggles maximize. Call it before laying out the bar so its buttons, registered later, take
-/// their clicks.
-pub fn drag_area(ui: &Ui, rect: Rect) {
-    let ctx = ui.ctx();
-    let resp = ui.interact(rect, Id::unique("titlebar-drag"), Sense::click_and_drag());
-    // egui hands a drag that starts on a click-only widget to the drag-sensing background below
-    // it, so remember whether the press itself landed on bare background.
-    if ctx.input(|i| i.pointer.any_pressed()) {
-        let bare = ctx.viewport(|v| v.hits.click.is_some_and(|w| w.id == resp.id));
-        ctx.data_mut(|d| d.insert_temp(resp.id, bare));
+fn run(app: &mut SolveApp, ctx: &egui::Context, action: WindowAction) {
+    if action == WindowAction::Close {
+        // Unsaved designs are asked about first; the window closes once they are answered.
+        crate::documents::request_quit(app);
+        if !app.quit_requested {
+            return;
+        }
     }
-    if resp.double_clicked() {
-        toggle_maximize(ctx);
-    } else if resp.drag_started_by(PointerButton::Primary) && ctx.data(|d| d.get_temp(resp.id).unwrap_or(false)) {
-        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
-    }
+    action.send(ctx);
 }
 
 /// Minimize, Maximize/Restore and Close at the right end of `bar` (the application bar's
-/// rect), full bar height, flush with the window's edge so a maximized window's corner hits
-/// Close.
+/// rect), run as SolidCraft runs them.
 pub fn caption_buttons(app: &mut SolveApp, ui: &mut Ui, bar: Rect) {
-    let t = Tokens::get();
-    let max = maximized(ui.ctx());
-    let mut clicked = None;
-    for (i, c) in CAPTIONS.into_iter().enumerate() {
-        let r = Rect::from_min_size(pos2(bar.right() - WIDTH + i as f32 * BUTTON_WIDTH, bar.top()), vec2(BUTTON_WIDTH, bar.height()));
-        let resp = ui.interact(r, caption_id(c), Sense::click());
-        let fill = match (resp.is_pointer_button_down_on(), resp.hovered()) {
-            (true, _) => t.app_bar_hover_subtle,
-            (_, true) => t.app_bar_hover_button,
-            _ if resp.has_focus() => t.app_bar_hover_button,
-            _ => Color32::TRANSPARENT,
-        };
-        ui.painter().rect_filled(r, 0.0, fill);
-        let ink = t.app_bar_text;
-        paint_glyph(ui, c, max, r.center(), Stroke::new(1.0, ink));
-        let tip = match c {
-            Caption::Minimize => "Minimize",
-            Caption::Maximize if max => "Restore",
-            Caption::Maximize => "Maximize",
-            Caption::Close => "Close",
-        };
-        if resp.backing_on_hover_text(tip).clicked() {
-            clicked = Some(c);
-        }
-    }
-    let action = match clicked {
-        Some(Caption::Minimize) => "minimize",
-        Some(Caption::Maximize) => "toggle",
-        Some(Caption::Close) => "close",
-        None => return,
-    };
-    let _ = window_action(app, &ui.ctx().clone(), action);
-}
-
-/// The resize border in physical pixels at `scale` (1.0 = 96 DPI): Windows' default, scaled and
-/// rounded, never less than a pixel.
-pub fn resize_border_px(scale: f32) -> f32 {
-    let s = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
-    (RESIZE_BORDER_AT_96_DPI * s).round().max(1.0)
-}
-
-/// The side of a corner zone for an edge `edge` wide: twice the edge, so a corner is easy to hit.
-pub fn corner_size(edge: f32) -> f32 {
-    2.0 * edge
-}
-
-/// The edge and corner zones of a window with rect `w`, edges `edge` wide: (zone, direction,
-/// cursor). Corners come last so they win where they overlap the edges.
-pub fn zones(w: Rect, edge: f32) -> [(Rect, ResizeDirection, CursorIcon); 8] {
-    use ResizeDirection::*;
-    let (e, c) = (edge, corner_size(edge));
-    [
-        (Rect::from_min_max(w.left_top(), pos2(w.right(), w.top() + e)), North, CursorIcon::ResizeVertical),
-        (Rect::from_min_max(pos2(w.left(), w.bottom() - e), w.right_bottom()), South, CursorIcon::ResizeVertical),
-        (Rect::from_min_max(w.left_top(), pos2(w.left() + e, w.bottom())), West, CursorIcon::ResizeHorizontal),
-        (Rect::from_min_max(pos2(w.right() - e, w.top()), w.right_bottom()), East, CursorIcon::ResizeHorizontal),
-        (Rect::from_min_size(w.left_top(), vec2(c, c)), NorthWest, CursorIcon::ResizeNwSe),
-        (Rect::from_min_size(w.right_top() - vec2(c, 0.0), vec2(c, c)), NorthEast, CursorIcon::ResizeNeSw),
-        (Rect::from_min_size(w.left_bottom() - vec2(0.0, c), vec2(c, c)), SouthWest, CursorIcon::ResizeNeSw),
-        (Rect::from_min_size(w.right_bottom() - vec2(c, c), vec2(c, c)), SouthEast, CursorIcon::ResizeNwSe),
-    ]
-}
-
-/// The resize direction at `p` in a window with rect `w` and edges `edge` wide, `None` away
-/// from the edges and outside the window. A point is in the window when `min <= p < max` (pixel
-/// rects: the right and bottom pixels are at `max - 1`). Corners win over edges.
-pub fn resize_hit(w: Rect, p: Pos2, edge: f32) -> Option<ResizeDirection> {
-    if !(w.is_positive() && edge > 0.0 && p.x >= w.left() && p.x < w.right() && p.y >= w.top() && p.y < w.bottom()) {
-        return None;
-    }
-    zones(w, edge).into_iter().rev().find(|(r, ..)| p.x >= r.left() && p.x < r.right() && p.y >= r.top() && p.y < r.bottom()).map(|(_, d, _)| d)
-}
-
-/// The window's new physical size when it moves from `old_dpi` to `new_dpi` (Windows'
-/// `WM_GETDPISCALEDSIZE`): the same logical size, rounded as winit rounds the size it then
-/// applies, so the rect the OS suggests mid-move is exactly the rect the window gets.
-pub fn dpi_scaled_size(size: (i32, i32), old_dpi: u32, new_dpi: u32) -> Option<(i32, i32)> {
-    if old_dpi == 0 || new_dpi == 0 || size.0 <= 0 || size.1 <= 0 {
-        return None;
-    }
-    let (old, new) = (f64::from(old_dpi) / 96.0, f64::from(new_dpi) / 96.0);
-    let scale = |v: i32| (f64::from(v) / old * new).round().clamp(1.0, f64::from(i32::MAX)) as i32;
-    Some((scale(size.0), scale(size.1)))
-}
-
-/// Invisible resize zones along the window's edges, above everything else; a press in one
-/// starts an OS resize in that direction. None while the window is maximized or fullscreen.
-pub fn resize_zones(ui: &mut Ui) {
-    let ctx = ui.ctx().clone();
-    if maximized(&ctx) || ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)) {
-        return;
-    }
-    let w = ctx.content_rect();
-    let ppp = ctx.pixels_per_point();
-    let edge = resize_border_px(ctx.input(|i| i.viewport().native_pixels_per_point).unwrap_or(ppp)) / ppp;
-    let layer = LayerId::new(Order::Foreground, Id::unique("titlebar-resize"));
-    let zui = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(w));
-    for (i, (r, dir, cursor)) in zones(w, edge).into_iter().enumerate() {
-        let resp = zui.interact(r, Id::unique(("titlebar-resize", i)), Sense::drag()).on_hover_cursor(cursor);
-        if resp.drag_started_by(PointerButton::Primary) {
-            ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
-        }
+    if let Some(action) = window_chrome::caption_buttons(ui, bar) {
+        run(app, &ui.ctx().clone(), action);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui::{Event, Pos2, RawInput, ViewportId};
+    use crate::window_chrome::{BUTTON_WIDTH, CAPTIONS, caption_id};
+    use egui::{Event, PointerButton, Pos2, RawInput, ResizeDirection, ViewportCommand, ViewportId, pos2, vec2};
     use solidcraft_engine::Session;
+    use solidcraft_theme::Tokens;
 
     /// A headless window `width` pt wide showing the application bar (as the title bar) and the
     /// resize zones.
@@ -416,80 +254,6 @@ mod tests {
         w.maximized = true;
         let cmds = w.gesture(&[pos2(1.0, 300.0), pos2(8.0, 300.0)]);
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::BeginResize(_))), "{cmds:?}");
-    }
-
-    #[test]
-    fn resize_border_is_windows_default_for_the_scale() {
-        for (dpi, px) in [(96.0, 8.0), (120.0, 10.0), (144.0, 12.0), (168.0, 14.0), (192.0, 16.0), (288.0, 24.0)] {
-            assert_eq!(resize_border_px(dpi / 96.0), px, "at {dpi} DPI");
-        }
-        // Never 0 px, whatever the scale says.
-        for bad in [0.0, -1.0, f32::NAN, f32::INFINITY] {
-            assert_eq!(resize_border_px(bad), 8.0, "{bad}");
-        }
-        assert_eq!(resize_border_px(0.01), 1.0);
-        assert_eq!(corner_size(resize_border_px(1.5)), 24.0);
-    }
-
-    #[test]
-    fn hit_test_edges_corners_and_inside() {
-        use ResizeDirection::*;
-        // A window at (100, 50), 1000 x 700 px, at 150 %: 12 px edges, 24 px corners.
-        let w = Rect::from_min_size(pos2(100.0, 50.0), vec2(1000.0, 700.0));
-        let e = resize_border_px(1.5);
-        let (l, t, r, b) = (100.0, 50.0, 1099.0, 749.0); // the outermost pixels
-        for (p, want) in [
-            ((l, 400.0), Some(West)),
-            ((l + 11.0, 400.0), Some(West)),
-            ((l + 12.0, 400.0), None),
-            ((r, 400.0), Some(East)),
-            ((r - 11.0, 400.0), Some(East)),
-            ((r - 12.0, 400.0), None),
-            ((600.0, t), Some(North)),
-            ((600.0, t + 12.0), None),
-            ((600.0, b), Some(South)),
-            ((600.0, b - 11.0), Some(South)),
-            ((l, t), Some(NorthWest)),
-            ((r, t), Some(NorthEast)),
-            ((l, b), Some(SouthWest)),
-            ((r, b), Some(SouthEast)),
-            // Corners win over the edges, along both edges for the corner's length.
-            ((l + 23.0, t), Some(NorthWest)),
-            ((l, t + 23.0), Some(NorthWest)),
-            ((l + 24.0, t), Some(North)),
-            ((l, t + 24.0), Some(West)),
-            ((r - 23.0, b), Some(SouthEast)),
-            ((r, b - 23.0), Some(SouthEast)),
-            ((r - 23.0, t), Some(NorthEast)),
-            ((l, b - 23.0), Some(SouthWest)),
-            ((600.0, 400.0), None),
-            // Outside the window: not ours.
-            ((l - 1.0, 400.0), None),
-            ((r + 1.0, 400.0), None),
-            ((600.0, t - 1.0), None),
-            ((600.0, b + 1.0), None),
-        ] {
-            assert_eq!(resize_hit(w, pos2(p.0, p.1), e), want, "at {p:?}");
-        }
-        assert_eq!(resize_hit(w, pos2(l, 400.0), 0.0), None);
-        assert_eq!(resize_hit(Rect::NOTHING, pos2(l, 400.0), e), None);
-        // Every DPI has a zone on every edge.
-        for dpi in [96.0, 120.0, 144.0, 192.0] {
-            let e = resize_border_px(dpi / 96.0);
-            for (p, d) in [((l, 400.0), West), ((r, 400.0), East), ((600.0, t), North), ((600.0, b), South)] {
-                assert_eq!(resize_hit(w, pos2(p.0, p.1), e), Some(d), "{d:?} at {dpi} DPI");
-            }
-        }
-    }
-
-    #[test]
-    fn dpi_change_keeps_the_logical_size() {
-        assert_eq!(dpi_scaled_size((1600, 1000), 96, 144), Some((2400, 1500)));
-        assert_eq!(dpi_scaled_size((2400, 1500), 144, 96), Some((1600, 1000)));
-        assert_eq!(dpi_scaled_size((1001, 777), 120, 192), Some((1602, 1243)));
-        assert_eq!(dpi_scaled_size((1001, 777), 96, 96), Some((1001, 777)));
-        assert_eq!(dpi_scaled_size((1001, 777), 0, 96), None);
-        assert_eq!(dpi_scaled_size((0, 777), 96, 144), None);
     }
 
     #[test]
