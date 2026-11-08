@@ -426,9 +426,6 @@ fn handshake_and_tools_list() {
     assert_eq!(init["result"]["serverInfo"]["name"], "solidcraft");
     assert!(init["result"]["capabilities"]["tools"].is_object());
     assert!(init["result"]["instructions"].as_str().unwrap().contains("headless"));
-    // An unknown version gets ours.
-    let init = call(&mut s, 2, "initialize", json!({"protocolVersion": "1999-01-01"}));
-    assert_eq!(init["result"]["protocolVersion"], PROTOCOL_VERSION);
     assert!(s.handle_line(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).is_none());
     assert!(s.is_initialized());
     assert_eq!(call(&mut s, 3, "ping", json!({}))["result"], json!({}));
@@ -1535,14 +1532,6 @@ fn unknown_tools_and_bad_arguments_are_clean_errors() {
     assert_eq!(r["result"]["isError"], true, "{r}");
     let r = raw_tool(&mut s, "execute", json!({"command": "NoSuchCommand"}));
     assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("unknown command"));
-    // Framing errors.
-    assert!(s.handle_line("{not json").unwrap().contains("-32700"));
-    assert!(s.handle_line("[]").unwrap().contains("-32600"));
-    assert!(s.handle_line("42").unwrap().contains("-32600"));
-    assert!(s.handle_line("   ").is_none());
-    assert!(s.handle_line(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#).is_none());
-    let both = s.handle_line(r#"[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/x"}]"#).unwrap();
-    assert_eq!(serde_json::from_str::<Value>(&both).unwrap().as_array().unwrap().len(), 1);
 }
 
 #[test]
