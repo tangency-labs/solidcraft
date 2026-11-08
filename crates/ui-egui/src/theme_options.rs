@@ -1,8 +1,6 @@
 //! Standard behaviours are registered here; file declarations alone do not offer a control.
-use crate::{
-    theme::Tokens,
-    theme_files::{OptionDef, OptionValue, ThemeFile},
-};
+use crate::theme_files::{OptionDef, OptionValue, ThemeFile};
+use solidcraft_theme::Tokens;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

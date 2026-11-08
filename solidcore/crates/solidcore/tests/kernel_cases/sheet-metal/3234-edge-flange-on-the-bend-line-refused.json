@@ -1,0 +1,41 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "3234-edge-flange-on-the-bend-line-refused",
+  "expected": {
+    "method": "the base's edge at y = 5 (the setback R + T = 5 from the first flange) is the bend line of the existing flange, not a free edge; a flange there would stand on material the first bend already occupies. The right behaviour is a clean refusal that leaves the sheet unchanged",
+    "outcome": "refused",
+    "refusal": "that edge is the bend line of a flange; pick a free edge of the sheet",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#3234",
+      "tangency-labs/solidcraft#3273"
+    ],
+    "what": "a second edge flange picked on the bend line of an existing flange made a doubled flange with a gap and two shells in one body"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 7 (sheet.flange): that edge is the bend line of a flange; pick a free edge of the sheet",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 7 (sheet.flange): that edge is the bend line of a flange; pick a free edge of the sheet",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3234",
+    "tangency-labs/solidcraft#3273"
+  ],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a second edge flange picked on the bend line of an existing flange made a doubled flange with a gap and two shells in one body",
+  "why_not": [
+    "no kernel operation ran before the failure: step 7 (sheet.flange): that edge is the bend line of a flange; pick a free edge of the sheet"
+  ]
+}

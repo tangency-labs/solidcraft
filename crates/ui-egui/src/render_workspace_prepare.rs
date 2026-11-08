@@ -167,7 +167,7 @@ mod native {
                     // Never free a returned heavy capture on the interactive UI,
                     // report released credit, or start an unbounded fallback.
                     self.prepared = Some(prepared);
-                    Err(crate::i18n::tr("render.preparation_retirement_failed").into())
+                    Err(solidcraft_ui_text::tr("render.preparation_retirement_failed").into())
                 }
             }
         }
@@ -273,7 +273,7 @@ mod native {
         if pending.committed || pending.applied {
             return false;
         }
-        cancel_pending(pending, crate::i18n::tr("render.preparation_cancelled").into());
+        cancel_pending(pending, solidcraft_ui_text::tr("render.preparation_cancelled").into());
         true
     }
     pub(crate) fn document_closing(app: &mut SolveApp, uid: u64) {
@@ -282,7 +282,7 @@ mod native {
             && pending.guard.uid == uid
             && !pending.committed
         {
-            cancel_pending(pending, crate::i18n::tr("render.preparation_cancelled").into());
+            cancel_pending(pending, solidcraft_ui_text::tr("render.preparation_cancelled").into());
         }
         batches::cancel_owner(app, &mut state.batches, uid);
         app.render_preparation = state;
@@ -385,7 +385,7 @@ mod native {
     }
     fn answer(pending: &mut Pending) {
         let Some(origin) = pending.origin.take() else { return };
-        let result = pending.completion.take().unwrap_or_else(|| Err(crate::i18n::tr("render.preparation_retirement_failed").into()));
+        let result = pending.completion.take().unwrap_or_else(|| Err(solidcraft_ui_text::tr("render.preparation_retirement_failed").into()));
         if let Origin::Control { request, echo } = origin {
             let mut reply = match result {
                 Ok(value) => json!({"ok":true,"result":value}),
@@ -487,7 +487,7 @@ mod native {
             if let Some(Origin::Control { request, .. }) = &pending.origin
                 && crate::control::chat_turn_cancelled(request.chat_turn.as_deref())
             {
-                cancel_pending(pending, crate::i18n::tr("render.preparation_cancelled").into());
+                cancel_pending(pending, solidcraft_ui_text::tr("render.preparation_cancelled").into());
             }
         }
         if pending.worker.is_none() {
@@ -747,7 +747,7 @@ mod native {
                     }
                     Err(TrySendError::Full(p) | TrySendError::Disconnected(p)) => {
                         self.prepared = Some(p);
-                        Err(crate::i18n::tr("render.preparation_retirement_failed").into())
+                        Err(solidcraft_ui_text::tr("render.preparation_retirement_failed").into())
                     }
                 }
             }
@@ -756,7 +756,7 @@ mod native {
                     Ok(()) => Ok(()),
                     Err(TrySendError::Full(input) | TrySendError::Disconnected(input)) => {
                         self._unavailable_input = Some(input);
-                        Err(crate::i18n::tr("render.preparation_retirement_failed").into())
+                        Err(solidcraft_ui_text::tr("render.preparation_retirement_failed").into())
                     }
                 }
             }
@@ -934,7 +934,7 @@ mod native {
                     && slot.uid == uid
                 {
                     found = true;
-                    slot.cancelled.get_or_insert_with(|| crate::i18n::tr("render.preparation_cancelled").into());
+                    slot.cancelled.get_or_insert_with(|| solidcraft_ui_text::tr("render.preparation_cancelled").into());
                     if let Some(active) = &mut state.active
                         && active.slot == i
                         && !active.committed
@@ -973,7 +973,7 @@ mod native {
                     }
                     out
                 })
-                .unwrap_or_else(|| Err(crate::i18n::tr("render.live.final_changed").into()))
+                .unwrap_or_else(|| Err(solidcraft_ui_text::tr("render.live.final_changed").into()))
             }
         }
         pub(super) fn poll(app: &mut SolveApp, ctx: &Context, state: &mut State) {
@@ -987,14 +987,14 @@ mod native {
             if !active.applied && !active.cleanup_only {
                 let current = crate::documents::render_owner(app, slot.uid);
                 if current.is_none() || slot.first.as_ref().is_some_and(|f| current.is_none_or(|s| !f.source.current(s))) {
-                    slot.cancelled.get_or_insert_with(|| crate::i18n::tr("render.live.final_changed").into());
+                    slot.cancelled.get_or_insert_with(|| solidcraft_ui_text::tr("render.live.final_changed").into());
                     active.cancel.cancel();
                 }
                 if slot.first.as_ref().and_then(|f| f.origin.as_ref()).is_some_and(|o| match o {
                     Origin::Control { request, .. } => crate::control::chat_turn_cancelled(request.chat_turn.as_deref()),
                     Origin::Ui => false,
                 }) {
-                    slot.cancelled.get_or_insert_with(|| crate::i18n::tr("render.preparation_cancelled").into());
+                    slot.cancelled.get_or_insert_with(|| solidcraft_ui_text::tr("render.preparation_cancelled").into());
                     active.cancel.cancel();
                 }
             }
@@ -1077,13 +1077,13 @@ mod native {
                 }
                 let owner = crate::documents::render_owner(app, slot.uid);
                 if owner.is_none() || slot.first.as_ref().is_some_and(|f| owner.is_none_or(|s| !f.source.current(s))) {
-                    slot.cancelled.get_or_insert_with(|| crate::i18n::tr("render.live.final_changed").into());
+                    slot.cancelled.get_or_insert_with(|| solidcraft_ui_text::tr("render.live.final_changed").into());
                 }
                 if slot.first.as_ref().and_then(|f| f.origin.as_ref()).is_some_and(|o| match o {
                     Origin::Control { request, .. } => crate::control::chat_turn_cancelled(request.chat_turn.as_deref()),
                     Origin::Ui => false,
                 }) {
-                    slot.cancelled.get_or_insert_with(|| crate::i18n::tr("render.preparation_cancelled").into());
+                    slot.cancelled.get_or_insert_with(|| solidcraft_ui_text::tr("render.preparation_cancelled").into());
                 }
                 if slot.cancelled.is_some() && slot.plan.is_none() {
                     if let Some(first) = &mut slot.first {
@@ -1101,12 +1101,12 @@ mod native {
                 {
                     let q = session.render_queue_state();
                     if q.waiting == 0 {
-                        slot.cancelled = Some(crate::i18n::tr("render.preparation_cancelled").into());
+                        slot.cancelled = Some(solidcraft_ui_text::tr("render.preparation_cancelled").into());
                     } else if q.running != 0 {
                         continue;
                     }
                     if !plan.owner_matches(session) {
-                        slot.cancelled = Some(crate::i18n::tr("render.live.final_changed").into());
+                        slot.cancelled = Some(solidcraft_ui_text::tr("render.live.final_changed").into());
                     }
                 }
                 // Start the empty receiver before taking any heavy claim/plan.
@@ -1156,7 +1156,7 @@ mod native {
                             None
                         }
                         None => {
-                            slot.cancelled = Some(crate::i18n::tr("render.live.final_changed").into());
+                            slot.cancelled = Some(solidcraft_ui_text::tr("render.live.final_changed").into());
                             None
                         }
                     }

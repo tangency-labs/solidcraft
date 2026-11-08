@@ -45,6 +45,7 @@ pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
 pub use features::{auto_operation, extrude_reach, shown_scope};
+pub(crate) use features::{rail_fit_form, sweep_orientation};
 pub use file::open_steps::OpenSteps;
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
@@ -86,6 +87,8 @@ mod script;
 mod section;
 pub mod settings;
 pub(crate) use clipboard::{component_path_form, copy_keys};
+pub(crate) use component::matrix::{rigid as rigid_matrix, tolerance as matrix_tolerance};
+pub(crate) use component::{base_transform, move_vector};
 pub(crate) use measure_sel::{measure_items, shape_of};
 pub(crate) use measure_shape::Shape;
 pub(crate) use script::step_params;
@@ -104,8 +107,8 @@ mod render_ui;
 mod script_tests;
 mod sheet;
 pub(crate) use sheet::{
-    FlangeType, ThenStep, flange_edge, flange_edge_list, flange_position, flange_type, fold_points, fold_position, perforation_pattern, sheet_points,
-    sheet_rule_name, then_list,
+    FlangeType, ThenStep, bend_table_format, flange_edge, flange_edge_list, flange_position, flange_type, fold_points, fold_position,
+    perforation_pattern, sheet_points, sheet_rule_name, then_list,
 };
 mod silhouette;
 mod sketch;
@@ -129,7 +132,7 @@ mod sketch_import;
 mod sketch_inspect;
 mod sketch_modify;
 mod sketch_project;
-pub(crate) use sketch_project::{RefForm, ref_form};
+pub(crate) use sketch_project::{MAX_PROJECTED_ENTITIES, RefForm, model_ref, ref_form};
 mod sketch_store;
 mod surface;
 mod surface_analysis;

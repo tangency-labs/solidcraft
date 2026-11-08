@@ -1,0 +1,199 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  13.228756555322963,
+                  -15.0,
+                  10.0
+                ],
+                [
+                  100.0,
+                  -15.0,
+                  10.0
+                ]
+              ],
+              "index": 8
+            },
+            {
+              "at": [
+                [
+                  16.357363863159545,
+                  11.508112245203474,
+                  10.0
+                ],
+                [
+                  13.228756555322946,
+                  15.0,
+                  10.0
+                ]
+              ],
+              "index": 9
+            },
+            {
+              "at": [
+                [
+                  13.228756555322963,
+                  -15.0,
+                  10.0
+                ],
+                [
+                  16.357363863159545,
+                  11.508112245203474,
+                  10.0
+                ]
+              ],
+              "index": 7
+            }
+          ],
+          "points": [
+            [
+              56.61437827766149,
+              -15.0,
+              10.0
+            ],
+            [
+              14.793060209241245,
+              13.254056122601737,
+              10.0
+            ],
+            [
+              19.849045376133375,
+              -2.34383220286971,
+              9.999999999999998
+            ]
+          ],
+          "tolerance": 6.347528024625401
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "1207-fillet-bar-top-edge-and-boss-arc-together",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "bar 100x30x10 (y -15..15) joined with a diameter 40 boss 20 tall at the origin, standing out over both sides (V0 = 49756.1794, as 1207-fillet-concave-arc-at-boss). The bar's front top edge (y=-15, z=10) and the boss's base arc over the bar (its two edges, split at the cylinder's seam: the tangent chain) rounded r2 together meet at (13.229, -15, 10), where the third edge, the boss's line on the front face, is concave and runs down. Away from that corner the body is V0 plus the arc round's spandrel strip ending on y=+-15 (integral over rho of [r - sqrt(r^2-(20+r-rho)^2)] rho 2 asin(15/rho) = 28.9190, Simpson) less the front round's spandrel out to the boss wall (integral over y of [r - sqrt(r^2-(y+15-r)^2)] (100 - sqrt(400-y^2)) = 74.0736); the corner patch lies within the cube of side 2r about the vertex, so V is graded as V0 + add - removed with (2r)^3 as its tolerance",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1207"
+    ],
+    "tolerance": {
+      "rel": 0.0012874407685721878
+    },
+    "volume_mm3": 49711.02481940043,
+    "what": "the bar's top edge and the partial base arc of a boss standing out over the bar's side, rounded r2 together: the corner patch where they meet must join the bar's round at least G1 (today a 15.6° crease)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 25,
+      "faces": 11,
+      "vertices": 16
+    }
+  },
+  "records": "1207-fillet-bar-top-edge-and-boss-arc-together.bodies.json.gz",
+  "result": [
+    {
+      "body": "Arm",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 11547.063241789961,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 11,
+      "vertices": 15,
+      "volume_mm3": 49710.799205771895
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1207"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the bar's top edge and the partial base arc of a boss standing out over the bar's side, rounded r2 together: the corner patch where they meet must join the bar's round at least G1 (today a 15.6° crease)",
+  "why_not": []
+}

@@ -1,0 +1,304 @@
+{
+ "cases": [
+  {
+   "name": "copy_union_box_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiBooleanUnion",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true,
+    "copy_op": 1,
+    "index": 0,
+    "value": 5.0
+   }
+  },
+  {
+   "name": "copy_union_box_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiBooleanUnion",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true,
+    "copy_op": 1,
+    "index": 0,
+    "value": 5.0
+   }
+  },
+  {
+   "name": "copy_union_copy_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiBooleanUnion",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true,
+    "copy_op": 2,
+    "index": 0,
+    "value": 5.0
+   }
+  },
+  {
+   "name": "copy_union_copy_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiBooleanUnion",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true,
+    "copy_op": 2,
+    "index": 0,
+    "value": 5.0
+   }
+  },
+  {
+   "name": "copy_fillet_edges_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiFilletEdges",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true,
+    "copy_op": 3,
+    "index": 0,
+    "value": 1.0
+   }
+  },
+  {
+   "name": "copy_fillet_edges_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiFilletEdges",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true,
+    "copy_op": 3,
+    "index": 0,
+    "value": 1.0
+   }
+  },
+  {
+   "name": "copy_fillet_edges_e5_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiFilletEdges",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true,
+    "copy_op": 3,
+    "index": 5,
+    "value": 2.0
+   }
+  },
+  {
+   "name": "copy_fillet_edges_e5_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiFilletEdges",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true,
+    "copy_op": 3,
+    "index": 5,
+    "value": 2.0
+   }
+  },
+  {
+   "name": "copy_shell_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiShellBrepFull",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true,
+    "copy_op": 4,
+    "index": 0,
+    "value": -1.0
+   }
+  },
+  {
+   "name": "copy_shell_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiShellBrepFull",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true,
+    "copy_op": 4,
+    "index": 0,
+    "value": -1.0
+   }
+  },
+  {
+   "name": "copy_shell_f3_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiShellBrepFull",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true,
+    "copy_op": 4,
+    "index": 3,
+    "value": -1.0
+   }
+  },
+  {
+   "name": "copy_shell_f3_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiShellBrepFull",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true,
+    "copy_op": 4,
+    "index": 3,
+    "value": -1.0
+   }
+  }
+ ]
+}

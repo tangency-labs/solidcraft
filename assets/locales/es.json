@@ -2204,6 +2204,7 @@
   "material.editor.preserved_appearance": "Apariencia conservada",
   "material.editor.public_reference": "Referencia pública",
   "material.editor.reference": "Referencia",
+  "material.editor.remove": "Eliminar",
   "material.editor.save_or_discard": "Guarda o descarta el borrador antes de asignar un material.",
   "material.editor.saved": "Material guardado. Las asignaciones a cuerpos no han cambiado.",
   "material.editor.scope": "Guardar almacena este material sin asignarlo a cuerpos. Las propiedades y condiciones vacías siguen siendo desconocidas. La densidad de la ficha no cambia la densidad asignada ni la masa.",

@@ -1,0 +1,8 @@
+Updates: WR-472
+
+#### WR-472 (update, 2026-10-27). Another trigger: `Fillet/sphere_diff_3cylinders.smb` at 1e-9
+
+- **Trigger:** read `upstream/TestFiles/pt_TestFiles/Fillet/sphere_diff_3cylinders.smb` (`SmBrep::ReadFromFile`) and measure each face's area and volume with `SmFace::ComputePreciseProperties` as `SmBrep::ComputePreciseProperties` calls it: `SM_OT_SAME`, relative accuracy 1e-9, the B-rep box midpoint (the origin) as the origin of computation, and the B-rep's area estimate. Faces 1 (sphere), 2, 3, 6 and 7 (cones) return `SM_ERR` (1001), so the B-rep's volume fails. Faces 0, 4 and 5 succeed. The area-only measurement with each face's own box midpoint succeeds for all eight faces. At c9c5979 these volume measurements succeeded (WR-449's table).
+- **Same defect:** with WR-472's opt-in fix (`Kernel::fixes.precise_properties_body_length_scale`) the port's five failing faces converge. Volume terms: face 1 154270.422893706243; faces 2, 3 and 6 34760.372312438965, 34760.372313503212 and 34760.368786081854; face 7 34762.512305140488. Face 7's excess over its siblings is WR-449's. Faces 0, 4 and 5 move by at most 3.2e-6 under the fix, which holds the volume to a different error scale.
+- **How found:** re-measuring WR-449 against v1.0.1 (`probe_sphere_diff_faces`, `crates/difftest/tests/probe_sphere_diff_faces.rs`; `PROBE_FIX472=1` turns the opt-in on for the Rust side), 2026-10-27.
+- **Confirmed:** yes. Against the v1.0.1 C++ reference build (x86-64 Linux, no fork fix) the five faces return 1001, as the port does with the default `Kernel`. With the opt-in, confirmed on the port only: the five faces converge.

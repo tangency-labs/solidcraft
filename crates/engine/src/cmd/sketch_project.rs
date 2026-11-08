@@ -40,16 +40,16 @@ const AUTO_PROJECT_CONTRACT: TypedContract<AutoProjectParams> = TypedContract::n
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.project", "Project", crate::checked!("sketch.project", project_cmd)).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).contract(&PROJECT_CONTRACT).output(output_schema_for::<ProjectResult>).params(
-        concat!(refs_doc!(), "; projection_link?: bool (default true)", created_doc!()),
+        concat!(refs_doc!(), "; projection_link?: bool (default true); construction?: bool (default the session's preference, off: the created curves are construction geometry)", created_doc!()),
     ),
     CommandSpec::new("sketch.intersect", "Intersect", crate::checked!("sketch.intersect", intersect_cmd)).at("SKETCH", "CREATE").icon("intersect").enabled(in_sketch).contract(&INTERSECT_CONTRACT).output(output_schema_for::<ProjectResult>).params(
-        concat!("refs: [{body}, {face: [x,y,z], body?}, {edge: [x,y,z], body?}, {sketch, curve}]: section curves (or points) with the sketch plane; projection_link?: bool (default true)", created_doc!()),
+        concat!("refs: [{body}, {face: [x,y,z], body?}, {edge: [x,y,z], body?}, {sketch, curve}]: section curves (or points) with the sketch plane; projection_link?: bool (default true); construction?: bool (default the session's preference, off: the created curves are construction geometry)", created_doc!()),
     ),
     CommandSpec::new("sketch.include_3d", "Include 3D Geometry", crate::checked!("sketch.include_3d", include_cmd))
         .at("SKETCH", "CREATE")
         .icon("include")
         .enabled(in_sketch)
-        .contract(&INCLUDE_3D_CONTRACT).output(output_schema_for::<ProjectResult>).params(concat!("refs: like Project (edges, vertices, sketch curves and points); curves out of the sketch plane are flattened onto it", created_doc!())),
+        .contract(&INCLUDE_3D_CONTRACT).output(output_schema_for::<ProjectResult>).params(concat!("refs: like Project (edges, vertices, sketch curves and points); curves out of the sketch plane are flattened onto it; construction?: bool (default the session's preference, off: the created curves are construction geometry)", created_doc!())),
     CommandSpec::new("sketch.project_to_surface", "Project To Surface", crate::checked!("sketch.project_to_surface", project_to_surface))
         .at("SKETCH", "CREATE")
         .icon("project_surface")
@@ -428,8 +428,10 @@ fn add_link_unless_present(
     if skip_present && r.wires.is_empty() && sk.link_geometry_present(&r.geom) {
         return Ok(None);
     }
+    // A mesh body is one face whose name says nothing of the flat patch picked: the link keeps
+    // the point instead (#13464), as an edge of a mesh body keeps no name.
     let name = if let LinkSource::Face { body, at } = &r.source {
-        st.body(body).and_then(|body| {
+        st.body(body).filter(|body| !body.body.is_mesh()).and_then(|body| {
             if let Some(index) = r.face_index {
                 solidcraft_doc::naming::face_names(body).get(index).filter(|name| !name.is_empty()).cloned()
             } else {
@@ -450,6 +452,26 @@ fn add_link_unless_present(
         l.edge_name = edge_name;
     }
     Ok(Some(link))
+}
+
+/// Make the curves of `link` construction geometry: references to draw against, left out of
+/// profiles (#13142). They stay linked; a link rebuilt because its shape changed comes back as
+/// normal geometry, as curves switched to construction by hand do.
+fn mark_construction(sk: &mut Sketch, link: &str) {
+    for c in sk.link_curves(link) {
+        if let Some(curve) = sk.curves.get_mut(c) {
+            curve.construction = true;
+        }
+    }
+}
+
+/// [`mark_construction`] for `link` in sketch `id`, as the session's preference asks of the face
+/// edges a new sketch projects (#13142).
+pub(super) fn construct_link(s: &mut Session, id: u64, link: &str) -> Result<()> {
+    sketch_store::update(s, id, |_, _, sk| {
+        mark_construction(sk, link);
+        Ok(())
+    })
 }
 
 /// A command's reply as JSON: they build their replies from the types their output schemas
@@ -474,6 +496,11 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
     if refs.is_empty() {
         return Err(bad(cmd, "`refs` is empty"));
     }
+    let construction = match p.get("construction") {
+        None => s.project_construction,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`construction` must be a boolean")),
+    };
     let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
     let sources: Vec<LinkSource> = refs.iter().map(|v| source(s, v, cmd)).collect::<Result<_>>()?;
     let (out, present) = sketch_store::update(s, id, |s, doc, sk| {
@@ -487,6 +514,9 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
             match add_link_unless_present(s, doc, id, sk, kind, src, kind == LinkKind::Project) {
                 Ok(Some(l)) => {
                     let (curves, points) = link_parts(sk, &l);
+                    if construction {
+                        mark_construction(sk, &l);
+                    }
                     let mut result = ProjectedLink { link: Some(l.clone()), curves, points };
                     if !projection_link {
                         result.link = None;
@@ -554,7 +584,7 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
 
 /// A model's reference among a command's operands (#6348): an `{edge: [x,y,z], body?}` or a
 /// `{vertex: [x,y,z], body?}`.
-fn model_ref(v: &Value) -> bool {
+pub(crate) fn model_ref(v: &Value) -> bool {
     v.get("edge").is_some() || v.get("vertex").is_some()
 }
 
@@ -573,7 +603,7 @@ fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Va
 
 /// Most model references one call may project into a sketch: each one is a link and a resolve,
 /// so the count is capped before any of them is projected.
-const MAX_PROJECTED_ENTITIES: usize = 1_000;
+pub(crate) const MAX_PROJECTED_ENTITIES: usize = 1_000;
 
 /// A dimension's entities may be model geometry (#7912): an `{edge: [x,y,z], body?}` or
 /// `{vertex: [x,y,z], body?}` among them is projected into the sketch first, as Project does,
