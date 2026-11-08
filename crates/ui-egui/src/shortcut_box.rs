@@ -964,6 +964,7 @@ mod tests {
     }
     #[test]
     fn command_mode_preserves_parser_and_keeps_invalid_input_editable() {
+        crate::i18n::install();
         assert!(typed("solid.box").is_none());
         assert_eq!(typed(r#"solid.box {"length":10}"#).unwrap().1.unwrap(), json!({"length":10}));
         assert!(typed("solid.box {}").unwrap().1.is_ok());

@@ -1568,6 +1568,7 @@ mod tests {
 
     #[test]
     fn web_font_is_fetched_only_for_a_cjk_language() {
+        crate::i18n::install();
         let mut loader = CjkFontLoader::default();
         for lang in ["en", "de"] {
             let mut language = lang.to_owned();
@@ -1584,6 +1585,7 @@ mod tests {
 
     #[test]
     fn chinese_ui_fetches_again_after_japanese_is_installed() {
+        crate::i18n::install();
         let mut loader = CjkFontLoader::default();
         let mut language = "ja".to_owned();
         assert!(loader.tick(&mut language, false));
@@ -1668,6 +1670,7 @@ mod tests {
 
     #[test]
     fn failed_font_fetch_falls_back_for_the_session_without_changing_the_saved_language() {
+        crate::i18n::install();
         let mut loader = CjkFontLoader::default();
         let mut language = "ja".to_owned();
         assert!(loader.tick(&mut language, false));

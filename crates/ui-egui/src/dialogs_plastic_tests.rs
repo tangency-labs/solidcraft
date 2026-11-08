@@ -198,6 +198,7 @@ fn inch_plastic_rule_edit_preserves_material_angles_and_stored_lengths() {
 /// face", …) are in the user's language: each has a message.
 #[test]
 fn optional_field_hints_have_messages() {
+    crate::i18n::install();
     let ja = solidcraft_ui_text::Locale::for_language("ja");
     for hint in ["no hole", "to the face", "from the rule", "none", "at the face", "solid"] {
         assert_ne!(ja.label(hint), hint, "`{hint}` has a Japanese message");

@@ -95,6 +95,7 @@ mod tests {
 
     #[test]
     fn states_ink_their_icons_in_the_sketch_colours_and_name_themselves() {
+        crate::i18n::install();
         for t in [Tokens::light(), Tokens::dark()] {
             assert_eq!(SketchState::Under(3).ink(&t), Some(t.sketch));
             assert_eq!(SketchState::Full.ink(&t), Some(t.sketch_fixed));

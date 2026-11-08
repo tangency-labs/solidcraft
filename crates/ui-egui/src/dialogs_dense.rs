@@ -1611,6 +1611,7 @@ mod tests {
     /// are on the controls, the codes only in hover texts. Every section open, the corner row shown.
     #[test]
     fn fillet_labels_use_words_not_continuity_codes() {
+        crate::i18n::install();
         let coded = |text: &str| ["G0", "G1", "G2", "G3"].iter().any(|code| text.contains(code));
         for label in FILLET_TYPES.map(|(label, _)| label).into_iter().chain(FILLET_CORNERS.map(|(g, _)| g.label_id())) {
             assert!(!coded(solidcraft_ui_text::tr_label(label)), "{label}: {}", solidcraft_ui_text::tr_label(label));
@@ -1639,6 +1640,7 @@ mod tests {
     /// in them.
     #[test]
     fn a_setback_too_short_for_the_corner_says_the_least_that_builds() {
+        crate::i18n::install();
         let refused = format!(
             "invalid parameters for `solid.fillet`: the setback is too short for its corner: {}5.9620 mm (the corner's patch is convex only from there)",
             solidcraft_engine::kernel::SETBACK_AT_LEAST
