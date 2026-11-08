@@ -2544,8 +2544,8 @@ fn dialog_takes_body(app: &SolveApp) -> bool {
     app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::BODIES != 0)
 }
 
-/// A plain click on a sketch (a Browser row or a History item) while Extrude, Revolve or Emboss
-/// is open gives the dialog every profile of that sketch (#6106). False when it is not one: the
+/// A plain click on a sketch (a Browser row or a History item) while a profile command is open
+/// gives the dialog every profile of that sketch (#6106, #7381). False when it is not one: the
 /// click then selects as usual.
 pub(crate) fn pick_sketch_into_dialog(app: &mut SolveApp, id: u64) -> bool {
     let Some(mut d) = app.dialog.take() else { return false };
@@ -3291,7 +3291,7 @@ fn entry_row(
             && let Some(Sel::Feature { id }) = e.sel
             && pick_sketch_into_dialog(app, id)
         {
-            // Extrude, Revolve or Emboss took all the sketch's profiles (#6106).
+            // A profile command took the sketch's profiles (#6106, #7381).
         } else {
             click_select(app, ui, e.row_key.clone(), e.sel.clone());
         }
