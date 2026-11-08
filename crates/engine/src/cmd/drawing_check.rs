@@ -1,6 +1,6 @@
 //! `drawing.check` (#13054): what makes the open drawing wrong or incomplete, as data that a person
 //! or a script acts on. Each finding comes from the rule that already says it: each sheet as an
-//! export reads it ([`crate::drawing_scene::as_shown`]), each view's place ([`crate::drawing_view::outside`]),
+//! export reads it ([`crate::drawing_scene::as_shown`]), each view's place there ([`crate::drawing_view::Room`]),
 //! the balloons' and notes' references as the model has them now, the title blocks' text as the
 //! sheet shows it ([`title_block_text::shown`]), and each parts list's balloon counts as
 //! `drawing.inspect` gives them. Beside the findings, each feature's coverage: whether a dimension
@@ -8,6 +8,7 @@
 //! draws one. Nothing is changed.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use serde_json::Value;
 use solidcore_record::Vec2;
@@ -16,12 +17,13 @@ use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::coverage::Timeline;
 use solidcraft_doc::drawing::dimension::Status;
 use solidcraft_doc::persistent_name::FaceName;
-use solidcraft_doc::{ids, naming};
+use solidcraft_doc::{ModelState, ids, naming};
 use solidcraft_geom::paper::{Item, ObjectKind};
 use solidcraft_geom::{Aabb2, EPS};
 
 use super::CommandSpec;
-use crate::drawing_scene::{Status as ViewStatus, ViewState};
+use crate::drawing_scene::{SheetScene, Status as ViewStatus, ViewState};
+use crate::drawing_view::Room;
 use crate::params::bad;
 use crate::schema::drawing_check::{
     CheckParams, CheckResult, CheckedKind, CheckedObject, Coverage, CoverageState, Finding, FindingKind, KindCount, StateCount,
@@ -49,9 +51,13 @@ fn check(s: &mut Session, p: &Value) -> Result<Value> {
         Some(named) => vec![crate::drawing_scene::sheet_id(&d, named, CHECK)?],
         None => d.sheets.iter().map(|sheet| sheet.id).collect(),
     };
+    // Each sheet read once, as it shows the model: for its findings and for what its views draw.
     let mut findings = Vec::new();
+    let mut drawn = Drawn::default();
     for &sheet in &sheets {
-        findings.extend(on_sheet(s, &d, sheet)?);
+        let shown = crate::drawing_scene::as_shown(s, &d, sheet)?;
+        drawn.add(&shown);
+        findings.extend(on_sheet(&d, sheet, shown)?);
     }
     findings.extend(references(s, &d, &sheets)?);
     findings.extend(fields_and_rows(s, &d, &sheets));
@@ -65,7 +71,7 @@ fn check(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|kind| KindCount { kind, count: findings.iter().filter(|f| f.kind == kind).count() })
         .filter(|count| count.count > 0)
         .collect();
-    let coverage = coverage(s, &d, &sheets);
+    let coverage = coverage(s, &d, &sheets, &drawn);
     let coverage_counts = CoverageState::ALL
         .into_iter()
         .map(|state| StateCount { state, count: coverage.iter().filter(|c| c.state == state).count() })
@@ -84,10 +90,9 @@ fn object(kind: CheckedKind, id: u64) -> CheckedObject {
     CheckedObject { kind, id: ids::encode(id) }
 }
 
-/// What sheet `sheet` shows: its views that draw nothing, its dimensions that don't stand with the
-/// model, what it shows as it last was, and what lies outside it.
-fn on_sheet(s: &mut Session, d: &Drawing, sheet: u64) -> Result<Vec<Finding>> {
-    let shown = crate::drawing_scene::as_shown(s, d, sheet)?;
+/// What sheet `sheet` shows (`shown`): its views that draw nothing, its dimensions that don't stand
+/// with the model, what it shows as it last was, and what lies outside it.
+fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> {
     let mut out: Vec<Finding> = shown.views.iter().filter_map(|view| view_finding(sheet, view)).collect();
     let dimensions =
         shown.dimensions.into_iter().filter_map(|state| status_finding(sheet, object(CheckedKind::Dimension, state.dimension), state.status));
@@ -97,24 +102,29 @@ fn on_sheet(s: &mut Session, d: &Drawing, sheet: u64) -> Result<Vec<Finding>> {
         let kind = if d.view(id).is_some() { CheckedKind::View } else { CheckedKind::Dimension };
         out.push(finding(FindingKind::OutOfDate, sheet, object(kind, id), held.into()));
     }
-    let views: Vec<u64> = d.views.iter().filter(|view| view.sheet == sheet).map(|view| view.id).collect();
-    for (view, _) in crate::drawing_view::outside(s, d, &views, CHECK)? {
-        let why = "it lies outside its sheet's drawing space or over its title block".into();
-        out.push(finding(FindingKind::OutsideSheet, sheet, object(CheckedKind::View, view), why));
-    }
-    // Views follow the rule above. The paper's box is display data, as the scene's boxes are: it
-    // decides nothing in the model.
-    let size = crate::drawing_view::sheet(d, sheet, CHECK)?.sheet.size_mm().map_err(|e| bad(CHECK, e.to_string()))?;
+    // A view belongs where its sheet's Room says, by its boundary as the sheet shows it. Anything
+    // else is held to the paper, whose box is display data, as the scene's boxes are: it decides
+    // nothing in the model.
+    let record = crate::drawing_view::sheet(d, sheet, CHECK)?;
+    let room = Room::on(record, CHECK)?;
+    let size = record.sheet.size_mm().map_err(|e| bad(CHECK, e.to_string()))?;
     let paper = Aabb2 { min: Vec2::ZERO, max: size }.inflated(EPS);
     let off = |bounds: Aabb2| !(paper.contains(bounds.min) && paper.contains(bounds.max));
     let off_paper = |kind, id| finding(FindingKind::OutsideSheet, sheet, object(kind, id), "it lies off the paper".into());
     for placed in &shown.objects {
         let kind = match placed.kind {
+            ObjectKind::View => {
+                if placed.boundary_mm.is_some_and(|boundary| !room.holds(&boundary)) {
+                    let why = "it lies outside its sheet's drawing space or over its title block".into();
+                    out.push(finding(FindingKind::OutsideSheet, sheet, object(CheckedKind::View, placed.object), why));
+                }
+                continue;
+            }
             ObjectKind::Dimension => CheckedKind::Dimension,
             ObjectKind::Note => CheckedKind::Note,
             ObjectKind::PartsList | ObjectKind::RevisionTable => CheckedKind::Table,
             // Images are painted with the border and aren't among the objects: read below.
-            ObjectKind::SheetImage | ObjectKind::View | ObjectKind::SheetBorder | ObjectKind::DrawingBorder | ObjectKind::TitleBlock => continue,
+            ObjectKind::SheetImage | ObjectKind::SheetBorder | ObjectKind::DrawingBorder | ObjectKind::TitleBlock => continue,
         };
         if off(placed.bounds_mm) {
             out.push(off_paper(kind, placed.object));
@@ -205,8 +215,8 @@ fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
 
 /// Each feature of the design, in timeline order, and whether the dimensions and notes on `sheets`
 /// point at a face it made: covered, or else not covered or unknown by what the views on `sheets`
-/// draw of it. Each annotation's names are read once and each drawn body's faces once.
-fn coverage(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Coverage> {
+/// draw of it (`drawn`). Each annotation's names are read once.
+fn coverage(s: &Session, d: &Drawing, sheets: &[u64], drawn: &Drawn) -> Vec<Coverage> {
     let timeline = Timeline::of(&s.doc);
     let on = |view: u64| d.view(view).is_some_and(|v| sheets.contains(&v.sheet));
     let dimensions = d.dimensions.iter().filter(|dim| on(dim.view)).map(|dim| (object(CheckedKind::Dimension, dim.id), dim.kind.references()));
@@ -221,7 +231,6 @@ fn coverage(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Coverage> {
             by.entry(feature).or_default().push(object.clone());
         }
     }
-    let drawn = drawn(s, d, sheets);
     let rolled_back = s.doc.marker.unwrap_or(usize::MAX);
     let mut out = Vec::with_capacity(s.doc.features.len());
     for (at, f) in s.doc.features.iter().enumerate() {
@@ -246,7 +255,7 @@ fn coverage(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Coverage> {
     out
 }
 
-/// The features that made a face a view on given sheets draws, by how the face is named.
+/// The features that made a face a view on the sheets read draws, by how the face is named.
 #[derive(Default)]
 struct Drawn {
     /// From exact history.
@@ -255,33 +264,41 @@ struct Drawn {
     inexact: HashSet<u64>,
     /// On a reference part only.
     reference: HashSet<u64>,
+    /// The bodies read ([`first_read`]).
+    seen: Vec<(Arc<ModelState>, HashSet<usize>)>,
 }
 
-/// What the views on `sheets` draw, each body once however many views draw it. A view that can't
-/// be worked out draws nothing here; its finding says why.
-fn drawn(s: &Session, d: &Drawing, sheets: &[u64]) -> Drawn {
-    let mut out = Drawn::default();
-    let Ok(all) = crate::drawing_view::shown(s) else { return out };
-    let mut seen = HashSet::new();
-    for view in d.views.iter().filter(|view| sheets.contains(&view.sheet)) {
-        let Ok(resolved) = d.resolve_view(view.id) else { continue };
-        for shown in &all.of_view(&resolved).bodies {
-            if !seen.insert(shown.index) {
+impl Drawn {
+    /// What the views in `shown` draw, as the sheet shows it, each body once however many views draw
+    /// it. A view that draws no lines draws nothing here; its finding says why.
+    fn add(&mut self, shown: &SheetScene) {
+        for (state, shown) in shown.bodies_drawn() {
+            if !first_read(&mut self.seen, state, shown.index) {
                 continue;
             }
-            let Some(body) = all.body(shown) else { continue };
+            let Some(body) = state.bodies.get(shown.index) else { continue };
             for (i, name) in naming::face_names(body).iter().enumerate() {
                 let maker = FaceName::parse(name).ok().and_then(|face| face.feature()).map(|feature| feature.0);
                 let set = match maker {
-                    _ if shown.reference => &mut out.reference,
-                    Some(_) if naming::face_name_exact(body, i) => &mut out.exact,
-                    _ => &mut out.inexact,
+                    _ if shown.reference => &mut self.reference,
+                    Some(_) if naming::face_name_exact(body, i) => &mut self.exact,
+                    _ => &mut self.inexact,
                 };
                 set.insert(maker.unwrap_or(body.feature));
             }
         }
     }
-    out
+}
+
+/// Whether body `index` of `state` is read for the first time, by the bodies `seen` read of each
+/// world state. A state is told by its identity, so each is held here: none freed while it is
+/// compared can lend its address to another. What is read never depends on this, only how often.
+fn first_read(seen: &mut Vec<(Arc<ModelState>, HashSet<usize>)>, state: &Arc<ModelState>, index: usize) -> bool {
+    let at = seen.iter().position(|(held, _)| Arc::ptr_eq(held, state)).unwrap_or_else(|| {
+        seen.push((state.clone(), HashSet::new()));
+        seen.len() - 1
+    });
+    seen.get_mut(at).is_some_and(|(_, read)| read.insert(index))
 }
 
 #[cfg(test)]

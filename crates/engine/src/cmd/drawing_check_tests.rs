@@ -181,6 +181,29 @@ fn a_held_view_and_its_dimension_are_out_of_date() {
     assert_eq!(of_kind(&reply, "out_of_date"), expected, "{reply}");
 }
 
+/// A deferred drawing is checked as its sheet shows the model: a bar added since it was drawn neither
+/// pushes the held view off its sheet nor is drawn by it, until the drawing is updated.
+#[test]
+fn a_held_sheet_is_checked_as_it_shows_the_model() {
+    let (mut s, _) = plate();
+    let (_, view) = drawn(&mut s);
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    with_model_changed(&mut s, |s| {
+        run(s, "solid.box", json!({"length": 900, "width": 10, "height": 10, "corner": [0, 80, 0], "body_name": "Bar", "operation": "new"}));
+    });
+    let bar = s.doc.features.last().unwrap().id;
+    let view = json!(ids::encode(view));
+    let held = checked(&mut s, json!({}));
+    assert_eq!(of_kind(&held, "out_of_date"), [named("view", &view)], "{held}");
+    assert!(of_kind(&held, "outside_sheet").is_empty(), "{held}");
+    assert_eq!(coverage_of(&held, bar)["state"], json!("not_applicable"), "{held}");
+    run(&mut s, "drawing.update", json!({}));
+    let now = checked(&mut s, json!({}));
+    assert_eq!(of_kind(&now, "outside_sheet"), [named("view", &view)], "{now}");
+    assert_eq!(coverage_of(&now, bar)["state"], json!("not_covered"), "{now}");
+}
+
 /// A view of a design with nothing to draw shows nothing: its one box, drawn, then suppressed (a
 /// drawing of an empty design isn't made at all).
 #[test]
