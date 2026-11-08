@@ -44,15 +44,18 @@ pub const MAX_PATCHES: usize = 4096;
 /// A piece of a face's surface: its homogeneous coordinates about the point, as Bernstein
 /// polynomials on the unit square, and the absolute error each coefficient may carry.
 #[derive(Debug, Clone)]
-struct Piece {
+pub(crate) struct Piece {
     /// `X W - p W`, `Y W - p W`, `Z W - p W`, `W`.
-    h: [Bernstein2; 4],
+    pub(crate) h: [Bernstein2; 4],
     /// The bound on every coefficient's error.
-    err: f64,
+    pub(crate) err: f64,
     /// The certified lower bound of the piece's distance from the point.
-    lower: f64,
+    pub(crate) lower: f64,
     /// Its subdivision depth.
-    depth: usize,
+    pub(crate) depth: usize,
+    /// Its rectangle in the surface's NURB parameters, `[u0, u1, v0, v1]` (to the rounding
+    /// of the splits that made it).
+    pub(crate) uv: [f64; 4],
 }
 
 impl PartialEq for Piece {
@@ -74,21 +77,62 @@ impl Ord for Piece {
 }
 
 impl Piece {
-    /// The piece with its bound, the coefficients `h` within `err` each.
-    fn new(h: [Bernstein2; 4], err: f64, depth: usize) -> Result<Self> {
+    /// The piece with its bound, the coefficients `h` within `err` each, over `uv`.
+    fn new(h: [Bernstein2; 4], err: f64, depth: usize, uv: [f64; 4]) -> Result<Self> {
         let lower = hull_bound(&h, err)?;
         Ok(Self {
             h,
             err,
             lower,
             depth,
+            uv,
         })
+    }
+
+    /// The box of its Euclidean control points about the point, each coordinate widened
+    /// by the error a quotient of coefficients within `err` can carry: every point of the
+    /// piece lies in it (the hull, with positive weights).
+    pub(crate) fn widened_box(&self) -> Result<([f64; 3], [f64; 3])> {
+        let (lo, hi, widen) = euclid_box(&self.h, self.err)?;
+        Ok((lo.map(|l| l - widen), hi.map(|u| u + widen)))
+    }
+
+    /// Its centre's Euclidean point about the point, and the centre's parameters.
+    pub(crate) fn centre(&self) -> ([f64; 3], [f64; 2]) {
+        let [x, y, z, w] = &self.h;
+        let wc = w.eval(0.5, 0.5);
+        let [u0, u1, v0, v1] = self.uv;
+        (
+            [
+                x.eval(0.5, 0.5) / wc,
+                y.eval(0.5, 0.5) / wc,
+                z.eval(0.5, 0.5) / wc,
+            ],
+            [0.5 * (u0 + u1), 0.5 * (v0 + v1)],
+        )
+    }
+
+    /// The certified range of `x . u` over the piece, for a direction `u`: the least and
+    /// largest of its Euclidean control points' (its hull), each moved out by the widening
+    /// along `u` and the products' rounding.
+    pub(crate) fn extent_along(&self, u: [f64; 3]) -> Result<(f64, f64)> {
+        let (lo, hi, widen) = euclid_box(&self.h, self.err)?;
+        let size = lo.iter().chain(&hi).fold(0.0_f64, |m, v| m.max(v.abs())) + widen;
+        let norm1 = u[0].abs() + u[1].abs() + u[2].abs();
+        let (mut least, mut most) = (f64::INFINITY, f64::NEG_INFINITY);
+        for e in euclid_points(&self.h) {
+            let d = e[0] * u[0] + e[1] * u[1] + e[2] * u[2];
+            least = least.min(d);
+            most = most.max(d);
+        }
+        let slack = widen * norm1 + gamma(3) * size * norm1;
+        Ok((least - slack, most + slack))
     }
 
     /// Its four quarters: one de Casteljau level each way, which adds the rounding of a
     /// convex combination per level (`gamma` of twice the degree plus two) of the largest
     /// coefficient.
-    fn quarters(&self) -> Result<[Self; 4]> {
+    pub(crate) fn quarters(&self) -> Result<[Self; 4]> {
         let largest = self
             .h
             .iter()
@@ -108,14 +152,23 @@ impl Piece {
             split(&self.h[2]),
             split(&self.h[3]),
         ];
+        let [u0, u1, v0, v1] = self.uv;
+        let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
+        let rects = [
+            [u0, um, v0, vm],
+            [u0, um, vm, v1],
+            [um, u1, v0, vm],
+            [um, u1, vm, v1],
+        ];
         let mut out = Vec::new();
-        for i in 0..4 {
+        for (i, uv) in rects.into_iter().enumerate() {
             let pick =
                 |a: &[Bernstein2; 4]| a.get(i).cloned().ok_or_else(|| SolidError::sm_err(OP));
             out.push(Self::new(
                 [pick(&x)?, pick(&y)?, pick(&z)?, pick(&w)?],
                 err,
                 self.depth + 1,
+                uv,
             )?);
         }
         out.try_into().map_err(|_| SolidError::sm_err(OP))
@@ -130,42 +183,15 @@ impl Piece {
 /// least the least P . u, and |X| >= X . u / |u|), which, unlike the box, tightens with the
 /// square of the piece's size on a piece tilted to the axes.
 fn hull_bound(h: &[Bernstein2; 4], err: f64) -> Result<f64> {
-    let [x, y, z, w] = h;
-    let (xs, ys, zs, ws) = (
-        x.coefficients(),
-        y.coefficients(),
-        z.coefficients(),
-        w.coefficients(),
-    );
-    let w_min = ws.iter().copied().fold(f64::INFINITY, f64::min);
-    if !above(w_min - err, 0.0) {
-        return Err(SolidError::Unsupported {
-            operation: OP,
-            reason: "a patch's weights are not proved positive",
-        });
-    }
-    let mut points = Vec::new();
-    let mut lo = [f64::INFINITY; 3];
-    let mut hi = [f64::NEG_INFINITY; 3];
-    let mut size = 0.0_f64;
+    let (lo, hi, widen) = euclid_box(h, err)?;
+    let points = euclid_points(h);
+    let size = lo.iter().chain(&hi).fold(0.0_f64, |m, v| m.max(v.abs()));
     let mut sum_points = [0.0_f64; 3];
-    for (((&a, &b), &c), &wi) in xs.iter().zip(ys).zip(zs).zip(ws) {
-        let e = [a / wi, b / wi, c / wi];
-        for (k, v) in e.into_iter().enumerate() {
-            size = size.max(v.abs());
-            if let (Some(l), Some(u), Some(t)) =
-                (lo.get_mut(k), hi.get_mut(k), sum_points.get_mut(k))
-            {
-                *l = l.min(v);
-                *u = u.max(v);
-                *t += v;
-            }
+    for e in &points {
+        for (t, v) in sum_points.iter_mut().zip(e) {
+            *t += v;
         }
-        points.push(e);
     }
-    // |(v + dv) / (w + dw) - v / w| <= err (1 + |v / w|) / (w - err), and the quotient's
-    // own rounding
-    let widen = err * (1.0 + size) / (w_min - err) + gamma(2) * size;
     let mut sum = 0.0_f64;
     for (l, u) in lo.into_iter().zip(hi) {
         let out = (l - widen).max(-(u + widen)).max(0.0);
@@ -200,6 +226,61 @@ fn hull_bound(h: &[Bernstein2; 4], err: f64) -> Result<f64> {
         });
     }
     Ok(bound.max(0.0))
+}
+
+/// The Euclidean control points of the homogeneous coefficients `h`.
+fn euclid_points(h: &[Bernstein2; 4]) -> Vec<[f64; 3]> {
+    let [x, y, z, w] = h;
+    x.coefficients()
+        .iter()
+        .zip(y.coefficients())
+        .zip(z.coefficients())
+        .zip(w.coefficients())
+        .map(|(((&a, &b), &c), &wi)| [a / wi, b / wi, c / wi])
+        .collect()
+}
+
+/// The box of the Euclidean control points of `h`, and how far each coordinate is to be
+/// widened for coefficients within `err` (and the quotients' own rounding): `(lo, hi,
+/// widen)`.
+fn euclid_box(h: &[Bernstein2; 4], err: f64) -> Result<([f64; 3], [f64; 3], f64)> {
+    let [x, y, z, w] = h;
+    let (xs, ys, zs, ws) = (
+        x.coefficients(),
+        y.coefficients(),
+        z.coefficients(),
+        w.coefficients(),
+    );
+    let w_min = ws.iter().copied().fold(f64::INFINITY, f64::min);
+    if !above(w_min - err, 0.0) {
+        return Err(SolidError::Unsupported {
+            operation: OP,
+            reason: "a patch's weights are not proved positive",
+        });
+    }
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    let mut size = 0.0_f64;
+    for (((&a, &b), &c), &wi) in xs.iter().zip(ys).zip(zs).zip(ws) {
+        let e = [a / wi, b / wi, c / wi];
+        for (k, v) in e.into_iter().enumerate() {
+            size = size.max(v.abs());
+            if let (Some(l), Some(u)) = (lo.get_mut(k), hi.get_mut(k)) {
+                *l = l.min(v);
+                *u = u.max(v);
+            }
+        }
+    }
+    // |(v + dv) / (w + dw) - v / w| <= err (1 + |v / w|) / (w - err), and the quotient's
+    // own rounding
+    let widen = err * (1.0 + size) / (w_min - err) + gamma(2) * size;
+    if !(widen.is_finite() && lo.iter().chain(&hi).all(|v| v.is_finite())) {
+        return Err(SolidError::Unsupported {
+            operation: OP,
+            reason: "a patch's box is not finite",
+        });
+    }
+    Ok((lo, hi, widen))
 }
 
 /// A certified lower bound of the distance from `p` to face `f` of `b`: no point of the face
@@ -320,6 +401,51 @@ pub fn surface_distance_lower_bound(
             "the bound asked for is finite and not negative",
         ));
     }
+    let (pieces, slack) = pieces_about(k, surf, uv_box, p)?;
+    let want_net = want + slack;
+    let mut made = pieces.len();
+    let mut heap: BinaryHeap<Piece> = pieces.into_iter().collect();
+    let off = |lower: f64| (lower - slack).max(0.0);
+    loop {
+        // (the box is inside the patches' range, so some patch overlaps it)
+        let nearest = heap.pop().ok_or_else(|| SolidError::sm_err(OP))?;
+        if nearest.lower >= want_net || made >= MAX_PATCHES {
+            return Ok(off(nearest.lower));
+        }
+        // the piece's centre is a point of the net over the box: nearer than the target, no
+        // bound reaches it
+        let (centre, _) = nearest.centre();
+        if (centre[0] * centre[0] + centre[1] * centre[1] + centre[2] * centre[2]).sqrt() < want_net
+        {
+            return Ok(off(nearest.lower));
+        }
+        for q in nearest.quarters()? {
+            heap.push(q);
+        }
+        made += 4;
+    }
+}
+
+/// The pieces of `surf` over `uv_box` (as [`surface_distance_lower_bound`] takes it) about
+/// `p`: its NURBS form's Bézier patches restricted to the box, translated by `-p`, each
+/// with its coefficients' error (the form's against its definition, the extraction's and
+/// the translation's, module docs); and the slack every distance from them is to lose (a
+/// net's certified bound from its definition, 0 for a surface that evaluates on its net).
+/// The one construction of the face pieces that [`surface_distance_lower_bound`] and the
+/// contact test between bodies ([`crate::query::contact`]) bound distances with.
+///
+/// # Errors
+///
+/// As [`surface_distance_lower_bound`]'s, but for `want`.
+pub(crate) fn pieces_about(
+    k: &Kernel,
+    surf: &Surface,
+    uv_box: Option<&Extent2d>,
+    p: Point3,
+) -> Result<(Vec<Piece>, f64)> {
+    if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
+        return Err(SolidError::invalid_input(OP, "point not finite"));
+    }
     if !measurable(k, surf)? {
         return Err(SolidError::Unsupported {
             operation: OP,
@@ -424,9 +550,7 @@ pub fn surface_distance_lower_bound(
             ));
         }
     }
-    let want_net = want + slack;
-    let mut heap = BinaryHeap::new();
-    let mut made = 0_usize;
+    let mut pieces = Vec::new();
     for patch in patches.iter().flatten() {
         let (pu, pv) = patch.degrees();
         let (uk, vk) = (patch.u_knots(), patch.v_knots());
@@ -496,33 +620,15 @@ pub fn surface_distance_lower_bound(
         } else {
             h
         };
-        heap.push(Piece::new(h, err, 0)?);
-        made += 1;
+        let uv = [
+            u0 + a0 * (u1 - u0),
+            u0 + a1 * (u1 - u0),
+            v0 + b0 * (v1 - v0),
+            v0 + b1 * (v1 - v0),
+        ];
+        pieces.push(Piece::new(h, err, 0, uv)?);
     }
-    let off = |lower: f64| (lower - slack).max(0.0);
-    loop {
-        // (the box is inside the patches' range, so some patch overlaps it)
-        let nearest = heap.pop().ok_or_else(|| SolidError::sm_err(OP))?;
-        if nearest.lower >= want_net || made >= MAX_PATCHES {
-            return Ok(off(nearest.lower));
-        }
-        // the piece's centre is a point of the net over the box: nearer than the target, no
-        // bound reaches it
-        let [x, y, z, w] = &nearest.h;
-        let wc = w.eval(0.5, 0.5);
-        let centre = (
-            x.eval(0.5, 0.5) / wc,
-            y.eval(0.5, 0.5) / wc,
-            z.eval(0.5, 0.5) / wc,
-        );
-        if (centre.0 * centre.0 + centre.1 * centre.1 + centre.2 * centre.2).sqrt() < want_net {
-            return Ok(off(nearest.lower));
-        }
-        for q in nearest.quarters()? {
-            heap.push(q);
-        }
-        made += 4;
-    }
+    Ok((pieces, slack))
 }
 
 #[cfg(test)]
@@ -890,7 +996,10 @@ mod tests {
                     .unwrap()
                 });
                 let exact = h.each_ref().map(exact_quarters);
-                let quarters = Piece::new(h, 0.0, 0).unwrap().quarters().unwrap();
+                let quarters = Piece::new(h, 0.0, 0, [0.0, 1.0, 0.0, 1.0])
+                    .unwrap()
+                    .quarters()
+                    .unwrap();
                 for (q, quarter) in quarters.iter().enumerate() {
                     for (axis, component) in quarter.h.iter().enumerate() {
                         for (rounded, reference) in

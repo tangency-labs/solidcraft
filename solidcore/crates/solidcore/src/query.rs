@@ -6,6 +6,7 @@
 
 pub mod api_queries;
 pub mod brep;
+pub mod contact;
 pub mod distance_bound;
 pub mod edge;
 #[cfg(test)]
