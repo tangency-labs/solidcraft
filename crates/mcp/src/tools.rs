@@ -977,9 +977,6 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         }
         "execute" => {
             let id = str_arg(a, "command").ok_or("`command` is required")?;
-            if !id.contains('.') && TOOL_STEPS.contains(&id) {
-                return Err(format!("`{id}` is a tool, not an engine command: call it as a tool, or run an engine command like `solid.box`"));
-            }
             let v = exec(b, id, a.get("params").cloned().filter(Value::is_object).unwrap_or(json!({})))?;
             Ok(if a.get("verbose").and_then(Value::as_bool).unwrap_or(true) { v } else { compact(v) })
         }

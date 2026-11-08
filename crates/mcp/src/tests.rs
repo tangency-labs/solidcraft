@@ -4441,6 +4441,7 @@ fn compact_output_follows_the_apps_preference() {
     assert!(inspect_design_is_compact(&mut s));
     let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true });
     assert!(inspect_design_is_compact(&mut s));
+}
 
 }
 
@@ -4568,12 +4569,12 @@ fn app_tools_are_not_batch_steps_and_check_arguments() {
         let r = raw_tool(&mut s, "batch", json!({"commands": [{"command": name}]}));
         assert_eq!(r["result"]["isError"], json!(true), "{name}: {r}");
         let text = r["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains(&format!("`{name}` is a tool")), "{name}: {text}");
+        // `execute` wrapping them is answered with the MCP-tool hint (#10680).
         // `execute` wrapping them is refused too, with the same direction.
         let r = raw_tool(&mut s, "execute", json!({"command": name}));
         assert_eq!(r["result"]["isError"], json!(true), "execute {name}: {r}");
         let text = r["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains(&format!("`{name}` is a tool, not an engine command")), "execute {name}: {text}");
+        assert!(text.contains(&format!("`{name}` is an MCP tool, not an engine command id")), "execute {name}: {text}");
     }
     let mut s = server();
     // Unknown arguments are schema errors…
