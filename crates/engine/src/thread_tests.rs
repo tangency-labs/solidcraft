@@ -1528,3 +1528,60 @@ fn a_modelled_thread_leaves_the_next_hole_a_cylinder_to_thread() {
         assert!(t3.is_ok(), "gap {gap}: the second hole takes a modelled thread: {t3:?}");
     }
 }
+
+/// #13505: a tapped hole drilled across two slots has its wall in three pieces (z 30..40, 15..25
+/// and 5..10). The thread runs along every piece the hole reaches, cosmetic or modelled, and a
+/// thread depth runs on through the pieces from the first one's start.
+#[test]
+fn a_tapped_hole_across_slots_is_threaded_along_every_piece_of_its_wall() {
+    let slotted = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 30, "width": 30, "height": 40, "body_name": "Part"}));
+        for z in [25, 10] {
+            run(&mut s, "solid.box", json!({"corner": [-1, -1, z], "length": 32, "width": 21, "height": 5, "operation": "cut", "targets": ["Part"]}));
+        }
+        s
+    };
+    let hole = |s: &mut Session, extra: Value| {
+        let mut ask = json!({"position": [15, 10, 40], "direction": [0, 0, -1], "thread": "M4", "depth": 35});
+        ask.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        run(s, "solid.hole", ask);
+    };
+    let spans = |s: &Session| {
+        let mut v: Vec<(f64, f64)> = s
+            .model
+            .state()
+            .threads
+            .iter()
+            .map(|t| {
+                let (a, b) = ((t.axis_point + t.axis * t.start).z, (t.axis_point + t.axis * t.end).z);
+                (a.min(b), a.max(b))
+            })
+            .collect();
+        v.sort_by(|a, b| b.0.total_cmp(&a.0));
+        v
+    };
+    let near = |got: Vec<(f64, f64)>, want: &[(f64, f64)]| {
+        assert_eq!(got.len(), want.len(), "{got:?} vs {want:?}");
+        for (g, w) in got.iter().zip(want) {
+            assert!((g.0 - w.0).abs() < 1e-6 && (g.1 - w.1).abs() < 1e-6, "{got:?} vs {want:?}");
+        }
+    };
+    let mut s = slotted();
+    hole(&mut s, json!({}));
+    near(spans(&s), &[(30.0, 40.0), (15.0, 25.0), (5.0, 10.0)]);
+    // 22 mm from the entry: on through the first slot, stopping in the second piece.
+    let mut s = slotted();
+    hole(&mut s, json!({"thread_depth": 22}));
+    near(spans(&s), &[(30.0, 40.0), (18.0, 25.0)]);
+    // Modelled, every piece of the wall is grooved: each loses material the cosmetic one keeps.
+    let mut s = slotted();
+    hole(&mut s, json!({"modeled": true}));
+    assert!(s.model.state().body("Part").unwrap().body.validity().is_empty());
+    let mut plain = slotted();
+    hole(&mut plain, json!({}));
+    for (z0, z1) in [(30.0, 40.0), (15.0, 25.0), (5.0, 10.0)] {
+        let (cut, drilled) = (volume_between(&s, "Part", (z0, z1), None), volume_between(&plain, "Part", (z0, z1), None));
+        assert!(cut < drilled - 1.0, "z {z0}..{z1}: {cut} vs {drilled}");
+    }
+}
