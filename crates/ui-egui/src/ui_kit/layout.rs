@@ -3,7 +3,6 @@ use super::{metrics::*, text::paint_text};
 use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Response, RichText, Ui, vec2};
-use solidcraft_engine::kernel::Continuity;
 
 pub(super) const FORM: &str = "sc_dense_form";
 
@@ -259,31 +258,6 @@ pub(crate) fn text_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str)
 /// Indexed choice row with the caller's unchanged dropdown ID. Tokens: `row, dropdown`.
 pub(crate) fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usize, options: &[&str]) -> Response {
     row(ui, label, |ui| super::dropdown(ui, id, selected, options))
-}
-
-/// The one control that chooses a continuity order, wherever one is chosen: a dropdown of
-/// `allowed` (what the construction builds, `Construction::offered`). Its labels are the orders'
-/// plain words and its hover text a line per order naming its code, both from the kernel's one
-/// table of orders; a value not in `allowed` shows the first. Tokens: `row, dropdown`.
-pub(crate) fn continuity_row(ui: &mut Ui, label: &str, id: &str, value: &mut Continuity, allowed: &[Continuity]) -> Response {
-    continuity_row_explained(ui, label, id, value, allowed, &continuity_tip(allowed))
-}
-
-/// [`continuity_row`] whose hover text says what each order builds there (`tip`, which names
-/// each order's code), for a choice whose orders stand for constructions (a fillet's corners).
-pub(crate) fn continuity_row_explained(ui: &mut Ui, label: &str, id: &str, value: &mut Continuity, allowed: &[Continuity], tip: &str) -> Response {
-    let labels: Vec<&str> = allowed.iter().map(|g| g.label_id()).collect();
-    let mut index = allowed.iter().position(|g| g == value).unwrap_or(0);
-    let response = choice_row(ui, label, id, &mut index, &labels);
-    if let Some(g) = allowed.get(index) {
-        *value = *g;
-    }
-    response.backing_on_hover_text(tip)
-}
-
-/// The hover text of a continuity choice: each order's own line, which names its code.
-pub(crate) fn continuity_tip(allowed: &[Continuity]) -> String {
-    allowed.iter().map(|g| crate::i18n::tr(g.tip_id())).collect::<Vec<_>>().join("\n")
 }
 
 /// Internal form geometry for controls which need several lines (e.g. text areas).

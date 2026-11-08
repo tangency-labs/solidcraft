@@ -1,6 +1,7 @@
 //! Table-driven layout/paint references in both themes. No window or GPU required.
 use super::preferences_figures::{ThemeSample, paint_theme_thumbnail};
 use super::*;
+use crate::dialogs_surface::{continuity_row, continuity_row_explained, continuity_tip};
 use crate::theme::Tokens;
 use crate::ui_kit::{Container, Surface};
 use egui::{Ui, vec2};

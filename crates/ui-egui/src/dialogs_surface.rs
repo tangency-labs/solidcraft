@@ -3,6 +3,7 @@
 //! Fair Surface, Match Surface and Split Face. Each has a live preview and Edit Feature.
 
 use crate::dialogs::put;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
 use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
@@ -150,6 +151,38 @@ impl Surf {
     }
 }
 
+/// The one control that chooses a continuity order, wherever one is chosen: a dropdown of
+/// `allowed` (what the construction builds, `Construction::offered`). Its labels are the orders'
+/// plain words and its hover text a line per order naming its code, both from the kernel's one
+/// table of orders; a value not in `allowed` shows the first. Tokens: `row, dropdown`.
+pub(crate) fn continuity_row(ui: &mut egui::Ui, label: &str, id: &str, value: &mut Continuity, allowed: &[Continuity]) -> egui::Response {
+    continuity_row_explained(ui, label, id, value, allowed, &continuity_tip(allowed))
+}
+
+/// [`continuity_row`] whose hover text says what each order builds there (`tip`, which names
+/// each order's code), for a choice whose orders stand for constructions (a fillet's corners).
+pub(crate) fn continuity_row_explained(
+    ui: &mut egui::Ui,
+    label: &str,
+    id: &str,
+    value: &mut Continuity,
+    allowed: &[Continuity],
+    tip: &str,
+) -> egui::Response {
+    let labels: Vec<&str> = allowed.iter().map(|g| g.label_id()).collect();
+    let mut index = allowed.iter().position(|g| g == value).unwrap_or(0);
+    let response = choice_row(ui, label, id, &mut index, &labels);
+    if let Some(g) = allowed.get(index) {
+        *value = *g;
+    }
+    response.backing_on_hover_text(tip)
+}
+
+/// The hover text of a continuity choice: each order's own line, which names its code.
+pub(crate) fn continuity_tip(allowed: &[Continuity]) -> String {
+    allowed.iter().map(|g| crate::i18n::tr(g.tip_id())).collect::<Vec<_>>().join("\n")
+}
+
 /// What each dialog's continuity rows offer: the orders its construction builds, from the
 /// kernel's table, so an order a construction learns shows up by itself.
 fn patch_orders() -> Vec<Continuity> {
@@ -160,7 +193,7 @@ fn patch_orders() -> Vec<Continuity> {
 /// faces meet each other with different curvatures (tangent only: no surface smooth at the corner
 /// has both curvatures there).
 fn patch_continuity_tip() -> String {
-    format!("{}\n{}", ui_kit::continuity_tip(&patch_orders()), crate::i18n::tr("ui.patch_continuity_corner_tip"))
+    format!("{}\n{}", continuity_tip(&patch_orders()), crate::i18n::tr("ui.patch_continuity_corner_tip"))
 }
 
 fn blend_orders() -> Vec<Continuity> {
@@ -319,23 +352,23 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
             ui_kit::options(ui, "untrim_options", &mut [("Restore outer boundary", outer), ("In place (surfaces)", in_place)]);
         }
         Surf::Patch { continuity } => {
-            ui_kit::continuity_row_explained(ui, "Continuity", "pa_cont", continuity, &patch_orders(), &patch_continuity_tip());
+            continuity_row_explained(ui, "Continuity", "pa_cont", continuity, &patch_orders(), &patch_continuity_tip());
         }
         Surf::Blend { continuity, bulge, stitch } => {
             let [from, to] = continuity;
             let [from_bulge, to_bulge] = bulge;
-            ui_kit::continuity_row(ui, "Start continuity", "bl_cont0", from, &blend_orders());
+            continuity_row(ui, "Start continuity", "bl_cont0", from, &blend_orders());
             form_row(ui, "Start bulge", |ui| {
                 ui_kit::scalar_field(ui, from_bulge, -0.9..=3.0);
             });
-            ui_kit::continuity_row(ui, "End continuity", "bl_cont1", to, &blend_orders());
+            continuity_row(ui, "End continuity", "bl_cont1", to, &blend_orders());
             form_row(ui, "End bulge", |ui| {
                 ui_kit::scalar_field(ui, to_bulge, -0.9..=3.0);
             });
             ui_kit::options(ui, "blend_options", &mut [("Stitch to both bodies", stitch)]);
         }
         Surf::Boundary { continuity, join } => {
-            ui_kit::continuity_row(ui, "Continuity", "bo_cont", continuity, &boundary_orders());
+            continuity_row(ui, "Continuity", "bo_cont", continuity, &boundary_orders());
             form_row(ui, "Operation", |ui| {
                 let mut op = usize::from(*join);
                 combo(ui, "bo_op", &BOUNDARY_OPS, &mut op);
@@ -1190,7 +1223,7 @@ mod tests {
                 assert!(tip.contains(g.code()), "{lang}: the {g:?} hover text names its code: {tip}");
             }
         }
-        assert_eq!(ui_kit::continuity_tip(&blend_orders()).lines().count(), 4);
+        assert_eq!(continuity_tip(&blend_orders()).lines().count(), 4);
         // The patch's hover text adds what it does at a corner whose faces' curvatures differ.
         let tip = patch_continuity_tip();
         assert_eq!(tip.lines().count(), patch_orders().len() + 1, "{tip}");
