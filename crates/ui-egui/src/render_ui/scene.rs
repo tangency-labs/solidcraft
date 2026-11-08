@@ -3,9 +3,9 @@ use super::{ImageMethod, RenderSelection, cpu, hdr, inspector, setups, studio};
 use crate::{
     SolveApp,
     browser::{self, Row},
-    context_menu::{self, Item},
+    context_menu,
     theme::Tokens,
-    ui_kit,
+    ui_kit::{self, Item},
 };
 use egui::Color32;
 use serde_json::json;
@@ -37,7 +37,7 @@ pub(crate) fn decoration(app: &SolveApp, names: &[String]) -> Decoration {
         count: if count == 0 {
             String::new()
         } else {
-            crate::i18n::format(if count == 1 { "render.tree_face_one" } else { "render.tree_face_count" }, &[("count", &count.to_string())])
+            solidcraft_ui_text::format(if count == 1 { "render.tree_face_one" } else { "render.tree_face_count" }, &[("count", &count.to_string())])
         },
     }
 }
@@ -70,7 +70,7 @@ fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
     let open = browser::is_open(app, &id, true);
     let label = app.tr(&format!("render.tree_{key}")).to_string();
     let add_label = app.tr(if key == "lights" { "render.tree_add_light" } else { "render.tree_add_shot" }).to_string();
-    let pending = app.tr("render.light_backend_limit").to_string();
+    let pending = app.tr("render.method_limit_raster").to_string();
     let actions = [ui_kit::TreeAction {
         icon: "plus",
         hover_only: false,
@@ -143,6 +143,11 @@ pub(crate) fn light_types(app: &SolveApp) -> Vec<&'static str> {
 }
 pub(crate) fn environment(app: &SolveApp) -> (String, String) {
     let view = &app.render_workspace.view;
+    if view.method == ImageMethod::GpuRaytrace && view.studio.environment == studio::Environment::None && view.studio.lighting_enabled {
+        // An explicit constant, including black, is not the implicit studio.
+        // It owns RGB radiance, not the legacy draft rotation/intensity pair.
+        return (app.tr("render.tree_constant").to_string(), String::new());
+    }
     let fixed = || (app.tr("render.tree_fixed_studio").to_string(), view.draft.environment_rotation, view.draft.environment_intensity);
     let source = |input: &hdr::Input| match input {
         hdr::Input::EmbeddedResource { resource } => format!("{} {resource}", app.tr("render.tree_hdr")),
@@ -154,6 +159,7 @@ pub(crate) fn environment(app: &SolveApp) -> (String, String) {
     let (name, rotation, intensity) = match view.method {
         ImageMethod::CpuRaytrace => match view.cpu.environment {
             cpu::Environment::Hdr => (source(&view.cpu.hdr), view.cpu.rotation_rad, view.cpu.intensity),
+            cpu::Environment::Sky => (app.tr("render.studio_sky").into(), view.cpu.rotation_rad, view.cpu.intensity),
             cpu::Environment::Constant => (app.tr("render.tree_constant").into(), 0.0, view.cpu.intensity),
             cpu::Environment::None => fixed(),
         },
@@ -166,7 +172,7 @@ pub(crate) fn environment(app: &SolveApp) -> (String, String) {
     };
     (
         name,
-        crate::i18n::format(
+        solidcraft_ui_text::format(
             "render.tree_environment_values",
             &[("rotation", &format!("{:.0}", rotation.to_degrees())), ("intensity", &format!("{intensity:.2}"))],
         ),
@@ -369,7 +375,7 @@ pub(crate) fn wear_subtitle(app: &SolveApp) -> String {
     if count == 0 {
         app.tr("render.wear_no_layers").into()
     } else {
-        crate::i18n::format(if count == 1 { "render.wear_layer_one" } else { "render.wear_layer_count" }, &[("count", &count.to_string())])
+        solidcraft_ui_text::format(if count == 1 { "render.wear_layer_one" } else { "render.wear_layer_count" }, &[("count", &count.to_string())])
     }
 }
 
@@ -415,7 +421,7 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
         }
         let open = browser::is_open(app, &key, true);
         let label = look_name(app, group.look.as_ref());
-        let count = crate::i18n::format(
+        let count = solidcraft_ui_text::format(
             if group.objects.len() == 1 { "render.tree_user_one" } else { "render.tree_users" },
             &[("count", &group.objects.len().to_string())],
         );

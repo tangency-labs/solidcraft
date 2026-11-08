@@ -24,8 +24,8 @@ fn harness() -> Harness {
 #[test]
 fn the_harness_takes_english_as_the_system_language() {
     let h = Harness::new();
-    assert_eq!(h.app.preferences.language, solidcraft_ui_egui::i18n::SYSTEM);
-    assert_eq!(solidcraft_ui_egui::i18n::effective_language(&h.app.preferences.language), "en");
+    assert_eq!(h.app.preferences.language, solidcraft_ui_text::SYSTEM);
+    assert_eq!(solidcraft_ui_text::effective_language(&h.app.preferences.language), "en");
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn docked_ribbon_geometry_and_search() {
                 (
                     fonts
                         .layout_no_wrap(
-                            solidcraft_ui_egui::i18n::tr_label("Search commands").to_owned(),
+                            solidcraft_ui_text::tr_label("Search commands").to_owned(),
                             egui::FontId::proportional(t.font_button),
                             t.form_dim,
                         )

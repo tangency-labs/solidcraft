@@ -3,11 +3,12 @@
 //! tools for free-form curves and slots, text placement, and constraint glyphs. Like `tools`,
 //! these are UI state only: every action runs a command.
 
-use crate::i18n::{tr, tr_engine_error};
+use crate::i18n::tr_engine_error;
 use crate::icons::markers::glyph_icon;
 use crate::icons::markers::glyph_letter;
 use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_ui_text::tr;
 use std::cell::{Cell, RefCell};
 
 use egui::{Pos2, Stroke};
@@ -226,7 +227,7 @@ fn next_measure(order: Continuity) -> Option<(&'static str, &'static str, &'stat
 fn continuity_label(app: &SolveApp, seam: &Value) -> String {
     let deg = |key: &str| seam[key]["value"].as_f64().map(|x| format!("{x:.3}\u{b0}")).unwrap_or_default();
     let order = seam["order"].as_str().and_then(Continuity::parse);
-    let class = crate::i18n::tr(order_class(order));
+    let class = solidcraft_ui_text::tr(order_class(order));
     match order {
         None => format!("{class} {}", seam["gap_mm"]["value"].as_f64().map(|g| crate::prefs::show_mm(app, g, 1)).unwrap_or_default()),
         Some(g) => {
@@ -323,12 +324,12 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         let Ok(v) = app.run(id, json!({})) else { return false };
         let summary = &v["summary"];
         // Each class in the legend's words, best first.
-        let gaps = summary["gap"].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", crate::i18n::tr(order_class(None))));
+        let gaps = summary["gap"].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", solidcraft_ui_text::tr(order_class(None))));
         let counts: Vec<String> = Continuity::ALL
             .into_iter()
             .rev()
             .filter_map(|g| {
-                summary["orders"][g.as_str()].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", crate::i18n::tr(order_class(Some(g)))))
+                summary["orders"][g.as_str()].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", solidcraft_ui_text::tr(order_class(Some(g)))))
             })
             .chain(gaps)
             .collect();
@@ -924,8 +925,8 @@ pub fn hint(id: &str) -> Option<String> {
             "inspect.center_of_mass" => "Center of mass of all bodies; click a body for its own",
             "inspect.isocurve" => "Isocurves: click faces",
             "inspect.continuity" => "Continuity: click an edge for its numbers (the button again turns the colours off)",
-            "canvas.insert" => crate::i18n::tr("canvas.place_hint"),
-            "canvas.decal" => crate::i18n::tr("canvas.decal_place_hint"),
+            "canvas.insert" => solidcraft_ui_text::tr("canvas.place_hint"),
+            "canvas.decal" => solidcraft_ui_text::tr("canvas.decal_place_hint"),
             "sketch.trim" => tr("sketch.hint.trim"),
             "sketch.extend" => tr("sketch.hint.extend"),
             "sketch.break" => tr("sketch.hint.break"),
@@ -1949,7 +1950,7 @@ fn constraint_entities(k: &solidcraft_engine::sketch::ConstraintKind) -> (Vec<us
         PatternRadius { a, b } => (vec![a, b], vec![]),
         Fix { p } => (vec![], vec![p]),
         Midpoint { p, l } => (vec![l], vec![p]),
-        PointOnCurve { p, c } => (vec![c], vec![p]),
+        PointOnCurve { p, c } | PointAlong { p, c, .. } => (vec![c], vec![p]),
         Symmetric { p, q, l } => (vec![l], vec![p, q]),
         Horizontal { l } | Vertical { l } => (vec![l], vec![]),
         Parallel { a, b }
@@ -1983,7 +1984,7 @@ fn glyph_anchors(sk: &solidcraft_engine::sketch::Sketch, k: &solidcraft_engine::
     };
     let pt = |p: usize| sk.point(p).map(|q| (q, None));
     match *k {
-        Coincident { p, .. } | Fix { p } | Midpoint { p, .. } | PointOnCurve { p, .. } => pt(p).into_iter().collect(),
+        Coincident { p, .. } | Fix { p } | Midpoint { p, .. } | PointOnCurve { p, .. } | PointAlong { p, .. } => pt(p).into_iter().collect(),
         PatternPoint { p, center, .. } => pt(center.unwrap_or(p)).into_iter().collect(),
         PatternRadius { .. } => Vec::new(),
         HorizontalPoints { p, q } | VerticalPoints { p, q } | Symmetric { p, q, .. } => {
@@ -2074,6 +2075,28 @@ mod glyph_zoom_tests {
     fn glyphs_stay_while_a_large_sketch_fills_the_view() {
         assert!(constraint_glyphs_visible_at_scale(1.5, true, || 500.0 * 1.5));
         assert!(constraint_glyphs_visible_at_scale(0.05, true, || MIN_GLYPH_SPAN_PX));
+    }
+
+    /// A Divide Curve point's constraint has a glyph on its point, an icon, and lights its point
+    /// and curve, as a point-on-curve constraint does (#8969).
+    #[test]
+    fn a_point_along_constraint_has_a_glyph_on_its_point() {
+        use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Sketch};
+        let mut sk = Sketch::new();
+        let (Ok(a), Ok(b), Ok(q)) = (
+            sk.add_point(super::Vec2::new(0.0, 0.0), None),
+            sk.add_point(super::Vec2::new(10.0, 0.0), None),
+            sk.add_point(super::Vec2::new(2.5, 0.0), None),
+        ) else {
+            panic!("points");
+        };
+        let Ok(l) = sk.add_curve(CurveKind::Line { a, b }, None) else { panic!("line") };
+        let k = ConstraintKind::PointAlong { p: q, c: l, at: 0.25 };
+        assert_eq!(super::constraint_entities(&k), (vec![l], vec![q]));
+        let anchors = super::glyph_anchors(&sk, &k);
+        assert_eq!(anchors.len(), 1);
+        assert!(anchors.first().is_some_and(|(at, dir)| (at.x - 2.5).abs() < 1e-9 && at.y.abs() < 1e-9 && dir.is_none()));
+        assert_eq!(crate::icons::markers::glyph_icon(k.name()), Some("c_midpoint"));
     }
 }
 

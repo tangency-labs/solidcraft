@@ -672,7 +672,7 @@ pub struct ApiBackend {
 impl ApiBackend {
     pub fn start(cfg: ApiConfig, ctx: StartContext) -> Result<ApiBackend, String> {
         if cfg.key.is_some() && !super::agents::key_allowed_for(&cfg.base_url, cfg.protocol == Protocol::OpenAi && cfg.allow_insecure_http) {
-            return Err(crate::i18n::tr("ui.ai_key_needs_https").to_string());
+            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
         }
         // One stable session ID per chat for OpenCode Go's routing and prompt cache.
         let session_id = new_session_id();
@@ -1295,7 +1295,7 @@ impl Worker {
 
 /// What the chat says when a request ran out of time: the limit, and where to raise it.
 pub fn timed_out(limit_s: u64) -> String {
-    crate::i18n::format("ui.ai_request_timed_out", &[("seconds", &limit_s.to_string())])
+    solidcraft_ui_text::format("ui.ai_request_timed_out", &[("seconds", &limit_s.to_string())])
 }
 
 /// A failed request as people read it: one that ran into the endpoint's request timeout (the
@@ -1309,10 +1309,10 @@ pub fn http_error(status: u16, body: &Value) -> String {
     let detail =
         body.pointer("/error/message").or_else(|| body.get("error")).and_then(Value::as_str).unwrap_or("").chars().take(300).collect::<String>();
     let what = match status {
-        401 | 403 => crate::i18n::tr("ui.ai_http_key"),
-        404 => crate::i18n::tr("ui.ai_http_not_found"),
-        429 => crate::i18n::tr("ui.ai_http_busy"),
-        413 => crate::i18n::tr("ui.ai_http_too_large"),
+        401 | 403 => solidcraft_ui_text::tr("ui.ai_http_key"),
+        404 => solidcraft_ui_text::tr("ui.ai_http_not_found"),
+        429 => solidcraft_ui_text::tr("ui.ai_http_busy"),
+        413 => solidcraft_ui_text::tr("ui.ai_http_too_large"),
         _ => "",
     };
     format!(
@@ -1643,7 +1643,7 @@ fn anthropic_headers(base_url: &str, key: Option<&str>) -> Result<Vec<(String, S
     let mut headers = vec![("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string())];
     if let Some(k) = key {
         if !super::agents::key_safe_for(base_url) {
-            return Err(crate::i18n::tr("ui.ai_key_needs_https").to_string());
+            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
         }
         headers.push(("x-api-key".to_string(), k.to_string()));
     }
@@ -1670,7 +1670,7 @@ pub fn anthropic_model_list(http: &HttpFn, base_url: &str, key: Option<&str>) ->
 pub fn test_anthropic_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &str) -> Result<String, String> {
     let model = model.trim();
     if model.is_empty() {
-        return Err(crate::i18n::tr("ui.ai_need_model").to_string());
+        return Err(solidcraft_ui_text::tr("ui.ai_need_model").to_string());
     }
     let mut headers = anthropic_headers(base_url, key)?;
     headers.push(("Content-Type".to_string(), "application/json".to_string()));
@@ -1687,7 +1687,7 @@ pub fn test_anthropic_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>,
     if status != 200 {
         return Err(http_error(status, &v));
     }
-    Ok(crate::i18n::format("ui.ai_test_answered", &[("model", model)]))
+    Ok(solidcraft_ui_text::format("ui.ai_test_answered", &[("model", model)]))
 }
 
 /// A tool call's result as text for the model, and whether it failed.
@@ -1741,7 +1741,7 @@ fn tool_title(name: &str, args: &Value) -> String {
 /// endpoint should be, say): an error, so the picker says so and asks again later.
 fn listed_models(body: &Value, name_key: &str) -> Result<Vec<(String, Option<String>)>, String> {
     let Some(entries) = body.get("data").and_then(Value::as_array) else {
-        return Err(crate::i18n::tr("ui.agent_chat_models_not_a_list").to_string());
+        return Err(solidcraft_ui_text::tr("ui.agent_chat_models_not_a_list").to_string());
     };
     Ok(entries
         .iter()
@@ -1771,7 +1771,7 @@ pub fn model_list(http: &HttpFn, base_url: &str, key: Option<&str>, allow_insecu
     let mut headers = Vec::new();
     if let Some(k) = key {
         if !super::agents::key_allowed_for(base_url, allow_insecure_http) {
-            return Err(crate::i18n::tr("ui.ai_key_needs_https").to_string());
+            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
     }
@@ -1783,13 +1783,16 @@ pub fn test_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &s
     let mut headers = Vec::new();
     if let Some(k) = key {
         if !super::agents::key_allowed_for(base_url, allow_insecure_http) {
-            return Err(crate::i18n::tr("ui.ai_key_needs_https").to_string());
+            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
     }
     let models = model_entries(http, base_url, headers)?;
     let found = model.is_empty() || models.iter().any(|m| m.id == model);
-    Ok(crate::i18n::format(if found { "ui.ai_test_ok" } else { "ui.ai_test_no_model" }, &[("count", &models.len().to_string()), ("model", model)]))
+    Ok(solidcraft_ui_text::format(
+        if found { "ui.ai_test_ok" } else { "ui.ai_test_no_model" },
+        &[("count", &models.len().to_string()), ("model", model)],
+    ))
 }
 
 #[cfg(test)]
@@ -2642,6 +2645,7 @@ mod tests {
     /// id that could not be sent back is left out, and the list stays within its caps.
     #[test]
     fn a_listing_keeps_the_names_and_stays_within_its_caps() {
+        crate::i18n::install();
         let mut data = vec![
             json!({"id": "openai/gpt-x", "name": "OpenAI: GPT X", "description": "Long text", "supported_parameters": ["tools"]}),
             json!({"id": "same", "name": "same", "display_name": "Same One"}),
@@ -2675,7 +2679,7 @@ mod tests {
     /// picker says why and asks again later; a list with nothing in it is a list.
     #[test]
     fn an_answer_that_is_no_model_list_is_an_error() {
-        let expected = crate::i18n::tr("ui.agent_chat_models_not_a_list").to_string();
+        let expected = solidcraft_ui_text::tr("ui.agent_chat_models_not_a_list").to_string();
         let page: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, b"<!doctype html><html><body>Control UI</body></html>".to_vec())));
         assert_eq!(model_list(&page, "http://localhost:18789/v1", None, false).unwrap_err(), expected);
         assert_eq!(anthropic_model_list(&page, "http://localhost:18789/v1", None).unwrap_err(), expected);
@@ -3110,6 +3114,7 @@ mod tests {
 
     #[test]
     fn the_anthropic_test_sends_one_small_message_and_checks_the_key_rule() {
+        crate::i18n::install();
         let seen = Arc::new(std::sync::Mutex::new(Vec::<HttpRequest>::new()));
         let log = seen.clone();
         let http: HttpFn = Arc::new(move |r: &HttpRequest| {

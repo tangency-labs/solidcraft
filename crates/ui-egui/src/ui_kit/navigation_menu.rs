@@ -1,7 +1,7 @@
 //! Popup and tooltip skin from the approved navigation boards.
 use super::{Container, Surface, navigation::*};
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{icons, navigation_bar::Edge, theme::Tokens};
+use crate::{icons, theme::Tokens};
 use egui::{Align2, FontId, Rect, Response, Sense, Ui, pos2, vec2};
 
 pub(crate) fn navigation_popup_frame() -> egui::Frame {
@@ -110,7 +110,7 @@ pub(crate) fn navigation_menu_separator(ui: &mut Ui) {
 
 /// A tip beyond `along` (the bar, or the row it names): above it, or below it for a bar on the
 /// view's top edge.
-pub(crate) fn navigation_tooltip(response: &Response, along: Rect, edge: Edge, label: &str, shortcut: Option<&str>) {
+pub(crate) fn navigation_tooltip(response: &Response, along: Rect, edge: NavigationEdge, label: &str, shortcut: Option<&str>) {
     let ctx = &response.ctx;
     let id = response.id.with("nav_tooltip_delay");
     if !response.hovered() {
@@ -130,10 +130,10 @@ pub(crate) fn navigation_tooltip(response: &Response, along: Rect, edge: Edge, l
         .area(response.id.with("nav_tooltip"))
         .order(egui::Order::Tooltip)
         .interactable(false)
-        .pivot(if edge == Edge::Top { Align2::CENTER_TOP } else { Align2::CENTER_BOTTOM })
+        .pivot(if edge == NavigationEdge::Top { Align2::CENTER_TOP } else { Align2::CENTER_BOTTOM })
         .fixed_pos(match edge {
-            Edge::Bottom => pos2(response.rect.center().x, along.top() - NAV_POPUP_GAP),
-            Edge::Top => pos2(response.rect.center().x, along.bottom() + NAV_POPUP_GAP),
+            NavigationEdge::Bottom => pos2(response.rect.center().x, along.top() - NAV_POPUP_GAP),
+            NavigationEdge::Top => pos2(response.rect.center().x, along.bottom() + NAV_POPUP_GAP),
         })
         .show(ctx, |ui| {
             Container::new(ctx, Surface::Popup).show_frame(ui, frame, ui.max_rect(), |ui| {

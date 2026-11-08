@@ -1,7 +1,8 @@
-//! Search across Preferences. The field is the Keyboard Shortcuts magnifier. A match is the
-//! control's own label, its section, its page, or the value a dropdown is showing, scored the
-//! same way as command search. English counts too, from the message catalog, so a new setting
-//! is found by being drawn — nothing is registered for search.
+//! Search across a settings page the kit draws; the Preferences window is SolidCraft's use of it.
+//! The field is the Keyboard Shortcuts magnifier. A match is the control's own label, its
+//! section, its page, or the value a dropdown is showing, scored the same way as command search.
+//! English counts too, from the message catalog, so a new setting is found by being drawn —
+//! nothing is registered for search.
 
 use std::collections::{HashMap, HashSet};
 
@@ -539,7 +540,7 @@ fn text_matches(query: &str, text: &str) -> bool {
     // is typed in reading order: compare the query in display order too, so a multi-word Hebrew
     // or Arabic label is found as it is typed (#10471; #7532 fixed only the test's half).
     setting_score(query, text) > 0
-        || setting_score(&crate::bidi::visual(query), text) > 0
+        || setting_score(&solidcraft_ui_text::bidi::visual(query), text) > 0
         || english_hit(query, text)
         || keywords(text).iter().any(|word| setting_score(query, word) > 0)
 }
@@ -702,12 +703,12 @@ fn english_hit(query: &str, shown: &str) -> bool {
         static MAP: RefCell<(String, HashMap<String, Vec<String>>)> = RefCell::new((String::new(), HashMap::new()));
     }
     MAP.with(|slot| {
-        let lang = crate::i18n::language().to_string();
+        let lang = solidcraft_ui_text::language().to_string();
         let mut slot = slot.borrow_mut();
         if slot.0 != lang {
             let mut map: HashMap<String, Vec<String>> = HashMap::new();
-            let locale = crate::i18n::Locale::for_language(&lang);
-            crate::i18n::each_english_message(|id, english| {
+            let locale = solidcraft_ui_text::Locale::for_language(&lang);
+            solidcraft_ui_text::each_english_message(|id, english| {
                 if english.contains('{') {
                     return;
                 }
@@ -801,7 +802,7 @@ pub(crate) fn remember(ui: &mut Ui, label: &str, rect: Rect) {
     if scroll {
         ui.scroll_to_rect(rect, Some(egui::Align::Center));
     }
-    crate::scenario::publish_handle("prefs:search:current", rect.center());
+    solidcraft_ui_registry::publish_handle("prefs:search:current", rect.center());
 }
 
 pub(crate) fn set_reveal(ctx: &Context, reveal: Option<Reveal>) {
@@ -815,13 +816,13 @@ pub(crate) fn set_reveal(ctx: &Context, reveal: Option<Reveal>) {
 }
 
 pub(crate) fn reveal_for(page: usize, label: &str) -> Reveal {
-    Reveal { page, label: label.to_string(), until: crate::now_ms() + REVEAL_MS }
+    Reveal { page, label: label.to_string(), until: now_ms() + REVEAL_MS }
 }
 
 /// Scroll the opened setting into view and outline it until [`Reveal::until`].
 pub(crate) fn follow(ui: &Ui, label: &str, rect: Rect) {
     let Some(reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID))) else { return };
-    if crate::now_ms() > reveal.until || fold(label) != fold(&reveal.label) {
+    if now_ms() > reveal.until || fold(label) != fold(&reveal.label) {
         return;
     }
     let page = with(ui, |state| state.page_index);
@@ -831,12 +832,51 @@ pub(crate) fn follow(ui: &Ui, label: &str, rect: Rect) {
     ui.scroll_to_rect(rect, Some(egui::Align::Center));
     let t = Tokens::get();
     ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
-    crate::scenario::publish_handle("prefs:revealed", rect.center());
+    solidcraft_ui_registry::publish_handle("prefs:revealed", rect.center());
+}
+
+/// Wall clock in milliseconds, for how long a reveal stays outlined.
+fn now_ms() -> f64 {
+    use web_time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn theme_picker_names_and_controls_are_searchable_and_theme_results_reveal_real_cards() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", serde_json::json!({"width":1467,"height":1146}));
+        h.call("ui.prefs", serde_json::json!({"language":"en","theme":"system","open":"Appearance"}));
+        for label in
+            ["Onyx", "Follow system", "One theme", "Carousel", "Grid", "Day theme", "Night theme", "High contrast", "Import theme file…", "Imported"]
+        {
+            h.app.prefs_window.filter = label.to_owned();
+            h.frames(5);
+            let (_, _, hits) = nav(&h.ctx);
+            let matches: Vec<_> =
+                hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_APPEARANCE && hit.label == label).collect();
+            assert_eq!(
+                matches.len(),
+                1,
+                "{label} has one searchable Appearance control: {:?}",
+                hits.iter().map(|hit| (&hit.label, hit.page)).collect::<Vec<_>>()
+            );
+            if label == "Onyx" {
+                set_cursor(&h.ctx, matches[0].0);
+                h.frames(2);
+                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+                h.frames(25);
+                let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+                let target = crate::scenario::rect_of("prefs:theme:onyx").unwrap();
+                assert!(page.contains_rect(target));
+                assert_eq!(h.app.preferences.theme, "system", "revealing a theme never selects it");
+            }
+        }
+    }
 
     #[test]
     fn graphics_cards_tiles_and_short_status_labels_keep_search_paths_and_reveal() {
@@ -933,12 +973,13 @@ mod tests {
 
     #[test]
     fn search_matches_a_label_a_subsequence_and_the_english_source() {
+        crate::i18n::install();
         assert!(matches_text("zoom", &["Reverse zoom direction"]));
         assert!(matches_text("zo", &["Reverse zoom direction"]));
         assert!(!matches_text("rzd", &["Reverse zoom direction"]));
         assert!(!matches_text("q", &["Units of new designs"]));
         assert!(!matches_text("qqqq", &["Units of new designs"]));
-        let _language = crate::i18n::scope("fr");
+        let _language = solidcraft_ui_text::scope("fr");
         assert!(matches_text("units", &["Unités des nouvelles conceptions"]));
         assert!(matches_text("preferences", &["préférences"]));
         assert!(matches_text("dark", &["Theme"]));
@@ -985,13 +1026,14 @@ mod tests {
 
     #[test]
     fn search_finds_right_to_left_labels_typed_in_reading_order() {
-        let _language = crate::i18n::scope("he");
-        let label = crate::i18n::tr("prefs.bodies_folders");
+        crate::i18n::install();
+        let _language = solidcraft_ui_text::scope("he");
+        let label = solidcraft_ui_text::tr("prefs.bodies_folders");
         assert!(matches_text("תיקיות גופים", &[label]), "the label as it is typed");
         assert!(matches_text("גופים תיקיות", &[label]), "the words swapped still match");
         assert!(matches_text("תיקיות", &[label]), "one word still matches");
-        let _language = crate::i18n::scope("ar");
-        let label = crate::i18n::tr("prefs.bodies_folders");
+        let _language = solidcraft_ui_text::scope("ar");
+        let label = solidcraft_ui_text::tr("prefs.bodies_folders");
         assert!(matches_text("مجلدات الأجسام", &[label]), "the label as it is typed");
         assert!(matches_text("الأجسام مجلدات", &[label]), "the words swapped still match");
         assert!(matches_text("مجلدات", &[label]), "one word still matches");
@@ -1094,9 +1136,10 @@ mod tests {
 
     #[test]
     fn the_search_field_names_the_window_it_searches() {
-        let name = crate::i18n::tr("ui.preferences").to_lowercase();
+        crate::i18n::install();
+        let name = solidcraft_ui_text::tr("ui.preferences").to_lowercase();
         for id in ["prefs.search", "prefs.search_empty"] {
-            let text = crate::i18n::tr(id).to_lowercase();
+            let text = solidcraft_ui_text::tr(id).to_lowercase();
             assert!(text.contains(&name), "`{text}` should name the window `{name}`");
         }
     }
@@ -1303,6 +1346,7 @@ mod tests {
 
     #[test]
     fn sketch_short_labels_keep_the_legacy_search_terms_in_every_complete_locale() {
+        crate::i18n::install();
         let cases = [
             ("prefs.sketch.tracking_guides", "Center and midpoint alignment guides"),
             ("prefs.sketch.tracking_points", "Alignment guides from end points and corners while drawing"),
@@ -1323,9 +1367,9 @@ mod tests {
             ("prefs.sketch.whole_bodies", "Click selects whole bodies"),
         ];
         for lang in ["en", "en-GB", "ar", "de", "he", "ja", "ko", "vi", "zh"] {
-            let _language = crate::i18n::scope(lang);
+            let _language = solidcraft_ui_text::scope(lang);
             for (id, legacy) in cases {
-                assert!(matches_text(legacy, &[crate::i18n::tr(id)]), "{lang}: {legacy} still finds {id}");
+                assert!(matches_text(legacy, &[solidcraft_ui_text::tr(id)]), "{lang}: {legacy} still finds {id}");
             }
         }
     }
@@ -1527,6 +1571,8 @@ mod tests {
                 ("Hide origin by default", "ui.hide_origin_by_default", crate::prefs::PAGE_DESIGN, "prefs:hide_origin"),
                 ("Snap to face and edge centres", "Snap to face and edge centres", crate::prefs::PAGE_TOOLS, "prefs:hole_snaps"),
                 ("Move holes by clicking or dragging", "Move holes by clicking or dragging", crate::prefs::PAGE_TOOLS, "prefs:hole_moves"),
+                ("Several holes on one face", "prefs.design_tools.hole_several", crate::prefs::PAGE_TOOLS, "prefs:hole_several"),
+                ("Group holes made together", "prefs.design_tools.hole_group", crate::prefs::PAGE_TOOLS, "prefs:hole_group"),
                 ("Show moved parts' old place as a ghost", "prefs.design_tools.ghost", crate::prefs::PAGE_TOOLS, "prefs:drive_joints_ghost"),
                 ("Near-axis rotation step (°)", "joint_move.coarse", crate::prefs::PAGE_TOOLS, "prefs:joint_rotation_coarse"),
                 ("Far-axis rotation step (°)", "joint_move.fine", crate::prefs::PAGE_TOOLS, "prefs:joint_rotation_fine"),

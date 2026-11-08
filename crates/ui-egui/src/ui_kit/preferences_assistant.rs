@@ -1,7 +1,7 @@
 //! Shared concise choice cards and the agent-pointer settings specimen.
 use super::{metrics::dimension, text::paint_text};
+use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{scenario, theme::Tokens};
 use egui::{FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 
 /// One concise choice with its full meaning available to keyboard users and on hover.
@@ -15,17 +15,17 @@ pub(crate) struct SettingsChoice<'a> {
 
 /// Equal option cards keep the choices comparable without repeating long explanations.
 pub(crate) fn settings_choices(ui: &mut Ui, choices: &[SettingsChoice<'_>], selected: &mut usize) -> bool {
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::shows_all(ui) {
+    if super::settings_search::querying(ui) && !super::settings_search::shows_all(ui) {
         let keep: Vec<usize> = choices
             .iter()
             .enumerate()
-            .filter(|(_, choice)| crate::prefs_search::texts_hit(ui, &[choice.title, choice.summary]))
+            .filter(|(_, choice)| super::settings_search::texts_hit(ui, &[choice.title, choice.summary]))
             .map(|(index, _)| index)
             .collect();
         if keep.is_empty() {
             return false;
         }
-        crate::prefs_search::reveal(ui);
+        super::settings_search::reveal(ui);
         return choice_row(ui, choices, selected, &keep);
     }
     let keep: Vec<usize> = (0..choices.len()).collect();
@@ -119,7 +119,7 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
         if let Some(icon) = choice.icon {
             let cue = Rect::from_min_size(at, vec2(t.space_14, t.space_14));
             crate::icons::paint_icon(ui.painter(), cue, icon, 1.0);
-            scenario::publish_rect(&format!("{}:icon", choice.key), cue);
+            solidcraft_ui_registry::publish_rect(&format!("{}:icon", choice.key), cue);
             at.x += icon_width;
         }
         let summary_at = pos2(rect.left() + t.space_12, at.y + title_galley.size().y + t.space_6);
@@ -127,16 +127,16 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
         ui.painter().galley(summary_at, summary_galley, t.form_dim);
     }
     let texts = [choice.title, choice.summary];
-    if let Some(text) = texts.iter().find(|text| crate::prefs_search::texts_hit(ui, &[*text])) {
-        crate::prefs_search::remember(ui, text, rect);
+    if let Some(text) = texts.iter().find(|text| super::settings_search::texts_hit(ui, &[*text])) {
+        super::settings_search::remember(ui, text, rect);
     }
     for text in texts {
-        crate::prefs_search::follow(ui, text, rect);
+        super::settings_search::follow(ui, text, rect);
     }
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::Role::RadioButton, ui.is_enabled(), selected, format!("{}: {}", choice.title, choice.detail))
     });
-    scenario::publish_target(choice.key, rect);
+    solidcraft_ui_registry::publish_target(choice.key, rect);
     response.backing_on_hover_text(choice.detail).on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -155,14 +155,14 @@ pub(crate) fn settings_pointer_preview(ui: &mut Ui, visible: bool, speed: &str, 
         crate::icons::pointer::paint(&ui.painter().with_clip_rect(rect.shrink(t.space_4)), path.get(1).copied().unwrap_or(rect.center()));
     }
     let caption = if visible {
-        crate::i18n::format("ai.prefs.pointer_preview_speed", &[("speed", speed)])
+        solidcraft_ui_text::format("ai.prefs.pointer_preview_speed", &[("speed", speed)])
     } else {
-        crate::i18n::tr("ai.prefs.pointer_preview_hidden").to_owned()
+        solidcraft_ui_text::tr("ai.prefs.pointer_preview_hidden").to_owned()
     };
     let caption_rect = Rect::from_min_max(rect.min + vec2(t.space_8, t.space_4), pos2(rect.right() - t.space_8, rect.top() + t.space_24));
     paint_text(ui, caption_rect, &caption, FontId::proportional(t.font_small), t.form_dim, false);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), &caption));
-    response.backing_on_hover_text(crate::i18n::tr(if follows_camera { "ai.prefs.follow_camera_on" } else { "ai.prefs.follow_camera_off" }));
+    response.backing_on_hover_text(solidcraft_ui_text::tr(if follows_camera { "ai.prefs.follow_camera_on" } else { "ai.prefs.follow_camera_off" }));
 }
 
 /// One muted metadata line; full commands, endpoints and tool lists remain available on hover.

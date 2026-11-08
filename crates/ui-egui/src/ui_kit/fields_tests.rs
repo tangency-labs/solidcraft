@@ -940,7 +940,7 @@ fn navigation_dropdown_popups_own_escape_and_return_focus_without_canceling_the_
     let previous = crate::theme::is_dark();
     for dark in [false, true] {
         crate::theme::set_dark(dark);
-        for kind in ["plain", "compact", "editable"] {
+        for kind in ["plain", "compact", "bounded", "editable"] {
             let ctx = crate::fonts::test_context();
             let action = Cell::new(Action::None);
             let trigger = Cell::new(None);
@@ -972,6 +972,7 @@ fn navigation_dropdown_popups_own_escape_and_return_focus_without_canceling_the_
                                 let response = match kind {
                                     "plain" => dropdown(ui, "styles", &mut choice, &options),
                                     "compact" => compact_dropdown_menu(ui, "styles", options[selected.get()], choices),
+                                    "bounded" => bounded_dropdown_menu(ui, "styles", options[selected.get()], 120.0, choices),
                                     _ => dropdown_menu_with_close_behavior(
                                         ui,
                                         "styles",
@@ -1295,6 +1296,116 @@ fn esc_closes_the_text_menu_alone() {
 }
 
 #[test]
+fn bounded_dropdown_focus_announces_full_selected_source_with_a_nonempty_accessible_label() {
+    use std::cell::Cell;
+    fn visible_text(shape: &egui::Shape, clip: egui::Rect, value: &str) -> bool {
+        match shape {
+            egui::Shape::Text(text) => text.galley.text() == value && clip.contains(text.pos),
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| visible_text(shape, clip, value)),
+            _ => false,
+        }
+    }
+    let long_source = "CPU retained image with a complete captured shot name that exceeds the bounded toolbar width";
+    for variant in ["bounded", "regular", "compact", "outside"] {
+        let current = if variant == "bounded" { long_source } else { "Add Light" };
+        for labelled in [false, true] {
+            let ctx = crate::fonts::test_context();
+            ctx.enable_accesskit();
+            let id = Cell::new(None);
+            let focus = Cell::new(false);
+            let rect = Cell::new(egui::Rect::NOTHING);
+            let chosen = Cell::new(false);
+            let mut draw = |ui: &mut Ui| {
+                let picker = |ui: &mut Ui| {
+                    if focus.get() {
+                        // Give the real widget focus during this frame, before its
+                        // native and kit metadata are emitted. No synthetic event.
+                        ui.memory_mut(|memory| memory.request_focus(id.get().expect("the first frame captures the picker ID")));
+                    }
+                    let choices = |ui: &mut Ui| {
+                        if list_picker(ui, "source", current, true).clicked() {
+                            chosen.set(true);
+                            ui.close();
+                        }
+                    };
+                    let response = match variant {
+                        "bounded" => bounded_dropdown_menu(ui, "accessible_bounded_source", current, 120.0, choices),
+                        "regular" => dropdown_menu(ui, "accessible_regular_source", current, choices),
+                        "compact" => compact_dropdown_menu(ui, "accessible_compact_source", current, choices),
+                        _ => dropdown_menu_with_close_behavior(
+                            ui,
+                            "accessible_outside_source",
+                            current,
+                            egui::PopupCloseBehavior::CloseOnClickOutside,
+                            choices,
+                        ),
+                    };
+                    id.set(Some(response.id));
+                    rect.set(response.rect);
+                };
+                if labelled {
+                    row(ui, "Retained source", picker);
+                } else {
+                    picker(ui);
+                }
+            };
+            menu_frame(&ctx, vec![], &mut draw);
+            let initial_rect = rect.get();
+            focus.set(true);
+            let output = menu_frame(&ctx, vec![], &mut draw);
+            assert!(ctx.memory(|memory| memory.has_focus(id.get().unwrap())));
+            let event = output.platform_output.events.last().expect("focusing the actual picker must announce its value");
+            assert!(matches!(event, egui::output::OutputEvent::FocusGained(_)), "the final announcement must describe actual focus: {event:?}");
+            let info = event.widget_info();
+            assert_eq!(info.role, egui::Role::ComboBox);
+            assert!(info.enabled);
+            let expected = if labelled { solidcraft_ui_text::tr_label("Retained source") } else { current };
+            assert_eq!(info.label.as_deref(), Some(expected));
+            assert!(!info.label.as_deref().unwrap().trim().is_empty());
+            assert_eq!(
+                info.current_text_value.as_deref(),
+                Some(current),
+                "the visual ellipsis cannot replace the full selected source in focus metadata"
+            );
+            let update = output.platform_output.accesskit_update.as_ref().expect("the native accessibility tree must describe the focused picker");
+            let pickers: Vec<_> = update.nodes.iter().filter(|(_, node)| node.role() == egui::accesskit::Role::ComboBox).collect();
+            assert_eq!(pickers.len(), 1, "the real picker has one native accessibility node");
+            let node = &pickers[0].1;
+            assert_eq!(node.label(), Some(expected));
+            assert_eq!(node.value(), Some(current), "the native screen reader receives the complete selected source");
+            assert!(!node.is_disabled());
+            if variant != "bounded" {
+                assert!(
+                    output.shapes.iter().any(|shape| visible_text(&shape.shape, shape.clip_rect, current)),
+                    "the accessible bare/row picker value is also the actual visible control text"
+                );
+            }
+            assert_eq!(rect.get(), initial_rect, "accessibility focus leaves the actual dropdown layout unchanged");
+            assert!(!chosen.get(), "focus cannot select an action");
+            if !labelled {
+                // egui's simple TTS description reads ComboBox labels; its native
+                // AccessKit tree above also carries the separate selected value.
+                assert!(output.platform_output.events_description().contains(current));
+            }
+            // The same real control remains clickable and its choice closes under
+            // either dismissal policy. No test-synthesized accessibility event.
+            focus.set(false);
+            menu_frame(&ctx, pointer(rect.get().center(), true), &mut draw);
+            menu_frame(&ctx, pointer(rect.get().center(), false), &mut draw);
+            menu_frame(&ctx, vec![], &mut draw);
+            assert!(egui::ComboBox::is_open(&ctx, id.get().unwrap()), "{variant}: actual dropdown opens");
+            let choice = scenario::handle_at("dialog:list:source").expect("the actual popup choice is visible");
+            menu_frame(&ctx, pointer(choice, true), &mut draw);
+            menu_frame(&ctx, pointer(choice, false), &mut draw);
+            menu_frame(&ctx, vec![], &mut draw);
+            assert!(chosen.get(), "{variant}: actual pointer activates the chosen action");
+            assert!(!egui::ComboBox::is_open(&ctx, id.get().unwrap()), "{variant}: accepted action closes its popup");
+            assert_eq!(rect.get(), initial_rect, "choice activation keeps the actual control geometry");
+        }
+    }
+}
+
+#[test]
 fn a_track_number_adds_up_and_a_sign_adds_to_the_value_now() {
     let typed = super::relative_number;
     assert_eq!(typed("1200", 5.0), Some(1200.0));
@@ -1308,7 +1419,7 @@ fn a_track_number_adds_up_and_a_sign_adds_to_the_value_now() {
 
 #[test]
 fn a_label_drag_reads_only_literal_values_and_moves_them_on_the_step_grid() {
-    let literal = |text: &str| super::literal(text).map(|l| (l.number, l.unit, l.comma));
+    let literal = |text: &str| super::literal(&crate::params_dialog::DocExpressions, text).map(|l| (l.number, l.unit, l.comma));
     assert_eq!(literal("20 mm"), Some((20.0, " mm".into(), false)));
     assert_eq!(literal(" 1,5in "), Some((1.5, "in".into(), true)));
     assert_eq!(literal("-3"), Some((-3.0, String::new(), false)));
@@ -1324,7 +1435,7 @@ fn a_label_drag_reads_only_literal_values_and_moves_them_on_the_step_grid() {
     assert_eq!(super::scrubbed(2.0, -500.0, 0.1), 0.0, "a size stops at zero");
     assert!((super::scrubbed(-2.0, -10.0, 0.1) + 3.0).abs() < 1e-9, "a negative offset keeps moving");
     assert_eq!(super::scrubbed(1.0, f32::MAX, 1e8), 1.0, "an overflowing drag keeps the value");
-    let text = |n, step, typed: &str| super::scrub_text(n, step, &super::literal(typed).unwrap());
+    let text = |n, step, typed: &str| super::scrub_text(n, step, &super::literal(&crate::params_dialog::DocExpressions, typed).unwrap());
     assert_eq!(text(23.0, 0.1, "20 mm"), "23.0 mm");
     assert_eq!(text(1.75, 0.01, "1,5 in"), "1,75 in");
     assert_eq!(text(-0.0001, 0.01, "-1"), "0.00");
@@ -1362,6 +1473,7 @@ fn dragging_a_value_rows_label_changes_its_literal_and_leaves_expressions_alone(
         frame(ctx, vec![], modifiers, values);
     }
     let ctx = crate::fonts::test_context();
+    crate::params_dialog::install_expressions(&ctx);
     let mut values = ["20 mm".to_owned(), "depth + 2 mm".to_owned()];
     frame(&ctx, vec![], Default::default(), &mut values);
     drag(&ctx, "Distance", 40.0, Default::default(), &mut values);

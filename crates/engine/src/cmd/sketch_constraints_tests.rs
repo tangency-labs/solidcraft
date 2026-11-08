@@ -750,6 +750,37 @@ fn symmetry_slides_a_rectangle_whose_width_is_dimensioned() {
 }
 
 #[test]
+fn symmetry_of_two_corners_of_one_edge_about_the_origin() {
+    // #4850: two corners of the same rectangle edge, symmetric about the origin point, were
+    // refused as "neither entity can move" although sliding the rectangle meets it.
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-12, -6], "p1": [18, 10]}));
+    let sides = ids(&r["curves"]);
+    let sk = sketch(&s);
+    let bottom = sides
+        .iter()
+        .find(|id| {
+            let (a, b) = line_ends(&sk, id);
+            (a.y + 6.0).abs() < 1e-9 && (b.y + 6.0).abs() < 1e-9
+        })
+        .unwrap_or_else(|| panic!("no bottom side in {sides:?}"))
+        .clone();
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": format!("{bottom}.start"), "b": format!("{bottom}.end"), "point": "origin"}));
+    let sk = sketch(&s);
+    let (a, b) = line_ends(&sk, &bottom);
+    assert!((a.x + b.x).abs() < 1e-6 && (a.y + b.y).abs() < 1e-6, "corners not mirrored about the origin: {a:?} {b:?}");
+    assert!(a.y.abs() < 1e-6 && b.y.abs() < 1e-6, "corners not on y = 0: {a:?} {b:?}");
+    assert!((a.x - b.x).abs() > 1.0, "the bottom side collapsed: {a:?} {b:?}");
+    for corner in [a, b] {
+        let met = sides.iter().filter(|id| **id != bottom).any(|id| {
+            let (p, q) = line_ends(&sk, id);
+            p.dist(corner) < 1e-6 || q.dist(corner) < 1e-6
+        });
+        assert!(met, "no adjacent side meets the corner {corner:?}");
+    }
+}
+
+#[test]
 fn symmetry_pairs_the_ends_of_fixed_lines_drawn_the_opposite_way() {
     // #1796: the sides of a face outline run in opposite directions (up one side, down the
     // other). Pairing start with start asked for a reflection no line gives, and centring a
@@ -1548,6 +1579,11 @@ fn midpoint_pair_orientation_uses_the_text_box_and_respects_explicit_types() {
         ("auto", [25., 33.], 'x'),
         ("auto", [43., 20.], 'y'),
         ("auto", [25., 20.], 'd'),
+        // The box's outer corners keep the distance between them, as before #7355.
+        ("auto", [50., 45.], 'd'),
+        ("auto", [55., 35.], 'd'),
+        ("auto", [0., 0.], 'd'),
+        ("auto", [-5., 5.], 'd'),
         ("distance", [25., 33.], 'd'),
         ("horizontal", [43., 20.], 'x'),
         ("vertical", [25., 33.], 'y'),

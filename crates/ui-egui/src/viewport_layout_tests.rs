@@ -8,6 +8,268 @@ fn bar_rect(canvas: Rect) -> Rect {
     crate::navigation_bar_view::measure(canvas, &Default::default(), crate::navigation::NavCaps::MODEL, |_| 0.0).rect
 }
 
+fn assert_navigator_shared_zoom(app: &crate::SolveApp, camera: Camera) {
+    let context = format!(
+        "host={}, measured={}, render={}, fov={}, up={:?}, viewport={:?}, shell_content={:?}",
+        app.universal_panel_host_enabled(),
+        app.universal_panel_frame().is_some(),
+        crate::render_workspace::active(app),
+        camera.fov,
+        camera.up,
+        app.viewport.rect,
+        app.shell.content,
+    );
+    if crate::render_workspace::active(app) && app.universal_panel_frame().is_some() {
+        let layout = app.viewport.layout.as_ref().expect(&context);
+        let usable = crate::shell::host_usable(app).expect(&context);
+        let picture = crate::render_workspace::host_picture_layout(app, layout, &usable).expect(&context);
+        let region = picture.usable.as_ref().expect(&context);
+        assert!(
+            region
+                .fit_rect_with_clearance(
+                    1.0,
+                    solidcraft_engine::panels::Point { x: picture.viewport.center().x, y: picture.viewport.center().y },
+                    crate::theme::Tokens::get().space_8,
+                )
+                .is_some(),
+            "the Render fixture must leave clear picture room: {context}; free={:?}",
+            region.free
+        );
+    }
+    let bounds = Aabb3 { min: Vec3::new(120.0, -35.0, 5.0), max: Vec3::new(180.0, -5.0, 15.0) };
+    let centre = bounds.center();
+    let radius = bounds.diagonal() * 0.5;
+    let offset = Vec3::new(radius, radius, radius);
+    let sphere = Aabb3 { min: centre - offset, max: centre + offset };
+    let mut front = if app.universal_panel_host_enabled() { camera } else { Camera::default() };
+    front.set_view(StandardView::Front);
+    let distance = app.try_fitted_bounds(front, &sphere).expect(&context).distance;
+    let reference = app.navigator_fitted_bounds(front, &bounds).expect(&context);
+    let mut directions = Vec::new();
+    for view in
+        [StandardView::Front, StandardView::Back, StandardView::Left, StandardView::Right, StandardView::Top, StandardView::Bottom, StandardView::Iso]
+    {
+        let mut requested = camera;
+        requested.set_view(view);
+        directions.push(requested);
+    }
+    for yaw in [-3.0, -1.0, 1.0, 3.0] {
+        for pitch in [-1.0, 1.0] {
+            directions.push(Camera {
+                yaw: yaw * std::f64::consts::FRAC_PI_4,
+                pitch: pitch * (1.0_f64 / 3.0_f64.sqrt()).asin(),
+                roll: 0.17,
+                ..camera
+            });
+        }
+    }
+    for requested in directions {
+        let fitted = app.navigator_fitted_bounds(requested, &bounds).expect(&context);
+        assert_eq!(fitted.distance.to_bits(), distance.to_bits(), "every navigator direction uses the Front probe's zoom");
+        assert_eq!(
+            (fitted.yaw, fitted.pitch, fitted.roll, fitted.up, fitted.fov),
+            (requested.yaw, requested.pitch, requested.roll, requested.up, requested.fov)
+        );
+        if app.universal_panel_frame().is_some() {
+            let layout = app.viewport.layout.as_ref().unwrap();
+            let usable = crate::shell::host_usable(app).unwrap();
+            let (projection, fov) = if crate::render_workspace::active(app) {
+                (crate::render_workspace::host_picture_layout(app, layout, &usable).unwrap(), requested.fov)
+            } else {
+                (host_projection_layout(layout, &usable, layout.viewport).unwrap(), app.view_fov())
+            };
+            assert!((fitted.target - centre).dot(fitted.back()).abs() < 1e-8, "the contour offset must stay in the image plane");
+            let viewport = projection.viewport;
+            let project = |camera| {
+                let effective = Camera { fov, ..camera };
+                let (x, y, _) = effective.to_screen(centre, f64::from(viewport.width()), f64::from(viewport.height()), distance * 4.0).unwrap();
+                pos2(viewport.left() + x as f32, viewport.top() + y as f32)
+            };
+            let focus = project(fitted);
+            let reference_focus = project(reference);
+            assert!((focus - reference_focus).length() < 1e-3, "every navigator direction keeps one screen centre: {focus:?} vs {reference_focus:?}");
+            assert!(
+                projection.usable.as_ref().unwrap().free.iter().any(|piece| crate::panel_runtime::egui_rect(*piece).contains(focus)),
+                "the same object centre lands in the usable picture, although its world-space target offset rotates"
+            );
+        } else {
+            assert_eq!(fitted.target, centre, "Classic and an unmeasured host keep the legacy centre");
+        }
+    }
+}
+
+fn navigator_layout_fixture(host: bool, measured: bool, render: bool) -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    if render {
+        crate::render_workspace::enter(&mut h.app, true).unwrap();
+        h.app.run("view.render_stage", json!({"stage":"frame"})).unwrap();
+        h.app.run("render.output.size", json!({"width":400,"height":1600})).unwrap();
+    }
+    // Start from a coherent Classic composition, including the shell content
+    // that anchors Render's picture, before optionally enabling the host.
+    h.frames(4);
+    if host {
+        crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
+        if measured {
+            h.frames(4);
+            if !render {
+                let viewport = h.app.viewport.rect.unwrap();
+                // Design has an asymmetric contour; Render keeps its real docks
+                // and Frame controls so the authored picture remains available.
+                h.app.viewport.host_windows =
+                    Some(vec![Rect::from_min_max(pos2(viewport.left() + 550.0, viewport.top()), pos2(viewport.right(), viewport.bottom() - 300.0))]);
+            }
+        }
+    }
+    assert_eq!(h.app.universal_panel_host_enabled(), host);
+    assert_eq!(h.app.universal_panel_frame().is_some(), measured);
+    h
+}
+
+#[test]
+fn navigator_front_probe_shares_zoom_in_classic_measured_and_unmeasured_hosts() {
+    for (host, measured) in [(false, false), (true, false), (true, true)] {
+        let mut h = navigator_layout_fixture(host, measured, false);
+        for perspective in [false, true] {
+            h.app.ui.perspective = perspective;
+            h.app.ui.auto_ortho_faces = false;
+            for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+                assert_navigator_shared_zoom(&h.app, Camera { up, fov: 0.95, ..Default::default() });
+            }
+        }
+    }
+}
+
+#[test]
+fn navigator_render_keeps_classic_probe_and_host_authored_lens_and_picture() {
+    for (host, measured) in [(false, false), (true, false), (true, true)] {
+        let mut h = navigator_layout_fixture(host, measured, true);
+        for fov in [0.0, 0.95] {
+            // Host framing uses the authored lens even when Design preferences disagree.
+            h.app.ui.perspective = fov == 0.0;
+            h.app.ui.auto_ortho_faces = false;
+            assert_ne!(h.app.view_fov(), fov);
+            let layout = h.app.viewport.layout.as_ref().unwrap();
+            let picture = crate::render_workspace::picture_layout(&h.app, layout);
+            let outer = h.app.viewport.rect.unwrap();
+            assert!(picture.viewport.width() < outer.width(), "the portrait frame must exercise a distinct projection");
+            for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+                assert_navigator_shared_zoom(&h.app, Camera { up, fov, ..Default::default() });
+            }
+        }
+        if measured {
+            h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
+            h.frames(4);
+            assert!(!crate::render_workspace::shot::overlay_visible(&h.app));
+            let layout = h.app.viewport.layout.as_ref().unwrap();
+            let usable = crate::shell::host_usable(&h.app).unwrap();
+            let picture = crate::render_workspace::host_picture_layout(&h.app, layout, &usable).unwrap();
+            let painted = crate::scenario::rect_of("render:product:frame").unwrap();
+            assert!(painted.width() < h.app.viewport.rect.unwrap().width());
+            assert_eq!(picture.viewport, painted, "host Fit and Centre must use the painted portrait even without guides");
+        }
+    }
+}
+
+#[test]
+fn host_picture_projection_clips_real_controls_and_refuses_invalid_domains() {
+    use crate::panel_runtime::{egui_rect, logical_rect, resolve_usable_region};
+    let viewport = Rect::from_min_max(pos2(0.0, 34.0), pos2(1400.0, 950.0));
+    let picture = Rect::from_min_max(pos2(420.0, 160.0), pos2(980.0, 860.0));
+    let outside = Rect::from_min_size(pos2(0.0, 34.0), vec2(1400.0, 100.0));
+    let crossing = Rect::from_min_size(pos2(300.0, 300.0), vec2(220.0, 120.0));
+    let usable = resolve_usable_region(logical_rect(viewport), &[logical_rect(outside), logical_rect(crossing)]).unwrap();
+    let mut layout = Layout::host_with_axis(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, Rect::NOTHING, false);
+    layout.navigation = Rect::from_min_size(pos2(900.0, 800.0), vec2(200.0, 40.0));
+    let projection = host_projection_layout(&layout, &usable, picture).unwrap();
+    let region = projection.usable.as_ref().unwrap();
+    assert_eq!(projection.viewport, picture);
+    assert_eq!(egui_rect(region.domain), picture);
+    assert_eq!(region.obstacles.len(), 2, "only real intersections remain");
+    assert!(region.obstacles.contains(&logical_rect(crossing.intersect(picture))));
+    assert!(region.obstacles.contains(&logical_rect(layout.navigation.intersect(picture))));
+    assert!(region.obstacles.iter().all(|rect| picture.contains_rect(egui_rect(*rect))));
+    assert_eq!(layout.viewport, viewport, "preparing a fit never changes the canvas");
+    for invalid in [
+        Rect::NOTHING,
+        Rect::from_min_size(picture.min, vec2(0.0, 1.0)),
+        viewport.expand(1.0),
+        Rect::from_min_size(pos2(f32::NAN, 0.0), vec2(10.0, 10.0)),
+    ] {
+        assert!(host_projection_layout(&layout, &usable, invalid).is_none());
+    }
+}
+
+#[test]
+fn host_picture_fit_keeps_product_lens_and_padded_corners_in_the_picture_contour() {
+    use crate::panel_runtime::{egui_rect, logical_rect, resolve_usable_region};
+    let viewport = Rect::from_min_max(pos2(0.0, 34.0), pos2(1400.0, 950.0));
+    // A 40 px inset leaves 1320 × 836 px: portrait 1:4 and landscape 12:5 frames.
+    for size in [vec2(209.0, 836.0), vec2(1320.0, 550.0)] {
+        let picture = Rect::from_center_size(viewport.center(), size);
+        let obstacle = Rect::from_min_size(picture.min, picture.size() * 0.25);
+        let usable = resolve_usable_region(logical_rect(viewport), &[logical_rect(obstacle)]).unwrap();
+        let layout = Layout::host_with_axis(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, Rect::NOTHING, false);
+        let projection = host_projection_layout(&layout, &usable, picture).unwrap();
+        let region = projection.usable.as_ref().unwrap();
+        for fov in [0.0, 0.95] {
+            for bounds in [
+                Aabb3 { min: Vec3::new(-60.0, -15.0, -2.0), max: Vec3::new(60.0, 15.0, 2.0) },
+                Aabb3 { min: Vec3::ZERO, max: Vec3::new(100.0, 0.0, 0.0) },
+            ] {
+                let camera = Camera { fov, ..Default::default() };
+                let fitted = fit_host_bounds(camera, &bounds, &projection, region, camera.fov, 1.0).unwrap();
+                assert_eq!(fitted.fov, fov);
+                let radius = (bounds.diagonal() + bounds.center().dist(fitted.target)).max(fitted.half_height() * 2.0).max(10.0);
+                let mut footprint = Rect::NOTHING;
+                for x in [bounds.min.x, bounds.max.x] {
+                    for y in [bounds.min.y, bounds.max.y] {
+                        for z in [bounds.min.z, bounds.max.z] {
+                            let (x, y, depth) =
+                                fitted.to_screen(Vec3::new(x, y, z), f64::from(picture.width()), f64::from(picture.height()), radius).unwrap();
+                            assert!((0.0..=1.0).contains(&depth));
+                            footprint.extend_with(pos2(picture.left() + x as f32, picture.top() + y as f32));
+                        }
+                    }
+                }
+                assert!(
+                    region.contains_rect(logical_rect(footprint.expand(crate::theme::Tokens::get().space_4))),
+                    "{footprint:?} in {:?}",
+                    egui_rect(region.domain)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn host_picture_centring_keeps_distance_and_selected_focus_at_the_product_lens() {
+    use crate::panel_runtime::{logical_rect, resolve_usable_region};
+    let viewport = Rect::from_min_max(pos2(0.0, 34.0), pos2(1200.0, 900.0));
+    let picture = Rect::from_min_max(pos2(420.0, 180.0), pos2(780.0, 800.0));
+    let obstacle = Rect::from_min_size(picture.min, vec2(100.0, 180.0));
+    let usable = resolve_usable_region(logical_rect(viewport), &[logical_rect(obstacle)]).unwrap();
+    let layout = Layout::host_with_axis(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, Rect::NOTHING, false);
+    let projection = host_projection_layout(&layout, &usable, picture).unwrap();
+    let safe = projection.usable.as_ref().unwrap();
+    let bounds = Aabb3 { min: Vec3::new(-20.0, -10.0, 0.0), max: Vec3::new(20.0, 10.0, 0.0) };
+    for fov in [0.0, 0.95] {
+        for distance in [2.0, 500.0] {
+            let camera = Camera { distance, fov, target: bounds.center(), ..Default::default() };
+            let centred = centre_host_camera(camera, Some(&bounds), &projection, safe, camera.fov).unwrap();
+            assert_eq!(centred.distance.to_bits(), distance.to_bits());
+            assert_eq!(centred.fov, fov);
+            let (x, y, _) = centred.to_screen(camera.target, f64::from(picture.width()), f64::from(picture.height()), 2000.0).unwrap();
+            let focus = pos2(picture.left() + x as f32, picture.top() + y as f32);
+            assert!(picture.contains(focus) && !obstacle.contains(focus));
+        }
+    }
+    let tiny = Rect::from_min_size(picture.min, vec2(4.0, 4.0));
+    let projection = host_projection_layout(&layout, &usable, tiny).unwrap();
+    assert!(fit_host_bounds(Camera::default(), &bounds, &projection, projection.usable.as_ref().unwrap(), 0.0, 1.0).is_none());
+}
+
 #[test]
 fn render_compass_avoids_the_navigation_bar_on_either_inspector_side() {
     let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 140.0));
@@ -93,7 +355,7 @@ fn thin_rotated_bounds_fit_using_the_original_full_projection() {
 
 #[test]
 fn measured_palette_fit_exposes_endpoints_and_layout_changes_preserve_manual_view() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -160,8 +422,251 @@ fn hostile_or_empty_fit_keeps_the_existing_camera_valid() {
 }
 
 #[test]
+fn host_fit_uses_the_actual_contour_and_model_extent_with_the_full_projection() {
+    use crate::panel_runtime::{egui_rect, logical_rect, resolve_usable_region};
+    let viewport = Rect::from_min_max(pos2(0.0, crate::toolbar::APP_BAR_HEIGHT), pos2(1400.0, 1000.0));
+    let obstacles = [
+        Rect::from_min_max(viewport.min, pos2(1400.0, 130.0)),
+        Rect::from_min_size(pos2(0.0, 130.0), vec2(260.0, 170.0)),
+        Rect::from_min_size(pos2(1180.0, 130.0), vec2(220.0, 300.0)),
+        Rect::from_min_size(pos2(500.0, 340.0), vec2(220.0, 160.0)),
+    ];
+    let usable = resolve_usable_region(logical_rect(viewport), &obstacles.map(logical_rect)).unwrap();
+    assert!(usable.free.iter().any(|piece| egui_rect(*piece).contains(pos2(100.0, 700.0))), "the short-panel gap is part of the retained contour");
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+        let navigation = bar_rect(viewport);
+        let layout = Layout::host(viewport, &usable, style, egui::Vec2::ZERO, navigation);
+        assert_eq!(layout.viewport, viewport);
+        assert!(layout.navigation.is_positive() && layout.axis_view.is_positive());
+        for control in [layout.navigation, layout.axis_view] {
+            assert!(usable.contains_rect(logical_rect(control)));
+            assert!(obstacles.iter().all(|obstacle| !control.intersect(*obstacle).is_positive()));
+        }
+        assert!(!layout.axis_view.expand(crate::theme::Tokens::get().space_4).intersect(layout.navigation).is_positive());
+        for bounds in [
+            Aabb3 { min: Vec3::new(-90.0, -5.0, -2.0), max: Vec3::new(110.0, 5.0, 2.0) },
+            Aabb3 { min: Vec3::new(-5.0, -90.0, -2.0), max: Vec3::new(5.0, 110.0, 2.0) },
+        ] {
+            for view in [StandardView::Top, StandardView::Iso] {
+                for fov in [0.0, 0.6] {
+                    let mut cam = Camera::default();
+                    cam.set_view(view);
+                    let fitted = fit_host_bounds(cam, &bounds, &layout, &usable, fov, 1.0).unwrap();
+                    assert_eq!((fitted.yaw, fitted.pitch, fitted.up), (cam.yaw, cam.pitch, cam.up));
+                    assert_eq!(fit_host_bounds(fitted, &bounds, &layout, &usable, fov, 1.0).unwrap(), fitted);
+                    let mut effective = fitted;
+                    effective.fov = fov;
+                    let radius = (bounds.diagonal() * 0.5 + bounds.center().dist(fitted.target)).max(effective.half_height() * 2.0).max(10.0);
+                    let mut projected = Rect::NOTHING;
+                    for x in [bounds.min.x, bounds.max.x] {
+                        for y in [bounds.min.y, bounds.max.y] {
+                            for z in [bounds.min.z, bounds.max.z] {
+                                let (sx, sy, depth) = effective
+                                    .to_screen(Vec3::new(x, y, z), f64::from(viewport.width()), f64::from(viewport.height()), radius)
+                                    .unwrap();
+                                assert!((0.0..=1.0).contains(&depth));
+                                projected.extend_with(pos2(viewport.left() + sx as f32, viewport.top() + sy as f32));
+                            }
+                        }
+                    }
+                    assert!(viewport.contains_rect(projected));
+                    assert!(
+                        obstacles.iter().all(|obstacle| !projected.intersect(*obstacle).is_positive()),
+                        "the entire model footprint must clear short panels and floating holes: {projected:?}"
+                    );
+                    assert!([layout.navigation, layout.axis_view, layout.confirm].iter().all(|control| !projected.intersect(*control).is_positive()));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn host_fit_keeps_thin_and_degenerate_model_footprints_padded_at_both_scales() {
+    use crate::panel_runtime::{logical_rect, resolve_usable_region};
+    for scale in [1.0, 2.0] {
+        let ctx = crate::fonts::test_context();
+        ctx.set_pixels_per_point(scale);
+        crate::test_support::frame(
+            &ctx,
+            egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 1000.0))), focused: true, ..Default::default() },
+            |ui| {
+                assert_eq!(ui.ctx().pixels_per_point(), scale);
+                let viewport = Rect::from_min_max(pos2(0.0, crate::toolbar::APP_BAR_HEIGHT), ui.ctx().content_rect().max);
+                let obstacles = [
+                    Rect::from_min_max(viewport.min, pos2(1400.0, 130.0)),
+                    Rect::from_min_size(pos2(0.0, 130.0), vec2(260.0, 170.0)),
+                    Rect::from_min_size(pos2(1180.0, 130.0), vec2(220.0, 300.0)),
+                    Rect::from_min_size(pos2(500.0, 340.0), vec2(220.0, 160.0)),
+                ];
+                let usable = resolve_usable_region(logical_rect(viewport), &obstacles.map(logical_rect)).unwrap();
+                let layout = Layout::host(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, bar_rect(viewport));
+                let all_obstacles = obstacles
+                    .iter()
+                    .copied()
+                    .chain([layout.navigation, layout.axis_view, layout.confirm].into_iter().filter(|rect| rect.is_positive()))
+                    .map(logical_rect)
+                    .collect::<Vec<_>>();
+                let safe = resolve_usable_region(logical_rect(viewport), &all_obstacles).unwrap();
+                for extent in [Vec3::new(100.0, 0.0, 0.0), Vec3::new(0.0, 100.0, 0.0), Vec3::new(100.0, 1e-9, 0.0), Vec3::new(1e-9, 100.0, 0.0)] {
+                    let bounds = Aabb3 { min: extent * -0.5, max: extent * 0.5 };
+                    for fov in [0.0, 0.6] {
+                        let mut cam = Camera::default();
+                        cam.set_view(StandardView::Top);
+                        let fitted = fit_host_bounds(cam, &bounds, &layout, &usable, fov, 1.0)
+                            .expect("a line or near-flat extent must still fit with clearance");
+                        assert_eq!((fitted.yaw, fitted.pitch, fitted.up, fitted.fov), (cam.yaw, cam.pitch, cam.up, cam.fov));
+                        let mut effective = fitted;
+                        effective.fov = fov;
+                        let radius = (bounds.diagonal() * 0.5 + bounds.center().dist(fitted.target)).max(effective.half_height() * 2.0).max(10.0);
+                        let mut projected = Rect::NOTHING;
+                        for x in [bounds.min.x, bounds.max.x] {
+                            for y in [bounds.min.y, bounds.max.y] {
+                                for z in [bounds.min.z, bounds.max.z] {
+                                    let (sx, sy, depth) = effective
+                                        .to_screen(Vec3::new(x, y, z), f64::from(viewport.width()), f64::from(viewport.height()), radius)
+                                        .unwrap();
+                                    assert!((0.0..=1.0).contains(&depth));
+                                    projected.extend_with(pos2(viewport.left() + sx as f32, viewport.top() + sy as f32));
+                                }
+                            }
+                        }
+                        assert!(projected.is_finite());
+                        let padding = crate::theme::Tokens::get().space_8;
+                        let padded = projected.expand(padding - 0.01);
+                        assert!(
+                            safe.contains_rect(logical_rect(padded)),
+                            "{scale}x thin extent {extent:?} needs its full projected clearance: {padded:?}"
+                        );
+                        assert!(all_obstacles.iter().all(|obstacle| !padded.intersect(crate::panel_runtime::egui_rect(*obstacle)).is_positive()));
+                    }
+                }
+            },
+        );
+    }
+}
+
+#[test]
+fn explicit_host_centring_preserves_zoom_and_only_falls_back_to_the_selected_focus() {
+    use crate::panel_runtime::{egui_rect, logical_rect, resolve_usable_region};
+    let viewport = Rect::from_min_max(pos2(0.0, crate::toolbar::APP_BAR_HEIGHT), pos2(1000.0, 700.0));
+    let obstacles = [Rect::from_min_size(pos2(0.0, viewport.top()), vec2(260.0, 220.0)), Rect::from_min_size(pos2(450.0, 300.0), vec2(180.0, 160.0))];
+    let usable = resolve_usable_region(logical_rect(viewport), &obstacles.map(logical_rect)).unwrap();
+    let layout = Layout::host(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, bar_rect(viewport));
+    let safe = layout.usable.as_ref().unwrap();
+    let bounds = Aabb3 { min: Vec3::new(0.0, 0.0, 10.0), max: Vec3::new(40.0, 30.0, 10.0) };
+    for fov in [0.0, 0.6] {
+        for distance in [2.0, 500.0] {
+            let mut camera = Camera::default();
+            camera.set_view(StandardView::Top);
+            camera.target = Vec3::new(20.0, 15.0, 10.0);
+            camera.distance = distance;
+            camera.fov = fov;
+            let focus = camera.target;
+            let centred = centre_host_camera(camera, Some(&bounds), &layout, &usable, fov).unwrap();
+            assert_eq!(centred.distance.to_bits(), camera.distance.to_bits(), "centring must never silently zoom out an oversized selection");
+            assert_eq!(centred.fov.to_bits(), camera.fov.to_bits());
+            assert_eq!((centred.yaw, centred.pitch, centred.roll, centred.up), (camera.yaw, camera.pitch, camera.roll, camera.up));
+            let radius = (bounds.diagonal().max(camera.half_height()).max(10.0)) * 2.0;
+            let project = |point| {
+                let (x, y, _) = centred.to_screen(point, f64::from(viewport.width()), f64::from(viewport.height()), radius).unwrap();
+                pos2(viewport.left() + x as f32, viewport.top() + y as f32)
+            };
+            let selected = project(focus);
+            assert!(safe.free.iter().any(|piece| egui_rect(*piece).contains(selected)));
+            assert!(obstacles.iter().all(|obstacle| !obstacle.contains(selected)));
+            if distance == 500.0 {
+                let mut footprint = Rect::NOTHING;
+                for x in [bounds.min.x, bounds.max.x] {
+                    for y in [bounds.min.y, bounds.max.y] {
+                        footprint.extend_with(project(Vec3::new(x, y, 10.0)));
+                    }
+                }
+                assert!(safe.contains_rect(logical_rect(footprint)), "when the current zoom fits, the complete selected footprint lands safely");
+            }
+        }
+    }
+}
+
+#[test]
+fn host_normal_to_keeps_distance_and_selection_while_generic_view_follow_remains_exact() {
+    for scale in [1.0, 2.0] {
+        for perspective in [false, true] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.look_at_anim = false;
+            h.call("ui.resize", json!({"width":1400,"height":900}));
+            h.app.run("solid.box", json!({"length":40,"width":30,"height":10})).unwrap();
+            h.settle();
+            h.ctx.set_pixels_per_point(scale);
+            crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
+            h.frames(3);
+            let body = h.app.session.model.state().bodies[0].clone();
+            let face = (0..body.body.face_count()).find(|index| body.body.planar_face(*index).is_some_and(|plane| plane.normal().z > 0.99)).unwrap();
+            let focus = Vec3::new(20.0, 15.0, 10.0);
+            h.app.run("select.set", json!({"items":[{"type":"face","body":body.name,"index":face,"point":focus}]})).unwrap();
+            let selection = h.app.session.selection.clone();
+            h.app.ui.perspective = perspective;
+            h.app.cam.distance = 2.0;
+            h.app.cam.fov = if perspective { 0.6 } else { 0.0 };
+            h.app.cam.target = Vec3::new(-50.0, -50.0, 0.0);
+            let distance = h.app.cam.distance.to_bits();
+            let lens = h.app.cam.fov.to_bits();
+            h.app.start("view.normal_to");
+            h.settle();
+            assert_eq!(h.app.cam.distance.to_bits(), distance);
+            assert_eq!(h.app.cam.fov.to_bits(), lens);
+            assert!(h.app.cam.back().dist(Vec3::Z) < 1e-6);
+            assert_eq!(h.app.session.selection, selection);
+            let viewport = h.app.viewport.rect.unwrap();
+            let point = crate::viewport::projection(&h.app, viewport).to_screen(focus).unwrap();
+            assert!(
+                h.app
+                    .viewport
+                    .layout
+                    .as_ref()
+                    .unwrap()
+                    .usable
+                    .as_ref()
+                    .unwrap()
+                    .free
+                    .iter()
+                    .any(|piece| crate::panel_runtime::egui_rect(*piece).contains(point)),
+                "an oversized selection keeps zoom while placing its selected focus safely"
+            );
+            let mut requested = h.app.cam;
+            requested.target = Vec3::new(123.0, 456.0, 7.0);
+            requested.distance = 17.0;
+            h.app.session.camera = Some(requested);
+            h.app.follow_view_request(false);
+            h.frames(2);
+            assert_eq!(h.app.cam, requested, "generic apply/replay must not acquire an implicit centring offset");
+        }
+    }
+}
+
+#[test]
+fn legacy_usable_space_does_not_silently_ignore_obstacles_after_sixteen() {
+    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
+    let mut obstacles = (0..20).map(|index| Rect::from_min_size(pos2(index as f32 * 40.0, 0.0), vec2(20.0, 20.0))).collect::<Vec<_>>();
+    let late = Rect::from_min_size(pos2(820.0, 0.0), vec2(180.0, 180.0));
+    obstacles.push(late);
+    let room = free_rect(viewport, &obstacles);
+    assert!(room.is_positive() && room.area() > 100000.0);
+    assert!(obstacles.iter().all(|obstacle| !room.intersect(*obstacle).is_positive()));
+    for scale in [1.0, 2.0] {
+        let layout =
+            Layout::with_content(viewport, viewport, &obstacles, scale, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, bar_rect(viewport));
+        assert_eq!(layout.viewport, viewport);
+        assert!(layout.drawable.is_positive());
+        assert!(obstacles.iter().all(|obstacle| !layout.drawable.intersect(*obstacle).is_positive()));
+        assert_eq!(layout.navigation, bar_rect(viewport), "legacy callers retain their supplied measured navigation policy");
+    }
+}
+
+#[test]
 fn fit_home_animation_and_manual_takeover_use_one_layout_solution() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -189,7 +694,7 @@ fn fit_home_animation_and_manual_takeover_use_one_layout_solution() {
 
 #[test]
 fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         for style in crate::prefs::NavigatorStyle::ALL {
             for (scale, width, height) in [(1.0, 900.0, 720.0), (2.0, 700.0, 475.0), (2.0, 700.0, 385.0)] {
                 let mut h = Harness::new();
@@ -281,7 +786,7 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
 
 #[test]
 fn immediate_standard_view_cancels_fit_before_the_measured_frame() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
@@ -328,7 +833,7 @@ fn navigation_anchors_ignore_positioned_resized_and_covering_dialogs() {
 
 #[test]
 fn opening_different_command_dialogs_keeps_published_navigation_positions() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
@@ -408,7 +913,7 @@ fn the_corner_pair_takes_the_top_right_and_the_view_navigator_moves_below_it() {
 /// axis view below it, and the pointer over it reaching neither picking nor navigation.
 #[test]
 fn the_corner_pair_follows_the_dialog_and_keeps_the_pointer_from_the_model() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();

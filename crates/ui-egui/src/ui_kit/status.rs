@@ -37,12 +37,12 @@ pub(crate) fn status_header(ui: &mut egui::Ui, key: &str, name: &str, status: St
             if fraction > 0.0 {
                 ui.painter().rect_filled(egui::Rect::from_min_size(meter.min, vec2(meter.width() * fraction, meter.height())), t.space_3, t.form_ink);
             }
-            crate::scenario::publish_rect(&format!("{key}:meter"), meter);
-            crate::scenario::publish_count(&format!("{key}:constrained_fraction"), f64::from(fraction));
+            solidcraft_ui_registry::publish_rect(&format!("{key}:meter"), meter);
+            solidcraft_ui_registry::publish_count(&format!("{key}:constrained_fraction"), f64::from(fraction));
         })
         .response;
     t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top(), t.dialog_rule);
-    crate::scenario::publish_target(&format!("{key}:status_header"), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("{key}:status_header"), response.rect);
     response
 }
 
@@ -58,7 +58,7 @@ pub(crate) fn progress(ui: &mut egui::Ui, key: &str, fraction: f32) -> egui::Res
         ui.painter().rect_filled(egui::Rect::from_min_size(bar.min, vec2(bar.width() * fraction, bar.height())), t.space_3, t.form_primary);
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ProgressIndicator, ui.is_enabled(), format!("{:.0}%", fraction * 100.0)));
-    crate::scenario::publish_rect(&format!("dialog:progress:{key}"), bar);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:progress:{key}"), bar);
     response
 }
 
@@ -132,8 +132,8 @@ pub(crate) fn steps(ui: &mut egui::Ui, key: &str, labels: &[&str], current: usiz
             std::cmp::Ordering::Greater => "next",
         };
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), *label));
-        crate::scenario::publish_rect(&format!("dialog:step:{key}:{i}:{state}"), row);
-        crate::scenario::publish_rect(&format!("dialog:step_mark:{key}:{i}"), slot);
+        solidcraft_ui_registry::publish_rect(&format!("dialog:step:{key}:{i}:{state}"), row);
+        solidcraft_ui_registry::publish_rect(&format!("dialog:step_mark:{key}:{i}"), slot);
     }
 }
 
@@ -210,7 +210,7 @@ pub(crate) fn check_status_line(ui: &mut egui::Ui, key: &str, label: &str, statu
             super::text(ui, label, super::Text::Report(key, false));
         })
         .response;
-    crate::scenario::publish_rect(key, response.rect);
+    solidcraft_ui_registry::publish_rect(key, response.rect);
     response
 }
 
@@ -240,14 +240,14 @@ pub(crate) fn progress_action(ui: &mut egui::Ui, key: &str, name: &str, status: 
         };
         let shown = fixed(ui, name_width, &|ui| super::text(ui, name, super::Text::Inline));
         let cut = name_natural > name_width + 0.5;
-        crate::scenario::publish_rect(&format!("{key}:name"), shown.rect);
-        crate::scenario::publish_count(&format!("{key}:name:cut"), f64::from(u8::from(cut)));
+        solidcraft_ui_registry::publish_rect(&format!("{key}:name"), shown.rect);
+        solidcraft_ui_registry::publish_count(&format!("{key}:name:cut"), f64::from(u8::from(cut)));
         fixed(ui, status_width, &|ui| super::text(ui, status, super::Text::Inline));
         fixed(ui, meter, &|ui| progress(ui, key, fraction));
         // Cancel keeps its whole label whatever room the row has left.
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
         let response = super::button(ui, cancel, super::Button::Normal);
-        crate::scenario::publish_rect(&format!("{key}:cancel"), response.rect);
+        solidcraft_ui_registry::publish_rect(&format!("{key}:cancel"), response.rect);
         response
     })
     .inner

@@ -9,6 +9,7 @@ use syn::{Expr, Item, Lit};
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("dialogs.rs", 2, "preview spinners: graphic diameter, not typography"),
     ("viewport.rs", 1, "viewport status spinner: graphic diameter, not typography"),
+    ("ui_kit/settings_search.rs", 2, "hidden off-screen areas that measure search matches: never drawn"),
 ];
 
 fn test_only(attrs: &[syn::Attribute]) -> bool {

@@ -4,6 +4,1002 @@ use crate::ui_kit::*;
 use crate::{scenario, theme::Tokens};
 use egui::Ui;
 
+#[test]
+fn closed_backing_window_noop_does_not_block_real_host_menu_but_visible_returning_window_does() {
+    use crate::panel_runtime::{ContentServices, HostControlTarget, HostOptions, HostPointerTarget, PanelMountHarness, WorkspacePanelHost};
+    use solidcraft_engine::panels::{
+        ActionSink as _, Destination, InstanceId, LogicalRect, Mutation, PanelKind, Point, SectionId, SectionLocation, Size, Zone,
+    };
+    fn frame(
+        ctx: &egui::Context,
+        content: &mut PanelMountHarness,
+        host: &mut WorkspacePanelHost,
+        time: &mut f64,
+        events: Vec<egui::Event>,
+        position: egui::Pos2,
+        open: bool,
+    ) -> (bool, bool) {
+        content.tick().unwrap();
+        host.capture_metrics(&content.runtime, &content.models).unwrap();
+        host.capture_reservations(&content.runtime, &content.catalogue).unwrap();
+        host.prepare(&content.runtime, LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1400.0, height: 1000.0 } }).unwrap();
+        *time += 1.0 / 60.0;
+        let mut observed = (false, false);
+        crate::test_support::frame(
+            ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0))),
+                focused: true,
+                time: Some(*time),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                Container::begin_host_windows(ui.ctx());
+                host.show_deferred(
+                    ui,
+                    &mut content.runtime,
+                    &mut content.native,
+                    &mut ContentServices { models: &content.models, commands: &mut content.commands, local: &mut content.local },
+                )
+                .unwrap();
+                let source = host
+                    .frame()
+                    .unwrap()
+                    .controls
+                    .iter()
+                    .find(|control| {
+                        matches!(&control.target,
+                HostControlTarget::Pointer(HostPointerTarget::Menu { instance }) if instance.0 == "source")
+                    })
+                    .unwrap();
+                observed.0 = ui.ctx().read_response(source.id).unwrap().clicked();
+                let id = egui::Id::unique("returning_backing_feature");
+                let container = Container::new(ui.ctx(), Surface::Feature);
+                let backing = Panel::feature_frame(ui.ctx(), crate::ui_kit::LayoutMode::Floating, crate::frame::Side::Left);
+                let stock = container
+                    .window("Returning independent feature")
+                    .id(id)
+                    .title_bar(false)
+                    .collapsible(false)
+                    .resizable(false)
+                    .scroll(false)
+                    .constrain(false)
+                    .fade_in(false)
+                    .fade_out(false)
+                    .fixed_pos(position)
+                    .frame(backing);
+                let mut open_flag = open;
+                let mut body_called = false;
+                let windows_before = Container::host_window_regions(ui.ctx());
+                // Exercise the real optional-backing allocation path without
+                // manufacturing GPU support in this headless test.
+                let shown =
+                    container::FeatureWindow::new(stock, id, backing).open(&mut open_flag).show_background(ui.ctx(), Some(host_marker), |ui| {
+                        body_called = true;
+                        ui.set_min_size(egui::vec2(180.0, 90.0));
+                        ui.label("Actual foreign feature content");
+                        ui.is_visible() && !ui.is_sizing_pass()
+                    });
+                observed.1 = shown.as_ref().and_then(|shown| shown.inner).unwrap_or(false);
+                if !open {
+                    assert!(shown.is_none());
+                    assert!(!body_called, "closing must skip the body on the first closed frame");
+                    assert_eq!(Container::host_window_regions(ui.ctx()), windows_before, "a closed window cannot leave a ghost footprint");
+                    let layer = egui::LayerId::new(egui::Order::Middle, id);
+                    assert!(
+                        ui.ctx().graphics(|graphics| graphics.get(layer).is_some_and(
+                            |paint| paint.all_entries().count() > 0 && paint.all_entries().all(|entry| matches!(&entry.shape, egui::Shape::Noop))
+                        )),
+                        "a closed backing wrapper must really leave only its reserved Noop"
+                    );
+                } else if observed.1 {
+                    assert!(Container::host_window_regions(ui.ctx()).unwrap().contains(&shown.as_ref().unwrap().response.rect));
+                }
+                host.finish(
+                    ui,
+                    &mut content.runtime,
+                    &mut content.native,
+                    &mut ContentServices { models: &content.models, commands: &mut content.commands, local: &mut content.local },
+                    &mut content.catalogue,
+                )
+                .unwrap();
+            },
+        );
+        observed
+    }
+    fn pointer(at: egui::Pos2, pressed: bool) -> Vec<egui::Event> {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+        ]
+    }
+    for scale in [1.0, 2.0] {
+        let ctx = crate::fonts::test_context();
+        ctx.set_pixels_per_point(scale);
+        ctx.options_mut(|options| options.max_passes = 1.try_into().unwrap());
+        let mut content = PanelMountHarness::new(false).unwrap();
+        content
+            .dispatch(vec![Mutation::Open {
+                kind: PanelKind::new("fixture.log").unwrap(),
+                instance: InstanceId::new("source").unwrap(),
+                destination: Some(Destination::NewSection {
+                    section: SectionId::new("source-section").unwrap(),
+                    index: 0,
+                    location: SectionLocation::Dock { zone: Zone::Left },
+                    size: Size { width: 280.0, height: 240.0 },
+                }),
+            }])
+            .unwrap();
+        let before = content.runtime.layout().inspect();
+        let commits = content.native.commits;
+        let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
+        let mut time = 0.0;
+        let away = egui::pos2(1600.0, 1200.0);
+        for _ in 0..3 {
+            frame(&ctx, &mut content, &mut host, &mut time, Vec::new(), away, true);
+        }
+        let source = host
+            .frame()
+            .unwrap()
+            .controls
+            .iter()
+            .find(|control| {
+                matches!(&control.target,
+            HostControlTarget::Pointer(HostPointerTarget::Menu { instance }) if instance.0 == "source")
+            })
+            .unwrap()
+            .clone();
+        let at = crate::panel_runtime::egui_rect(source.bounds).center();
+        let cover = at - egui::vec2(12.0, 12.0);
+        assert!(frame(&ctx, &mut content, &mut host, &mut time, Vec::new(), cover, true).1);
+        frame(&ctx, &mut content, &mut host, &mut time, Vec::new(), cover, false);
+        let retained = egui::containers::AreaState::load(&ctx, egui::Id::unique("returning_backing_feature")).unwrap();
+        assert!(retained.interactable && retained.rect().contains(at), "the closed window must retain its old covering Area state");
+        frame(&ctx, &mut content, &mut host, &mut time, pointer(at, true), cover, false);
+        assert!(
+            frame(&ctx, &mut content, &mut host, &mut time, pointer(at, false), cover, false).0,
+            "the earlier actual Menu widget must complete its real click"
+        );
+        for _ in 0..2 {
+            frame(&ctx, &mut content, &mut host, &mut time, Vec::new(), cover, false);
+        }
+        assert!(host.frame().unwrap().menu_bounds.is_some(), "Noop-only backing must not refuse the real underlying menu intent");
+        for pressed in [true, false] {
+            frame(
+                &ctx,
+                &mut content,
+                &mut host,
+                &mut time,
+                vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE }],
+                cover,
+                false,
+            );
+        }
+        frame(&ctx, &mut content, &mut host, &mut time, Vec::new(), cover, false);
+        frame(&ctx, &mut content, &mut host, &mut time, pointer(at, true), cover, false);
+        let returned = frame(&ctx, &mut content, &mut host, &mut time, pointer(at, false), cover, true);
+        assert!(returned.0 && returned.1, "the actual Window must return visibly after the earlier Menu click queues its intent");
+        for _ in 0..3 {
+            frame(&ctx, &mut content, &mut host, &mut time, Vec::new(), cover, false);
+        }
+        assert!(host.frame().unwrap().menu_bounds.is_none(), "actual visible foreign paint still rejects the source with no latent replay");
+        assert_eq!(content.runtime.layout().inspect(), before);
+        assert_eq!(content.native.commits, commits);
+        assert_eq!(content.commands.calls, 0);
+    }
+}
+
+#[test]
+fn host_window_ledger_is_opt_in_pass_scoped_identity_aware_and_fail_closed() {
+    let ctx = crate::fonts::test_context();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let first = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(100.0, 80.0));
+    let moved = first.translate(egui::vec2(30.0, 40.0));
+    let id = egui::Id::unique("actual_window_identity");
+    let mut passes = 0;
+    crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        passes += 1;
+        assert_eq!(Container::host_window_regions(ui.ctx()), Some(Vec::new()));
+        Container::record_host_window(ui.ctx(), id, Some(first));
+        assert_eq!(Container::host_window_regions(ui.ctx()), Some(Vec::new()), "a producer cannot activate collection without the host");
+        Container::begin_host_windows(ui.ctx());
+        Container::record_host_window(ui.ctx(), id, Some(first));
+        Container::record_host_window(ui.ctx(), id, Some(moved));
+        assert_eq!(Container::host_window_regions(ui.ctx()), Some(vec![moved]), "an identity update replaces its old footprint");
+        Container::record_host_window(ui.ctx(), id, None);
+        assert_eq!(Container::host_window_regions(ui.ctx()), Some(Vec::new()));
+        Container::record_host_window(ui.ctx(), id, Some(first));
+        if ui.ctx().current_pass_index() == 0 {
+            ui.ctx().request_discard("prove persistent window footprints do not leak into a retry pass");
+        }
+    });
+    assert!(passes >= 2);
+    crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        assert_eq!(Container::host_window_regions(ui.ctx()), Some(Vec::new()), "a new frame cannot reuse the preceding footprint");
+    });
+    for bad in [
+        egui::Rect::from_min_size(egui::pos2(f32::NAN, 0.0), egui::vec2(10.0, 10.0)),
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(f32::INFINITY, 10.0)),
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
+    ] {
+        crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+            Container::begin_host_windows(ui.ctx());
+            Container::record_host_window(ui.ctx(), id, Some(bad));
+            assert!(Container::host_window_regions(ui.ctx()).is_none());
+            Container::record_host_window(ui.ctx(), id, None);
+            assert!(Container::host_window_regions(ui.ctx()).is_none(), "removal cannot erase a hostile-footprint failure in this pass");
+        });
+    }
+    crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        Container::begin_host_windows(ui.ctx());
+        for index in 0..256 {
+            Container::record_host_window(ui.ctx(), egui::Id::unique(("bounded_window", index)), Some(first));
+        }
+        assert_eq!(Container::host_window_regions(ui.ctx()).unwrap().len(), 256);
+        Container::record_host_window(ui.ctx(), egui::Id::unique(("bounded_window", 0)), Some(moved));
+        assert_eq!(Container::host_window_regions(ui.ctx()).unwrap().len(), 256, "repainting a known window consumes no extra capacity");
+        Container::record_host_window(ui.ctx(), egui::Id::unique(("bounded_window", 256)), Some(first));
+        assert!(Container::host_window_regions(ui.ctx()).is_none(), "overflow must refuse the whole snapshot instead of truncating windows");
+        Container::record_host_window(ui.ctx(), egui::Id::unique(("bounded_window", 0)), None);
+        assert!(Container::host_window_regions(ui.ctx()).is_none());
+    });
+    let peer = egui::ViewportId::from_hash_of("independent_native_host");
+    let mut input = egui::RawInput { viewport_id: peer, screen_rect: Some(screen), ..Default::default() };
+    input.viewports.entry(peer).or_default().parent = Some(egui::ViewportId::ROOT);
+    crate::test_support::frame(&ctx, input, |ui| {
+        assert_eq!(ui.ctx().viewport_id(), peer);
+        assert_eq!(Container::host_window_regions(ui.ctx()), Some(Vec::new()), "another viewport cannot inherit root's exhausted ledger");
+        Container::begin_host_windows(ui.ctx());
+        Container::record_host_window(ui.ctx(), id, Some(moved));
+        assert_eq!(Container::host_window_regions(ui.ctx()), Some(vec![moved]));
+    });
+    crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        Container::begin_host_windows(ui.ctx());
+        assert_eq!(Container::host_window_regions(ui.ctx()), Some(Vec::new()), "root's next pass recovers without peer footprints");
+    });
+}
+
+#[test]
+fn actual_feature_and_system_windows_publish_visible_paint_but_popups_and_modals_do_not() {
+    for scale in [1.0, 2.0] {
+        for background in [false, true] {
+            let ctx = crate::fonts::test_context();
+            ctx.set_pixels_per_point(scale);
+            ctx.options_mut(|options| options.max_passes = 1.try_into().unwrap());
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0));
+            for visible in [false, true, true] {
+                crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+                    Container::begin_host_windows(ui.ctx());
+                    let id = egui::Id::unique("actual_feature_ledger_producer");
+                    let container = Container::new(ui.ctx(), Surface::Feature);
+                    let frame = Panel::feature_frame(ui.ctx(), crate::ui_kit::LayoutMode::Floating, crate::frame::Side::Left);
+                    let stock = container
+                        .window("Persistent feature")
+                        .id(id)
+                        .title_bar(false)
+                        .collapsible(false)
+                        .resizable(false)
+                        .scroll(false)
+                        .fade_in(false)
+                        .fade_out(false)
+                        .frame(frame)
+                        .fixed_pos(egui::pos2(20.0, 20.0));
+                    let shown = container::FeatureWindow::new(stock, id, frame)
+                        .show_background(ui.ctx(), background.then_some(host_marker), |ui| {
+                            let visible = ui.is_visible() && !ui.is_sizing_pass();
+                            ui.disable();
+                            ui.set_min_size(egui::vec2(160.0, 90.0));
+                            let leaf = ui.button("Disabled content still paints");
+                            assert!(!leaf.enabled());
+                            visible
+                        })
+                        .unwrap();
+                    assert_eq!(shown.inner, Some(visible));
+                    let feature = Container::host_window_regions(ui.ctx()).unwrap();
+                    assert_eq!(feature, if visible { vec![shown.response.rect] } else { Vec::new() });
+                    Window::new(egui::Id::unique("actual_system_ledger_producer"), "", "Persistent system window")
+                        .placed(egui::Align2::LEFT_TOP, egui::pos2(400.0, 20.0))
+                        .surface(ui.ctx(), false, |ui| {
+                            ui.disable();
+                            ui.label("Visible system content");
+                            (false, Action::None)
+                        });
+                    let windows = Container::host_window_regions(ui.ctx()).unwrap();
+                    assert_eq!(windows.len(), if visible { 2 } else { 0 });
+                    if visible {
+                        assert!(windows.contains(&shown.response.rect));
+                        assert!(windows.contains(&scenario::rect_of("dialog:window").unwrap()));
+                    }
+                    Container::new(ui.ctx(), Surface::Popup)
+                        .area(egui::Id::unique("transient_popup_not_a_fit_obstacle"))
+                        .fixed_pos(egui::pos2(600.0, 400.0))
+                        .show(ui.ctx(), |ui| {
+                            ui.label("Transient popup");
+                        });
+                    Container::new(ui.ctx(), Surface::Canvas)
+                        .area(egui::Id::unique("model_following_area_not_a_fit_obstacle"))
+                        .fixed_pos(egui::pos2(600.0, 500.0))
+                        .show(ui.ctx(), |ui| {
+                            ui.label("Model-following value box");
+                        });
+                    Window::new(egui::Id::unique("modal_system_wrapper_not_a_fit_obstacle"), "", "Modal system window").surface(
+                        ui.ctx(),
+                        true,
+                        |ui| {
+                            ui.label("Modal system content");
+                            (false, Action::None)
+                        },
+                    );
+                    Container::new(ui.ctx(), Surface::Window).modal(egui::Id::unique("modal_not_a_persistent_fit_obstacle")).show(ui.ctx(), |ui| {
+                        ui.label("Modal content");
+                    });
+                    assert_eq!(
+                        Container::host_window_regions(ui.ctx()),
+                        Some(windows),
+                        "popup, modal and model-following wrappers cannot register persistent windows"
+                    );
+                });
+            }
+        }
+    }
+}
+
+#[test]
+fn universal_chrome_controls_have_real_accessible_widgets_and_stable_ids_at_both_scales() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget, enable_host_specimen};
+    for scale in [1.0, 2.0] {
+        for preset in ["docks", "tabs", "collapsed", "overflow", "floating", "inline"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.ctx.set_pixels_per_point(scale);
+            h.call("ui.resize", serde_json::json!({"width":800,"height":600}));
+            enable_host_specimen(&mut h.app, preset).unwrap();
+            h.frames(3);
+            let before = h.app.universal_panel_frame().unwrap().controls.clone();
+            assert!(!before.is_empty(), "actual chrome at scale {scale}: {preset}");
+            let tree = h.output.accesskit_update.as_ref().expect("real egui accessibility update");
+            let mut ids = std::collections::HashSet::new();
+            for control in &before {
+                assert!(ids.insert(control.id), "semantic IDs cannot collide: {control:?}");
+                assert!(!control.accessible_name.is_empty());
+                control.bounds.validate().unwrap();
+                let interactive = !matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Surface { .. }));
+                if interactive && control.enabled {
+                    let node = tree
+                        .nodes
+                        .iter()
+                        .find(|(id, _)| *id == control.id.accesskit_id())
+                        .map(|(_, node)| node)
+                        .unwrap_or_else(|| panic!("exported control needs its own actual widget: {control:?}"));
+                    assert_eq!(node.label(), Some(control.accessible_name.as_str()), "actual widget/metadata name parity: {control:?}");
+                    let expected_role = match &control.target {
+                        HostControlTarget::Pointer(HostPointerTarget::Tab { .. }) => egui::accesskit::Role::Tab,
+                        HostControlTarget::Pointer(HostPointerTarget::Sash { .. } | HostPointerTarget::Resize { .. }) => {
+                            egui::accesskit::Role::Splitter
+                        }
+                        HostControlTarget::Scroll { .. } => egui::accesskit::Role::ScrollBar,
+                        HostControlTarget::PanelMenu { .. } | HostControlTarget::Shared { .. } => egui::accesskit::Role::MenuItem,
+                        HostControlTarget::Pointer(_) | HostControlTarget::Content { .. } => egui::accesskit::Role::Button,
+                    };
+                    assert_eq!(node.role(), expected_role, "the actual widget role follows its typed target: {control:?}");
+                    if matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { .. })) {
+                        assert_eq!(control.accessible_name, solidcraft_ui_text::tr("ui.panel_host.menu"));
+                    }
+                }
+            }
+            h.frames(2);
+            let after = &h.app.universal_panel_frame().unwrap().controls;
+            for control in before {
+                let retained = after.iter().find(|other| other.target == control.target).expect("same semantic target on the next frame");
+                assert_eq!(retained.id, control.id, "status/service update cannot change widget identity");
+                assert_eq!(retained.bounds, control.bounds);
+            }
+        }
+    }
+}
+
+#[test]
+fn universal_host_slots_and_menu_button_stay_bounded_at_minimum_and_small_window_sizes() {
+    use crate::panel_runtime::enable_host_specimen;
+    for scale in [1.0, 2.0] {
+        for (width, height) in [(1280, 800), (800, 600), (480, 320)] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.ctx.set_pixels_per_point(scale);
+            h.call("ui.resize", serde_json::json!({"width":width,"height":height}));
+            enable_host_specimen(&mut h.app, "tabs").unwrap();
+            h.frames(3);
+            let host = &h.app.universal_panel_frame().unwrap().layout;
+            host.resolved.validate().unwrap();
+            for section in &host.sections {
+                assert!(section.outer.contains_rect(section.header));
+                assert!(section.header.contains_rect(section.menu));
+                if let Some(body) = section.body {
+                    assert!(section.outer.contains_rect(body));
+                    assert!(body.origin.y >= section.header.origin.y + section.header.size.height);
+                }
+                assert_eq!(section.header.size.height, host.metrics.header_height);
+                if let Some(strip) = section.tab_strip {
+                    assert_eq!(strip.origin.y, section.header.origin.y);
+                    assert_eq!(strip.size.height, section.header.size.height);
+                    assert!(section.header.contains_rect(strip));
+                    assert!(section.outer.contains_rect(strip));
+                    if let Some(body) = section.body {
+                        assert!(body.origin.y >= strip.origin.y + strip.size.height);
+                    }
+                }
+                if let Some(footer) = section.footer {
+                    assert!(section.outer.contains_rect(footer));
+                    if let Some(body) = section.body {
+                        assert_eq!(footer.origin.y, body.origin.y + body.size.height);
+                    }
+                    assert_eq!(footer.size.height, host.metrics.footer_height);
+                }
+                assert!(section.menu.size.width > 0.0 && section.menu.size.height > 0.0, "shared actions remain reachable when content fits");
+            }
+            for overflow in &host.overflow {
+                assert!(!overflow.sections.is_empty());
+                if let Some(bounds) = overflow.bounds {
+                    assert!(host.capacity.contains_rect(bounds));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn panel_disclosure_blends_only_ink_and_reduced_motion_finishes_immediately() {
+    for scale in [1.0, 2.0] {
+        let ctx = crate::fonts::test_context();
+        ctx.set_pixels_per_point(scale);
+        ctx.enable_accesskit();
+        ctx.global_style_mut(|style| style.animation_time = 0.14);
+        let id = egui::Id::unique("disclosure-transition");
+        let bounds = egui::Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(28.0, 28.0));
+        let frame = |time, collapsed, reduced| {
+            let output = crate::test_support::frame(&ctx, egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+                let response = crate::ui_kit::panel_host::panel_host_disclosure(ui, id, bounds, "Toggle panel", true, collapsed, reduced);
+                assert_eq!(response.rect, bounds);
+            });
+            let node =
+                &output.platform_output.accesskit_update.as_ref().unwrap().nodes.iter().find(|(node_id, _)| *node_id == id.accesskit_id()).unwrap().1;
+            assert_eq!(node.is_expanded(), Some(!collapsed), "semantics commit before the paint transition");
+            assert!(output.shapes.iter().all(|shape| shape.clip_rect.contains_rect(bounds)), "paint keeps the inherited clip");
+            output.shapes.iter().filter(|shape| matches!(shape.shape, egui::Shape::Mesh(_))).count()
+        };
+        assert_eq!(frame(0.0, true, false), 1);
+        frame(1.0 / 60.0, false, false);
+        assert_eq!(frame(2.0 / 60.0, false, false), 2, "only the existing down/up glyphs crossfade");
+        for tick in 3..14 {
+            frame(f64::from(tick) / 60.0, false, false);
+        }
+        assert_eq!(frame(14.0 / 60.0, false, false), 1);
+        assert_eq!(frame(15.0 / 60.0, true, false), 2, "collapse also transitions without delaying expanded state");
+        for tick in 16..28 {
+            frame(f64::from(tick) / 60.0, true, false);
+        }
+        assert_eq!(frame(28.0 / 60.0, true, false), 1);
+        assert_eq!(frame(29.0 / 60.0, false, true), 1, "reduced motion paints the committed endpoint immediately");
+        ctx.global_style_mut(|style| style.animation_time = 0.0);
+        assert_eq!(frame(30.0 / 60.0, true, false), 1, "disabled animation also paints the endpoint");
+    }
+}
+
+#[test]
+fn universal_kit_chrome_uses_one_container_and_preserves_parent_clipping_and_focus_semantics() {
+    use crate::ui_kit::panel_host::{HostChrome, panel_host_control, panel_host_sash, panel_host_surface};
+    let mut t = Tokens::get();
+    let bevel = crate::theme::Bevel { width: 1.0, highlight: t.form_ink, light: t.control_border, shadow: t.form_dim, dark_shadow: t.border };
+    t.borders.primary = Some(egui::Stroke::new(1.0, t.border));
+    t.borders.bevel = Some(bevel);
+    t.borders.primary_inset = Some(crate::theme::InsetBorder { stroke: egui::Stroke::new(0.75, t.form_error), gap: 3.0 });
+    let _tokens = crate::theme::scoped_tokens(t);
+    let ctx = crate::fonts::test_context();
+    ctx.enable_accesskit();
+    let bounds = egui::Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(160.0, 120.0));
+    let clip = egui::Rect::from_min_max(bounds.min + egui::vec2(5.0, 5.0), bounds.max);
+    let header = egui::Rect::from_min_size(bounds.min, egui::vec2(bounds.width(), 32.0));
+    let sash = egui::Rect::from_min_size(egui::pos2(bounds.left(), bounds.bottom() - 4.0), egui::vec2(bounds.width(), 4.0));
+    let mut calls = 0;
+    let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+        ui.set_clip_rect(clip);
+        panel_host_surface(
+            ui,
+            egui::Id::unique("synthetic-section"),
+            bounds,
+            false,
+            panel_host_frame(ui.ctx(), false).fill,
+            None,
+            |ui, content_clip| {
+                calls += 1;
+                assert_eq!(ui.clip_rect(), clip);
+                assert!(clip.contains_rect(content_clip));
+                let outer_frames = ui.stack().iter().filter(|node| node.frame().fill != egui::Color32::TRANSPARENT).count();
+                assert!(outer_frames <= 1, "a section must not introduce nested outer frames");
+                let title = panel_host_control(
+                    ui,
+                    egui::Id::unique("synthetic-header"),
+                    header,
+                    HostChrome {
+                        label: "Synthetic long localized panel title",
+                        icon: Some("list"),
+                        icon_only: false,
+                        attention: true,
+                        selected: false,
+                        enabled: true,
+                        drag: true,
+                        title: true,
+                        grip_only: false,
+                        rtl: false,
+                    },
+                );
+                let resize = panel_host_sash(ui, egui::Id::unique("synthetic-sash"), sash, "Resize synthetic neighbours", true, bounds.height());
+                assert!(title.sense.is_focusable());
+                assert!(resize.sense.is_focusable());
+                assert_eq!(title.rect, header);
+                assert_eq!(resize.rect, sash);
+            },
+        );
+    });
+    assert!(calls >= 1);
+    let tree = output.platform_output.accesskit_update.as_ref().unwrap();
+    for label in ["Synthetic long localized panel title", "Resize synthetic neighbours"] {
+        assert!(tree.nodes.iter().any(|(_, node)| node.label() == Some(label)), "actual focusable widget: {label}");
+    }
+    let separator = &tree.nodes.iter().find(|(_, node)| node.label() == Some("Resize synthetic neighbours")).unwrap().1;
+    assert_eq!(separator.role(), egui::accesskit::Role::Splitter);
+    assert_eq!(separator.orientation(), Some(egui::accesskit::Orientation::Horizontal));
+    assert_eq!(separator.numeric_value(), Some(f64::from(bounds.height())));
+    let translated = sash.translate(egui::vec2(35.0, 27.0));
+    let moved = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+        let response = panel_host_sash(ui, egui::Id::unique("synthetic-sash"), translated, "Resize synthetic neighbours", true, bounds.height());
+        assert_eq!(response.rect, translated);
+    });
+    let moved_separator = &moved
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Resize synthetic neighbours"))
+        .unwrap()
+        .1;
+    assert_eq!(moved_separator.numeric_value(), separator.numeric_value(), "moving the same controlled panel cannot announce a resize");
+    let (mut bevel_edges, mut inset_borders) = (0, 0);
+    for shape in &output.shapes {
+        assert!(clip.contains_rect(shape.clip_rect), "chrome paint must not escape its inherited clip");
+        crate::test_support::each_shape(&shape.shape, &mut |paint| match paint {
+            egui::Shape::LineSegment { stroke, .. }
+                if stroke.width == bevel.width && [bevel.highlight, bevel.light, bevel.shadow, bevel.dark_shadow].contains(&stroke.color) =>
+            {
+                bevel_edges += 1;
+            }
+            egui::Shape::Rect(rect) if rect.stroke.color == t.form_error => {
+                assert!(!clip.contains_rect(rect.rect), "the partial clip must actually trim the inset border");
+                inset_borders += 1;
+            }
+            _ => {}
+        });
+    }
+    assert!(bevel_edges > 0 && inset_borders > 0, "exercise both decorations under the inherited partial clip");
+}
+
+#[test]
+fn universal_surface_uses_adaptive_workspace_fill_and_rounding_with_safe_content_clip() {
+    use crate::ui_kit::LayoutMode;
+    let bounds = egui::Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(320.0, 180.0));
+    for dark in [false, true] {
+        let mut tokens = if dark { Tokens::dark() } else { Tokens::light() };
+        tokens.panel = tokens.panel.gamma_multiply(0.8);
+        let _tokens = crate::theme::scoped_tokens(tokens);
+        for layout in [LayoutMode::Floating, LayoutMode::Docked] {
+            for free_card in [false, true] {
+                let ctx = crate::fonts::test_context();
+                layout.publish(&ctx);
+                let shared = if free_card { Container::floating_card(Surface::Panel) } else { Container::new(&ctx, Surface::Panel) };
+                let expected = shared.frame(&ctx, tokens.panel, crate::frame::Side::Left);
+                if free_card {
+                    // A new floating Area first measures invisibly, even with fade disabled.
+                    crate::test_support::frame(&ctx, egui::RawInput { time: Some(0.0), ..Default::default() }, |ui| {
+                        panel_host_surface(ui, egui::Id::unique("adaptive-surface"), bounds, free_card, expected.fill, None, |_, _| {});
+                    });
+                }
+                for time in [1.0, 2.0] {
+                    let output = crate::test_support::frame(&ctx, egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+                        panel_host_surface(ui, egui::Id::unique("adaptive-surface"), bounds, free_card, expected.fill, None, |ui, clip| {
+                            assert!(ui.is_visible() && !ui.is_sizing_pass(), "assert the first visible paint and its subsequent frame");
+                            assert!(bounds.contains_rect(clip));
+                            let stroke = expected.stroke.width;
+                            for (corner, center, radius) in [
+                                (clip.left_top(), bounds.left_top(), expected.corner_radius.nw),
+                                (clip.right_top(), bounds.right_top(), expected.corner_radius.ne),
+                                (clip.left_bottom(), bounds.left_bottom(), expected.corner_radius.sw),
+                                (clip.right_bottom(), bounds.right_bottom(), expected.corner_radius.se),
+                            ] {
+                                let radius = f32::from(radius);
+                                let inward = egui::vec2(
+                                    if center.x == bounds.left() { radius } else { -radius },
+                                    if center.y == bounds.top() { radius } else { -radius },
+                                );
+                                if radius > stroke {
+                                    assert!(corner.distance(center + inward) <= radius - stroke + 0.001);
+                                }
+                            }
+                            // A controller may paint an oversized rectangular body;
+                            // its inherited content clip must still protect corners.
+                            ui.painter().with_clip_rect(clip).rect_filled(bounds, 0, tokens.control_fill);
+                        });
+                    });
+                    let mut backgrounds = 0;
+                    for shape in &output.shapes {
+                        crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                            if let egui::Shape::Rect(rect) = shape
+                                && rect.rect == bounds
+                                && rect.stroke == expected.stroke
+                            {
+                                assert_eq!(rect.fill, expected.fill, "shared frame alpha is stable from the first visible paint");
+                                assert_eq!(rect.corner_radius, expected.corner_radius);
+                                assert!(rect.fill.a() < 255, "the host must retain the shared frame's alpha");
+                                backgrounds += 1;
+                            }
+                        });
+                    }
+                    assert!(backgrounds > 0, "actual bounded background must use the shared frame");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn universal_header_reuses_title_font_and_six_dot_grip_without_idle_control_tiles() {
+    let t = Tokens::get();
+    let title = egui::Rect::from_min_size(egui::pos2(30.0, 30.0), egui::vec2(300.0, t.form_header_height));
+    let tab = title.translate(egui::vec2(0.0, title.height()));
+    let group = tab.translate(egui::vec2(0.0, tab.height()));
+    for rtl in [false, true] {
+        let ctx = crate::fonts::test_context();
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            for (bounds, is_title, label) in [(title, true, "Shared title"), (tab, false, "Shared tab")] {
+                let response = panel_host_control(
+                    ui,
+                    egui::Id::unique(label),
+                    bounds,
+                    HostChrome {
+                        label,
+                        icon: None,
+                        icon_only: false,
+                        attention: false,
+                        selected: false,
+                        enabled: true,
+                        drag: true,
+                        title: is_title,
+                        grip_only: false,
+                        rtl,
+                    },
+                );
+                assert_eq!(response.rect, bounds, "paint insets must preserve the exact target");
+                assert!(response.sense.is_focusable());
+            }
+            let grip = egui::Rect::from_center_size(
+                egui::pos2(if rtl { group.right() - t.space_10 } else { group.left() + t.space_10 }, group.center().y),
+                egui::vec2(t.space_10 + t.space_8, group.height()),
+            );
+            let response = panel_host_control(
+                ui,
+                egui::Id::unique("group-grip"),
+                grip,
+                HostChrome {
+                    label: "Accessible active panel",
+                    icon: None,
+                    icon_only: false,
+                    attention: false,
+                    selected: false,
+                    enabled: true,
+                    drag: true,
+                    title: true,
+                    grip_only: true,
+                    rtl,
+                },
+            );
+            assert_eq!(response.rect, grip);
+            assert!(response.sense.is_focusable());
+        });
+        let (mut titles, mut tabs, mut dots, mut group_dots) = (0, 0, 0, 0);
+        for clipped in &output.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
+                egui::Shape::Text(text) if text.galley.job.text == "Shared title" => {
+                    assert_eq!(text.galley.job.sections.first().unwrap().format.font_id, crate::fonts::semibold(t.font_heading));
+                    titles += 1;
+                }
+                egui::Shape::Text(text) if text.galley.job.text == "Shared tab" => {
+                    assert_eq!(text.galley.job.sections.first().unwrap().format.font_id, egui::FontId::proportional(t.font_label));
+                    tabs += 1;
+                }
+                egui::Shape::Text(text) => {
+                    assert_ne!(text.galley.job.text, "Accessible active panel", "grip accessibility name is not a duplicate painted title")
+                }
+                egui::Shape::Circle(dot) if title.contains(dot.center) && dot.fill == t.text_dim => {
+                    assert_eq!(dot.center.x > title.center().x, rtl, "grip follows the leading edge");
+                    dots += 1;
+                }
+                egui::Shape::Circle(dot) if group.contains(dot.center) && dot.fill == t.text_dim => {
+                    group_dots += 1;
+                }
+                egui::Shape::Rect(rect) => assert_ne!(rect.fill, t.panel_header, "idle controls share the outer background"),
+                _ => {}
+            });
+        }
+        assert_eq!((titles, tabs, dots, group_dots), (1, 1, 6, 6));
+    }
+}
+
+#[test]
+fn universal_drag_source_changes_only_label_ink_and_keeps_existing_fonts() {
+    let t = Tokens::get();
+    for (title, selected, attention, enabled) in
+        [(true, false, false, true), (false, true, true, true), (false, false, false, true), (false, false, false, false)]
+    {
+        let ctx = crate::fonts::test_context();
+        let bounds = egui::Rect::from_min_size(egui::pos2(30.0, 30.0), egui::vec2(300.0, t.form_header_height));
+        let other = bounds.translate(egui::vec2(0.0, bounds.height()));
+        let ink = if !enabled {
+            t.form_dim
+        } else if attention {
+            t.form_primary
+        } else {
+            t.form_ink
+        };
+        let font = if title {
+            crate::fonts::semibold(t.font_heading)
+        } else if selected {
+            crate::fonts::semibold(t.font_label)
+        } else {
+            egui::FontId::proportional(t.font_label)
+        };
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            for (rect, label, opacity) in [(bounds, "Moved title", 0.5), (other, "Other title", 1.0)] {
+                let response = panel_host_control_label_opacity(
+                    ui,
+                    egui::Id::unique(label),
+                    rect,
+                    HostChrome { label, icon: None, icon_only: false, attention, selected, enabled, drag: true, title, grip_only: false, rtl: false },
+                    opacity,
+                );
+                assert_eq!(response.rect, rect);
+                assert_eq!(response.sense, if enabled { egui::Sense::click_and_drag() } else { egui::Sense::hover() });
+            }
+        });
+        let (mut moved, mut others, mut dots) = (0, 0, 0);
+        for clipped in &output.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
+                egui::Shape::Text(text) if matches!(text.galley.job.text.as_str(), "Moved title" | "Other title") => {
+                    let dim = text.galley.job.text == "Moved title";
+                    for section in &text.galley.job.sections {
+                        assert_eq!(section.format.color, ink.gamma_multiply(if dim { 0.5 } else { 1.0 }));
+                        assert_eq!(section.format.font_id, font);
+                    }
+                    if dim {
+                        moved += 1;
+                    } else {
+                        others += 1;
+                    }
+                }
+                egui::Shape::Circle(dot) if title && (bounds.contains(dot.center) || other.contains(dot.center)) => {
+                    assert_eq!(dot.fill, t.text_dim, "grip ink remains unchanged");
+                    dots += 1;
+                }
+                egui::Shape::Rect(rect) if selected && (rect.rect.intersects(bounds) || rect.rect.intersects(other)) => {
+                    assert_eq!(rect.fill, t.selected_bg, "selection fill remains unchanged");
+                }
+                _ => {}
+            });
+        }
+        assert_eq!((moved, others, dots), (1, 1, if title { 12 } else { 0 }));
+    }
+}
+
+#[test]
+fn universal_drag_badge_keeps_display_order_on_one_line_and_clamps_without_allocating_input_or_layout() {
+    let t = Tokens::get();
+    let domain = egui::Rect::from_min_max(egui::pos2(20.0, 30.0), egui::pos2(440.0, 330.0));
+    let logical = "אחד שניים שלושה ארבעה חמישה שישה שבעה שמונה תשעה עשרה אחרון";
+    let hebrew = solidcraft_ui_text::bidi::visual(logical).into_owned();
+    assert_ne!(hebrew, logical, "exercise an already display-ordered eleven-word Hebrew title");
+    let narrow = egui::Rect::from_min_size(domain.min, egui::vec2(180.0, 600.0));
+    for (scale, rtl) in [(1.0, false), (2.0, true)] {
+        let ctx = crate::fonts::test_context();
+        ctx.set_pixels_per_point(scale);
+        for (title, domain) in
+            [("Full title".to_owned(), domain), ("Full current presentation title without ellipsis ".repeat(5), domain), (hebrew.clone(), narrow)]
+        {
+            let clip = domain.shrink(20.0);
+            for at in [
+                clip.center(),
+                clip.left_top() + egui::vec2(1.0, 1.0),
+                clip.right_bottom() - egui::vec2(1.0, 1.0),
+                egui::pos2(-20.0, -20.0),
+                egui::pos2(f32::NAN, 100.0),
+            ] {
+                let visible = at.is_finite() && clip.contains(at);
+                let mut layer = None;
+                let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+                    ui.set_clip_rect(clip);
+                    layer = Some(egui::LayerId::new(egui::Order::Tooltip, ui.scope_id().with("panel_preview")));
+                    let before = ui.min_rect();
+                    panel_host_drag_title(ui, &title, at, domain, rtl);
+                    assert_eq!(ui.min_rect(), before, "paint-only feedback allocates no layout");
+                });
+                let (mut labels, mut backgrounds) = (0, 0);
+                for clipped in &output.shapes {
+                    crate::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
+                        egui::Shape::Text(text) if text.galley.job.text == title => {
+                            assert!(clip.contains_rect(clipped.clip_rect));
+                            let text_bounds = egui::Rect::from_min_size(text.pos, text.galley.size());
+                            assert!(text_bounds.intersects(clipped.clip_rect));
+                            let padding = t.space_8.min(clip.width() / 4.0);
+                            let aligned = if rtl {
+                                text_bounds.right() - (clipped.clip_rect.right() - padding)
+                            } else {
+                                text_bounds.left() - (clipped.clip_rect.left() + padding)
+                            };
+                            assert!(aligned.abs() < 0.01, "keep the reading start visible when the full galley exceeds its clip");
+                            assert!(
+                                text.galley.job.sections.iter().all(|section| section.format.color == t.form_ink
+                                    && section.format.font_id == egui::FontId::proportional(t.font_label))
+                            );
+                            assert_eq!(text.galley.rows.len(), 1, "never reflow already display-ordered words");
+                            if title == hebrew {
+                                assert_eq!(text.galley.job.text, hebrew, "preserve display order without a second bidi pass");
+                                assert!(text_bounds.width() > clipped.clip_rect.width(), "the narrow Hebrew case must exercise clipping");
+                                if rtl {
+                                    assert!(text_bounds.left() < clipped.clip_rect.left());
+                                }
+                            }
+                            labels += 1;
+                        }
+                        egui::Shape::Rect(rect) if rect.fill == t.dialog_body.to_opaque() && rect.corner_radius == t.radius_sm.into() => {
+                            assert!(clip.contains_rect(rect.rect));
+                            assert_ne!(ctx.layer_id_at(rect.rect.center()), layer, "no tooltip Area or input shield");
+                            if title == "Full title" && at == clip.center() {
+                                assert_eq!(rect.rect.center().x < at.x, rtl, "cursor offset mirrors with direction");
+                            }
+                            backgrounds += 1;
+                        }
+                        _ => {}
+                    });
+                }
+                assert_eq!((labels, backgrounds), if visible { (1, 1) } else { (0, 0) });
+            }
+        }
+    }
+}
+
+#[test]
+fn universal_collapsed_header_keeps_actions_and_one_click_restores_the_same_controller() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget, enable_host_specimen, inspect_host_specimen};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", serde_json::json!({"width":1400,"height":900}));
+    enable_host_specimen(&mut h.app, "collapsed").unwrap();
+    h.frames(3);
+    let before = inspect_host_specimen(&mut h.app).unwrap();
+    let frame = h.app.universal_panel_frame().unwrap();
+    assert!(frame.layout.sections.iter().all(|section| section.collapsed && section.body.is_none() && section.footer.is_none()));
+    assert!(frame.controls.iter().any(|control| matches!(&control.target,
+        HostControlTarget::Pointer(HostPointerTarget::HeaderAction { instance, action }) if instance.0 == "specimen-0" && action.0 == "apply")
+        && control.enabled));
+    assert!(frame.controls.iter().any(|control| matches!(&control.target,
+        HostControlTarget::Pointer(HostPointerTarget::Close { instance }) if instance.0 == "specimen-0")));
+    assert!(!frame.controls.iter().any(|control| matches!(&control.target,
+        HostControlTarget::Pointer(HostPointerTarget::Close { instance }) if instance.0 == "specimen-1")));
+    let expand = frame
+        .controls
+        .iter()
+        .find(|control| {
+            matches!(&control.target,
+        HostControlTarget::Pointer(HostPointerTarget::Collapse { instance }) if instance.0 == "specimen-0")
+        })
+        .unwrap();
+    let at = crate::panel_runtime::egui_rect(expand.bounds).center();
+    h.call("ui.click", serde_json::json!({"x":at.x,"y":at.y}));
+    h.frames(2);
+    let restored = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|section| section.instance.0 == "specimen-0").unwrap();
+    assert!(!restored.collapsed);
+    assert!(restored.body.is_some());
+    let after = inspect_host_specimen(&mut h.app).unwrap();
+    let controller = |value: &serde_json::Value| {
+        value["runtime"]["probe"]["controllers"].as_array().unwrap().iter().find(|state| state["instance"] == "specimen-0").unwrap().clone()
+    };
+    let old = controller(&before);
+    let new = controller(&after);
+    assert_eq!(old["renders"], 0);
+    assert!(new["renders"].as_u64().unwrap() > 0);
+    assert_eq!(old["controller_identity"], new["controller_identity"]);
+    assert_eq!(old["cancels"], new["cancels"]);
+    assert_eq!(old["draft"], new["draft"]);
+    assert_eq!(before["session"]["camera"], after["session"]["camera"]);
+}
+
+#[test]
+fn universal_sole_content_gap_is_navigable_while_declared_fill_uses_the_column() {
+    use crate::panel_runtime::{enable_host_specimen, logical_rect};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", serde_json::json!({"width":1400,"height":900}));
+    enable_host_specimen(&mut h.app, "content_fill").unwrap();
+    h.frames(3);
+    let frame = h.app.universal_panel_frame().unwrap();
+    let content = frame.layout.sections.iter().find(|section| section.instance.0 == "specimen-0").unwrap();
+    let fill = frame.layout.sections.iter().find(|section| section.instance.0 == "specimen-1").unwrap();
+    assert!(fill.outer.size.height > content.outer.size.height);
+    let outer = crate::panel_runtime::egui_rect(content.outer);
+    let gap = egui::Rect::from_center_size(egui::pos2(outer.center().x, outer.bottom() + 20.0), egui::vec2(4.0, 4.0));
+    assert!(frame.layout.usable.contains_rect(logical_rect(gap)));
+    assert!(!frame.layout.consumes_pointer(solidcraft_engine::panels::Point { x: gap.center().x, y: gap.center().y }));
+    assert!(frame.layout.resolved.rails.is_empty() && frame.layout.overflow.is_empty());
+}
+
+#[test]
+fn universal_inline_specimen_uses_one_total_row_with_real_content_and_shared_controls() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget, enable_host_specimen};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", serde_json::json!({"width":1400,"height":900}));
+    enable_host_specimen(&mut h.app, "inline").unwrap();
+    h.frames(3);
+    let frame = h.app.universal_panel_frame().unwrap();
+    let section = frame.layout.sections.first().unwrap();
+    assert!(section.inline && !section.collapsed);
+    assert_eq!(section.header, section.outer);
+    assert!(section.outer.size.height <= crate::theme::PANEL_INLINE_MAX_HEIGHT);
+    assert!(section.body.is_none() && section.footer.is_none());
+    assert!(!frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::HeaderAction { .. }))));
+    let runtime = h.app.panel_runtime().unwrap();
+    let instance = runtime.layout().layout().instance(&section.instance).unwrap();
+    assert!(runtime.layout().registry().get(&instance.kind).unwrap().header_actions.is_empty(), "the inline log declares no custom or debug actions");
+    assert!(frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { .. }))));
+    assert!(frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Collapse { .. }))));
+    assert!(h.widget(solidcraft_ui_text::tr("ui.panel_fixture.inline")).is_some());
+    assert!(h.widget(solidcraft_ui_text::tr("ui.panel_fixture.caption")).is_none());
+}
+
+#[test]
+fn universal_registered_header_command_invokes_only_the_declared_synthetic_binding() {
+    use crate::panel_runtime::{enable_host_specimen, inspect_host_specimen};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", serde_json::json!({"width":1400,"height":900}));
+    enable_host_specimen(&mut h.app, "collapsed").unwrap();
+    h.frames(3);
+    let before = inspect_host_specimen(&mut h.app).unwrap();
+    h.app.run_panel_command("panel.action", &serde_json::json!({"target":{"type":"instance","id":"specimen-0"},"action":"apply"})).unwrap();
+    let after = inspect_host_specimen(&mut h.app).unwrap();
+    let applies = |value: &serde_json::Value| {
+        value["runtime"]["probe"]["controllers"].as_array().unwrap().iter().find(|state| state["instance"] == "specimen-0").unwrap()["applies"]
+            .as_u64()
+            .unwrap()
+    };
+    assert_eq!(applies(&after), applies(&before) + 1);
+    assert_eq!(after["runtime"]["probe"]["content_command_calls"], before["runtime"]["probe"]["content_command_calls"].as_u64().unwrap() + 1);
+    assert_eq!(before["session"], after["session"]);
+    let rejected = h.app.run_panel_command("panel.action", &serde_json::json!({"target":{"type":"instance","id":"specimen-1"},"action":"apply"}));
+    assert_eq!(rejected.unwrap_err().rule, solidcraft_engine::panels::Rule::Capability);
+    let undeclared = h.app.run_panel_command("panel.action", &serde_json::json!({"target":{"type":"instance","id":"specimen-0"},"action":"cancel"}));
+    assert_eq!(undeclared.unwrap_err().rule, solidcraft_engine::panels::Rule::Capability, "a content action is not automatically a header action");
+    let refused = inspect_host_specimen(&mut h.app).unwrap();
+    assert_eq!(applies(&after), applies(&refused));
+    assert_eq!(after["runtime"]["probe"]["content_command_calls"], refused["runtime"]["probe"]["content_command_calls"]);
+    let editor = |value: &serde_json::Value| {
+        value["runtime"]["probe"]["controllers"].as_array().unwrap().iter().find(|state| state["instance"] == "specimen-0").unwrap().clone()
+    };
+    assert_eq!(editor(&after)["cancels"], editor(&refused)["cancels"]);
+    assert_eq!(editor(&after)["transaction_live"], editor(&refused)["transaction_live"]);
+    assert_eq!(before["session"], refused["session"]);
+}
+
 #[derive(Clone, Copy, Debug)]
 enum BlurHost {
     Frame,
@@ -40,7 +1036,7 @@ fn host_marker(painter: &egui::Painter, frame: egui::Frame, content: egui::Rect,
 fn blur_host_fixture(host: BlurHost, mode: u8, position: egui::Pos2, transform: egui::emath::TSTransform) -> (egui::FullOutput, String) {
     let ctx = crate::fonts::test_context();
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
-    let container = Container::for_layout(crate::shell::LayoutMode::Floating, Surface::Feature);
+    let container = Container::for_layout(crate::ui_kit::LayoutMode::Floating, Surface::Feature);
     let frame = container
         .frame(&ctx, egui::Color32::from_rgba_unmultiplied(40, 80, 100, 180), crate::frame::Side::Left)
         .stroke(egui::Stroke::new(2.5, egui::Color32::WHITE))
@@ -141,14 +1137,16 @@ fn blur_stock_hosts_zero_has_identical_shapes_noops_geometry_and_ids() {
 fn blur_stock_window_open_flag_preserves_closed_close_and_reopen_behavior() {
     fn record(mode: u8, omit_markers: bool) -> Vec<(Vec<String>, String)> {
         let ctx = crate::fonts::test_context();
-        let container = Container::for_layout(crate::shell::LayoutMode::Floating, Surface::Feature);
+        let container = Container::for_layout(crate::ui_kit::LayoutMode::Floating, Surface::Feature);
         let frame = container.frame(&ctx, Tokens::get().dialog_body, crate::frame::Side::Left);
         let id = egui::Id::unique("open flag fixture");
         let mut recorded = Vec::new();
         for (index, mut keep) in [false, false, true, true, true, false, false, false, true, true, true].into_iter().enumerate() {
+            let initially_open = keep;
             let mut observation = String::new();
             let mut called = false;
             let output = crate::test_support::frame(&ctx, egui::RawInput { time: Some(index as f64), ..Default::default() }, |_| {
+                Container::begin_host_windows(&ctx);
                 let window = container
                     .window("Open flag fixture")
                     .id(id)
@@ -169,22 +1167,25 @@ fn blur_stock_window_open_flag_preserves_closed_close_and_reopen_behavior() {
                     }
                 };
                 let shown = if mode == 0 {
-                    window.open(&mut keep).show(&ctx, &mut body)
+                    // Compare open windows with stock geometry and close handling;
+                    // explicitly closed features skip stock's animated showing.
+                    if initially_open { window.open(&mut keep).show(&ctx, &mut body) } else { None }
                 } else {
                     // A long-lived builder must accept this frame-local mutable borrow.
                     let window: container::FeatureWindow<'static> = container::FeatureWindow::new(window, id, frame);
                     let window = window.open(&mut keep);
                     if mode == 1 { window.show(&ctx, &mut body) } else { window.show_background(&ctx, Some(host_marker), &mut body) }
                 };
-                if index == 0 || index == 7 {
-                    assert!(shown.is_none(), "initially closed and settled closed windows stay hidden");
+                if !initially_open {
+                    assert!(shown.is_none(), "initially closed and newly closed windows stay hidden immediately");
+                    assert_eq!(Container::host_window_regions(&ctx), Some(Vec::new()), "closed windows publish no geometry");
                 }
                 if index == 4 {
                     assert!(shown.as_ref().is_some_and(|shown| shown.response.should_close()), "the Window response carries the close request");
                 }
                 observation = format!("{:?}", (keep, shown.map(|shown| (shown.response.id, shown.response.rect, shown.inner))));
             });
-            if index == 0 || index == 7 {
+            if !initially_open {
                 assert!(!called);
             }
             if index == 4 {
@@ -211,8 +1212,8 @@ fn blur_stock_window_open_flag_preserves_closed_close_and_reopen_behavior() {
         }
         recorded
     }
-    assert_eq!(record(0, false), record(1, false), "zero keeps stock shapes, including Noop counts and hidden windows");
-    assert_eq!(record(0, true), record(2, true), "positive markers preserve stock visibility, close handling, geometry and IDs");
+    assert_eq!(record(0, false), record(1, false), "zero keeps open stock shapes and Noop counts, with immediate closed visibility");
+    assert_eq!(record(0, true), record(2, true), "positive markers preserve close handling, geometry and IDs, with immediate closed visibility");
 }
 
 #[test]
@@ -288,7 +1289,7 @@ fn blur_stock_hosts_late_scaled_layers_and_moved_windows_keep_final_geometry() {
 fn blur_stock_frame_marker_uses_final_joined_corner_radii() {
     let ctx = crate::fonts::test_context();
     let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-        let host = Container::for_layout(crate::shell::LayoutMode::Docked, Surface::Feature).joined(DockEdges::default());
+        let host = Container::for_layout(crate::ui_kit::LayoutMode::Docked, Surface::Feature).joined(DockEdges::default());
         let frame = host.frame(ui.ctx(), Tokens::get().dialog_body, crate::frame::Side::Left);
         let bounds = ui.available_rect_before_wrap();
         host.show_frame_background(ui, frame, bounds, Some(host_marker), |ui| {
@@ -402,7 +1403,7 @@ fn heading_weight_field_surfaces_and_disclosures_follow_tokens_in_both_themes() 
 
 #[test]
 fn panel_keeps_actions_and_body_geometry_in_both_layouts() {
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let ctx = crate::fonts::test_context();
         let vp = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
         for _ in 0..3 {
@@ -410,7 +1411,7 @@ fn panel_keeps_actions_and_body_geometry_in_both_layouts() {
             crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(vp), ..Default::default() }, |_| {
                 let side = crate::frame::Side::Right;
                 let frame = Panel::feature_frame(&ctx, layout, side);
-                let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
+                let anchor = egui::pos2(vp.right() - crate::ui_kit::SHELL_GAP, vp.top());
                 let panel = Panel::new("Fillet", egui::Id::unique("gallery_feature"), anchor, vp, side, frame);
                 panel.window(&ctx).show(&ctx, |ui| {
                     panel.feature(
@@ -466,8 +1467,8 @@ fn feature_frame_with(
     crate::test_support::frame(ctx, egui::RawInput { screen_rect: Some(vp), events, focused: true, ..Default::default() }, |_| {
         placement.publish(ctx);
         let side = crate::frame::Side::Right;
-        let frame = Panel::feature_frame(ctx, crate::shell::LayoutMode::Floating, side);
-        let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
+        let frame = Panel::feature_frame(ctx, crate::ui_kit::LayoutMode::Floating, side);
+        let anchor = egui::pos2(vp.right() - crate::ui_kit::SHELL_GAP, vp.top());
         let panel = Panel::new("Fillet", egui::Id::unique("top_actions"), anchor, vp, side, frame);
         panel.window(ctx).show(ctx, |ui| {
             let heading = FeatureOptions {
@@ -555,14 +1556,14 @@ fn top_placement_shows_the_compute_status_in_the_title_row() {
         output = Some(crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(vp), ..Default::default() }, |_| {
             DialogButtons::Top.publish(&ctx);
             let side = crate::frame::Side::Right;
-            let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
+            let anchor = egui::pos2(vp.right() - crate::ui_kit::SHELL_GAP, vp.top());
             let panel = Panel::new(
                 "Fillet",
                 egui::Id::unique("top_status"),
                 anchor,
                 vp,
                 side,
-                Panel::feature_frame(&ctx, crate::shell::LayoutMode::Floating, side),
+                Panel::feature_frame(&ctx, crate::ui_kit::LayoutMode::Floating, side),
             );
             panel.window(&ctx).show(&ctx, |ui| {
                 let heading = FeatureOptions {
@@ -598,14 +1599,14 @@ fn bottom_placement_puts_the_busy_spinner_in_the_footer_row() {
         crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(vp), ..Default::default() }, |_| {
             DialogButtons::Bottom.publish(&ctx);
             let side = crate::frame::Side::Right;
-            let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
+            let anchor = egui::pos2(vp.right() - crate::ui_kit::SHELL_GAP, vp.top());
             let panel = Panel::new(
                 "Fillet",
                 egui::Id::unique("bottom_status"),
                 anchor,
                 vp,
                 side,
-                Panel::feature_frame(&ctx, crate::shell::LayoutMode::Floating, side),
+                Panel::feature_frame(&ctx, crate::ui_kit::LayoutMode::Floating, side),
             );
             panel.window(&ctx).show(&ctx, |ui| {
                 let heading = FeatureOptions {
@@ -651,7 +1652,7 @@ fn top_placement_keeps_a_managers_fold_beside_the_actions() {
 
 #[test]
 fn palette_scrolls_short_views_and_retains_its_status_and_action_handles() {
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         for height in [125.0, 480.0] {
             let ctx = crate::fonts::test_context();
             let vp = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, height));
@@ -659,11 +1660,11 @@ fn palette_scrolls_short_views_and_retains_its_status_and_action_handles() {
                 scenario::clear_handles();
                 crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(vp), ..Default::default() }, |_| {
                     let frame = Panel::palette_frame(&ctx, layout);
-                    let bottom = vp.bottom() - crate::shell::SHELL_GAP;
+                    let bottom = vp.bottom() - crate::ui_kit::SHELL_GAP;
                     let panel = Panel::new(
                         "Options",
                         egui::Id::unique("gallery_palette"),
-                        egui::pos2(vp.right() - crate::shell::SHELL_GAP, 0.0),
+                        egui::pos2(vp.right() - crate::ui_kit::SHELL_GAP, 0.0),
                         vp,
                         crate::frame::Side::Right,
                         frame,
@@ -708,7 +1709,7 @@ fn palette_scrolls_short_views_and_retains_its_status_and_action_handles() {
 
 #[test]
 fn wide_tables_remain_bounded_with_pinned_actions_on_small_viewports() {
-    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         for width in [240.0, 640.0, 1200.0] {
             let ctx = crate::fonts::test_context();
             let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 360.0));
@@ -1253,7 +2254,7 @@ fn window_footer_is_optional_and_can_contain_only_a_left_action() {
 
 #[test]
 fn universal_containers_follow_one_layout_without_changing_transient_surfaces() {
-    use crate::{frame::Side, shell::LayoutMode};
+    use crate::{frame::Side, ui_kit::LayoutMode};
     let ctx = crate::fonts::test_context();
     let previous = crate::theme::is_dark();
     for dark in [false, true] {
@@ -1368,7 +2369,7 @@ fn window_body_buttons_stay_visible_after_the_page_grows_from_nothing() {
 #[test]
 fn adjoining_compact_frames_share_one_stroke_and_only_exposed_corners_round() {
     use crate::ui_kit::DockEdges;
-    use crate::{frame::Side, shell::LayoutMode};
+    use crate::{frame::Side, ui_kit::LayoutMode};
     let ctx = crate::fonts::test_context();
     LayoutMode::Docked.publish(&ctx);
     let t = Tokens::get();
@@ -1390,7 +2391,7 @@ fn adjoining_compact_frames_share_one_stroke_and_only_exposed_corners_round() {
 #[test]
 fn compact_tool_sheet_corners_follow_its_right_edge_contact() {
     let ctx = crate::fonts::test_context();
-    crate::shell::LayoutMode::Docked.publish(&ctx);
+    crate::ui_kit::LayoutMode::Docked.publish(&ctx);
     let t = Tokens::get();
     let container = Container::new(&ctx, Surface::Feature);
     let frame = container.frame(&ctx, t.dialog_body, crate::frame::Side::Right);
@@ -1400,7 +2401,7 @@ fn compact_tool_sheet_corners_follow_its_right_edge_contact() {
 
 #[test]
 fn theme_shape_changes_preserve_panel_geometry_and_dock_contacts() {
-    use crate::{frame::Side, shell::LayoutMode};
+    use crate::{frame::Side, ui_kit::LayoutMode};
     let ctx = crate::fonts::test_context();
     let mut results = Vec::new();
     for name in ["solidcraft-95", "blueprint", "cupertino"] {
@@ -1448,7 +2449,7 @@ fn border_hierarchy_reaches_hosts_sections_controls_and_inset_without_new_target
         let ctx = crate::fonts::test_context();
         let mut value = "12 mm".to_string();
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-            let container = Container::for_layout(crate::shell::LayoutMode::Floating, Surface::Panel);
+            let container = Container::for_layout(crate::ui_kit::LayoutMode::Floating, Surface::Panel);
             let frame = container.frame(ui.ctx(), t.panel, crate::frame::Side::Left).inner_margin(12);
             let bounds = ui.max_rect();
             container.show_frame(ui, frame, bounds, |ui| {
@@ -1487,7 +2488,7 @@ fn border_hierarchy_reaches_hosts_sections_controls_and_inset_without_new_target
             });
         }
         assert!(found.into_iter().all(|v| v), "missing role: {found:?}");
-        for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for surface in [
                 Surface::Panel,
                 Surface::Chrome,
@@ -1514,7 +2515,7 @@ fn inset_border_skips_tiny_or_invalid_surfaces_and_keeps_dock_contacts_square() 
     let _restore = crate::theme::scoped_tokens(t);
     let ctx = crate::fonts::test_context();
     let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-        let frame = Container::for_layout(crate::shell::LayoutMode::Docked, Surface::Panel).joined(DockEdges::ALL).frame(
+        let frame = Container::for_layout(crate::ui_kit::LayoutMode::Docked, Surface::Panel).joined(DockEdges::ALL).frame(
             &ctx,
             t.panel,
             crate::frame::Side::Left,
@@ -1668,5 +2669,93 @@ fn page_sidebar_footer_stays_visible_when_the_page_list_scrolls() {
         assert_eq!(scenario::rect_of("dialog:pages_footer"), Some(footer));
         assert!(footer.contains_rect(scenario::rect_of("prefs:profile").unwrap()));
         assert!(nav.contains_rect(scenario::rect_of("prefs:page:Plugins").unwrap()), "last page is reachable in {theme}");
+    }
+}
+
+#[test]
+fn host_surface_fallback_paints_readable_plain_labels_without_changing_body_layout() {
+    use solidcraft_engine::panels::{ContrastOutcome, PanelSurface};
+    let bounds = egui::Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(320.0, 180.0));
+    for floating in [false, true] {
+        for fallback in [false, true] {
+            let ctx = crate::fonts::test_context();
+            let mut authored = Tokens::get();
+            authored.panel = egui::Color32::WHITE;
+            authored.text = egui::Color32::BLACK;
+            authored.text_dim = egui::Color32::BLACK;
+            authored.form_ink = egui::Color32::BLACK;
+            authored.form_dim = egui::Color32::BLACK;
+            authored.dialog_label = egui::Color32::BLACK;
+            if fallback {
+                authored.text = authored.panel;
+            }
+            let _authored = crate::theme::scoped_panel_tokens(authored);
+            let style = crate::panel_runtime::HostSurfaceStyle::capture(&ctx, false, Some(0.0), None);
+            let appearance = style.appearance(PanelSurface::Translucent, floating);
+            let failed = matches!(appearance.contrast, ContrastOutcome::RetainReadableFallback { .. });
+            assert_eq!(failed, fallback, "exercise both authored paint and deliberately unreadable fallback");
+            let palette = failed.then(|| style.palette(appearance));
+            let font = egui::FontId::monospace(19.0);
+            // Floating Areas create a fresh Ui from the context style; they do
+            // not inherit a caller's local Ui overrides. Set the common baseline
+            // before the sizing pass so both existing host paths inherit it.
+            ctx.global_style_mut(|style| {
+                style.override_font_id = Some(font.clone());
+                style.spacing.item_spacing = egui::vec2(13.0, 17.0);
+                style.wrap_mode = Some(egui::TextWrapMode::Wrap);
+                style.visuals.override_text_color = Some(authored.panel);
+            });
+            if floating {
+                crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+                    panel_host_surface(ui, egui::Id::unique("captured-fill"), bounds, floating, appearance.fill, palette, |_, _| {});
+                });
+            }
+            let mut expected_ink = egui::Color32::TRANSPARENT;
+            let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+                let parent_visuals = ui.visuals().clone();
+                let parent_spacing = ui.spacing().item_spacing;
+                let parent_fonts = ui.style().text_styles.clone();
+                let parent_wrap = ui.style().wrap_mode;
+                expected_ink = palette.map_or(authored.panel, |tokens| tokens.text);
+                panel_host_surface(ui, egui::Id::unique("captured-fill"), bounds, floating, appearance.fill, palette, |ui, clip| {
+                    assert_eq!(Tokens::get(), palette.copied().unwrap_or(authored));
+                    assert_eq!(ui.spacing().item_spacing, parent_spacing);
+                    assert_eq!(ui.style().text_styles, parent_fonts);
+                    assert_eq!(ui.style().override_font_id, Some(font.clone()));
+                    assert_eq!(ui.style().wrap_mode, parent_wrap);
+                    if palette.is_none() {
+                        assert_eq!(ui.visuals(), &parent_visuals, "normal bodies inherit unchanged visuals");
+                    }
+                    assert!(bounds.contains_rect(clip));
+                    ui.label("Readable captured panel");
+                });
+                assert_eq!(Tokens::get(), authored);
+                assert_eq!(ui.visuals(), &parent_visuals, "fallback visuals restore immediately");
+                assert_eq!(ui.spacing().item_spacing, parent_spacing);
+                assert_eq!(ui.style().text_styles, parent_fonts);
+            });
+            let (mut backgrounds, mut labels) = (0, 0);
+            for shape in &output.shapes {
+                crate::test_support::each_shape(&shape.shape, &mut |shape| match shape {
+                    egui::Shape::Rect(rect) if rect.rect == bounds && rect.fill != egui::Color32::TRANSPARENT => {
+                        assert_eq!(rect.fill, appearance.fill, "actual paint uses the captured fill");
+                        backgrounds += 1;
+                    }
+                    egui::Shape::Text(text) if text.galley.job.text == "Readable captured panel" => {
+                        for section in &text.galley.job.sections {
+                            let ink = text.override_text_color.unwrap_or_else(|| {
+                                if section.format.color == egui::Color32::PLACEHOLDER { text.fallback_color } else { section.format.color }
+                            });
+                            assert_eq!(ink, expected_ink, "the actual plain-label galley uses readable fallback ink");
+                            assert_eq!(section.format.font_id, font, "fallback preserves the body's chosen font");
+                        }
+                        labels += 1;
+                    }
+                    _ => {}
+                });
+            }
+            assert!(backgrounds > 0 && labels > 0, "inspect real background and label paint");
+            assert_eq!(Tokens::get(), authored);
+        }
     }
 }

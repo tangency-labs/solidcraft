@@ -1,309 +1,447 @@
 # Universal panel foundation
 
-The public foundation is `solidcraft_engine::panels` and
-`solidcraft_ui_egui::panel_runtime`. It establishes contracts and executable
-synthetic fixtures for #11302. The current shell and defaults remain in use.
-No panel commands, preferences, content migrations, native windows or docking
-gestures are enabled by this change. Classic remains a permanent compatibility
-preset. Production adapters land in the separate children of #11218.
+The public contracts are `solidcraft_engine::panels` and
+`solidcraft_ui_egui::panel_runtime`. The #11305 host is explicitly enabled and
+uses synthetic controllers to exercise shared behaviour. Preferences → Layout →
+Use shared panel layout mounts the existing Browser, History, Assistant and Render
+Scene Browser content in that host. Apply enables the setting; clearing it returns
+to the existing Classic placement. Classic remains the shipping default.
+Sketch, feature forms, BOM and the other Render panels remain separate work.
+A specimen is not production migration or visual evidence.
+Draggable tool windows and the existing native Assistant retain their legacy hosts.
 
-## Ownership and integration boundaries
+## Initial real-content integration
 
-| Owner | Public contract | Responsibility |
-| --- | --- | --- |
-| Foundation / engine | `PanelRegistry`, `PanelSpec`, `Layout`, `LayoutService`, `ActionSink` | Stable identities, bounded wire values, constraints, atomic actions and inspection. No egui or Session dependency. |
-| Foundation / UI | `PanelRuntime`, `ControllerBinding`, `PanelController`, `RuntimeActionSink` | Retained state, ownership, lifecycle preflight, live availability, independent service ticks. |
-| Host child | `PanelHost`, `PanelContext`, `ResolvedLayout`, `EguiPanelHost` | Geometry, host composition and later docking interactions. Existing `ui_kit::Container` remains the outer boundary. |
-| Command child | `LayoutAction`, `LayoutReply`, `PanelError`, `LayoutTarget` | Register schemas and route GUI/agent requests to the live runtime sink. Do not construct a second service from a saved snapshot. |
-| Persistence child | `LayoutEnvelope`, `LayoutPersistence`, `decode`, `encode` | Workspace preference key, atomic storage, presets and future migrations. Keep unrelated preferences. |
-| Native child | `NativeHostAdapter`, `HostEffect`, `HostCapabilities` | Preflight resources, native host realization, focus and redock. No native implementation is included here. |
-| Surface/accessibility children | `InputRegion`, `ControlId`, `Direction`, `Motion`, `ContrastOutcome` | Painted/input bounds, semantic roles, keyboard routing, mirrored edges, reduced motion and validated theme surfaces. |
-| Content children | `PanelModels`, `ContentCommandSink`, `PanelLocalServices`, content slots | Model access, explicit content commands, controllers, owner-scoped services and independently scrolling content. |
+The shared runtime owns placement and small presentation descriptors. Existing
+`SolveApp` document state, Browser semantic rows, History playback and `AgentChat`
+continue to own content. A frame-scoped callback invokes the existing renderers
+inside the shared host's stable content identity and current focus-report service.
+It retains no application reference beyond that paint call. Immutable host
+geometry remains visible to content commands throughout the call.
 
-Panel kind, instance, section, workspace, document, viewport, native host and
-semantic control IDs are different Rust types. Their wire values are bounded
-lowercase identifiers. Registry specs and serializable layout never contain
-callbacks, document state, egui state or live editors. Only `allowed_zones`,
-`edge_rule` and `surface` express placement exceptions. Normal capabilities
-(close, tabs, collapse, popout, multiple instances) are shared feature flags.
+Hidden bodies do not render. History playback and Assistant polling stay in their
+existing application paths. Closing an Assistant panel does not stop its backend
+or clear its draft. Popped Assistant windows keep the legacy path. Combined
+Browser/History uses the existing content preference and suppresses the separate
+History body. Render Inspector, Shots and appearances keep their existing hosts
+and contribute their actual footprints to navigation and camera fitting.
 
-Layout belongs to the application/workspace; it never enters a design file,
-Session revision, dirty flag, undo stack, evaluator or tessellation cache.
-`ContentOwner` independently chooses application, workspace, document or window
-ownership. A native reparent does not change content ownership. Document switching
-retains existing controllers and creates only missing owner/instance bindings.
-Complete layout application changes the live workspace without replacing the
-runtime or service. Application/document/window controllers keep matching instance
-identities; workspace controllers remain under their original workspace owner and
-continue ticking while hidden. Switching back reuses those controllers and drafts.
-All retained controllers receive service updates even when closed, unavailable,
-inactive, collapsed or on another document. Providers must expose models for
-retained owners, not redirect old-document reads to the current document.
+Visible bodies report their natural scroll content and fixed control bands.
+A sole production panel hugs that content until column capacity requires scrolling;
+Assistant declares Fill to use the full available side height. A newly visible unmeasured
+width starts at capacity until its first real paint supplies its natural extent.
+No hidden body is rendered to obtain a measurement.
 
-`SolveApp::enable_panel_runtime` accepts a runtime and `AppPanelServices` explicitly.
-Its optional field defaults to `None`, remains on the app across document tabs,
-and is ticked from `SolveApp::logic` independently of presentation. Refresh receives
-only `&Session`. `disable_panel_runtime` preflights cleanup and requires native
-sections to be redocked before dropping their adapter. Tick failures remain
-inspectable on `AppPanelRuntime::last_error`; they do not inject untranslated UI.
-This is an internal adapter seam, not a preference, environment switch or control
-method. `dispatch_panel_layout`, `mount_panels`, `panel_content_action` and
-`tick_panel_runtime` forward through the same injected provider. Application
-command, atomic-batch and GUI dispatch boundaries refresh the read-only provider
-and current document environment before inspection/projection. Availability is
-refreshed without ticking content, evaluating models or creating geometry; retained
-service failures still require a successful real update to recover. Sequential
-programmatic model/document changes are therefore visible to the next panel step
-without waiting for a frame tick.
+Bottom History declares a fixed, symmetrically padded icon row. It has no collapse
+or height-resize control; commands enforce the same bounds. A new side column
+inherits the current source column's width, or the registered standard width when
+the source has no column. The standard width matches Classic Browser's default.
+Existing columns and explicit resizing keep their width.
+The full responsive/native acceptance matrix remains roadmap work. This initial
+integration does not close the parent rollout issue.
 
-`AppPanelRuntime::set_command_adapters` installs one catalogue and one native
-adapter once, before native hosts exist. Both `SolveApp::dispatch_panel_layout(action)`
-and command routes use that stored adapter; there is no per-call native argument.
-`AppPanelRuntime::dispatch`, content actions and command/batch methods take the current `&Session`
-for read-only context refresh. Its runtime is private with a read-only `runtime()`
-accessor; service borrowing is internal, so consumers cannot replace the runtime or
-dispatch through another adapter through a mutable services callback. Standalone
-`PanelRuntime`/`RuntimeActionSink` fixtures retain their explicit fake-adapter seam.
-Changing the installed application adapter is refused rather than abandoning its
-created hosts. These are integration APIs, not a production native implementation.
+## Ownership
 
-## Actions and atomicity
+The engine registry owns bounded kind metadata and capabilities. Layout owns
+instance, column, section and tab identities, placement memory, widths, saved
+weights, collapse, active tabs and native return destinations. Side columns are
+ordered outer to inner; each contains a contiguous vertical stack of sections.
+Each section contains ordered tabs. Inactive tabs still constrain composite size
+limits. Registrations declare allowed zones, PinOuter, Content/Fill height policy,
+text-heavy content, surface preference, header actions and independent
+`closable`/`hot_closable` flags. No generic host branches on product panel names.
+Only future History product registration allows Bottom; synthetic kinds can allow
+all zones. Quick close is an affordance, not the close capability itself.
 
-`ActionSink::dispatch` accepts `Inspect`, `Apply { expected_revision, mutations }`
-or `Replace { expected_revision, layout }`.
-GUI, keyboard and agent adapters share this reducer. `RuntimeActionSink` adds
-controller/native lifecycle guards around the same engine service. Runtime users
-receive immutable layout inspection; there is no mutable bare-service escape.
-Replies describe committed layout, revision, availability, interaction, capabilities
-and host effects. Layout revision is independent of document revision.
+Layout is application/workspace preference data. It never enters CAD files,
+document undo, evaluation or tessellation. `PanelRuntime` retains controllers by
+instance and `ContentOwner`, independent of presentation. Services tick while
+controllers are collapsed, inactive, unavailable, closed or on inactive documents.
+Owner changes retain the appropriate draft/controller rather than redirecting an
+old document's model reads to a new document. Explicit close/destroy/reopen and
+reparent have side-effect-free lifecycle preflight before commit. Hidden bodies
+are not rendered to measure them or animate collapse.
 
-`Replace` validates a complete preset/saved layout and atomically changes the
-workspace on the same authoritative service/revision. It stages availability,
-controller factories and native create/rebind/release effects before committing.
-Omitted entries and entries marked closed are noncanceling hides: their retained
-controllers keep drafts, conversations and service updates, with no collapsed rail
-unless the snapshot actually requests one. Restoring the snapshot restores those
-controllers. Instance IDs cannot change kind across workspace switches; the service
-retains a bounded identity catalogue until explicit Destroy releases an identity
-and all of its retained owners. Unknown kinds fail atomically; persistence
-adapters first decode/quarantine unknown data and apply the known layout portion.
-Registered kinds with missing bindings or unavailable context remain dormant.
-After successful replacement, old local input/overlay ownership is released;
-failure leaves environment, revision, controllers and local/native hosts intact.
-Use this operation for workspace switching rather than rebuilding a runtime or
-synthesizing Close/Open batches. `set_environment` changes document/window/viewport
-context within the already committed workspace.
+`PanelModels` reads immutable owner models. Explicit content operations use
+`ContentCommandSink`. `PanelLocalServices` owns viewport-local keyboard, focus,
+clipboard, picking, drops and overlays. Registered header actions must also have a
+retained controller binding and pass availability/enabled checks. `panel.action`
+returns a truthful committed `LayoutReply`; it cannot invoke an unregistered
+binding. A fallible content action cannot be mixed with structural mutations in
+one runtime transaction. Synthetic Apply/Finish/Pulse actions never run Session
+commands. Real History playback and Assistant New Chat bindings belong to their
+content migrations.
 
-- `Open` targets kind **and** instance. New instances require an explicit destination;
-  an existing closed instance can reopen from its remembered placement and size.
-  Repeating an open is idempotent unless a new placement is supplied; use `Move`.
-- `NewSection` and `JoinTab` are distinct destinations. Section insertion indexes
-  address the global ordered section list **after** detachment; tab indexes address
-  the destination list after detachment. Both reject invalid indexes. Empty groups
-  are removed. Joining retains the group's active tab, dimensions and collapse state.
-- `Activate` selects an already-open tab, without requesting keyboard focus or
-  uncollapsing it. `Focus` can reopen retained closed state, select its tab,
-  uncollapse it and request host focus. `Peek` temporarily presents a collapsed
-  tab, without changing persisted size or collapse. Dismiss is transient too.
-- `ResizePair` requires adjacent sections of one dock, conserves their split-axis
-  extent and changes no cross-axis dimension. `ResetPair` returns the pair to
-  the ratio of active members' registered defaults within intersected bounds.
-  `SetSize` is a typed explicit outer-size mutation.
-- `Close` retains placement/size memory. `Destroy` removes an already-closed
-  instance and its retained controllers across workspaces/owners. `NativeClose` redocks the whole section
-  to its recorded return destination, optionally rejoining a stable former tab
-  group. Missing/reparented groups use the recorded dock fallback; valid joins
-  retain target activation. It does not close/cancel the content.
+## Application preferences
 
-A transaction is prepared on a bounded copy and validated before commit. Rejected
-transactions preserve layout, revision, interaction, retained controllers and hosts.
-Lifecycle preflight is side-effect-free. It checks explicit Close/Reopen/Reparent/
-Destroy events before committing; applying those prepared events is infallible.
-State notifications are observational and cannot veto a mutation. Factories stage
-fresh controllers without publishing external effects, since staging can be
-discarded. Native preflight similarly must establish that commit can finish.
-Adapters must reserve/stage fallible work, not discover a failure after commit.
-Only explicit content actions may Apply/Finish/Cancel/Stop; hiding, tab changes,
-collapse, reparent and native redock never implicitly invoke them. Explicit close
-cancels transactional controllers for the affected instance across retained owners;
-one cancellation refusal rejects the entire batch.
-Close or Destroy combined with any other instance-targeted operation on the same
-instance in a batch is rejected with `Lifecycle` before mutations/effects. This
-includes Close/Open, Close/Move/Open and Destroy/Open; independent instance and
-section mutations can still be batched. Explicit Close cancels a live hidden
-transaction even if its saved entry was already marked closed by `Replace`.
+The opt-in preference adapter connects the existing envelope and catalogue to
+`SolveApp::prefs` and `load_prefs`, under the application-level `panel_layout` key.
+Desktop and web store this same Rust value through their existing preference
+writers. The adapter adds no design-file field, filesystem backend or browser
+storage path. A runtime must explicitly enable this integration; Classic remains
+the production default and ordinary specimens remain ephemeral.
 
-`ControllerState` distinguishes requested-open, available, presented, activated
-and destroyed. Presented requires usable resolved geometry; activated additionally
-requires the selected tab/peek. Keyboard focus is separate in `PanelContext`.
-`destroy_owner` performs explicit cleanup without editing layout, leaves a bounded
-tombstone, and requires `revive_owner` to create fresh content again. `shutdown`
-preflights all owners before clearing any and makes the runtime terminal.
+`PanelLayoutPreferences` retains deferred input until a registered runtime is
+available. The runtime's layout and injected catalogue remain authoritative once
+enabled. The stored workspace identifies what to restore at startup; it is not a
+second live workspace selection. Tool, document and ribbon changes do not select
+a layout workspace.
 
-Independent updates attempt every retained controller even when staging or another
-controller fails. `update_errors` aggregates at most two bounded typed errors per
-controller plus staging/reconciliation errors (258 total). Invalid availability
-reports become `Availability` failures. Failing content is unavailable, loses stale
-presentation/input ownership and cannot become healthy merely by moving it; a
-successful later update restores availability. Reconciliation still runs before
-the aggregate failure is returned. Injected-provider refresh failures also do not
-skip the independent controller update loop.
+The application record uses the existing bounded envelope/catalogue codecs.
+Current records take precedence over one-time legacy placement import and
+defaults. A corrupt or future current record is present data, so it must remain
+recoverable instead of repeatedly triggering legacy import. Layout records keep
+columns, saved proportions, tab/collapse state, closed placements and native
+return memory. They exclude measured content height, usable-space geometry,
+camera state and live controllers. Restored Content/Fill geometry is measured at
+the current width through the same host admission path.
 
-## Final product decisions
+The existing Layout page exposes registered workspaces and named layouts only
+when this integration is enabled. Its controls use `layout.workspace.select`,
+`layout.apply`, `layout.save` and `layout.reset`. Built-ins remain immutable;
+replacing a user layout is explicit. Reset affects the current workspace and
+preserves the named layout library. Preferences Apply/Cancel and held writes
+cover layout changes too. A refused restore keeps the Preferences dialog and its
+snapshot available rather than discarding the restore obligation.
 
-- Zones are logical Left, Right, Bottom, Floating and Window. Top remains reserved
-  for ribbon/application chrome. RTL mirrors the physical side; persisted IDs and
-  tab order remain logical.
-- `PinOuter` follows whichever logical side the panel occupies, requires its section
-  first on that edge and excludes Bottom in registry data. It is inactive in free/
-  native hosts. Competing pinned **instances**, including in one group, are rejected;
-  no existing panel is silently displaced.
-- Tab groups use the intersection of every member's minimum and maximum **width
-  and height**. Impossible joins and dimensions outside that intersection fail.
-- min/default/max are outer logical dimensions. Geometry reports actual outer and
-  usable body bounds separately. egui applies scale once. Free/native flow starts
-  Wide at aspect >= 1, otherwise Tall; Tall switches above 1.1 and Wide below 0.9.
-  Size classes use the shorter usable edge: Compact < 240, Regular 240..480,
-  Wide > 480. Invalid/nonfinite/oversized dimensions are rejected.
-- Capacity shortages produce transient unpresented/overflow records, never reduced
-  below-minimum content or saved-dimension/collapse rewrites. Collapsed rails are
-  chrome. Hosts expose overflow access and retry presentation when capacity returns.
-- New Open/Focus/Activate/Peek requests for unavailable content fail with an
-  availability reason. Saved requested-open content remains dormant and reappears
-  when its owner/context is available. Missing bindings are dormant too.
-- Combined History-in-Browser and History Bodies/Origin stay content preferences
-  or shared components. They do not merge or depend on panel host identity.
-- Opaque surface requests win over Translucent, then zone defaults apply (bottom/
-  native opaque, side/free translucent). Contrast resolution can raise background
-  alpha only. If full opacity cannot make authored tokens readable, return
-  `RetainReadableFallback` with a typed reason and keep the validated fallback/last
-  good tokens and raw imported intent. No claim of 4.5:1 or text recolouring is
-  permitted to disguise failure. Theme resolution is implemented by the surface child.
+Settings profiles carry the selected layout workspace and the current arrangement
+of every workspace, excluding the named library and machine-specific native window
+geometry. Layout page defaults preserve arrangements and the library. Applying a profile uses
+the same validated runtime path and reports a refused layout through the existing
+skipped-field result. Product adapters supply their actual preset registrations;
+synthetic fixture layouts do not stand in for migrated production content.
 
-## Geometry and local services
+## Allocation and presentation
 
-`ResolvedPanel` contains outer/body geometry plus explicit paint and input regions.
-Validation bounds regions and requires input inside paint; the viewport outside
-these regions belongs to the existing camera/navigation path. Semantic controls
-carry stable IDs, roles, accessible names and keyboard-focusability. Hosts may use
-`consumes_pointer` to compose input ownership without a full-window shield.
-The reference `resolve_geometry` is deterministic synthetic mounting geometry,
-not production docking. It reports overflow instead of changing desired state.
+The pure engine allocator is authoritative for both commands and gestures. It
+intersects every tab's constraints and each column's width constraints, uses
+constrained saved weights for stacks, and preserves minimum dimensions when the
+window is tiny. Right and Bottom placement share a bounded scroll extent, avoiding
+overlapping docked hosts. The viewport domain stays fixed below the application
+bar, including behind the ribbon and panels.
 
-`PanelContext` carries presentation geometry, owner/scope identities, flow, size
-class, direction, focus and motion; services are a separate argument. Content
-has Header/Body/Footer slots and chooses scrolling itself. `EguiPanelHost` uses
-one kit Container, title/status/attention and semantic content actions; its action
-strip can scroll independently of the body. Reduced motion resolves duration to
-zero, without delaying identity/focus/lifecycle changes.
-The reference egui adapter accepts exactly one full-outer paint rectangle and one
-full-outer Surface input region. It rejects sparse, empty-input or partial-input
-records with `Capability` before painting or creating widgets. Rich region-aware
-surfaces belong to #11307. Every child clip intersects the existing parent clip.
+A sole presented side section defaults to Content height. The active tab supplies
+bounded preferred outer height at the assigned width, including shared header,
+body, content toolbar, footer, padding and spacing. Fill consumes available height
+within the same composite limits. Multiple sections use their saved stack weights;
+entering/leaving the sole-section state does not rewrite them. Collapse reserves
+only the full-width header and leaves genuine uncovered canvas below short or
+all-collapsed stacks.
 
-Keyboard ownership, focus, file/pointer drops, overlays, clipboard and picking use
-`PanelLocalServices` with explicit workspace/document/viewport scope. Native viewport
-identity uses the native host's stable string in the viewport ID domain; platform
-adapters map that identity to their actual viewport handle. Reparenting releases
-old host-local focus/overlays/drop routing; the controller survives. Never route
-a native service request through the root viewport or a different document.
+Expanded dock sizing can declare `preferred_extent` on the stack axis. An
+omitted preference remains None; saved legacy size does not imply a new override.
+After reserving every presented minimum, allocation processes `extent_priority`
+tiers highest-first, compressing requested surplus proportionally within a tier
+when necessary. Older/common preferences use rank 0; nonexplicit members receive
+the weighted remainder. SetSize authors a new highest tier. Ordinary weighted
+pair resize/reset clears the pair's overrides/ranks; when weights cannot represent
+a feasible actual split, the pair's exact requested extents receive one new tied
+highest tier. Repeated overlapping edits therefore favor the latest authored pair
+under later compression while preserving older preferences. Unrelated neighbours
+keep their rectangles, even when their normalized weights need a common scale;
+zero saved surplus remains valid. Sole side Content/Fill ignores latent extent
+and rank during presentation and retains them for returning to a stack.
 
-## Persistence and bounds
+Bottom top-edge dragging uses the typed `SetBottomHeight` mutation. Registered
+`panel.resize` with `thickness_only:true` uses the same mutation for Bottom, or
+`SetColumnWidth` for a side dock; Floating/Window refuse. Omitted/false retains
+full-size behavior. Both size components are validated before ignoring the other
+axis. `SetBottomHeight` changes shared row thickness within registered common
+bounds while preserving every Bottom width, preferred width, rank and weight. There is no additional public
+string command. The side/Bottom separator exists only when side geometry presents;
+a Bottom-only 64-point row fits exactly in 64 points of capacity.
 
-Envelope format is `solidcraft.panel-layout`, envelope/layout versions are both 1.
-`PANEL_API_VERSION` and each live reply's `api_version` are also 1.
-Public schema functions describe actions, replies and envelopes. Serde/schema
-values are **untrusted wire data**, not validity proofs. Use `decode_action`,
-`decode`, `encode` and the reducer. The engine owns versions; persistence adapters
-own atomic storage and migration policy, not a second layout model.
+`PanelController::measure(&self, owner, models, spec)` captures an immutable
+`Arc<dyn HostContentMetrics>` snapshot. Its bounded `measure(request)` answers
+assigned-width requests without a renderer or mutable services. `revision()` must
+change whenever any answer could change, including responsive policy. The default
+reports registered preferred outer height explicitly; it does not claim intrinsic
+content measurement. Adapters supply real bounded metrics. `host_measure_requests`
+uses the same width allocator as resolution; candidate widths are measured before
+a preview is shown. Missing/stale data rejects. Replacing metric data cancels the
+old candidate. The host retains the same snapshot identity while its revision is
+unchanged, avoiding geometry feedback from an already stretched parent.
 
-Limits: 64-byte IDs, 128 kinds/layout instances/retained instance identities,
-64 sections,
-32 tabs per section, 64 mutations per transaction, 262144-byte encoded envelope,
-32768 logical units per positive size dimension, finite bounded coordinates.
-Opaque JSON is limited to 8192 nodes and depth 32; availability reasons to 256
-bytes. Region/control, service payload and retained-owner collections are bounded.
-Encoding uses a capped writer, not an unbounded serialization followed by a check.
-Runtime retention has separate limits: 32 document owners, 128 other owners,
-128 controllers per owner, and 20,480 controllers overall. These limits preserve
-the application's supported document count without evicting live drafts.
+`HostLayout` separates intended section slots, scroll extent, actual clipped
+paint/input/occlusion footprints and usable-space contour. `ResolvedPanel.body`
+and `PanelContext.usable_body` are optional. Collapsed hosts have no content body.
+Expanded Wide geometry at or below `theme::PANEL_INLINE_MAX_HEIGHT` (88 logical
+points) has one total row: the real shared title/grip, registered actions, dedicated
+inline content, menu, chevron and optional quick close, fully mirrored in RTL. It calls
+`render_inline`, whose compatibility default delegates to Body. It does not call
+Header/Body/Footer again or add a second title band. Controllers can override the
+inline slot with a compact representation. This generic capability is demonstrated
+by an editable inline specimen, not a substitute History timeline.
 
-Unknown panel records and raw future fields are retained in bounded quarantine.
-`section_snapshots` stores each raw section once, including future fields, desired
-tab order and pending activation; quarantined/retained records refer to its ID.
-The bounded `section_order` list ranks **all** saved sections, including dormant
-sections and known survivors without snapshots. Restoration uses those ranks, not
-insertion indexes clamped into an incomplete list, so instance/quarantine processing
-order and staged registry reappearance cannot reorder the saved complete layout.
-Known live ordering remains authoritative when edited: surviving visible entries
-take their latest relative order while dormant gaps remain; newly added entries
-anchor before their next surviving visible neighbour.
+Shared chrome uses the existing adaptive `ui_kit::Container`, panel fill, title
+fonts, six-dot grip and header separator. Each section has one header row. A single
+panel uses a text-only title and grip; a tab group uses one leading section grip
+and individual text-only tab headings in that same row, with no duplicate active
+title. Grip, tabs and controls have disjoint hitboxes at the same y and height.
+The grip drags the active tab; each tab retains its own select, drag and reorder
+target. Header title typography is independent of icon metadata, which remains
+available to other presentations. Collapsed groups retain their tabs across the
+full-width header. Inline groups use their allocated title region for grip/tabs,
+preserving the actual inline editor and one total row. Compact tab overflow keeps
+the active heading visible whenever its minimum width fits beside the overflow
+button; the bounded accessible menu retains every tab. Measurements and allocation
+count only the shared header, content toolbar and footer, with no extra tab-row
+height. Floating shell spacing comes from
+`Container::gap()` and participates in allocation, previews and input geometry;
+compact surfaces join without a sizing gap. In LTR, the
+trailing controls are custom actions, menu, chevron, optional quick close; RTL
+mirrors their geometry. Collapse retains these controls and one click on its
+chevron restores the body. There is no rail, hover-peek or pin-open product UI.
+Published `panel.peek`/`panel.dismiss` compatibility commands retain their wire
+meaning without creating a new host affordance.
 
-A retained snapshot from a fully restored episode is opaque metadata, not stale
-layout authority. Before newly unknown members are removed on load, current saved
-section semantics refresh its tabs, activation, placement, dimensions, collapse
-state and rank. Existing opaque keys absent from typed live data are preserved;
-current raw values for the same keys supply the latest saved intent. In an active
-partial episode, still-dormant members remain in the complete order. Each snapshot's
-optional `projected` section records the last materialized state: changed visible
-activation overrides a pending choice, while an unchanged generated fallback does
-not replace the desired dormant active member. Newly generated fallback selections
-are recorded after quarantine filtering, so they cannot be mistaken for user edits.
-The same merge runs before direct restoration after an in-memory live edit.
+Overflow retains actual panels at minimum dimensions. Narrow scroll tracks and
+unconsumed wheel input over actual panel paint change presentation offset. The
+scroll canvas itself has no full-viewport response; uncovered gaps stay navigable.
+Content retains its own scroll area and gets first use of wheel input.
 
-These v1 fields have serde defaults. Earlier v1 envelopes without `section_order`
-derive missing section ranks from sorted snapshot indexes; missing projections
-conservatively retain dormant activation until a materialized baseline is recorded.
-Both the complete rank list and projected sections obey the existing section/tab/
-ID limits, plus the envelope's global byte/node/depth bounds. Known layout starts
-independently, and known survivors/extra current tabs remain intact during restores.
-`restore_quarantine_with_availability` can defer unavailable entries; invalid bounds
-or constraints also leave entries quarantined. Successful restoration preserves
-raw instance fields in `retained_data` and shared raw section fields/order in
-`section_snapshots`, even across later unregister/register cycles. Adapters consume
-these explicitly. Restore stages the whole envelope and applies it only if encoding
-fits global byte/node/depth caps; successful decode is guaranteed encodable by this
-version. An unrepresentable lossless result returns fallback/recovery, not silent
-field loss. Unknown corruption, invalid known layouts or future versions
-return a validated preset fallback plus a once-reportable notice and bounded rejected
-bytes for recovery. The adapter must preserve unrelated preference keys.
+## Exact candidates and admission
 
-## Executable fixtures
+`prepare_host_layout` produces a non-Clone `PreparedHostLayout` containing private
+engine state, proposed geometry, reference geometry and scope. Both app commands
+and pointer actions use this preparation and allocator. Missing host/environment
+refuses structural app commands. `NO_SPACE` refuses neutral or worsening overflow
+except Close, Collapse (including expansion), Focus, or a strict improvement of one
+extent without increasing the other.
 
-`synthetic_registry`, `fixture_service`, `fixture_open`, `transaction`,
-`FakePersistence` and `FIXTURE_LAYOUT_V1` are public engine fixtures. The v1 JSON
-lives at `crates/engine/src/panels/fixtures/layout-v1.json`. It is authored contract
-data, not a captured production design or a generated schema snapshot.
+Drags start after six logical points. Invisible card-edge regions select adjacent
+columns or stacked sections; the centre joins tabs and measured tab halves choose
+insertion. Side ordering accounts for both dock side and RTL. Empty space has no
+implicit float fallback. Floating is an explicit menu/command action.
 
-`PanelMountHarness` combines the actual runtime/action service with synthetic
-application-owned content, document-owned transactional editor, workspace-owned multi-instance log/pin
-controllers, fake models/command sink/local services/native adapter, fake mount
-host and persistence adapter. `FixtureProbe` provides snapshots and bounded draft/
-failure controls. `apply_layout` exercises saved-layout/workspace transitions through
-the actual sink; `without_content` exercises dormant missing bindings. Fake host mounting invokes all three real controller slots with
-an egui context; it is headless and does not establish visual correctness.
+Once a Move crosses that threshold, the current moved instance's full presentation
+title follows the cursor on the existing preview paint layer, including over
+invalid or absent landing targets. Its original header or tab title uses half
+its existing ink opacity; other text, grips, actions and panel content keep their
+normal appearance. The paint-only badge uses theme tokens, mirrors its cursor
+offset in RTL and clamps within the render domain and current clip. It keeps
+the full display-ordered title on one line without automatic wrapping or
+ellipsis. Physically oversized text clips, aligned left in LTR and right in RTL
+so its reading start stays visible. It adds no widget, input, occlusion or
+usable-space reservation. Mere presses,
+clicks, resize and paired-resize gestures have no title feedback.
 
-```rust
-use solidcraft_engine::panels::*;
-use solidcraft_ui_egui::panel_runtime::PanelMountHarness;
+Window docking takes priority over panel targets: Bottom first, then sides,
+measured tab insertion, relative edges and centre joins. Side bands are 16 logical
+points wide (56 on empty sides); the Bottom band is 64 points high. Only the
+innermost presented receiving column's centre-facing edge reaches 64 points into
+clear canvas. Other outward column edges retain 18 points. Added reach stops at
+painted panels or chrome and preserves the original edge-band tie-breaking.
 
-fn specimen() -> PanelResult<()> {
-    let mut h = PanelMountHarness::new(false)?;
-    h.dispatch(vec![fixture_open(
-        "fixture.editor", "editor", "editor-section", Zone::Left, 0,
-    )?])?;
-    h.tick()?; // independent services, even with no host mounted
-    h.mount(LogicalRect {
-        origin: Point { x: 0.0, y: 0.0 },
-        size: Size { width: 1200.0, height: 800.0 },
-    })?;
-    h.save()?;
-    Ok(())
-}
-```
+The Below region extends through clear column space under a short panel, stopping
+at the next visible panel, chrome or placement boundary. It adds no idle widget
+or canvas obstacle. New stacked sections use the anchor's relative weight scale;
+logical pixel heights do not become weights against normalized proportions.
 
-Engine and UI domain test modules contain hostile action sequences, bounds and
-collection limits, exactly-once constraints, pins, atomic failures, incompatible
-tabs, overflow restoration, availability, close/reopen, schema/envelope fixtures,
-controller retention, hidden service updates, explicit editor actions, native
-preflight/redock, scoped input, RTL/reduced motion and document/cache isolation.
+Only the selected successful candidate's complete landing, changed neighbours
+and tab marker are painted. Targets are data, never idle widgets. Preview does
+not mutate committed layout, preferences, controllers, identities, document or
+camera. Release consumes the unchanged shown candidate once. It does not rerun
+an action reconstructed from the preview. Runtime performs lifecycle, action and
+native preflight before committing that same prepared engine state. Resize uses
+the same ownership protocol. Invalid/outside release, Escape, cancellation,
+focus/visibility/modal loss, independent commands, changed scope, revision,
+availability, metrics or environment discard capture without mutation.
+Pointer leave hides the preview and discards its candidate while retaining a
+valid held gesture. Re-entry resolves a fresh candidate. A button released
+outside cannot resume a drag on re-entry; actual focus loss still cancels it.
+The held Move's source text stays dim during pointer absence, but its badge has
+no position and is hidden until a fresh inside Move. Cancellation or release
+removes the badge and requests a repaint to restore the already-painted source
+text. These visual observations derive from capture, never from `HostPreview`
+or a second gesture state.
+
+The runtime owns one private proposal containing B's prepared host layout and
+one staged incoming controller cohort. B captures once from a pure owner/topology
+projection before numeric pair normalization. Controller construction does not
+use temporary placement dimensions. Every numeric prefix and final admission use
+that same availability/provider snapshot; lifecycle preflight and commit reuse
+those exact objects. An explicit Open/Move can change the stack before a pair,
+and a newly available floating owner need not match outgoing membership.
+Availability freshness compares the captured proposed cohort, including unavailable
+or unbound dormant instances, with fresh read-only answers from the same objects.
+Mounting, activation and registered actions share active-or-first-available
+selection while preserving remembered activation. Existing controllers are retained.
+
+`commands::execute_layout_action` stages the app's injected catalogue before
+consuming the candidate once. Its retained-candidate sink returns the exact proposed
+layout during projection and never replays a reducer on pointer release. Current
+full-envelope preparation context is captured through `current_envelope_snapshot`
+and `host_identity_reservations` before generators run. It includes dormant/native/
+quarantine identities, effective recovery priority records and completeness.
+`ActionSink::project_in_context` and `dispatch_in_context` forward this full context;
+a retained proposal refuses any supplied-context mismatch without replay. Incoming
+workspace preparation context is retained separately from outgoing paint freshness.
+Bare host defaults remain incomplete; admission fixtures read a complete synthetic
+envelope rather than claiming empty recovery metadata is authoritative. The engine
+command staging boundary must compare the current catalogue's full source context
+again after fallible storage preparation, even when service revision is unchanged;
+a differing context refuses publication of the retained proposal.
+Standalone registered HeaderAction is an owner command without placement/storage
+dependency; mixed structural transactions refuse. Preset/workspace replacement
+uses the existing command executor with its complete incoming envelope.
+
+Changed metrics/reservations discard pending widget intents, cached proposals,
+drag and the old painted frame. Widget admission requires fresh paint. Independent
+commands and batches cancel capture before parsing, even if subsequently refused.
+Explicit Close/Open intent remains attached when the exact candidate is consumed,
+so lifecycle guards cannot disappear during conversion to prepared engine state.
+
+## Application and surface boundaries
+
+`SolveApp::enable_panel_runtime` installs an explicit retained runtime and
+`AppPanelServices`; `enable_universal_panel_host` enables workspace composition.
+Disabling the host unmounts the root cohort while keeping services alive. Whole
+runtime teardown preflights every retained owner. Command, prepare, mount, paint
+and finish boundaries refresh read-only Session context without an extra service
+tick. Failure suspends stale presentation and remains inspectable in `last_error`.
+The app exposes immutable runtime inspection; callers cannot replace its stored
+native resource owner while native hosts exist.
+
+The app paints the full-domain scene through its existing navigation path, paints
+host chrome, and finalizes host input after later windows/modals. Initial presses
+must belong to the actual enabled top-layer widget; exported geometry alone does
+not authorize input through another window. Modal/hidden/focus loss cancels capture.
+Foreign overlay raises and owner-scoped popup provenance use shared Container
+services. Root and each native host mount complete separate cohorts, so unmounting
+one does not deactivate another.
+
+Panel operations never change camera, zoom, projection, focus or model screen
+position. Explicit Fit uses actual usable space and may zoom. Centre/Look At
+preserves zoom/distance and requested orientation, centring only focus if the
+current model footprint cannot fit. Navbar/compass use their measured footprints.
+Current persistent legacy forms, redefine controls, sketch palette and confirmation
+paint remain obstacles after all producer passes. Sizing, closed, stale and Noop-only
+hosts must not create obstacles. Transient menus shield input but do not become
+framing targets. The existing semantic-content finalization and Browser editors
+remain in the application shell.
+The opt-in shell calls `browser::editors` once before sketch palette and
+confirmation producers, retaining Move/Copy, Capture Position, Canvas, Point Cloud
+and Sketch Attachment windows, drafts and command guards. Their existing shared
+Window wrappers publish actual per-pass footprints; invisible sizing and closed
+windows do not reserve usable space. Sketch Attachment has no second host call.
+
+Suppressing the root Assistant clears only its cached panel, drop and dock-space
+geometry, so an undrawn floating card cannot narrow legacy tool bounds. Desired
+open state, conversation, backend and layout preferences remain owned by the
+existing Assistant. A popped Assistant still uses `agent_chat::show` and its
+existing native-window path, which performs the service poll itself; other host
+composition passes call `agent_chat::poll` instead. This does not migrate or
+reparent the window.
+
+The default adapter truthfully advertises no native windows. Actual Window
+placement needs the native sibling's monitor/DPI, focus and close/redock services.
+The renderer resolves surface intent through the shared Container, raising its
+fill alpha when canonical text needs more contrast. Captured `paint_alpha` and
+`contrast` report the effective paint and any readable fallback separately from
+declarative intent. Input and occlusion remain reserved regardless of alpha.
+Remaining panel migrations, native window services and full workspace rollout
+stay with their named peers.
+
+### Keyboard, accessibility and motion
+
+The shared host exposes disclosure state, selected tabs and tab lists, action
+toggle state, menu items and oriented splitters to accessibility. Disabled actions
+retain their reason. Keyboard menu navigation returns focus to its opener on
+Escape, and panel focus traversal reveals headers inside bounded scroll extents.
+
+Nine contextual commands use the existing command registry and keymap for panel
+focus, collapse, moving to the next permitted zone and sash resize/reset. They
+resolve the actual owned host context, then use the existing typed admission and
+dispatch path. They do not infer focus from a model or headless session. Automatic
+shortcuts defer to focused text editors and foreign or modal UI. Explicit command
+calls can resolve an owned editor's panel without borrowing its caret keys.
+
+Controller and egui identities retain editor state. Focus restoration is scoped
+to the controller owner, document and viewport; it must not steal deliberate
+focus from another control. Hidden bodies are never rendered to restore focus.
+Adapters report freshly rendered focusable responses through
+`PanelLocalServices::register_focus_response`. The host accepts only eligible
+responses from the current content slot, rather than relying on egui's
+previous-pass widget lookup. Without a current response, an explicit panel focus
+request uses the visible header and leaves retained editor memory intact.
+Bookmarks retain a focused text editor's cursor range because egui collapses a
+selection during an unfocused render. Eligible restoration replaces only that
+range in the existing editor state; undo, IME and scroll state stay in egui.
+
+The native host follows the effective locale's logical direction, including
+Arabic and Hebrew, through the existing edge mapping. Saved layout coordinates
+and physical floating/native window positions remain unchanged. Theme motion
+uses a 120–160 ms cubic-out paint transition. Reduced motion or disabled theme
+animation completes immediately; layout, semantics and focus never wait for it.
+
+## Specimens and verification boundary
+
+`ui.panel_fixture` is authenticated, off by default, and refuses to replace another
+runtime. Presets: `docks`, `tabs`, `collapsed`, `floating`, `overflow` (24 instances),
+`pinned`, `columns` (three independent Left columns), `stack_tabs`, `content_fill`
+(short Content versus Fill), `inline` (one editable total row), and `surfaces`
+(declared surface preferences with the existing synthetic bodies). The old `rails`
+preset is replaced by `collapsed`; it is not an alias to the retired experience.
+The optional `remember:true` enable parameter attaches the application preference
+catalogue for isolated restart review. A restart must explicitly enable the same
+specimen with `remember:true`; loading preferences alone never starts it. Saved
+restoration waits for valid host dimensions and uses normal runtime admission.
+Fixture workspace/preset registrations remain synthetic evidence, not shipping
+production registrations.
+The optional `reduced_motion` boolean updates the enabled specimen in place.
+It changes no saved preference, controller identity, draft or layout and refuses
+without a specimen owner. This review seam adds no operating-system motion service.
+
+### Surface review specimen
+
+The `surfaces` preset alone opts out of the host's compatibility opaque default.
+It contains an inactive text-heavy editor tab beside an active log tab, explicit
+Opaque and Translucent side members, and FollowZone Bottom and Floating members.
+The same existing content, commands and translated captions remain in use.
+Other presets retain their previous opaque presentation.
+
+`ui.panel_fixture {"preset":"surfaces","translucency_percent":50}` requests
+50% translucency for this explicitly enabled specimen. The optional value is a
+finite number from 0 to 100; opacity is `1 - translucency_percent / 100`.
+Zero requests an opaque surface and 100 requests a fully transparent surface
+before readability protection. The override is not a saved preference.
+`ui.panel_fixture {"translucency_percent":100}` updates the already enabled
+specimen host in place, preserving retained controllers, drafts and layout.
+It refuses when no specimen host is enabled or another provider owns the runtime.
+The parameter is also accepted with other explicitly enabled specimen presets;
+their compatibility opaque policy still applies. Omitting the
+override uses current theme/preferences rather than a specimen colour palette.
+
+Surface resolution uses every registered tab's metadata, including inactive tabs.
+Explicit Opaque wins, then explicit Translucent. Otherwise FollowZone is opaque
+for Bottom/Window or a multi-tab group containing a text-heavy member, and
+translucent elsewhere. Effective opacity may increase to protect both primary
+and muted text at 4.5:1 over possible viewport backgrounds. When the authored
+token pair cannot meet that guarantee even at full opacity, the renderer uses a
+known accessible opaque fallback pair and reports the failure, rather than
+describing the authored pair as compliant. Existing blur infrastructure remains
+independent of opacity and input capture.
+
+Section inspection reports declarative `surface`, actual `paint_alpha`, and
+optional `contrast`. The latter preserves `ContrastOutcome`, including the
+fallback reason; fallback is not a successful proof for the original pair.
+Actual clipped surface footprints continue to own input even when translucent.
+Uncovered short-panel gaps remain navigable, while content scrolling and actual
+controls shield the model. Temporary popup shielding is not a Fit/Centre obstacle.
+
+This is shared surface policy and an opt-in review seam, not a production content
+migration or a new appearance preset. Classic and shipping defaults remain.
+The initial approved docked adapters are Browser, History, Assistant and their allowed
+RenderSceneBrowser counterpart; other content conversions require a separate
+scope decision. Persistent legacy forms retain their existing hosts and continue
+to contribute their actual footprints until their own migrations.
+The original synthetic controllers expose draft, transaction, action, lifecycle,
+render and service counters plus process-local equality tokens. They do not expose
+fake production actions or pretend to perform CAD work.
+
+The existing engine, panel-runtime, kit, shell and viewport test files and JSON
+scenarios are the locations for authored regression cases. This source describes
+contracts and review fixtures; it does not claim tests, native screenshots,
+performance budgets or visual acceptance have been verified. Root owns runnable
+milestone builds, screenshots, user visual approval and the final checks.
