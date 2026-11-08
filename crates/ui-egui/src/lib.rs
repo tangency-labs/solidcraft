@@ -292,7 +292,7 @@ pub mod space_mouse_calibration;
 pub mod space_mouse_model;
 pub mod space_mouse_offer;
 pub mod stand_up;
-pub(crate) mod start_page;
+pub mod start_page;
 mod status_bar;
 #[cfg(test)]
 mod sweep_dialog_tests;

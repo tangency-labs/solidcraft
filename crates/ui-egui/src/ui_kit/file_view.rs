@@ -25,11 +25,38 @@ pub(crate) struct RecentRow<'a> {
     pub thumbnail_failed: bool,
 }
 
+/// A picture the host gives a kit surface: a name in the kit's icon set, a texture the host made
+/// (its own app icon, say), or the host's own painter, called with the icon's rect and opacity.
+#[derive(Clone, Copy)]
+pub enum Icon<'a> {
+    Kit(&'a str),
+    Texture(TextureId),
+    Paint(&'a dyn Fn(&egui::Painter, Rect, f32)),
+}
+
+impl<'a> From<&'a str> for Icon<'a> {
+    fn from(name: &'a str) -> Self {
+        Icon::Kit(name)
+    }
+}
+
+impl Icon<'_> {
+    pub(crate) fn paint(&self, painter: &egui::Painter, rect: Rect, opacity: f32) {
+        match self {
+            Icon::Kit(name) => crate::icons::paint_accented(painter, rect, name, None, opacity),
+            Icon::Texture(texture) => {
+                painter.image(*texture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE.gamma_multiply(opacity));
+            }
+            Icon::Paint(paint) => paint(painter, rect, opacity),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct SampleCard<'a> {
     pub title: &'a str,
     pub description: &'a str,
-    pub icon: &'a str,
+    pub icon: Icon<'a>,
     pub thumbnail: Option<(TextureId, Vec2)>,
 }
 
@@ -245,14 +272,22 @@ impl FileView {
         ui.add_space(t.space_10);
     }
 
-    pub(crate) fn action_tile(ui: &mut Ui, id: &str, width: f32, icon: &str, label: &str, subtitle: &str, primary: bool) -> Response {
+    pub(crate) fn action_tile<'a>(
+        ui: &mut Ui,
+        id: &str,
+        width: f32,
+        icon: impl Into<Icon<'a>>,
+        label: &str,
+        subtitle: &str,
+        primary: bool,
+    ) -> Response {
         let t = Tokens::get();
         let (rect, response) = allocate(ui, id, width, t.file_tile_height, label);
         card(ui, rect, &response, primary);
         let inner = rect.shrink(t.space_16);
         let icon_size = t.file_tile_icon.min(inner.height()).min(inner.width());
         let icon_rect = Rect::from_center_size(pos2(inner.left() + icon_size / 2.0, inner.center().y), Vec2::splat(icon_size));
-        crate::icons::paint_accented(ui.painter(), icon_rect, icon, None, if ui.is_enabled() { 1.0 } else { 0.45 });
+        icon.into().paint(ui.painter(), icon_rect, if ui.is_enabled() { 1.0 } else { 0.45 });
         let text_rect = Rect::from_min_max(pos2((icon_rect.right() + t.space_14).min(inner.right()), inner.top()), inner.max);
         let ink = if primary { t.file_primary_ink } else { t.form_ink };
         let mut title_job = egui::text::LayoutJob::simple(label.to_owned(), crate::fonts::semibold(t.font_heading), ink, text_rect.width());
@@ -562,13 +597,7 @@ fn sample_card_with_height(ui: &mut Ui, id: &str, width: f32, sample: &SampleCar
     let image = Rect::from_min_size(inner.min, vec2(inner.width(), t.file_sample_image_height));
     thumbnail(ui, image, sample.thumbnail);
     if sample.thumbnail.is_none() {
-        crate::icons::paint_accented(
-            ui.painter(),
-            Rect::from_center_size(image.center(), Vec2::splat(t.file_tile_icon.min(image.width()))),
-            sample.icon,
-            None,
-            1.0,
-        );
+        sample.icon.paint(ui.painter(), Rect::from_center_size(image.center(), Vec2::splat(t.file_tile_icon.min(image.width()))), 1.0);
     }
     let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(inner));
     let title_top = image.bottom() + t.space_8;

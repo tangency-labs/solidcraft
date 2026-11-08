@@ -3,12 +3,14 @@
 //! every label, icon, thumbnail and what each entry stands for (`A`); [`show`] draws the page and
 //! returns the entry chosen this frame, which the host runs. Nothing here knows the app.
 //!
-//! Icons are names in the icon set ([`crate::icons`]); thumbnails are textures the host made.
+//! Tiles and samples take a host [`Icon`] (a kit icon name, a texture or the host's painter);
+//! menu entries take a kit icon name. Thumbnails are textures the host made.
 
 use std::borrow::Cow;
 
 use egui::vec2;
 
+pub use crate::ui_kit::Icon;
 use crate::ui_kit::{self, FileView, RecoveryMessage};
 use solidcraft_theme::Tokens;
 
@@ -56,7 +58,8 @@ pub struct RailEntry<'a, A> {
 }
 
 pub enum Body<'a, A> {
-    Start(Start<'a, A>),
+    /// Boxed: the start section is far larger than the other bodies.
+    Start(Box<Start<'a, A>>),
     Tiles(Tiles<'a, A>),
     Reviews(Reviews<'a, A>),
 }
@@ -83,7 +86,7 @@ pub struct Tiles<'a, A> {
 
 pub struct Tile<'a, A> {
     pub id: Label<'a>,
-    pub icon: &'a str,
+    pub icon: Icon<'a>,
     pub title: Label<'a>,
     pub hint: Label<'a>,
     /// Drawn as the page's main action.
@@ -122,7 +125,7 @@ pub struct MenuEntry<'a, A> {
 pub struct Sample<'a, A> {
     pub title: Label<'a>,
     pub description: Label<'a>,
-    pub icon: &'a str,
+    pub icon: Icon<'a>,
     pub thumbnail: Option<(egui::TextureId, egui::Vec2)>,
     pub chosen: A,
 }
@@ -233,7 +236,7 @@ fn content<A>(ui: &mut egui::Ui, id: &str, heading: (&str, &str, Option<&str>), 
                 ui_kit::text(ui, message, ui_kit::Text::Error(&format!("{id}_status")));
             }
             match body.take() {
-                Some(Body::Start(start)) => start_content(ui, id, start, chosen),
+                Some(Body::Start(start)) => start_content(ui, id, *start, chosen),
                 Some(Body::Tiles(tiles)) => tile_grid(ui, tiles, chosen),
                 Some(Body::Reviews(reviews)) => review_list(ui, id, reviews, chosen),
                 None => {}
@@ -327,7 +330,7 @@ fn start_content<A>(ui: &mut egui::Ui, id: &str, start: Start<'_, A>, chosen: &m
             samples.into_iter().map(|sample| ((sample.title, sample.description, sample.icon, sample.thumbnail), sample.chosen)).unzip();
         let cards: Vec<_> = shown
             .iter()
-            .map(|(title, description, icon, thumbnail)| ui_kit::SampleCard { title, description, icon, thumbnail: *thumbnail })
+            .map(|(title, description, icon, thumbnail)| ui_kit::SampleCard { title, description, icon: *icon, thumbnail: *thumbnail })
             .collect();
         let sample_id = format!("{id}:sample");
         let responses = FileView::sample_grid(ui, &sample_id, &cards);
@@ -374,25 +377,29 @@ mod tests {
         Tile(&'static str),
         Recent(usize),
         Forget(usize),
+        ShowInFolder(usize),
         Sample(usize),
     }
 
+    /// The texture the second tile's icon is drawn from.
+    const HOST_ICON: egui::TextureId = egui::TextureId::User(7);
+
     /// A start page of plain data: no app, no design, no engine.
     fn page(recent: usize) -> Page<'static, Picked> {
-        let tile = |id: &'static str, primary| Tile {
+        let tile = |id: &'static str, icon, primary| Tile {
             id: id.into(),
-            icon: "new",
+            icon,
             title: id.into(),
             hint: "a hint".into(),
             primary,
             chosen: Picked::Tile(id),
         };
-        let entry = |id: &'static str, selected| RailEntry {
+        let entry = |id: &'static str, selected, enabled| RailEntry {
             id: id.into(),
             label: id.into(),
             shortcut: "".into(),
             selected,
-            enabled: true,
+            enabled,
             chosen: Picked::Rail(id),
         };
         Page {
@@ -400,14 +407,22 @@ mod tests {
             name: "Start page".into(),
             interactive: true,
             back: Back { template: "Back to {name}".into(), document: "Plate".into(), shortcut: "Esc".into(), chosen: Picked::Back },
-            rail: vec![RailItem::Entry(entry("start:home", true)), RailItem::Separator, RailItem::Entry(entry("start:about", false))],
+            rail: vec![
+                RailItem::Entry(entry("start:home", true, true)),
+                RailItem::Entry(entry("start:save", false, false)),
+                RailItem::Separator,
+                RailItem::Entry(entry("start:about", false, true)),
+            ],
             title: "Start".into(),
             hint: "Pick something".into(),
             error: None,
-            body: Body::Start(Start {
+            body: Body::Start(Box::new(Start {
                 banner: None,
                 actions_title: "New".into(),
-                actions: Tiles { grid: "start_new", tiles: vec![tile("start:first", true), tile("start:second", false)] },
+                actions: Tiles {
+                    grid: "start_new",
+                    tiles: vec![tile("start:first", Icon::Kit("new"), true), tile("start:second", Icon::Texture(HOST_ICON), false)],
+                },
                 recent_title: "Recent".into(),
                 recent_empty: "Nothing yet".into(),
                 recent: (0..recent)
@@ -419,7 +434,10 @@ mod tests {
                         thumbnail: None,
                         thumbnail_failed: false,
                         chosen: Picked::Recent(i),
-                        menu: vec![MenuEntry { label: "Remove from list".into(), icon: "delete", chosen: Picked::Forget(i) }],
+                        menu: vec![
+                            MenuEntry { label: "Remove from list".into(), icon: "delete", chosen: Picked::Forget(i) },
+                            MenuEntry { label: "Show in folder".into(), icon: "folder", chosen: Picked::ShowInFolder(i) },
+                        ],
                     })
                     .collect(),
                 samples_title: "Samples".into(),
@@ -427,30 +445,60 @@ mod tests {
                     .map(|i| Sample {
                         title: format!("sample {i}").into(),
                         description: "a sample".into(),
-                        icon: "box",
+                        icon: Icon::Kit("box"),
                         thumbnail: None,
                         chosen: Picked::Sample(i),
                     })
                     .collect(),
-            }),
+            })),
         }
     }
 
-    /// Draws the page three frames (hover, press, release) at what `name` published, and returns
-    /// what the page chose.
-    fn click(size: egui::Vec2, name: &str, recent: usize) -> Vec<Picked> {
-        let ctx = crate::fonts::test_context();
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
-        let input = |events| egui::RawInput { screen_rect: Some(screen), focused: true, events, ..Default::default() };
-        let mut chosen = Vec::new();
-        solidcraft_ui_registry::clear_handles();
-        crate::test_support::frame(&ctx, input(Vec::new()), |ui| chosen.extend(show(ui, page(recent))));
-        let at = solidcraft_ui_registry::handle_at(name).unwrap_or_else(|| panic!("{name} was not drawn"));
-        for pressed in [true, false] {
-            solidcraft_ui_registry::clear_handles();
-            crate::test_support::frame(&ctx, input(crate::test_support::pointer(at, pressed)), |ui| chosen.extend(show(ui, page(recent))));
+    /// The page drawn frame by frame, with what it chose so far.
+    struct Drive {
+        ctx: egui::Context,
+        screen: egui::Rect,
+        recent: usize,
+        chosen: Vec<Picked>,
+    }
+
+    impl Drive {
+        fn new(size: egui::Vec2, recent: usize) -> Drive {
+            let mut drive =
+                Drive { ctx: crate::fonts::test_context(), screen: egui::Rect::from_min_size(egui::Pos2::ZERO, size), recent, chosen: Vec::new() };
+            drive.frame(Vec::new());
+            drive
         }
-        chosen
+
+        fn frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+            solidcraft_ui_registry::clear_handles();
+            let input = egui::RawInput { screen_rect: Some(self.screen), focused: true, events, ..Default::default() };
+            let recent = self.recent;
+            let chosen = &mut self.chosen;
+            crate::test_support::frame(&self.ctx, input, |ui| chosen.extend(show(ui, page(recent))))
+        }
+
+        fn at(name: &str) -> egui::Pos2 {
+            solidcraft_ui_registry::handle_at(name).unwrap_or_else(|| panic!("{name} was not drawn"))
+        }
+
+        /// Press and release at what `name` published last frame.
+        fn click_with(&mut self, name: &str, button: egui::PointerButton) {
+            let pos = Self::at(name);
+            for pressed in [true, false] {
+                self.frame(vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button, pressed, modifiers: Default::default() }]);
+            }
+        }
+
+        fn click(&mut self, name: &str) {
+            self.click_with(name, egui::PointerButton::Primary);
+        }
+    }
+
+    fn click(size: egui::Vec2, name: &str, recent: usize) -> Vec<Picked> {
+        let mut drive = Drive::new(size, recent);
+        drive.click(name);
+        drive.chosen
     }
 
     #[test]
@@ -467,6 +515,38 @@ mod tests {
         assert_eq!(click(wide, "start:about", 2), [Picked::Rail("start:about")]);
         assert_eq!(click(wide, "start:recent:1", 2), [Picked::Recent(1)]);
         assert_eq!(click(wide, "start:sample:2", 2), [Picked::Sample(2)]);
+    }
+
+    #[test]
+    fn start_page_disabled_rail_entry_returns_nothing() {
+        assert_eq!(click(egui::vec2(1400.0, 900.0), "start:save", 0), []);
+    }
+
+    #[test]
+    fn start_page_recent_context_menu_returns_the_entry_picked() {
+        for (entry, picked) in [("menu:Remove from list", Picked::Forget(1)), ("menu:Show in folder", Picked::ShowInFolder(1))] {
+            let mut drive = Drive::new(egui::vec2(1400.0, 900.0), 2);
+            drive.click_with("start:recent:1", egui::PointerButton::Secondary);
+            drive.frame(Vec::new());
+            drive.click(entry);
+            assert_eq!(drive.chosen, [picked], "{entry}");
+        }
+    }
+
+    #[test]
+    fn start_page_tile_draws_the_hosts_texture_icon() {
+        let mut drive = Drive::new(egui::vec2(1400.0, 900.0), 0);
+        let output = drive.frame(Vec::new());
+        let tile = solidcraft_ui_registry::rect_of("start:second").unwrap();
+        let mut drawn = false;
+        for clipped in &output.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Mesh(mesh) = shape {
+                    drawn |= mesh.texture_id == HOST_ICON && tile.contains_rect(mesh.calc_bounds());
+                }
+            });
+        }
+        assert!(drawn, "the second tile draws its icon from the host's texture");
     }
 
     #[test]

@@ -721,7 +721,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             .into(),
         error: app.status.as_ref().filter(|(_, _, error)| *error).map(|(message, _, _)| message.as_str().into()),
         body: match app.home.section {
-            Section::Start => start_page::Body::Start(start_body(app)),
+            Section::Start => start_page::Body::Start(Box::new(start_body(app))),
             Section::Recovery => start_page::Body::Reviews(recovery_body(app)),
             Section::Export => start_page::Body::Tiles(export_tiles(app)),
         },
@@ -803,7 +803,14 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
         ("home:import", "import", app.tr("home.import"), app.tr("home.import_hint").into(), false, FileAction::Import),
     ]
     .into_iter()
-    .map(|(id, icon, title, hint, primary, chosen)| start_page::Tile { id: id.into(), icon, title: title.into(), hint, primary, chosen })
+    .map(|(id, icon, title, hint, primary, chosen)| start_page::Tile {
+        id: id.into(),
+        icon: start_page::Icon::Kit(icon),
+        title: title.into(),
+        hint,
+        primary,
+        chosen,
+    })
     .collect();
     let recent = app.home.recent.iter().map(|path| recent_entry(app, path)).collect();
     let samples = solidcraft_engine::sample::samples()
@@ -812,7 +819,7 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
         .map(|(index, sample)| start_page::Sample {
             title: app.tr_label(sample.name).into(),
             description: (if app.home.wanted == Some(index) { app.tr("home.opening") } else { app.tr_label(sample.about) }).into(),
-            icon: "box",
+            icon: start_page::Icon::Kit("box"),
             thumbnail: texture(app.home.thumbs.get(&format!("sample:{index}")).and_then(Option::as_ref)),
             chosen: FileAction::Sample(index),
         })
@@ -975,7 +982,7 @@ fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
         .into_iter()
         .map(|(id, format, hint, chosen)| start_page::Tile {
             id: format!("home:export:{id}").into(),
-            icon: "export",
+            icon: start_page::Icon::Kit("export"),
             title: if id == "view_dxf" {
                 app.tr_label("Export Current View as DXF…").into()
             } else {
