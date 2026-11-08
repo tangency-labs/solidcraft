@@ -1421,7 +1421,7 @@ fn page_list_sized<S>(
             if let Some(header) = header {
                 header(ui, state);
             }
-            let force_scroll = search_scroll && crate::prefs_search::force_scroll(ui.ctx());
+            let force_scroll = search_scroll && super::settings_search::force_scroll(ui.ctx());
             if let Some(page) = pages.get(*selected) {
                 if page.scroll || force_scroll {
                     let scroll = super::settings_scroll(ui, ("sc_prefs_page", *selected), |ui| (page.draw)(ui, state));

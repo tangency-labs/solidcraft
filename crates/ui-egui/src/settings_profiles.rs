@@ -664,7 +664,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Searching for "profiles" must keep this entry on the results page; without a hit here the
         // whole section was dropped and the name field could not be reached with a query active.
         let entry = [app.tr("prefs.general.profile_name"), app.tr("prefs.general.save_new"), app.tr("prefs.general.import")];
-        if crate::prefs_search::visible(ui, &entry) {
+        if crate::ui_kit::settings_search::visible(ui, &entry) {
             ui.horizontal_wrapped(|ui| {
                 let mut draft = std::mem::take(&mut app.settings_profiles.draft);
                 let enter = ui_kit::named_control(ui, app.tr("prefs.general.profile_name"), |ui| {
@@ -759,7 +759,7 @@ pub(crate) fn rename_popup(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let Some(mut rename) = app.settings_profiles.rename.take() else { return };
-    crate::prefs_search::note_key_sink(ctx);
+    crate::ui_kit::settings_search::note_key_sink(ctx);
     let mut done = None;
     let popup = ui_kit::Container::new(ctx, ui_kit::Surface::Popup)
         .area(egui::Id::unique("sc_profile_rename"))

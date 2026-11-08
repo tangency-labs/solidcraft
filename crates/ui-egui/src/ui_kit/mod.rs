@@ -45,6 +45,7 @@ mod radial;
 mod reports;
 mod review;
 mod search;
+pub(crate) mod settings_search;
 mod shortcuts;
 mod sphere;
 mod stages;

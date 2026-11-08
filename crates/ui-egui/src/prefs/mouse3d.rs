@@ -163,7 +163,7 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui) {
         let width = ui_kit::ContentWidth::label(ui, label) + Tokens::get().space_16 + Tokens::get().space_4;
         ui_kit::settings_form(ui, width, |ui| {
             ui_kit::settings_row_help(ui, label, help, |ui| {
-                crate::prefs_search::note_choices(ui, &orbits.each_ref().map(String::as_str));
+                crate::ui_kit::settings_search::note_choices(ui, &orbits.each_ref().map(String::as_str));
                 let mut selected = usize::from(!app.preferences.space_mouse_model_pivot);
                 let response = ui.scope(|ui| {
                     ui_kit::segmented(
@@ -180,11 +180,11 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if response.inner {
                     app.preferences.space_mouse_model_pivot = selected == 0;
                 }
-                if !crate::prefs_search::texts_hit(ui, &[label]) {
+                if !crate::ui_kit::settings_search::texts_hit(ui, &[label]) {
                     for option in &orbits {
                         if let Some(rect) = crate::scenario::rect_of(&format!("dialog:{label}:{option}")) {
-                            crate::prefs_search::remember(ui, option, rect);
-                            crate::prefs_search::follow(ui, option, rect);
+                            crate::ui_kit::settings_search::remember(ui, option, rect);
+                            crate::ui_kit::settings_search::follow(ui, option, rect);
                         }
                     }
                 }

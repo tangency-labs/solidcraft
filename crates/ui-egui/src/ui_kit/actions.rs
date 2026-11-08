@@ -572,8 +572,8 @@ fn button_widget(label: egui::WidgetText, options: Button) -> impl egui::Widget 
 pub fn button(ui: &mut Ui, label: impl Into<egui::WidgetText>, options: Button) -> Response {
     let label = label.into();
     let key = label.text().to_owned();
-    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[&key]) {
-        return crate::prefs_search::hidden_response(ui);
+    if super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, &[&key]) {
+        return super::settings_search::hidden_response(ui);
     }
     let response = match options {
         Button::Enabled(enabled) if super::settings_page_active(ui) => {

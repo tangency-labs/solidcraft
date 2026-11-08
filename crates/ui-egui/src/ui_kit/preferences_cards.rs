@@ -111,9 +111,9 @@ pub(crate) fn settings_row_card<R>(ui: &mut Ui, selected: bool, height: f32, add
 }
 
 fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
-    crate::prefs_search::note_unlabelled(ui, &[card.label]);
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[card.label, card.sub.unwrap_or("")]) {
-        return crate::prefs_search::hidden_response(ui);
+    super::settings_search::note_unlabelled(ui, &[card.label]);
+    if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &[card.label, card.sub.unwrap_or("")]) {
+        return super::settings_search::hidden_response(ui);
     }
     let t = Tokens::get();
     let width = dimension(width);
@@ -122,8 +122,8 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
     // Labelled compound rows own their search index (settings_picture_choices, for example).
     // Standalone cards and tiles are independently searchable settings.
     if super::layout::label(ui).is_empty() {
-        crate::prefs_search::remember(ui, card.label, rect);
-        crate::prefs_search::follow(ui, card.label, rect);
+        super::settings_search::remember(ui, card.label, rect);
+        super::settings_search::follow(ui, card.label, rect);
     }
     let look = card_look(card.selected, enabled, response.hovered(), response.has_focus());
     let p = ui.painter();
@@ -204,7 +204,7 @@ fn tick(p: &Painter, r: Rect, ink: Color32) {
 
 /// A radio card: a figure, a label and an optional sub-label. Click it to choose it.
 pub(crate) fn picture_card(ui: &mut Ui, card: &Card, width: f32) -> Response {
-    crate::prefs_search::note_unlabelled(ui, &[card.sub.unwrap_or("")]);
+    super::settings_search::note_unlabelled(ui, &[card.sub.unwrap_or("")]);
     paint_card(ui, card, width, false)
 }
 
@@ -271,7 +271,7 @@ pub(crate) fn settings_picture_choices_sized(
         + if size.caption { t.space_16 + t.space_10 } else { 0.0 };
     super::settings_form(ui, 0.0, |ui| {
         super::layout::sized_row(ui, label, height, |ui| {
-            crate::prefs_search::note_choices(ui, &options.iter().map(|o| o.label).collect::<Vec<_>>());
+            super::settings_search::note_choices(ui, &options.iter().map(|o| o.label).collect::<Vec<_>>());
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing = vec2(t.space_10, t.space_10);
                 // Use the real control child, including the scrollbar and form bounds. Round
@@ -283,7 +283,7 @@ pub(crate) fn settings_picture_choices_sized(
                     super::settings_inline_note(ui, label);
                 }
                 let mut picked = None;
-                let mut indexed = crate::prefs_search::texts_hit(ui, &[label]);
+                let mut indexed = super::settings_search::texts_hit(ui, &[label]);
                 for (row, choices) in options.chunks(columns).enumerate() {
                     ui.horizontal_top(|ui| {
                         for (column, option) in choices.iter().enumerate() {
@@ -291,11 +291,11 @@ pub(crate) fn settings_picture_choices_sized(
                             let response = picture_card(ui, &option.card(selected == index, enabled, size.aspect), width);
                             solidcraft_ui_registry::publish_target(&format!("prefs:{key}:{}", option.key), response.rect);
                             solidcraft_ui_registry::publish_target(&format!("dialog:{label}:{}", option.label), response.rect);
-                            if !indexed && crate::prefs_search::texts_hit(ui, &[option.label]) {
-                                crate::prefs_search::remember(ui, option.label, response.rect);
+                            if !indexed && super::settings_search::texts_hit(ui, &[option.label]) {
+                                super::settings_search::remember(ui, option.label, response.rect);
                                 indexed = true;
                             }
-                            crate::prefs_search::follow(ui, option.label, response.rect);
+                            super::settings_search::follow(ui, option.label, response.rect);
                             if response.clicked() && enabled {
                                 picked = Some(index);
                             }
@@ -311,7 +311,7 @@ pub(crate) fn settings_picture_choices_sized(
 
 /// A toggle tile: the same picture with a checkbox in the corner. Click it to flip `card.selected`.
 pub(crate) fn toggle_tile(ui: &mut Ui, card: &Card, width: f32) -> Response {
-    crate::prefs_search::note_unlabelled(ui, &[card.sub.unwrap_or("")]);
+    super::settings_search::note_unlabelled(ui, &[card.sub.unwrap_or("")]);
     paint_card(ui, card, width, true)
 }
 
@@ -326,9 +326,9 @@ pub(crate) fn preset_card(
     icon: &dyn Fn(&Painter, Rect, Color32),
     width: f32,
 ) -> Response {
-    crate::prefs_search::note_unlabelled(ui, &[name, word]);
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[name, word]) {
-        return crate::prefs_search::hidden_response(ui);
+    super::settings_search::note_unlabelled(ui, &[name, word]);
+    if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &[name, word]) {
+        return super::settings_search::hidden_response(ui);
     }
     let t = Tokens::get();
     let enabled = enabled && ui.is_enabled();
@@ -336,8 +336,8 @@ pub(crate) fn preset_card(
     let height = t.space_24 * 3.0 - t.space_2;
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), if enabled { Sense::click() } else { Sense::hover() });
     if super::layout::label(ui).is_empty() {
-        crate::prefs_search::remember(ui, name, rect);
-        crate::prefs_search::follow(ui, name, rect);
+        super::settings_search::remember(ui, name, rect);
+        super::settings_search::follow(ui, name, rect);
     }
     let look = card_look(selected, enabled, response.hovered(), response.has_focus());
     let dim = |c: Color32| c.gamma_multiply(look.alpha);

@@ -15,17 +15,17 @@ pub(crate) struct SettingsChoice<'a> {
 
 /// Equal option cards keep the choices comparable without repeating long explanations.
 pub(crate) fn settings_choices(ui: &mut Ui, choices: &[SettingsChoice<'_>], selected: &mut usize) -> bool {
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::shows_all(ui) {
+    if super::settings_search::querying(ui) && !super::settings_search::shows_all(ui) {
         let keep: Vec<usize> = choices
             .iter()
             .enumerate()
-            .filter(|(_, choice)| crate::prefs_search::texts_hit(ui, &[choice.title, choice.summary]))
+            .filter(|(_, choice)| super::settings_search::texts_hit(ui, &[choice.title, choice.summary]))
             .map(|(index, _)| index)
             .collect();
         if keep.is_empty() {
             return false;
         }
-        crate::prefs_search::reveal(ui);
+        super::settings_search::reveal(ui);
         return choice_row(ui, choices, selected, &keep);
     }
     let keep: Vec<usize> = (0..choices.len()).collect();
@@ -127,11 +127,11 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
         ui.painter().galley(summary_at, summary_galley, t.form_dim);
     }
     let texts = [choice.title, choice.summary];
-    if let Some(text) = texts.iter().find(|text| crate::prefs_search::texts_hit(ui, &[*text])) {
-        crate::prefs_search::remember(ui, text, rect);
+    if let Some(text) = texts.iter().find(|text| super::settings_search::texts_hit(ui, &[*text])) {
+        super::settings_search::remember(ui, text, rect);
     }
     for text in texts {
-        crate::prefs_search::follow(ui, text, rect);
+        super::settings_search::follow(ui, text, rect);
     }
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::Role::RadioButton, ui.is_enabled(), selected, format!("{}: {}", choice.title, choice.detail))

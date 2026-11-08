@@ -209,7 +209,6 @@ pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod prefs;
 pub mod prefs_notice;
-mod prefs_search;
 #[cfg(test)]
 mod preselect_tests;
 pub mod preview;

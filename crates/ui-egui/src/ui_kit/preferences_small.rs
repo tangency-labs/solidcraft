@@ -141,9 +141,9 @@ pub(crate) struct SettingsChip<'a> {
 
 /// Bounded informational pill; an optional removal target lives inside the same outline.
 pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) -> egui::Response {
-    crate::prefs_search::note_unlabelled(ui, &[label]);
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[label]) {
-        return crate::prefs_search::hidden_response(ui);
+    super::settings_search::note_unlabelled(ui, &[label]);
+    if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &[label]) {
+        return super::settings_search::hidden_response(ui);
     }
     let t = Tokens::get();
     let ink = if chip.accent { t.selected_ink } else { t.form_dim };
@@ -161,8 +161,8 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
     let height = if chip.compact { t.space_24 - t.space_2 } else { t.space_24 };
     let (rect, response) = ui.allocate_exact_size(vec2(natural.min(super::metrics::dimension(ui.max_rect().width())), height), Sense::hover());
     if super::layout::label(ui).is_empty() {
-        crate::prefs_search::remember(ui, label, rect);
-        crate::prefs_search::follow(ui, label, rect);
+        super::settings_search::remember(ui, label, rect);
+        super::settings_search::follow(ui, label, rect);
     }
     ui.painter().rect(
         rect,
@@ -212,15 +212,15 @@ pub(crate) fn settings_block_hint<'a, R>(
 }
 
 fn settings_block_content<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
-    if let Some(gate) = crate::prefs_search::block_gate(ui, label, hint) {
-        let before = crate::prefs_search::hits(ui);
+    if let Some(gate) = super::settings_search::block_gate(ui, label, hint) {
+        let before = super::settings_search::hits(ui);
         if !gate.show {
-            let result = crate::prefs_search::run_hidden(ui, label, add);
-            crate::prefs_search::block_finish(ui, &gate, false, before);
+            let result = super::settings_search::run_hidden(ui, label, add);
+            super::settings_search::block_finish(ui, &gate, false, before);
             return result;
         }
         let result = settings_block_body(ui, label, hint, label_width, add);
-        crate::prefs_search::block_finish(ui, &gate, true, before);
+        super::settings_search::block_finish(ui, &gate, true, before);
         return result;
     }
     settings_block_body(ui, label, hint, label_width, add)
@@ -324,11 +324,11 @@ pub(crate) fn settings_bindings(ui: &mut Ui, bindings: &[(&[&str], &str)]) {
         })
         .fold(t.space_24 * 8.0 + t.space_8, f32::max);
     for (keys, action) in bindings {
-        if crate::prefs_search::querying(ui) && !crate::prefs_search::shows_all(ui) {
-            if !crate::prefs_search::texts_hit(ui, &[action, &keys.join(" ")]) {
+        if super::settings_search::querying(ui) && !super::settings_search::shows_all(ui) {
+            if !super::settings_search::texts_hit(ui, &[action, &keys.join(" ")]) {
                 continue;
             }
-            crate::prefs_search::reveal(ui);
+            super::settings_search::reveal(ui);
         }
         let width = super::metrics::dimension(ui.available_width());
         let action_width = super::ContentWidth::label(ui, action);

@@ -434,7 +434,7 @@ fn paint_monitor(p: &egui::Painter, rect: egui::Rect, ink: egui::Color32) {
 /// shows the rows without it, like every other card.
 fn computer_card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     let t = Tokens::get();
-    if crate::prefs_search::suppress_chrome(ui) {
+    if crate::ui_kit::settings_search::suppress_chrome(ui) {
         add(ui);
         return;
     }

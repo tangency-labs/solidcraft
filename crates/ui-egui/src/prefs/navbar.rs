@@ -63,7 +63,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
             scenario::publish_rect("prefs:navbar:header", header.response.rect);
-            if !crate::prefs_search::suppress_chrome(ui) {
+            if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                 preview(app, ui, &mut state, width);
                 if state.selected.is_some() {
                     let card = ui_kit::settings_card(ui, |ui| inspector(app, ui, &mut state));

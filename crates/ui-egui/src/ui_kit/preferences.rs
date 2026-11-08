@@ -451,7 +451,7 @@ pub(crate) fn settings_heading(ui: &mut Ui, title: &str, description: &str) {
 }
 
 pub(crate) fn settings_heading_with_tag(ui: &mut Ui, title: &str, description: &str, tag: Option<fn(&mut Ui)>) {
-    if crate::prefs_search::querying(ui) {
+    if super::settings_search::querying(ui) {
         return;
     }
     let t = Tokens::get();
@@ -505,33 +505,33 @@ fn settings_section_count_spaced<R>(
     compact: bool,
     mut add: impl FnMut(&mut Ui) -> R,
 ) -> Option<R> {
-    if crate::prefs_search::querying(ui) {
-        crate::prefs_search::begin_section(ui, title);
+    if super::settings_search::querying(ui) {
+        super::settings_search::begin_section(ui, title);
         if !ui.is_visible() {
             return Some(add(ui));
         }
-        if crate::prefs_search::shows_all(ui) {
-            let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-section", key), false);
+        if super::settings_search::shows_all(ui) {
+            let mut child = super::settings_search::detached_child(ui, ("prefs-search-section", key), false);
             let result = add(&mut child);
-            crate::prefs_search::place_search_child(ui, &child);
+            super::settings_search::place_search_child(ui, &child);
             return Some(result);
         }
-        let mark = crate::prefs_search::search_layout_mark(ui);
-        let before = crate::prefs_search::hits(ui);
+        let mark = super::settings_search::search_layout_mark(ui);
+        let before = super::settings_search::hits(ui);
         let (gained, missed) = {
-            let mut probe = crate::prefs_search::detached_child(ui, ("prefs-search-section-probe", key), true);
+            let mut probe = super::settings_search::detached_child(ui, ("prefs-search-section-probe", key), true);
             let missed = add(&mut probe);
-            (crate::prefs_search::hits(ui) > before, missed)
+            (super::settings_search::hits(ui) > before, missed)
         };
-        crate::prefs_search::restore_search_layout(ui, mark);
+        super::settings_search::restore_search_layout(ui, mark);
         if !gained {
             return Some(missed);
         }
         // Keep search headings outside wrapped rows in this section.
-        crate::prefs_search::reveal(ui);
-        let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-section", key), false);
+        super::settings_search::reveal(ui);
+        let mut child = super::settings_search::detached_child(ui, ("prefs-search-section", key), false);
         let result = add(&mut child);
-        crate::prefs_search::place_search_child(ui, &child);
+        super::settings_search::place_search_child(ui, &child);
         return Some(result);
     }
     let t = Tokens::get();
@@ -580,7 +580,7 @@ pub(super) fn settings_card_frame(ui: &Ui) -> egui::Frame {
 
 /// Controls and one explanatory specimen side by side, stacked on narrow viewports.
 pub(crate) fn settings_pair<R>(ui: &mut Ui, controls: impl FnOnce(&mut Ui) -> R, preview: impl FnOnce(&mut Ui, R)) {
-    if crate::prefs_search::suppress_chrome(ui) {
+    if super::settings_search::suppress_chrome(ui) {
         let _ = controls(ui);
         return;
     }
@@ -607,7 +607,7 @@ pub(crate) fn settings_pair<R>(ui: &mut Ui, controls: impl FnOnce(&mut Ui) -> R,
 
 /// Compact informational state badge for settings; never an interactive control.
 pub(crate) fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
-    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[text]) {
+    if super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, &[text]) {
         return;
     }
     let t = Tokens::get();
@@ -642,13 +642,13 @@ pub(crate) enum PreferenceFigure {
 /// Reusable illustrated radio card. Width comes from the figure, and wrapping is owned by
 /// the parent; labels remain accessible even when translations need an ellipsis.
 pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected: bool, enabled: bool, figure: PreferenceFigure) -> Response {
-    if crate::prefs_search::querying(ui) {
+    if super::settings_search::querying(ui) {
         let show = match note {
-            Some(note) => crate::prefs_search::visible(ui, &[label, note]),
-            None => crate::prefs_search::visible(ui, &[label]),
+            Some(note) => super::settings_search::visible(ui, &[label, note]),
+            None => super::settings_search::visible(ui, &[label]),
         };
         if !show {
-            return crate::prefs_search::hidden_response(ui);
+            return super::settings_search::hidden_response(ui);
         }
     }
     let t = Tokens::get();
@@ -925,7 +925,7 @@ pub(crate) fn settings_font_row(ui: &mut Ui, label: &str, mut add: impl FnMut(&m
 
 /// Natural-width dim text, for inline suffixes and metadata without a full-width note row.
 pub(crate) fn settings_inline_note(ui: &mut Ui, text: &str) {
-    if crate::prefs_search::suppress_chrome(ui) {
+    if super::settings_search::suppress_chrome(ui) {
         return;
     }
     let t = Tokens::get();
@@ -941,7 +941,7 @@ pub(crate) fn settings_inline_note(ui: &mut Ui, text: &str) {
 
 /// Framed font specimen, inheriting the chosen application font and its fallback glyphs.
 pub(crate) fn font_specimen(ui: &mut Ui, text: &str) {
-    if crate::prefs_search::suppress_chrome(ui) {
+    if super::settings_search::suppress_chrome(ui) {
         return;
     }
     let t = Tokens::get();
@@ -952,7 +952,10 @@ pub(crate) fn font_specimen(ui: &mut Ui, text: &str) {
 
 /// Intrinsically sized segments, retaining the usual row label for accessibility and automation.
 pub(crate) fn settings_segments(ui: &mut Ui, label: &str, selected: &mut usize, options: &[&str]) -> bool {
-    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[label]) && !crate::prefs_search::texts_hit(ui, options) {
+    if super::settings_search::suppress_chrome(ui)
+        && !super::settings_search::texts_hit(ui, &[label])
+        && !super::settings_search::texts_hit(ui, options)
+    {
         return false;
     }
     let t = Tokens::get();
@@ -969,7 +972,7 @@ pub(crate) fn settings_segments(ui: &mut Ui, label: &str, selected: &mut usize, 
 }
 
 pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
-    if crate::prefs_search::suppress_chrome(ui) {
+    if super::settings_search::suppress_chrome(ui) {
         return;
     }
     let t = Tokens::get();
@@ -1007,7 +1010,7 @@ pub(crate) const COLOUR_VISION_SAMPLE: [&str; 6] =
 /// colours of `t` (the preference passes the mode being chosen, #7152). The six cells share one
 /// responsive, clipped area.
 pub(crate) fn colour_vision_sample(ui: &mut egui::Ui, t: &Tokens) {
-    if crate::prefs_search::suppress_chrome(ui) {
+    if super::settings_search::suppress_chrome(ui) {
         return;
     }
     let count = COLOUR_VISION_SAMPLE.len() as f32;

@@ -177,7 +177,7 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         ui_kit::settings_form(ui, width, |ui| {
             ui_kit::settings_row_help(ui, label, help, |ui| {
                 let options = [crate::i18n::tr("prefs.navigation.turntable"), crate::i18n::tr("prefs.navigation.free")];
-                crate::prefs_search::note_choices(ui, &options);
+                crate::ui_kit::settings_search::note_choices(ui, &options);
                 let mut selected = usize::from(app.preferences.free_orbit);
                 let response = ui.scope(|ui| {
                     ui_kit::segmented(
@@ -190,11 +190,11 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 if response.inner {
                     app.preferences.free_orbit = selected == 1;
                 }
-                if !crate::prefs_search::texts_hit(ui, &[label]) {
+                if !crate::ui_kit::settings_search::texts_hit(ui, &[label]) {
                     for option in options {
                         if let Some(rect) = crate::scenario::rect_of(&format!("dialog:{label}:{option}")) {
-                            crate::prefs_search::remember(ui, option, rect);
-                            crate::prefs_search::follow(ui, option, rect);
+                            crate::ui_kit::settings_search::remember(ui, option, rect);
+                            crate::ui_kit::settings_search::follow(ui, option, rect);
                         }
                     }
                 }

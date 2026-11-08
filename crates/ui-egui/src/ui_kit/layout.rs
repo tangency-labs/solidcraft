@@ -174,7 +174,7 @@ pub(super) fn publish(ui: &Ui, response: &Response, kind: egui::Role) {
         egui::Role::TextInput => {
             t.input_bevel(ui, response);
             if response.has_focus() {
-                crate::prefs_search::note_key_sink(ui.ctx());
+                super::settings_search::note_key_sink(ui.ctx());
             }
         }
         egui::Role::ComboBox | egui::Role::Button => t.button_bevel(ui, response, false),
@@ -299,31 +299,31 @@ fn scrub_row<R>(ui: &mut Ui, text: &str, control: impl FnOnce(&mut Ui, Option<&R
 
 fn row_with<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control: impl FnOnce(&mut Ui, Option<&Response>) -> R) -> R {
     let mut passthrough = false;
-    if crate::prefs_search::querying(ui) {
+    if super::settings_search::querying(ui) {
         // A row with no label has no words to match; its controls supply them (#9265).
         let unlabelled = text.is_empty();
         if unlabelled {
-            crate::prefs_search::set_unlabelled_control(ui);
+            super::settings_search::set_unlabelled_control(ui);
         } else {
-            crate::prefs_search::set_control(ui, text);
+            super::settings_search::set_control(ui, text);
         }
-        if !crate::prefs_search::visible(ui, &[text]) {
+        if !super::settings_search::visible(ui, &[text]) {
             if unlabelled {
-                crate::prefs_search::push_unlabelled(ui);
+                super::settings_search::push_unlabelled(ui);
             }
-            let result = crate::prefs_search::run_hidden(ui, text, |ui| control(ui, None));
+            let result = super::settings_search::run_hidden(ui, text, |ui| control(ui, None));
             if unlabelled {
-                crate::prefs_search::pop_unlabelled(ui);
+                super::settings_search::pop_unlabelled(ui);
             }
-            crate::prefs_search::recheck(ui, &[text]);
+            super::settings_search::recheck(ui, &[text]);
             return result;
         }
-        crate::prefs_search::push_passthrough(ui);
+        super::settings_search::push_passthrough(ui);
         passthrough = true;
     }
     let result = sized_row_body(ui, text, height, scrub, control);
     if passthrough {
-        crate::prefs_search::pop_passthrough(ui);
+        super::settings_search::pop_passthrough(ui);
     }
     result
 }
@@ -332,8 +332,8 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control:
     let t = Tokens::get();
     let width = dimension(ui.available_width());
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
-    crate::prefs_search::remember(ui, text, rect);
-    crate::prefs_search::follow(ui, text, rect);
+    super::settings_search::remember(ui, text, rect);
+    super::settings_search::follow(ui, text, rect);
     // A nested row (`"  Of"`) lines up under the one above: the lookup uses the text without its
     // indent and the indent stays in front of the translation. The `LABEL` tag keeps the original.
     let shown = indented_label(text);
@@ -409,7 +409,7 @@ pub(crate) fn warning_caption(ui: &mut Ui, aligned_to: &str, text: &str) {
 }
 
 fn caption_in(ui: &mut Ui, aligned_to: &str, text: &str, color: egui::Color32) {
-    if crate::prefs_search::suppress_chrome(ui) {
+    if super::settings_search::suppress_chrome(ui) {
         return;
     }
     let t = Tokens::get();
@@ -570,10 +570,10 @@ fn section_with_badge<R>(
     let (count, pending, compact) = badge;
     // A search still walks the body, so a setting inside a folded section can match, without
     // leaving the folded heading on screen for every query.
-    if crate::prefs_search::querying(ui) && crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[title]) {
+    if super::settings_search::querying(ui) && super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, &[title]) {
         return Some(add(ui));
     }
-    let searching = crate::prefs_search::querying(ui);
+    let searching = super::settings_search::querying(ui);
     let t = Tokens::get();
     ui.add_space(t.space_2);
     let id = ui.make_persistent_id(id);
@@ -591,7 +591,7 @@ fn section_with_badge<R>(
         ),
         egui::Sense::click(),
     );
-    crate::prefs_search::follow(ui, title, rect);
+    super::settings_search::follow(ui, title, rect);
     if response.hovered() || response.has_focus() {
         ui.painter().rect_filled(rect.shrink2(vec2(0.0, 1.0)), t.radius_sm, t.hover);
     }
@@ -666,13 +666,13 @@ fn section_with_badge<R>(
 pub(crate) fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
     let t = Tokens::get();
     let id = egui::Id::unique(("prefs_search_fold", title));
-    let query = crate::prefs_search::query(ui);
+    let query = super::settings_search::query(ui);
     let mut open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
     let previous = ui.data(|data| data.get_temp::<String>(id.with("query"))).unwrap_or_default();
     if previous != query {
         open = false;
     }
-    crate::prefs_search::reveal(ui);
+    super::settings_search::reveal(ui);
     ui.add_space(t.space_2);
     let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::click());
     if response.hovered() || response.has_focus() {
@@ -727,9 +727,9 @@ pub(crate) fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl F
         data.insert_temp(id, open);
     });
     open.then(|| {
-        crate::prefs_search::push_force(ui);
+        super::settings_search::push_force(ui);
         let result = add(ui);
-        crate::prefs_search::pop_force(ui);
+        super::settings_search::pop_force(ui);
         result
     })
 }
@@ -753,7 +753,7 @@ pub(crate) fn list_row(ui: &mut Ui, key: &str, text: &str) -> Response {
 /// Full-width rule; Tokens: dialog_rule. Use between groups without extra padding.
 /// Full-width rule without extra padding. Tokens: `dialog_rule`.
 pub(crate) fn divider(ui: &mut Ui, key: &str) {
-    if crate::prefs_search::suppress_chrome(ui) {
+    if super::settings_search::suppress_chrome(ui) {
         return;
     }
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), 1.0), egui::Sense::hover());
@@ -837,20 +837,20 @@ pub(crate) fn name_cell_with_hint(ui: &mut Ui, name: &str, strong: bool, hint: &
 }
 
 fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>) -> Response {
-    if crate::prefs_search::querying(ui) {
+    if super::settings_search::querying(ui) {
         let heading = matches!(style, Text::Heading(_));
         if heading {
-            let hit = crate::prefs_search::texts_hit(ui, &[text]);
-            crate::prefs_search::set_heading_open(ui, hit);
+            let hit = super::settings_search::texts_hit(ui, &[text]);
+            super::settings_search::set_heading_open(ui, hit);
             if hit {
-                crate::prefs_search::reveal(ui);
-            } else if crate::prefs_search::suppress_chrome(ui) {
-                return crate::prefs_search::hidden_response(ui);
+                super::settings_search::reveal(ui);
+            } else if super::settings_search::suppress_chrome(ui) {
+                return super::settings_search::hidden_response(ui);
             }
-        } else if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[text]) {
-            return crate::prefs_search::hidden_response(ui);
-        } else if crate::prefs_search::texts_hit(ui, &[text]) && !crate::prefs_search::shows_all(ui) {
-            crate::prefs_search::reveal(ui);
+        } else if super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, &[text]) {
+            return super::settings_search::hidden_response(ui);
+        } else if super::settings_search::texts_hit(ui, &[text]) && !super::settings_search::shows_all(ui) {
+            super::settings_search::reveal(ui);
         }
     }
     let t = Tokens::get();
@@ -924,8 +924,8 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
     let id = format!("dialog:{kind}:{key}");
     solidcraft_ui_registry::publish_rect(&id, response.rect);
     if matches!(style, Text::Heading(_)) {
-        crate::prefs_search::remember(ui, text, response.rect);
-        crate::prefs_search::follow(ui, text, response.rect);
+        super::settings_search::remember(ui, text, response.rect);
+        super::settings_search::follow(ui, text, response.rect);
     }
     if !matches!(style, Text::Note(_) | Text::MonoNote(_)) {
         solidcraft_ui_registry::publish_handle(&id, response.rect.center());
