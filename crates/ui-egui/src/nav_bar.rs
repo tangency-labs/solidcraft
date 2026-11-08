@@ -30,6 +30,8 @@ pub struct SlotView<'a> {
     pub show_text: bool,
     /// Where it is drawn (unused for a slot in the More menu).
     pub rect: Rect,
+    /// A second registry name its handle is published under, wherever it is drawn.
+    pub alias: Option<&'a str>,
 }
 
 /// Labels of the bar's own controls, in the app's language.
@@ -204,6 +206,9 @@ pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, menu: impl FnOnce(&str) -> Menu) -
         let shown: Vec<_> = bar.slots.iter().map(|s| SlotView { selected: s.selected || open == s.id, ..s.clone() }).collect();
         for (slot, response) in shown.iter().zip(paint_slots(ui, bar.rect, bar.size, bar.edge, &shown, None)) {
             solidcraft_ui_registry::publish_target(&format!("nav:slot:{}", slot.id), response.rect);
+            if let Some(alias) = slot.alias {
+                solidcraft_ui_registry::publish_handle(alias, response.rect.center());
+            }
             context_menu(&response, Some(slot.index), &bar.labels, &mut action);
             if response.clicked() && slot.kind != NavigationKind::Separator {
                 if slot.kind == NavigationKind::Menu {
@@ -317,6 +322,9 @@ fn overflow_menu(ui: &mut egui::Ui, bar: &Bar<'_>, open: &mut String, action: &m
         let response = item.show(ui);
         context_menu(&response, Some(slot.index), &bar.labels, action);
         solidcraft_ui_registry::publish_target(&format!("nav:slot:{}", slot.id), response.rect);
+        if let Some(alias) = slot.alias {
+            solidcraft_ui_registry::publish_handle(alias, response.rect.center());
+        }
         ui_kit::navigation_tooltip(&response, response.rect, NavigationEdge::Bottom, &slot.tip, slot.key.as_deref());
         if response.clicked() {
             if slot.kind == NavigationKind::Menu {

@@ -297,6 +297,8 @@ fn slot_view(app: &SolveApp, bar: &BarLayout, slot: &'static Slot, index: usize,
         hidden: hidden.is_some(),
         show_text: if slot.kind == NavigationKind::Menu { bar.values && value } else { bar.labels },
         rect,
+        // The View menu's slot, by the name older scenarios use.
+        alias: (slot.id == "display").then_some("nav:view"),
     }
 }
 
@@ -354,10 +356,6 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         },
     };
     let action = nav_bar::show(ui, &bar, |id| menu(app, id));
-    // The View menu's slot, wherever it is drawn, for older scenarios.
-    if let Some(at) = solidcraft_ui_registry::handle_at("nav:slot:display") {
-        solidcraft_ui_registry::publish_handle("nav:view", at);
-    }
     if let Some(action) = action {
         run(app, action);
     }

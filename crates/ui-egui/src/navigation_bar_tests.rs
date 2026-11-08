@@ -641,6 +641,7 @@ fn the_bar_component_returns_the_slot_or_menu_row_chosen_from_plain_data() {
         hidden: false,
         show_text: false,
         rect: Rect::from_min_size(pos2(x, 304.0), vec2(26.0, 26.0)),
+        alias: None,
     };
     let bar = Bar {
         rect: Rect::from_min_size(pos2(96.0, 300.0), vec2(68.0, 34.0)),
