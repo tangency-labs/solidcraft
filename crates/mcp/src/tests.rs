@@ -3586,9 +3586,14 @@ fn a_bridged_server_checks_calls_at_its_param_check_level() {
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     assert!(text(&r).contains(&format!("invalid parameters for `solid.box`: {warning}")), "{r}");
     assert_eq!(sent("engine.execute solid.box"), 0, "refused unsent");
-    let r = raw_tool(&mut s, "execute", json!({"command": "solid.chamfer", "params": {"nonsense": 1}}));
-    assert_ne!(r["result"]["isError"], json!(true), "{r}");
-    assert_eq!(sent("engine.execute solid.chamfer"), 1, "no contract here: the app decides");
+    // A body command with no contract yet: the first stands for them all, so converting a command
+    // doesn't break this.
+    let unchecked = solidcraft_engine::cmd::command_specs().into_iter().find(|c| c.contract.is_none() && c.id.starts_with("solid."));
+    if let Some(id) = unchecked.map(|c| c.id) {
+        let r = raw_tool(&mut s, "execute", json!({"command": id, "params": {"nonsense": 1}}));
+        assert_ne!(r["result"]["isError"], json!(true), "{id}: {r}");
+        assert_eq!(sent(&format!("engine.execute {id}")), 1, "{id}: no contract here, so the app decides");
+    }
     let r = raw_tool(&mut s, "batch", json!({"commands": [good, misspelt]}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     let reply: Value = serde_json::from_str(&text(&r)).unwrap();
