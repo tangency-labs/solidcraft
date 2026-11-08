@@ -137,6 +137,17 @@ fn the_walk_stops_at_its_caps_as_before() {
     assert_eq!(deepest(&cycle), Some(MAX_PLACEMENT_DEPTH + 1));
 }
 
+/// A component placed twice at each level doubles the paths per level: the walk stops at the cap
+/// instead of listing them all. Here 18 levels give 2^18 paths down to the part at the bottom.
+#[test]
+fn occurrence_paths_stop_at_max_placements() {
+    let mut doubling: Vec<Occurrence> = (1..=18).flat_map(|k| [occurrence(2 * k, k, k - 1), occurrence(2 * k + 1, k, k - 1)]).collect();
+    doubling.push(occurrence(1000, 99, 18));
+    let paths = with(doubling).occurrence_paths(1000);
+    assert_eq!(paths.len(), MAX_PLACEMENTS);
+    assert!(paths.iter().all(|p| p.len() == 19 && p.last() == Some(&1000)));
+}
+
 #[test]
 fn children_are_listed_in_document_order() {
     let doc = with(vec![occurrence(5, 2, 1), occurrence(1, 1, 0), occurrence(4, 3, 1), occurrence(2, 2, 1), occurrence(3, 9, 7)]);

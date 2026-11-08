@@ -333,26 +333,38 @@ impl Document {
     }
 
     /// Every path from the root to an occurrence: one for each placement of the components above
-    /// it, as [`Self::path_placement`] takes them. Empty for an occurrence that isn't there.
+    /// it, as [`Self::path_placement`] takes them. Empty for an occurrence that isn't there. A
+    /// component placed twice at each level doubles the paths with every level, so the walk stops
+    /// after [`MAX_PLACEMENTS`] paths, as [`Self::placements`] stops after that many placements.
     pub fn occurrence_paths(&self, occurrence: u64) -> Vec<Vec<u64>> {
-        fn walk(doc: &Document, occurrence: u64, depth: usize) -> Vec<Vec<u64>> {
+        /// The paths from the root down to `occurrence`, `depth` levels below where the walk
+        /// started, taking one from `budget` for each path found.
+        fn walk(doc: &Document, occurrence: u64, depth: usize, budget: &mut usize) -> Vec<Vec<u64>> {
+            if *budget == 0 {
+                return Vec::new();
+            }
             let Some(o) = doc.occurrences.iter().find(|o| o.id == occurrence) else { return Vec::new() };
             if o.parent == 0 {
+                *budget -= 1;
                 return vec![vec![occurrence]];
             }
             if depth >= MAX_PLACEMENT_DEPTH {
                 return Vec::new();
             }
-            let above = doc.occurrences.iter().filter(|p| p.component == o.parent);
-            above
-                .flat_map(|p| walk(doc, p.id, depth + 1))
-                .map(|mut path| {
+            let mut out = Vec::new();
+            for p in doc.occurrences.iter().filter(|p| p.component == o.parent) {
+                if *budget == 0 {
+                    break;
+                }
+                out.extend(walk(doc, p.id, depth + 1, budget).into_iter().map(|mut path| {
                     path.push(occurrence);
                     path
-                })
-                .collect()
+                }));
+            }
+            out
         }
-        walk(self, occurrence, 0)
+        let mut budget = MAX_PLACEMENTS;
+        walk(self, occurrence, 0, &mut budget)
     }
 
     /// One placement: the component the occurrence `path` from the root leads to (the root for

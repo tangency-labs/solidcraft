@@ -40,6 +40,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<FocusJointsParams>(), &["path"]);
 }
 
+/// `joint.focus` answers in the shape its output schema gives, turning the view on and off.
 #[test]
 fn focus_replies_match_the_output_schema() {
     let schema = output_schema_for::<FocusJointsResult>();

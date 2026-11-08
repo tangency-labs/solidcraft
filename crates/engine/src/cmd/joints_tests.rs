@@ -88,6 +88,21 @@ fn a_shared_subassembly_lists_the_joints_crossing_it_on_each_placement() {
     assert_eq!(joints(frame), [(across, nut)]);
 }
 
+/// `joint.focus` refuses a path that isn't a short list of occurrence ids, and a refusal leaves
+/// the view as it was.
+#[test]
+fn focus_refuses_a_bad_path_and_keeps_the_view() {
+    let mut s = Session::default();
+    leaf(&mut s, "Frame");
+    let frame = occ(&s, "Frame");
+    run(&mut s, "joint.focus", json!({"path": [frame]}));
+    let long: Vec<u64> = std::iter::repeat_n(frame, 65).collect();
+    for path in [json!("Frame:1"), json!([frame, -1]), json!([1.5]), json!(long), json!([u64::MAX])] {
+        assert!(s.execute("joint.focus", &json!({ "path": path })).is_err(), "{path}");
+        assert_eq!(s.joint_focus(), Some([frame].as_slice()), "{path}");
+    }
+}
+
 #[test]
 fn circle_given_by_its_centre_takes_that_round_end() {
     // #393: `circle` at the centre of a round end, as the parameters document, was refused with

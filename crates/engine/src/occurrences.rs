@@ -733,6 +733,7 @@ impl Session {
         self.joint_focus.as_deref().filter(|path| self.doc.path_placement(path).is_some())
     }
 
+    /// Show Joints on the placement `path` leads to, or no longer for `None` (`joint.focus`).
     pub(crate) fn set_joint_focus(&mut self, path: Option<Vec<u64>>) {
         self.joint_focus = path;
     }

@@ -2252,8 +2252,8 @@ pub fn pick_joint(app: &mut SolveApp, id: u64, add: bool) {
 /// joint, a double-click edits it, the eye shows or hides its glyph and the menu is the joint's
 /// menu. The folder starts closed and has no eye of its own (the root folder's eye hides every
 /// joint glyph); it isn't drawn for a placement no joint attaches. `key` is the placement's row
-/// key. With `detailed_joint_folders` off it lists only the joints the placement is an end of,
-/// without a count, each beside the other placement.
+/// key. With `detailed_joint_folders` off, the default, it lists only the joints the placement is
+/// an end of, without a count, each beside the other placement, as before.
 ///
 /// [`Document::attached_joints`]: solidcraft_engine::doc::Document::attached_joints
 pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key: &str, depth: usize) {

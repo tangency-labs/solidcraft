@@ -93,6 +93,7 @@ inspect.curvature_map             display analysis: shading
 inspect.environment_map           display analysis: shading
 inspect.silhouette                display analysis: outline
 inspect.zebra                     display analysis: shading
+joint.focus                       a view: which joints are drawn, the rest faded; no geometry (crates/engine/src/schema/joints_tests.rs, crates/ui-egui/src/joint_browser_tests.rs)
 layout.apply                      application panel layout; no geometry (engine/UI/MCP tests)
 layout.get                        application panel layout; no geometry (engine/UI/MCP tests)
 layout.reset                      application panel layout; no geometry (engine/UI/MCP tests)

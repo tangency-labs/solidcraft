@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use solidcraft_engine::doc::{Document, Visibility};
+use solidcraft_engine::doc::{Document, ModelState, Visibility};
 
 use crate::SolveApp;
 
@@ -22,24 +22,29 @@ pub struct Spotlight {
 
 /// What was lit, and the state of the design it was lit in.
 struct Lit {
+    /// Empty while the parts have no bodies, which lights nothing: an evaluation still running at
+    /// the pick can give them some.
     bodies: Vec<String>,
     doc: Arc<Document>,
+    /// The evaluated model the bodies were named from.
+    model: Arc<ModelState>,
     visibility: Visibility,
     active: (u64, Option<Vec<u64>>),
     moves: usize,
 }
 
 impl Lit {
-    fn of(app: &SolveApp, joints: &[u64]) -> Option<Lit> {
+    /// The bodies of `joints`' parts, with the state of the design they were found in.
+    fn of(app: &SolveApp, joints: &[u64]) -> Lit {
         let s = &app.session;
-        let bodies = s.joint_bodies(joints);
-        (!bodies.is_empty()).then(|| Lit {
-            bodies,
+        Lit {
+            bodies: s.joint_bodies(joints),
             doc: s.doc.clone(),
+            model: s.model.state(),
             visibility: s.visibility.clone(),
             active: (s.active_component, s.active_occurrence_path.clone()),
             moves: s.pending_moves.len(),
-        })
+        }
     }
 
     /// Is the design as it was lit?
@@ -70,19 +75,27 @@ fn gives_way(app: &SolveApp) -> bool {
 pub(crate) fn follow(app: &mut SolveApp) -> bool {
     if app.tree.joint_spotlight.pick != app.tree.picked_joints {
         let pick = app.tree.picked_joints.clone();
-        let lit = if pick.is_empty() || gives_way(app) { None } else { Lit::of(app, &pick) };
+        let lit = if pick.is_empty() || gives_way(app) { None } else { Some(Lit::of(app, &pick)) };
         let changed = lit.is_some() || app.tree.joint_spotlight.lit.is_some();
         app.tree.joint_spotlight = Spotlight { pick, lit };
-        changed
-    } else if app.tree.joint_spotlight.lit.as_ref().is_some_and(|lit| gives_way(app) || !lit.holds(app)) {
-        app.tree.joint_spotlight.lit = None;
-        true
-    } else {
-        false
+        return changed;
     }
+    let Some(lit) = app.tree.joint_spotlight.lit.as_ref() else { return false };
+    if gives_way(app) || !lit.holds(app) {
+        app.tree.joint_spotlight.lit = None;
+        return true;
+    }
+    if Arc::ptr_eq(&lit.model, &app.session.model.state()) {
+        return false;
+    }
+    // The model was evaluated again on the same design (an evaluation finishing): its bodies may
+    // be named differently, or be there now where they weren't at the pick.
+    let pick = app.tree.joint_spotlight.pick.clone();
+    app.tree.joint_spotlight.lit = Some(Lit::of(app, &pick));
+    true
 }
 
 /// The bodies that stay solid while the spotlight is on.
 pub(crate) fn bodies(app: &SolveApp) -> Option<&[String]> {
-    app.tree.joint_spotlight.lit.as_ref().map(|lit| lit.bodies.as_slice())
+    app.tree.joint_spotlight.lit.as_ref().filter(|lit| !lit.bodies.is_empty()).map(|lit| lit.bodies.as_slice())
 }

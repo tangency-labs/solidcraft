@@ -14,6 +14,7 @@ use crate::test_support::click;
 #[test]
 fn a_picked_joint_lights_its_parts_and_fades_the_rest() {
     let mut h = harness();
+    h.app.preferences.highlight_joint_parts = true;
     let [a, b, c] = ["A:1", "B:1", "C:1"].map(|name| occurrence(&h, name));
     let (hinge, glue) = (id(&h, "Hinge"), id(&h, "Glue"));
     assert_eq!(crate::viewport::solid_bodies(&h.app), None);
@@ -43,6 +44,7 @@ fn a_picked_joint_lights_its_parts_and_fades_the_rest() {
 #[test]
 fn anything_else_puts_out_a_picked_joints_light() {
     let mut h = harness();
+    h.app.preferences.highlight_joint_parts = true;
     let (hinge, glue) = (id(&h, "Hinge"), id(&h, "Glue"));
     let solid = |h: &Harness| crate::viewport::solid_bodies(&h.app);
     let pick = |h: &mut Harness| {
@@ -152,6 +154,7 @@ fn id(h: &Harness, name: &str) -> u64 {
     h.app.session.doc.assembly.joints.iter().find(|j| j.name == name).unwrap().id
 }
 
+/// The id of the occurrence called `name`, such as "A:1".
 fn occurrence(h: &Harness, name: &str) -> u64 {
     h.app.session.doc.occurrences.iter().find(|o| o.name == name).unwrap().id
 }
@@ -236,6 +239,7 @@ fn the_menu_and_the_v_key_hide_and_show_picked_joints() {
 }
 
 /// What an occurrence's Joints folder lists: (joint, the placement it joins this one to).
+/// The rows of an occurrence's detailed Joints folder: each joint's name and the part it joins.
 fn listed(h: &Harness, occurrence: u64) -> Vec<(String, String)> {
     let doc = &h.app.session.doc;
     let attached = doc.attached_joints().remove(&occurrence).unwrap_or_default();
@@ -283,8 +287,8 @@ fn a_subassembly_lists_only_the_joints_that_cross_its_border() {
     assert_eq!(listed(&h, frame), [pair("Bearing", "Spindle:1"), pair("Rail", "Carriage:1")]);
 }
 
-/// Only a joint's own ends are direct, and with detailed folders off a subassembly joined from
-/// inside has no folder, as before they existed.
+/// Only a joint's own ends are direct, and with detailed folders off, the default, a subassembly
+/// joined from inside has no folder, as before they existed.
 #[test]
 fn plain_joint_folders_list_only_a_placements_own_joints() {
     let (mut h, [_, axis, spindle, ..]) = subassembly();
@@ -296,10 +300,10 @@ fn plain_joint_folders_list_only_a_placements_own_joints() {
     h.app.tree.expanded.insert(format!("o:{axis}/joints"));
     h.frames(3);
     let rows = |label: &str| crate::browser::drawn_rows().into_iter().filter(|r| r.0 == label).count();
-    assert_eq!(rows("Bearing"), 2, "the root's folder and Axis's");
-    h.app.preferences.detailed_joint_folders = false;
-    h.frames(3);
     assert_eq!(rows("Bearing"), 1, "the root's folder alone");
+    h.app.preferences.detailed_joint_folders = true;
+    h.frames(3);
+    assert_eq!(rows("Bearing"), 2, "the root's folder and Axis's");
 }
 
 /// Show Joints draws one placement's joints, hidden ones too, and fades the bodies outside it. It

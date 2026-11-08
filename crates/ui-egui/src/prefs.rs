@@ -1210,8 +1210,8 @@ preference_settings! {
     /// Draw a wider rim under finished sketch curves to improve contrast on shaded faces.
     sketch_halo: bool = false, PAGE_GRAPHICS => check("Halo under sketch curves");
     /// Picking a joint fades everything but the parts it joins, while the pick is all that's going
-    /// on (`joint_spotlight`). Off: a pick changes nothing around the joint.
-    highlight_joint_parts: bool = true, PAGE_GRAPHICS => check_id("prefs.highlight_joint_parts");
+    /// on (`joint_spotlight`). Off by default: a pick changes nothing around the joint, as before.
+    highlight_joint_parts: bool = false, PAGE_GRAPHICS => check_id("prefs.highlight_joint_parts");
     /// Show the view's pitch, yaw and roll and its projection under the orientation gizmo (#6032).
     /// Off by default; View ▸ View angles and `view.angle_readout` turn it on.
     show_view_angles: bool = false, PAGE_GRAPHICS;
@@ -1427,8 +1427,9 @@ preference_settings! {
     /// When components' bodies sit in a Bodies folder in the browser (#4217).
     browser_bodies_folders: BodiesFolders = BodiesFolders::Several, PAGE_LAYOUT;
     /// A placement's Joints folder also lists the joints crossing a subassembly's border, with a
-    /// count and the other part on a second line. Off: only the joints it is an end of, as before.
-    detailed_joint_folders: bool = true, PAGE_LAYOUT;
+    /// count and the other part on a second line. Off by default: only the joints it is an end
+    /// of, as before.
+    detailed_joint_folders: bool = false, PAGE_LAYOUT;
     /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
     /// column at the rows' right end. Off by default.
     browser_eye_left: bool = false, PAGE_LAYOUT;
@@ -8787,16 +8788,18 @@ mod tests {
         assert_eq!(app.preferences.validation, Validation::EachFeature);
     }
 
+    /// Both joint preferences start off (the behaviour before #10878), are saved when set and
+    /// come back off when their pages are reset.
     #[test]
-    fn joint_detail_preferences_are_on_by_default_saved_and_restored() {
+    fn joint_detail_preferences_are_off_by_default_saved_and_restored() {
         use serde_json::json;
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        assert_eq!((app.preferences.highlight_joint_parts, app.preferences.detailed_joint_folders), (true, true));
-        let saved = super::set(&mut app, &json!({"highlight_joint_parts": false, "detailed_joint_folders": false})).unwrap();
-        assert_eq!((saved["highlight_joint_parts"].as_bool(), saved["detailed_joint_folders"].as_bool()), (Some(false), Some(false)));
+        assert_eq!((app.preferences.highlight_joint_parts, app.preferences.detailed_joint_folders), (false, false));
+        let saved = super::set(&mut app, &json!({"highlight_joint_parts": true, "detailed_joint_folders": true})).unwrap();
+        assert_eq!((saved["highlight_joint_parts"].as_bool(), saved["detailed_joint_folders"].as_bool()), (Some(true), Some(true)));
         super::defaults(&mut app, super::PAGE_GRAPHICS);
         super::defaults(&mut app, super::PAGE_LAYOUT);
-        assert_eq!((app.preferences.highlight_joint_parts, app.preferences.detailed_joint_folders), (true, true));
+        assert_eq!((app.preferences.highlight_joint_parts, app.preferences.detailed_joint_folders), (false, false));
     }
 
     #[test]
