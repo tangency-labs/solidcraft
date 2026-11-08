@@ -12,6 +12,24 @@ reviews:
         Don't flag purely additive changes: a new command, a new setting whose default keeps today's behaviour, or a new option that appears only when someone chooses it. Don't flag bug fixes that only turn a crash or an error into the result the feature always promised.
         When you flag one, start the comment with "Changes a default:", say what a user sees before and after, whether a setting keeps the old behaviour, and whether the PR description's `Changes a default:` line says so.
 
+    # Where code goes, SolidCraft or SolidCore: solidcore/docs/layers.md.
+    - path: "crates/**"
+      instructions: &app_layer |
+        The layer split (solidcore/docs/layers.md): the kernel (solidcore) computes geometry any
+        client could use; ops (solidcore-ops) is a recipe of kernel calls for a workflow, with no
+        geometric quantity of its own; the app (SolidCraft) holds state and maps input to commands,
+        with no geometry math.
+
+        - Flag any geometric computation added to SolidCraft's code: dot or cross products,
+          normalizing, square roots or trigonometry on coordinates, linear solves, derivative
+          formulas, intersections, meshing, STEP parsing. Quote the line and say that, per
+          solidcore/docs/layers.md, it belongs in solidcore: the kernel, or ops if it is a recipe
+          of kernel calls for a workflow.
+        - Flag any new direct use of a solidcore crate other than solidcore-ops, solidcore-tess and
+          solidcore-record (a new dependency, `use` or path).
+    - path: "apps/**"
+      instructions: *app_layer
+
     # The vendored SolidCore kernel: its own review rules (from solidcore/.coderabbit.yaml, which
     # CodeRabbit reads only at the repository root), with its paths under solidcore/.
     - path: "solidcore/**"
@@ -58,6 +76,14 @@ reviews:
         - Library code: no `unwrap`, `expect`, `panic!` or unchecked indexing; deterministic
           results; input-dependent recursion bounded. Licence: only the upstream paths AGENTS.md
           lists; never GPL/LGPL code.
+
+        The layer split (solidcore/docs/layers.md): solidcore is shared by every client, so flag
+        anything specific to one application: UI, command ids, application defaults or settings,
+        document state (selection, timeline, history). In solidcore/crates/solidcore-ops, also flag
+        any geometric quantity computed directly (a dot or cross product, normalizing, a square
+        root or trigonometry on coordinates, a linear solve, a derivative formula) instead of
+        through a kernel call: per solidcore/docs/layers.md it becomes a kernel primitive with its
+        own tests, and ops calls it.
 
     - path: "solidcore/crates/solidcore/src/blend/**"
       instructions: |
