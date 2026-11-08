@@ -418,7 +418,11 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                         Hit::Vertex { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false)),
                         // An origin axis is projected too; it has no length of its own, so it
                         // waits for the entity measured to it (a line's distance to the axis).
-                        Hit::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Some((json!({"axis": name}).to_string(), false, false)),
+                        // Only while the dimension takes another pick: once it has two, a click
+                        // on an axis places the dimension as a click on empty space does.
+                        Hit::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") && tool.picks.len() < 2 => {
+                            Some((json!({"axis": name}).to_string(), false, false))
+                        }
                         _ => None,
                     })
                 });
