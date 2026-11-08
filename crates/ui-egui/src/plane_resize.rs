@@ -51,6 +51,12 @@ pub(crate) fn extent(app: &SolveApp, id: u64, half: f64) -> [f64; 4] {
     app.session.doc.plane_extents.get(&id).copied().unwrap_or([-half, -half, half, half])
 }
 
+/// The plane being dragged and where the drag has it, for the highlight's key: the highlight
+/// draws the plane at [`extent`], so it is built again as the handle moves.
+pub(crate) fn live_key() -> Option<(u64, [u64; 4])> {
+    DRAG.with(|d| d.borrow().as_ref().map(|d| (d.id, d.live.map(f64::to_bits))))
+}
+
 /// The construction plane to show handles on: the only thing selected, with nothing else going
 /// on (no dialog, tool or sketch being edited).
 fn target(app: &SolveApp) -> Option<(u64, String, Plane)> {
@@ -212,5 +218,22 @@ mod tests {
         assert_eq!(follow(e, (0, -1), Vec2::new(0.0, 50.0), false), [-10.0, 10.0 - MIN_SIDE, 10.0, 10.0]);
         // Shift: about the middle.
         assert_eq!(follow(e, (1, 1), Vec2::new(20.0, 15.0), true), [-20.0, -15.0, 20.0, 15.0]);
+    }
+
+    /// The highlight follows a handle as it is dragged: its key changes with the live size.
+    #[test]
+    fn the_highlight_key_follows_a_dragged_handle() {
+        let h = crate::scenario::Harness::new();
+        let start = [-10.0, -10.0, 10.0, 10.0];
+        let drag = |live| Drag { id: 7, name: "Plane1".into(), plane: Plane::XY, side: (1, 0), start, offset: Vec2::new(0.0, 0.0), live };
+        let idle = crate::viewport::highlight_key(&h.app);
+        DRAG.with(|d| *d.borrow_mut() = Some(drag(start)));
+        let at_start = crate::viewport::highlight_key(&h.app);
+        assert_ne!(at_start, idle, "a drag is part of the key");
+        DRAG.with(|d| *d.borrow_mut() = Some(drag([-10.0, -10.0, 25.0, 10.0])));
+        assert_ne!(crate::viewport::highlight_key(&h.app), at_start, "the side moved");
+        assert_eq!(extent(&h.app, 7, 10.0), [-10.0, -10.0, 25.0, 10.0], "the plane is drawn where the drag has it");
+        cancel();
+        assert_eq!(crate::viewport::highlight_key(&h.app), idle, "back once the drag is given up");
     }
 }

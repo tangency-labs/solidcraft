@@ -344,6 +344,7 @@ view.navigator                    the view: navigator type; crates/engine/src/sc
 view.next_tab                     the view: camera, layout, display
 view.normal_to                    the view: camera, layout, display
 view.perspective                  the view: camera, layout, display
+view.plane_size                   construction plane display size only: crates/engine/src/construct_tests.rs::a_construction_plane_keeps_the_size_it_is_given
 view.previous_tab                 the view: camera, layout, display
 view.rename                       the view: camera, layout, display
 view.render_browser               the view: camera, layout, display
