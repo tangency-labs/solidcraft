@@ -148,6 +148,7 @@ fn sweep(h: &mut Harness, language: &str) -> BTreeMap<&'static str, BTreeSet<Str
 
 #[test]
 fn no_english_is_painted_where_the_language_has_a_translation() {
+    crate::i18n::install();
     let english = english_ids();
     let mut h = sample();
     let names = design_names(&h.app);
@@ -169,6 +170,7 @@ fn no_english_is_painted_where_the_language_has_a_translation() {
 /// is a word the language gives another message.
 #[test]
 fn the_sweep_reports_english_only_where_a_translation_exists() {
+    crate::i18n::install();
     let english = english_ids();
     let locale = solidcraft_ui_text::Locale::for_language("ja");
     let translated = locale.text("cmd.sketch_rectangle_center").to_string();
