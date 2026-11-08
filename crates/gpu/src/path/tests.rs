@@ -2800,7 +2800,7 @@ fn gpu_indirect_clamp_keeps_hue_caps_the_brightest_channel_and_spares_the_first_
             let options = JobOptions { clamp_indirect: limit, volume, lighting, ..Default::default() };
             options.validate().unwrap();
             let mut task = Task::new(context.clone(), sphere(white()), request(1), options, CancelToken::default()).unwrap();
-            let mut params = task.parameters(1);
+            let mut params = task.parameters(1).unwrap();
             params[16..20].copy_from_slice(&bounce.to_le_bytes());
             let mut up = Vec::new();
             scene::vector(&mut up, Vec3::new(value[0], value[1], value[2]), 0.0);
@@ -3517,6 +3517,48 @@ fn host_readiness_includes_unmapped_non_nested_glass() {
     for (index, slot) in context.clamped_pipelines.iter().enumerate() {
         assert_eq!(slot.get().is_some(), index == opaque, "clamped program {index}");
     }
+}
+
+#[test]
+fn a_clamped_job_uses_the_clamped_optical_glass_and_caustic_programs() {
+    use solidcraft_render::job::{CausticOptions, PunctualLightOptions, PunctualLights, StudioLighting};
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let lighting = Some(StudioLighting {
+        punctual_lights: PunctualLights::new(&[PunctualLightOptions {
+            position_mm: [0.0, 0.0, 4.0],
+            color: [1.0; 3],
+            intensity: 1.0,
+            reference_distance_mm: 1.0,
+            minimum_distance_mm: 0.001,
+            cone: None,
+        }])
+        .unwrap(),
+        ..Default::default()
+    });
+    let options = JobOptions { samples: 4, max_depth: 8, lighting, clamp_indirect: Some(0.5), ..Default::default() };
+    // Rough glass connects lights in the optical programs; a clamped job gets their clamped copy.
+    let rough = rough_glass_fixture(false, 0.5, Vec3::ZERO, 0.0);
+    let task = Task::new(context.clone(), rough.clone(), request(2), options, CancelToken::default()).unwrap();
+    let clamped = context.clamped_glass.get().expect("the clamped optical program is built by the clamped job");
+    assert_eq!(task.render_pipeline, clamped.camera);
+    assert_ne!(Some(&task.render_pipeline), context.glass.get().map(|pipelines| &pipelines.camera));
+    let pixel = rough_glass_pixel(context.clone(), rough, options);
+    assert!(pixel.iter().all(|value| value.is_finite() && *value >= 0.0), "{pixel:?}");
+    if context.device.limits().max_storage_buffers_per_shader_stage < 7 {
+        return;
+    }
+    // Caustics on an opaque scene run the caustic camera program, clamped for a clamped job.
+    let caustics = JobOptions { caustics: Some(CausticOptions { photons: 64, radius_mm: 1.0, ..Default::default() }), ..options };
+    let mut task = Task::new(context.clone(), sphere(white()), request(2), caustics, CancelToken::default()).unwrap();
+    let shared = context.photons.get().expect("caustic programs are built by the caustic job");
+    assert_eq!(Some(&task.render_pipeline), shared.clamped_render.get());
+    assert_ne!(task.render_pipeline, shared.render);
+    for _ in 0..caustics.samples {
+        task.complete_sample().unwrap();
+    }
+    assert!(task.photons.as_ref().unwrap().ready());
+    assert!(task.read_linear().unwrap().iter().flatten().all(|value| value.is_finite() && *value >= 0.0));
 }
 
 #[test]
