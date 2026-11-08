@@ -2869,6 +2869,25 @@ fn a_joint_origin_path_is_checked() {
     // A path that ends at another occurrence than the one named.
     assert!(s.execute("joint.origin", &json!({"occurrence": probe, "face": [95, 25, 10], "path": [second, header]})).is_err());
     assert!(s.doc.assembly.origins.is_empty());
+    // `null` is left out, as for the other optional keys: the pick finds its copy.
+    run(&mut s, "joint.origin", json!({"name": "Top", "face": [95, 25, 10], "path": null}));
+    let top = s.doc.assembly.origins.iter().find(|o| o.name == "Top").map(|o| o.origin.clone()).unwrap();
+    assert_eq!((top.occurrence, top.inside), (second, vec![header]));
+}
+
+#[test]
+fn a_placement_with_no_inverse_does_not_stop_picks_on_other_parts() {
+    // A hand-edited file can hold a placement that can't be undone. The search for the placement
+    // a pick is on skips it, instead of failing every pick in the design.
+    let mut s = Session::default();
+    let (_, second, header) = board_twice(&mut s);
+    let probe = occ(&s, "Probe");
+    if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == probe) {
+        o.transform = [[0.0; 4]; 4];
+    }
+    run(&mut s, "joint.origin", json!({"name": "Top", "face": [95, 25, 10]}));
+    let top = s.doc.assembly.origins.iter().find(|o| o.name == "Top").map(|o| o.origin.clone()).unwrap();
+    assert_eq!((top.occurrence, top.inside), (second, vec![header]));
 }
 
 #[test]

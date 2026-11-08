@@ -12,6 +12,7 @@ use solidcraft_doc::joints::{Coupling, JointExprs, JointKind, Snap};
 use solidcraft_geom::Vec3Geom;
 
 use super::check::whole;
+use super::component::OccurrencePath;
 use super::motion::require;
 use super::types::{AngleExpr, IdOrName, LengthExpr, present};
 use crate::cmd::joints::{MAX_FACE_NAME, MAX_REACH_JOINTS};
@@ -360,7 +361,8 @@ impl JsonSchema for JointOriginArg {
     fn schema_name() -> Cow<'static, str> {
         "JointOriginArg".into()
     }
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let path = generator.subschema_for::<OccurrencePath>();
         // `params::vec3` reads [x, y, z] and {x, y, z}.
         let forms = [
             json!({"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}),
@@ -376,7 +378,7 @@ impl JsonSchema for JointOriginArg {
                     "type": "object",
                     "properties": {
                         "occurrence": {"description": "The occurrence the origin is on, by id or name. Default: found from the point, or the named face's component.", "type": ["number", "string"]},
-                        "path": {"description": "The placement picked, as occurrence ids from the top of the assembly down to occurrence: says which copy of a sub-assembly placed more than once.", "type": "array", "items": {"type": "integer", "minimum": 0}},
+                        "path": {"description": "The placement picked, as occurrence ids from the top of the assembly down to occurrence: says which copy of a sub-assembly placed more than once.", "anyOf": [path, {"type": "null"}]},
                         "face": {"description": "The centre of a planar face: a point on it [x, y, z], or its name.", "anyOf": [point, {"type": "string"}]},
                         "circle": {"description": "The centre of a round end: a point [x, y, z] on its wall, rim or centre, or the round face's name.", "anyOf": [point, {"type": "string"}]},
                         "edge": at("A point [x, y, z] on an edge of a planar face."),
@@ -1802,7 +1804,7 @@ pub struct MakeJointOriginParams {
     /// `occurrence`, so a part in a sub-assembly placed more than once is on that copy. Default:
     /// the occurrence's first placement, or with no occurrence the placement nearest the pick.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<Vec<u64>>")]
+    #[schemars(with = "Option<OccurrencePath>")]
     pub path: Option<Value>,
     /// The centre of a planar face: a point on it, or its name. The first of `face` and `circle`
     /// given by name wins; then the first given as a point of `face`, `circle`, `edge` and `point`.
@@ -1926,6 +1928,10 @@ fn origin_point(v: Option<&Value>, message: &str) -> Result<(), String> {
 impl MakeJointOriginParams {
     /// The keys `origin_param` reads, in the cases it reads them, in the order it reads them.
     fn check(m: &Map<String, Value>) -> Result<(), String> {
+        // The path is read first, by the same rule `occurrence.move` uses; `null` is left out.
+        if let Some(path) = m.get("path").filter(|p| !p.is_null()) {
+            OccurrencePath::deserialize(path).map_err(|_| "`path` must list 1..64 occurrence ids")?;
+        }
         // A face or circle given by its name: the first of the two that is text.
         let named = ["face", "circle"].into_iter().find_map(|k| m.get(k).and_then(Value::as_str).map(|n| (k, n)));
         if let Some((what, name)) = named {

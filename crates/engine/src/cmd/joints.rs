@@ -492,7 +492,8 @@ pub(crate) fn placement_at(s: &Session, p: Vec3) -> Option<Vec<u64>> {
         // Which body a pick is on is a model decision: its exact box, not its display mesh's.
         let Ok(bb) = b.body.exact_bounds() else { continue };
         for (_, path, t) in of.get(&s.doc.model_body_component(b)).into_iter().flatten() {
-            let inv = solidcraft_doc::mat_inverse(t)?;
+            // A placement that can't be undone (a hand-edited file) is skipped, not every pick.
+            let Some(inv) = solidcraft_doc::mat_inverse(t) else { continue };
             let q = solidcraft_doc::apply_point(&inv, p);
             let c = Vec3::new(q.x.clamp(bb.min.x, bb.max.x), q.y.clamp(bb.min.y, bb.max.y), q.z.clamp(bb.min.z, bb.max.z));
             let d = c.dist(q);
@@ -508,7 +509,8 @@ pub(crate) fn placement_at(s: &Session, p: Vec3) -> Option<Vec<u64>> {
 /// `occurrence`), or with no occurrence given, the placement nearest the pick. `None` when the
 /// origin names its occurrence alone.
 fn picked_placement(s: &Session, v: &Value, world: Option<Vec3>, cmd: &str) -> Result<Option<Vec<u64>>> {
-    match (v.get("path"), v.get("occurrence"), world) {
+    // `null` is left out, as for the other optional keys.
+    match (v.get("path").filter(|p| !p.is_null()), v.get("occurrence"), world) {
         (Some(path), occurrence, _) => {
             let last = path.as_array().and_then(|ids| ids.last()).cloned();
             let id = occurrence_id(s, occurrence.or(last.as_ref()), cmd)?;

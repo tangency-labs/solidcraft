@@ -1288,6 +1288,9 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
             (json!({"point": [1, 2, 3], "nme": "N"}), false),
             (json!({"face": [1, 2, 3], "path": "6/4"}), false),
             (json!({"face": [1, 2, 3], "path": [6, -4]}), false),
+            (json!({"face": [1, 2, 3], "path": null}), true),
+            (json!({"face": [1, 2, 3], "path": []}), false),
+            (json!({"face": [1, 2, 3], "path": (0..65).collect::<Vec<u64>>()}), false),
         ],
     );
     takes(
