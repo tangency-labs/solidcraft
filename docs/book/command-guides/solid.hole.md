@@ -10,19 +10,22 @@ Put a hole in a solid body: a simple hole, a counterbore, a countersink or a tap
 
 | Choice in the dialog | Meaning | Example or reason to choose it |
 | --- | --- | --- |
-| Personal Presets | Saves the dialog settings under a name you choose (Save new), so you can reuse them. Rename and Delete manage saved presets. | Save a "1/4-20 blind" preset once and pick it for every tapped hole of that size. |
+| Personal Presets | Saves the dialog settings under a name you choose (Save new), so you can reuse them. Presets are saved in your profile, so they carry over to every design. Rename and Delete manage saved presets. | Save a "1/4-20 blind" preset once and pick it for every tapped hole of that size. |
 | Placement | Single drills one hole on the face you pick. Multiple drills a hole at each sketch point you select. | Single for one hole located from edges. Multiple for a bolt pattern laid out in a sketch. |
 | Face | The face the hole is drilled into. | Click the top face of the part. |
 | Reference 1 and Distance 1 | An edge of the face, and how far the hole center is from it. | The left edge, 0.75 in. |
 | Reference 2 and Distance 2 | A second edge, and how far the hole center is from it. | The front edge, 0.75 in. |
 | Extents | How the depth is set. Distance drills to the Depth you type. | Use Distance for a blind hole. |
 | Hole Type | Simple is a straight hole. Counterbore and Countersink add a bore or a cone at the top. | Counterbore for a socket head cap screw. Countersink for a flat head screw: 82° for inch screws, 90° for metric. |
-| Hole Tap Type | Simple is a plain drilled hole with a Diameter you type. Tapped drills the tap drill size and carries the thread as a callout; the thread itself is not cut into the hole wall. | Choose Tapped for any tapped hole. To show real thread geometry, use {{#command solid.thread}} on the hole wall. |
+| Hole Tap Type | Simple is a plain drilled hole with a Diameter you type. Tapped drills the tap drill size and shows the thread settings. | Choose Tapped for any tapped hole. |
 | Profile (Tapped) | The thread standard. | UNC for coarse inch threads, UNF for fine inch threads. |
-| Size (Tapped) | The thread size, from a list. The Designation box shows the callout, and Tap drill diameter shows the drill the app uses. | 1/4-20 UNC uses a 0.201 in (#7) tap drill. The app shows it as 5.1054 mm. |
+| Size (Tapped) | The thread size, from a list. The Designation box shows the callout. | 1/4-20 UNC. |
+| Tap drill diameter (Tapped) | The drill for the tapped hole. It fills in the tap maker's drill for the size, and you can type a different one. The app accepts drills from the thread's minor diameter up to 5% over the tap maker's drill, and says the allowed range if you go outside it. | 1/4-20 UNC fills in 5.1054 mm (0.201 in, a #7 drill). Typing 0.203 in (13/64) is accepted; 0.220 in is refused because too little thread would engage. |
 | Full thread depth (Tapped) | On: the thread runs the full depth of the hole. Off: a Thread depth box appears. | Turn it off for a blind tapped hole. |
 | Thread depth (Tapped) | How deep the full thread goes, separate from the drill Depth. | Drill 0.625 in deep with 0.50 in of thread, so a standard tap doesn't bottom out. |
-| Thread direction (Tapped) | Right-hand or left-hand thread. | Right-hand unless the print calls for LH. |
+| Hand (Tapped) | Right or Left. | Right unless the print calls for LH. |
+| Modeled (Tapped) | On: the thread groove is cut into the hole wall. Off: the thread is carried as a callout only. | Leave it off unless you need to see the thread or 3D print it. A modeled thread makes the part slower to rebuild. |
+| End (Modeled on) | Square stops the thread sharp at the bottom. Fade runs it out over a length, the way a tap's chamfered end leaves it. | Fade for a realistic blind tapped hole. |
 | Drill Point | The bottom of the hole. Angle leaves a drill point. | Use Angle for a hole made with a twist drill. |
 | Depth | How deep the hole goes. | Measured to the end of the full diameter, not the tip of the drill point. |
 | Tip Angle | The angle of the drill point. Default is 118°. | 118° for a standard jobber drill. 135° for most carbide and split-point drills. |
@@ -36,11 +39,13 @@ Put a hole in a solid body: a simple hole, a counterbore, a countersink or a tap
 4. Click Reference 1, pick the left edge of the top face and set Distance 1 to 0.75 in. Click Reference 2, pick the front edge and set Distance 2 to 0.75 in.
 5. Set Hole Tap Type to Tapped, Profile to UNC and Size to 1/4-20 UNC. Check that Tap drill diameter shows 5.1054 mm (0.201 in).
 6. Turn off Full thread depth. Set Depth to 0.625 in and Thread depth to 0.50 in. Click OK.
+
 #### Tips and common mistakes
 
 - **Do** locate holes from edges the way the print dimensions them. When the part changes size, the holes keep their distances from those edges.
 - **Do** use Tapped and pick the size from the list instead of typing a drill diameter. The hole then carries the thread callout, and the tap drill comes from the tap maker's table.
-- **Do** check the Tap drill diameter before clicking OK. It is shown in millimetres: 5.1054 mm is 0.201 in.
+- **Do** check the Tap drill diameter before clicking OK. It is shown in millimetres: 5.1054 mm is 0.201 in. If your shop runs a different drill, such as 0.203 in for 1/4-20 in steel, type it in.
+- **Don't** turn on Modeled just to show the hole is tapped. The callout already says it.
 - **Do** turn off Full thread depth on blind tapped holes and set a Thread depth shorter than the drill Depth, so a standard tap doesn't bottom out.
 - **Do** type the unit with the number when the print is in another unit. In a millimetre design, typing 0.75 in enters 19.05 mm.
 - **Don't** expect every hole to work on sheet metal. Sheet metal holes must go straight into a flat panel; holes into the edge of the sheet, countersinks and drill points are refused there.
