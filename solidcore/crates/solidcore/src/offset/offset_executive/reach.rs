@@ -2175,8 +2175,9 @@ fn corner(
 
 /// Where the planes `a` and `b` and the net `n` meet at a corner, from the vertex `p`: within
 /// a certified distance of it, nowhere near (the planes parallel), or not proved
-/// ([`CornerMeeting`]). Where a boundary row of the net lies on one of the planes (within
-/// the B-rep's `tolerance`, [`net::Net::rows_on`]), that row is where the plane and the net
+/// ([`CornerMeeting`]). Where a boundary row of the net lies on one of the planes and passes
+/// the vertex (each within the B-rep's `tolerance`, [`net::Net::rows_through`]), that row is
+/// where the plane and the net
 /// meet, to that tolerance (as two planes within it are one, [`PlanePair::One`]), and the
 /// corner is where it crosses the other plane ([`net::Net::row_meets`]): the
 /// planes' line may run along the net there (a plane tangent to the net along the row,
@@ -2194,12 +2195,17 @@ fn corner_with_net(
     tangent_sine: f64,
     tolerance: f64,
 ) -> Result<CornerMeeting> {
-    let on = |holding: Tangent, other: Tangent| {
-        n.rows_on(holding, tolerance)
+    let mut through = n
+        .rows_through(a, tolerance, p)?
+        .into_iter()
+        .map(|side| (side, b))
+        .collect::<Vec<_>>();
+    through.extend(
+        n.rows_through(b, tolerance, p)?
             .into_iter()
-            .map(move |side| (side, other))
-    };
-    if let Some((side, other)) = on(a, b).chain(on(b, a)).next() {
+            .map(|side| (side, a)),
+    );
+    if let Some(&(side, other)) = through.first() {
         return Ok(match n.row_meets(side, other.point, other.raw, p)? {
             Some(reach) if reach.is_finite() => CornerMeeting::Within(reach),
             _ => CornerMeeting::Uncertified,

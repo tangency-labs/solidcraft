@@ -4,18 +4,20 @@
 //!
 //! A net is its own surface over its knots and, past a side the offset executive extends,
 //! the extension it builds (`Continuity::Ruled`, definitions-and-certificates.md §6.1;
-//! `surface/extend.rs`): each row across the side continues by the homogeneous line
-//! `H_n + s D`, `D = H_v + μ H` with one `μ` for the side, so past `v = v1` the surface is
-//! `H(u, v1) + s′ H_v(u, v1)` in homogeneous coordinates, `s′ = s / (1 + s μ)` the same for
-//! every row: a line through `G(u, v1)` along `G_v` at each `u`. Its corner past two sides,
-//! the first side's extension extended again, is `H + s′ H_u + t′ H_v + s′ t′ H_uv` at the
-//! box's corner, on the rows' common parameters again. That holds where the rows across each
-//! side end in one weight ratio (every polynomial net, a rational extrusion's or
-//! revolution's); where they do not, the line ends at a finite point and past it the
-//! extension takes the product form `S + s S_v`, or is refused and left short, so nothing
-//! past such a side is enclosed here. A closed direction is not extended: the
-//! net runs on round its seam. A side collapsed to a point (a pole) is not extended either,
-//! and nothing past it is enclosed.
+//! `surface/extend.rs`): each row across the side continues as the line its end is tangent
+//! to, so past `v = v1` the surface is the set of the lines `G(u, v1) + λ G_v(u, v1)`, here
+//! `G + (v − v1) G_v`. Where the rows across the side end in one weight ratio (every
+//! polynomial net, a rational extrusion's or revolution's) the extension's weights stay
+//! constant along it and it is that very surface, on these parameters. Where the ratios
+//! differ, the homogeneous lines reach a finite distance on other parameters, and past it
+//! the product form `S + s S_v` is these lines again on these parameters (or, with no such
+//! form, the extension is refused and left short, and the meeting found on the lines is
+//! not reached: the operation fails, it builds nothing wrong). Past two sides the first
+//! side's extension is extended again: `G + Δu G_u + Δv G_v + Δu Δv G_uv` at the box's
+//! corner, which holds where both sides' rows end in one weight ratio; another corner is not
+//! enclosed here. A closed direction is not extended: the net runs on round its seam. A
+//! side collapsed to a point (a pole) is not extended either, and nothing past it is
+//! enclosed.
 //!
 //! A meeting is proved by Krawczyk's operator (definitions-and-certificates.md §4.3): a box
 //! `Y` about Newton's root `ỹ` with `K(Y) = ỹ − C F(ỹ) + (I − C F′(Y)) (Y − ỹ)` strictly
@@ -133,17 +135,15 @@ enum Part {
 #[derive(Debug, Clone)]
 pub(super) struct Net {
     cn: Nurbs,
-    /// The homogeneous net as two polynomial ones: its points `H` and its weights `W` (as
-    /// the first coordinate), whose partials give the extension's.
-    h: Nurbs,
-    w: Nurbs,
     /// The knots' range: `[u0, u1]`, `[v0, v1]`.
     range: [(f64, f64); 2],
     /// Whether the net is closed in u, in v.
     closed: [bool; 2],
-    /// Whether each side (`BoxSide::ALL` order) is extended as enclosed here: the executive
-    /// extends it, and its rows end in one weight ratio (module docs).
+    /// Whether the executive extends each side (`BoxSide::ALL` order).
     extends: [bool; 4],
+    /// Whether the rows across each side end in one weight ratio (`BoxSide::ALL` order):
+    /// a corner past two such sides is enclosed (module docs).
+    uniform: [bool; 4],
 }
 
 impl Net {
@@ -229,34 +229,12 @@ impl Net {
                 cn.nu,
             ),
         ];
-        // past the reach of rows whose end weight ratios differ the extension takes the
-        // product form, or is refused and left short: such a side is not enclosed
-        for (e, &one) in extends.iter_mut().zip(&uniform) {
-            *e &= one;
-        }
-        let polynomial = |coordinates: &dyn Fn(&[f64]) -> [f64; 3]| {
-            let mut pw = Vec::new();
-            for c in cn.pw.chunks_exact(4) {
-                let [x, y, z] = coordinates(c);
-                pw.extend_from_slice(&[x, y, z, 1.0]);
-            }
-            Nurbs { pw, ..cn.clone() }
-        };
-        let h = polynomial(&|c| match c {
-            [x, y, z, _] => [*x, *y, *z],
-            _ => [f64::NAN; 3],
-        });
-        let w = polynomial(&|c| match c {
-            [_, _, _, w] => [*w, 0.0, 0.0],
-            _ => [f64::NAN; 3],
-        });
         Ok(Some(Self {
             cn,
-            h,
-            w,
             range: [(lo.x, hi.x), (lo.y, hi.y)],
             closed,
             extends,
+            uniform,
         }))
     }
 
@@ -358,66 +336,51 @@ impl Net {
     }
 
     /// The jet over one part of a box ([`Net::parts`]): on the knots, the net's own; past a
-    /// side, or two, the extension's (module docs), from the homogeneous net's partials at
-    /// the side, `H + Δu H_u + Δv H_v + Δu Δv H_uv` and its partials (`Δ` zero along a side
-    /// the part is on), projected.
+    /// side, or two, the extension's (module docs), from the net's partials at the side,
+    /// `G + Δu G_u + Δv G_v + Δu Δv G_uv` and its partials (`Δ` zero along a side the part
+    /// is on).
     fn part_jet(&self, pu: Part, pv: Part) -> Result<Option<Jet>> {
         let at = |p: Part| match p {
             Part::On(a, b) => (a, b),
             Part::Past { at, .. } => (at, at),
         };
-        // how far past its side the part is
-        let past = |p: Part| match p {
+        // how far past its side the part is, and that side's index (`BoxSide::ALL`)
+        let past = |p: Part, d: usize| match p {
             Part::On(..) => None,
-            Part::Past { d, .. } => Some(d),
+            Part::Past { at, d: by } => {
+                let low = self.range.get(d).is_some_and(|&(r0, _)| at <= r0);
+                Some((by, if low { 2 * d } else { 2 * d + 1 }))
+            }
         };
-        let (du, dv) = (past(pu), past(pv));
-        if du.is_none() && dv.is_none() {
-            let Some(g) = Self::partials(&self.cn, at(pu), at(pv), 1)? else {
-                return Ok(None);
-            };
+        let (du, dv) = (past(pu, 0), past(pv, 1));
+        let uniform = |d: Option<(Ivl, usize)>| {
+            d.is_some_and(|(_, side)| self.uniform.get(side).copied().unwrap_or(false))
+        };
+        if du.is_some() && dv.is_some() && !(uniform(du) && uniform(dv)) {
+            return Ok(None);
+        }
+        let lk = if du.is_none() && dv.is_none() { 1 } else { 2 };
+        let Some(g) = Self::partials(&self.cn, at(pu), at(pv), lk)? else {
+            return Ok(None);
+        };
+        let (x, xu, xv) = (of_v3(g.at(0, 0)), of_v3(g.at(1, 0)), of_v3(g.at(0, 1)));
+        if lk == 1 {
             return Ok(Some(Jet {
-                p: of_v3(g.at(0, 0)),
-                su: of_v3(g.at(1, 0)),
-                sv: of_v3(g.at(0, 1)),
+                p: x,
+                su: xu,
+                sv: xv,
             }));
         }
-        let (Some(h), Some(w)) = (
-            Self::partials(&self.h, at(pu), at(pv), 2)?,
-            Self::partials(&self.w, at(pu), at(pv), 2)?,
-        ) else {
-            return Ok(None);
-        };
+        let xuv = of_v3(g.at(1, 1));
         let zero = Ivl::from(0.0);
-        let (eu, ev) = (du.unwrap_or(zero), dv.unwrap_or(zero));
-        let extend = |x: &crate::blend::fillet_section::station::Partials<Ivl>| {
-            let (x, xu, xv, xuv) = (
-                of_v3(x.at(0, 0)),
-                of_v3(x.at(1, 0)),
-                of_v3(x.at(0, 1)),
-                of_v3(x.at(1, 1)),
-            );
-            (
-                add(
-                    add(x, scale(xu, eu)),
-                    add(scale(xv, ev), scale(xuv, eu * ev)),
-                ),
-                add(xu, scale(xuv, ev)),
-                add(xv, scale(xuv, eu)),
-            )
-        };
-        let (hp, hu, hv) = extend(&h);
-        let ([wp, _, _], [wu, _, _], [wv, _, _]) = extend(&w);
-        if wp.lo <= 0.0 || wp.lo.is_nan() {
-            return Ok(None);
-        }
-        let over = Ivl::from(1.0) / wp;
-        let p = scale(hp, over);
-        let quotient = |hd: I3, wd: Ivl| scale(sub(hd, scale(p, wd)), over);
+        let (eu, ev) = (du.map_or(zero, |(d, _)| d), dv.map_or(zero, |(d, _)| d));
         Ok(Some(Jet {
-            p,
-            su: quotient(hu, wu),
-            sv: quotient(hv, wv),
+            p: add(
+                add(x, scale(xu, eu)),
+                add(scale(xv, ev), scale(xuv, eu * ev)),
+            ),
+            su: add(xu, scale(xuv, ev)),
+            sv: add(xv, scale(xuv, eu)),
         }))
     }
 
@@ -473,10 +436,96 @@ impl Net {
 
 impl Net {
     /// The sides (`BoxSide::ALL` order) whose boundary row lies on the plane `plane` within
-    /// `tolerance`: every control point of the row within it of the plane
-    /// ([`super::plane_distance`], a certified bound), so the row, in their convex hull
-    /// (weights positive), is too.
-    pub(super) fn rows_on(&self, plane: super::Tangent, tolerance: f64) -> Vec<usize> {
+    /// `tolerance` and passes the vertex `p` within it: the row is then where the plane and
+    /// the net meet at that vertex, the corner's curve there. On the plane: every control
+    /// point of the row within `tolerance` of it ([`super::plane_distance`], a certified
+    /// bound), so the row, in their convex hull (weights positive), is too. Past the vertex:
+    /// a point of the row, enclosed, within `tolerance` of `p` ([`Net::row_near`]).
+    ///
+    /// # Errors
+    ///
+    /// A cancel.
+    pub(super) fn rows_through(
+        &self,
+        plane: super::Tangent,
+        tolerance: f64,
+        p: Vec3,
+    ) -> Result<Vec<usize>> {
+        let mut out = Vec::new();
+        for side in self.rows_on(plane, tolerance) {
+            if self.row_near(side, p)?.is_some_and(|d| d <= tolerance) {
+                out.push(side);
+            }
+        }
+        Ok(out)
+    }
+
+    /// The row of `side` (`BoxSide::ALL` order) as its fixed parameter, whether it runs
+    /// along u, and its parameter range.
+    fn row(&self, side: usize) -> Option<(f64, bool, (f64, f64))> {
+        let [(u0, u1), (v0, v1)] = self.range;
+        Some(match side {
+            0 => (u0, false, (v0, v1)),
+            1 => (u1, false, (v0, v1)),
+            2 => (v0, true, (u0, u1)),
+            3 => (v1, true, (u0, u1)),
+            _ => return None,
+        })
+    }
+
+    /// An upper bound on the distance from `p` of the row of `side` over its range: the
+    /// enclosed distance of one point of it, found by Gauss–Newton from the grid point
+    /// nearest `p` (a choice only: any point of the row bounds the distance from above).
+    ///
+    /// # Errors
+    ///
+    /// A cancel.
+    fn row_near(&self, side: usize, p: Vec3) -> Result<Option<f64>> {
+        let Some((fixed, along_u, (r0, r1))) = self.row(side) else {
+            return Ok(None);
+        };
+        let at = |t: f64| -> Result<Option<(Vec3, Vec3, Vec3)>> {
+            if along_u {
+                self.at(t, fixed)
+            } else {
+                self.at(fixed, t)
+            }
+        };
+        let mut best: Option<(f64, f64)> = None;
+        for i in 0..=GUESS_GRID {
+            let t = r0 + (r1 - r0) * f64::from(i) / f64::from(GUESS_GRID);
+            if let Some((x, _, _)) = at(t)? {
+                let d = (x - p).length();
+                if d.is_finite() && best.is_none_or(|(b, _)| d < b) {
+                    best = Some((d, t));
+                }
+            }
+        }
+        let Some((_, mut t)) = best else {
+            return Ok(None);
+        };
+        for _ in 0..NEWTON_STEPS {
+            let Some((x, su, sv)) = at(t)? else {
+                return Ok(None);
+            };
+            let d = if along_u { su } else { sv };
+            let dd = d.dot(d);
+            if !(dd.is_finite() && dd > 0.0) {
+                break;
+            }
+            t = (t - (x - p).dot(d) / dd).max(r0).min(r1);
+        }
+        let jet = if along_u {
+            self.jet(Ivl::from(t), Ivl::from(fixed))?
+        } else {
+            self.jet(Ivl::from(fixed), Ivl::from(t))?
+        };
+        Ok(jet.map(|g| length_bound(sub(g.p, point(p)))))
+    }
+
+    /// The sides (`BoxSide::ALL` order) whose boundary row lies on `plane` within
+    /// `tolerance` ([`Net::rows_through`]).
+    fn rows_on(&self, plane: super::Tangent, tolerance: f64) -> Vec<usize> {
         let point = |i: usize, j: usize| {
             let at = i.checked_mul(self.cn.nv)?.checked_add(j)?.checked_mul(4)?;
             match *self.cn.pw.get(at..at.checked_add(4)?)? {
@@ -505,7 +554,8 @@ impl Net {
     /// Where the boundary row of `side` (`BoxSide::ALL` order), continued along the
     /// extension past the box, crosses the plane `(origin, normal)`: an upper bound on the
     /// distance from `p` of a crossing proved by Krawczyk's test on `normal · (G − origin) = 0`
-    /// along the row (module docs), or `None`.
+    /// along the row (module docs), or `None`. The caller has proved the row passes `p`
+    /// ([`Net::rows_through`]).
     ///
     /// # Errors
     ///
@@ -517,14 +567,8 @@ impl Net {
         normal: Vec3,
         p: Vec3,
     ) -> Result<Option<f64>> {
-        let [(u0, u1), (v0, v1)] = self.range;
-        // the row's fixed parameter, and whether it runs along u
-        let (fixed, along_u) = match side {
-            0 => (u0, false),
-            1 => (u1, false),
-            2 => (v0, true),
-            3 => (v1, true),
-            _ => return Ok(None),
+        let Some((fixed, along_u, (r0, r1))) = self.row(side) else {
+            return Ok(None);
         };
         let (n, o) = (point(normal), point(origin));
         let jet = |t: Ivl| -> Result<Option<Jet>> {
@@ -551,7 +595,6 @@ impl Net {
         // Newton's start: the row's point nearest the plane, on a grid along it (the point
         // nearest the vertex can be where the row is tangent to the plane, a tangent edge's,
         // where Newton's step is not defined)
-        let (r0, r1) = if along_u { (u0, u1) } else { (v0, v1) };
         let mut start: Option<(f64, f64)> = None;
         for i in 0..=GUESS_GRID {
             let t = r0 + (r1 - r0) * f64::from(i) / f64::from(GUESS_GRID);
@@ -720,6 +763,7 @@ fn newton<const N: usize>(
     inverse: &Inverse<N>,
 ) -> Result<Option<[f64; N]>> {
     let mut y = start;
+    let mut last = f64::INFINITY;
     for _ in 0..NEWTON_STEPS {
         let Some((f, j)) = at(y)? else {
             return Ok(None);
@@ -727,20 +771,26 @@ fn newton<const N: usize>(
         let Some(c) = inverse(&j) else {
             return Ok(None);
         };
-        let mut settled = true;
-        for (yi, row) in y.iter_mut().zip(&c) {
+        let mut size = 0.0_f64;
+        let mut next = y;
+        for (yi, row) in next.iter_mut().zip(&c) {
             let step: f64 = row.iter().zip(&f).map(|(r, x)| r * x).sum();
             if !step.is_finite() {
                 return Ok(None);
             }
-            settled &= step.abs() <= 1e-14 * (1.0 + yi.abs());
+            size = size.max(step.abs());
             *yi -= step;
         }
-        if settled {
+        // settled: the step no longer shrinks, at the rounding of `F` wherever the part
+        // lies (no stop relative to `y`, which a part far from the origin never meets)
+        if size == 0.0 || size >= last {
             return Ok(Some(y));
         }
+        y = next;
+        last = size;
     }
-    Ok(None)
+    // a start only: Krawczyk's box decides whether a root is near
+    Ok(y.iter().all(|x| x.is_finite()).then_some(y))
 }
 
 /// The inverse (rows) of a 3 × 3 matrix given by columns.
@@ -1050,6 +1100,48 @@ mod tests {
         Surface::from(BSplineSurface::from_gw_nurb(&patch))
     }
 
+    /// A saddle as a bilinear net: corners (0, 0, 0), (10, 0, 0), (0, 10, −5), (10, 10, 5),
+    /// so `z = v (10 u − 5)`: the plane z = 0 holds its row v = 0 (y = 0) and its line
+    /// u = ½ (x = 5).
+    fn saddle() -> Surface {
+        let row =
+            |x: f64, z1: f64| vec![CPoint::new(x, 0.0, 0.0, NOW), CPoint::new(x, 10.0, z1, NOW)];
+        let patch = Patch::new(
+            vec![row(0.0, -5.0), row(10.0, 5.0)],
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        Surface::from(BSplineSurface::from_gw_nurb(&patch))
+    }
+
+    /// A boundary row on a plane is the corner's only where it passes the corner's vertex:
+    /// the saddle's row v = 0 lies on z = 0, which also holds its line x = 5; at a vertex on
+    /// that line, (5, 8, 0), the row is no curve of the corner and is not taken, at a vertex
+    /// on the row, (3, 0, 0) or its end (0, 0, 0), it is (`BoxSide::VMin`, 2).
+    #[test]
+    fn a_row_on_the_plane_is_the_corners_only_through_its_vertex() {
+        let k = Kernel::default();
+        let n = net(&k, &saddle());
+        let plane = super::super::Tangent {
+            point: Vec3::ZERO,
+            normal: Vec3::Z,
+            raw: Vec3::Z,
+        };
+        assert!(n
+            .rows_through(plane, 1e-6, Vec3::new(5.0, 8.0, 0.0))
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            n.rows_through(plane, 1e-6, Vec3::new(3.0, 0.0, 0.0))
+                .unwrap(),
+            vec![2]
+        );
+        assert_eq!(n.rows_through(plane, 1e-6, Vec3::ZERO).unwrap(), vec![2]);
+    }
+
     /// Newton's start for Krawczyk's box settles wherever the part lies: a quarter cylinder
     /// of radius 0.002 about (1000, 1000), z 1000 to 1000.003, whose points round at about
     /// 1e-13, while its parameters move 500 per unit length. The line through its axis at
@@ -1079,7 +1171,10 @@ mod tests {
         let tau = line_meets(&n, (point(x0), point(u)), (x0, u), &guess)
             .unwrap()
             .unwrap();
-        assert!(tau.lo <= r && r <= tau.hi && tau.hi - tau.lo < 1e-9, "{tau:?}");
+        assert!(
+            tau.lo <= r && r <= tau.hi && tau.hi - tau.lo < 1e-9,
+            "{tau:?}"
+        );
     }
 
     /// The plane x = `x` as a bilinear net over y in [−5, 5], z in [−5, 5].
@@ -1105,7 +1200,7 @@ mod tests {
     }
 
     /// Past the top (v = 1) the quarter cylinder runs on along its rulings, on the cylinder:
-    /// `H + s′ H_v` with `H_v` the ruling (its weight's rate 0), so v = 1.25 is z = 3.75 at
+    /// `G + (v − 1) G_v` with `G_v` the ruling, so v = 1.25 is z = 3.75 at
     /// radius 2. Past the arc's end (u = 1, at (0, 2)) it is the tangent line along −x there,
     /// y = 2, and past both its corner is their plane y = 2, above z = 3. Each point is
     /// enclosed tightly about its closed form.
@@ -1158,8 +1253,8 @@ mod tests {
     /// the executive builds: the quarter cylinder extended `Ruled` by 1.5 on every side
     /// (`extended_sides_keeping_parameters`, as the offset executive asks), its points past
     /// the top, past the arc's end and past both lie on the model's extension within
-    /// rounding, though the two are on different parameters past the box (`s′ = s / (1 + s
-    /// μ)`).
+    /// rounding (the rows end in one weight ratio, so the two agree as surfaces and
+    /// parameters).
     #[test]
     fn the_extension_model_is_the_ruled_extension_the_executive_builds() {
         use crate::surface::extend::Continuity;
