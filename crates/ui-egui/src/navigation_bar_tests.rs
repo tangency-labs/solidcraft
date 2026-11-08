@@ -46,6 +46,7 @@ fn slot_catalogue_uses_registered_commands_and_existing_icons() {
 
 #[test]
 fn catalogue_slot_descriptions_explain_slots_without_settings_jargon() {
+    crate::i18n::install();
     for slot in CATALOGUE {
         for language in ["en", "ja", "zh"] {
             let description = solidcraft_ui_text::Locale::for_language(language).text(slot.description);

@@ -72,10 +72,10 @@ pub const TABLE: &[(&str, Class)] = &[
     ("ui-registry", Class::Shared),
     // message catalogs' machinery and bidirectional text: lookup, formatting, language choice (#13290)
     ("ui-text", Class::Shared),
-    // the token contract UI components draw with: light and dark tokens, colour vision, tab accents, theme state (#13304)
-    ("theme", Class::Shared),
     // the MCP server machinery: JSON-RPC over stdio, lifecycle, tool schemas and argument checks; apps register their tools (#12947)
     ("mcp-server", Class::Shared),
+    // the token contract UI components draw with: light and dark tokens, colour vision, tab accents, theme state (#13304)
+    ("theme", Class::Shared),
     // the control channel: the per-launch token and its files, what a request still running does (#12946)
     ("control", Class::Shared),
     // the window's own control requests over egui: ui.screenshot and ui.resize (#12946)
