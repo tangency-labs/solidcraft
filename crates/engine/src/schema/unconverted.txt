@@ -2,11 +2,6 @@
 # (coverage_tests.rs). This list only shrinks: when you give a command its contract and output
 # type, remove its line. Never add one: a new command comes with both schemas. Sorted, one id
 # per line.
-component.capture_position
-component.move_bodies
-component.move_sketches
-component.paste_new
-component.revert_position
 doc.open
 doc.recover
 doc.recovery_discard
@@ -20,14 +15,6 @@ file.save
 file.save_as
 file.save_mesh
 file.slicers
-joint.cam
-joint.gear
-joint.motion_link
-joint.origin
-joint.rack_pinion
-joint.reach
-joint.rigid_group
-joint.screw
 joint.sweep
 mesh.convert
 motion.export_animation
@@ -36,11 +23,6 @@ motion.plot
 motion.trace
 motion.trace.edit
 motion.trace.keep
-occurrence.copy
-occurrence.drag
-occurrence.ground
-occurrence.move
-occurrence.properties
 render.aging.describe
 render.backends
 render.cancel
@@ -55,20 +37,8 @@ render.status
 select.clear
 select.set
 sheet.export_dxf
-sketch.chain
-sketch.construction
-sketch.create
-sketch.delete
 sketch.dimension
-sketch.dimension_text
-sketch.drag
-sketch.drag_end
 sketch.draw.dimensioned
-sketch.export_dxf
-sketch.insert_dxf
-sketch.insert_svg
-sketch.move_point
-sketch.options
 sketch.polygon.circumscribed
 sketch.polygon.edge
 sketch.polygon.inscribed
@@ -78,7 +48,6 @@ sketch.rectangle.three_point
 sketch.rectangle.two_point
 sketch.slot.center_to_center
 sketch.slot.overall
-sketch.solve
 solid.align
 solid.chamfer
 solid.coil
@@ -116,11 +85,3 @@ surface.thicken
 surface.trim
 surface.unstitch
 surface.untrim
-timeline.group
-timeline.move_many
-timeline.move_to_group
-timeline.redefine
-timeline.rename_group
-timeline.reorder
-timeline.reorder_many
-timeline.ungroup

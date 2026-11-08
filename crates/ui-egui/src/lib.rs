@@ -541,6 +541,8 @@ pub(crate) enum EscapeOwner {
 pub struct SolveApp {
     /// Common panel foundation, internal opt-in; stays on the app across document tabs.
     pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
+    /// Current immutable geometry while production content borrows the app.
+    pub(crate) panel_content_frame: Option<panel_runtime::HostFrame>,
     pub(crate) panel_layout_preferences: panel_runtime::PanelLayoutPreferences,
     pub blur: blur::State,
     pub(crate) blur_session: blur::Session,
@@ -853,6 +855,7 @@ impl SolveApp {
         let (shot_tx, shot_rx) = std::sync::mpsc::channel();
         let mut app = SolveApp {
             panel_runtime: None,
+            panel_content_frame: None,
             panel_layout_preferences: panel_runtime::PanelLayoutPreferences::default(),
             viewport_status: Default::default(),
             blur: Default::default(),
@@ -3506,6 +3509,7 @@ impl SolveApp {
         // The status bar first: it spans the window's width below History and the side panels.
         if self.universal_panel_host_enabled() {
             self.universal_workspace_ui(ui);
+            semantic_content::finalize(self, ui.ctx());
             // Browser-owned editors retain their independent legacy windows,
             // drafts and capture questions while the Browser host is suppressed.
             browser::editors(self, ui);

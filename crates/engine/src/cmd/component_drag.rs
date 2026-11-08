@@ -4,11 +4,12 @@
 //! (`joint.reach` moves those as far as their joints allow). A chain of joints joined to nothing
 //! fixed moves as one, so its joints stay as they are.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_doc::{mat_inverse, mat_mul};
 
 use super::{move_vector, occurrence, occurrence_path, translation, valid_position};
 use crate::params::bad;
+use crate::schema::component::DragResult;
 use crate::{EngineError, Result, Session};
 
 #[cfg(test)]
@@ -158,5 +159,12 @@ pub(super) fn drag(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let continuous = p.get("continuous").and_then(Value::as_bool).unwrap_or(false);
-    Ok(json!({"occurrence": path.last(), "path": path, "moved": moved, "translate": [t.x, t.y, t.z], "continuous": continuous}))
+    super::reply(DragResult {
+        occurrence: path.last().copied().unwrap_or_default(),
+        path,
+        moved,
+        translate: [t.x, t.y, t.z],
+        continuous,
+        param_warnings: Vec::new(),
+    })
 }

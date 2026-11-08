@@ -202,6 +202,16 @@ pub fn effective_language(preference: &str) -> &'static str {
     Locale::for_language(preference).0.id
 }
 
+/// Interface direction follows the selected catalog, including English fallback.
+/// Message contents and document coordinates never determine workspace direction.
+pub(crate) fn panel_direction(preference: &str) -> solidcraft_engine::panels::Direction {
+    use solidcraft_engine::panels::Direction;
+    match effective_language(preference) {
+        "ar" | "he" => Direction::Rtl,
+        _ => Direction::Ltr,
+    }
+}
+
 /// Immutable locale reference. Catalogs parse once; lookups are logarithmic.
 #[derive(Clone, Copy)]
 pub struct Locale(&'static Catalog);
@@ -468,6 +478,20 @@ pub fn tr_engine_error(error: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn panel_direction_follows_effective_catalog_including_missing_message_fallback() {
+        use solidcraft_engine::panels::Direction;
+        for language in ["ar", "he"] {
+            assert_eq!(super::panel_direction(language), Direction::Rtl);
+            // An untranslated message may be English without making the UI LTR.
+            assert_eq!(super::Locale::for_language(language).text("unregistered.caption"), "unregistered.caption");
+        }
+        for language in ["en", "de", "ja", "unknown"] {
+            assert_eq!(super::panel_direction(language), Direction::Ltr);
+        }
+        assert_eq!(super::panel_direction(super::SYSTEM), super::panel_direction(super::system_language()));
+    }
+
     /// The system's locale tags pick a catalog: exact tag, then base language, then English (#10138).
     #[test]
     fn system_tags_match_the_catalog_exact_then_base_then_english() {
