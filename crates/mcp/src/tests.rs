@@ -3916,3 +3916,95 @@ fn compact_output_follows_the_apps_preference() {
     let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true });
     assert!(inspect_design_is_compact(&mut s));
 }
+
+#[test]
+fn request_envelope_rejects_malformed_messages_before_backend_calls() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    struct CountingBackend(Rc<Cell<usize>>);
+    impl crate::Backend for CountingBackend {
+        fn call(&mut self, _: &str, _: Value) -> Result<Value, String> {
+            self.0.set(self.0.get() + 1);
+            Ok(json!({}))
+        }
+        fn has_ui(&self) -> bool {
+            false
+        }
+        fn describe(&self) -> String {
+            "counting test backend".into()
+        }
+    }
+
+    let calls = Rc::new(Cell::new(0));
+    let mut s = Server::new(Box::new(CountingBackend(calls.clone())));
+    let request = json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+        "params":{"name":"execute","arguments":{"command":"file.new","params":{}}}});
+    let mut malformed = Vec::new();
+    for version in [Value::Null, json!("1.0"), json!(2.0), json!(false)] {
+        let mut message = request.clone();
+        message["jsonrpc"] = version;
+        malformed.push(message);
+    }
+    let mut missing_version = request.clone();
+    missing_version.as_object_mut().unwrap().remove("jsonrpc");
+    malformed.push(missing_version);
+    for id in [json!(true), json!(false), Value::Null, json!(1.5), json!([]), json!({"id":1})] {
+        let mut message = request.clone();
+        message["id"] = id;
+        malformed.push(message);
+    }
+    for message in malformed {
+        let reply = s.handle(message.clone()).expect("invalid request reply");
+        assert_eq!(reply["error"]["code"], -32600, "{message}: {reply}");
+        assert_eq!(reply["id"], Value::Null, "{message}: {reply}");
+        assert!(reply.get("result").is_none(), "{message}: {reply}");
+        assert_eq!(calls.get(), 0, "malformed request reached the backend: {message}");
+    }
+    let valid = s.handle(request).unwrap();
+    assert!(valid.get("result").is_some());
+    assert_eq!(calls.get(), 1, "the same tool call with a valid envelope reaches the backend");
+}
+
+#[test]
+fn request_envelope_preserves_valid_ids_and_notifications() {
+    let mut s = server();
+    for id in [json!(0), json!(-1), json!(u64::MAX), json!("request-1")] {
+        let reply = s.handle(json!({"jsonrpc":"2.0","id":id,"method":"ping"})).unwrap();
+        assert_eq!(reply, json!({"jsonrpc":"2.0","id":id,"result":{}}));
+    }
+    assert!(s.handle(json!({"jsonrpc":"2.0","method":"notifications/initialized"})).is_none());
+    assert!(s.is_initialized());
+    assert!(s.handle(json!({"jsonrpc":"2.0","method":"unknown/notification"})).is_none());
+    assert!(s.handle(json!({"jsonrpc":"2.0","id":1,"result":{}})).is_none());
+}
+
+#[test]
+fn request_envelope_rejects_malformed_initialization_notifications() {
+    for version in [Value::Null, json!("1.0"), json!(2.0)] {
+        let mut s = server();
+        let reply = s.handle(json!({"jsonrpc":version,"method":"notifications/initialized"})).unwrap();
+        assert_eq!(reply["error"]["code"], -32600);
+        assert!(!s.is_initialized());
+    }
+}
+
+#[test]
+fn request_envelope_batch_continues_after_malformed_messages() {
+    let mut s = server();
+    let batch = json!([
+        {"jsonrpc":"1.0","id":1,"method":"ping"},
+        {"jsonrpc":"2.0","id":true,"method":"ping"},
+        {"jsonrpc":"2.0","method":"notifications/initialized"},
+        {"jsonrpc":"2.0","id":"next","method":"ping"}
+    ]);
+    let reply: Value = serde_json::from_str(&s.handle_line(&batch.to_string()).unwrap()).unwrap();
+    let replies = reply.as_array().unwrap();
+    assert_eq!(replies.len(), 3);
+    for response in &replies[..2] {
+        assert_eq!(response["error"]["code"], -32600);
+        assert_eq!(response["id"], Value::Null);
+    }
+    assert_eq!(replies[2], json!({"jsonrpc":"2.0","id":"next","result":{}}));
+    assert!(s.is_initialized());
+}

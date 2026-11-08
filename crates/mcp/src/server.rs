@@ -217,6 +217,13 @@ impl Server {
             }
             return Some(error(id.unwrap_or(Value::Null), INVALID_REQUEST, "missing `method`"));
         };
+        // Validate the envelope before a request can run a tool or initialize the session.
+        if o.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+            return Some(error(Value::Null, INVALID_REQUEST, "`jsonrpc` must be `2.0`"));
+        }
+        if id.as_ref().is_some_and(|id| !id.is_string() && !id.is_i64() && !id.is_u64()) {
+            return Some(error(Value::Null, INVALID_REQUEST, "`id` must be a string or integer"));
+        }
         let params = o.get("params").cloned().unwrap_or(Value::Null);
         let Some(id) = id else {
             if method == "notifications/initialized" {
