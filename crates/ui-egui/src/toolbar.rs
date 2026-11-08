@@ -2937,7 +2937,7 @@ fn dropdown_row(
         ui.label(solidcraft_ui_text::tr_label(tip));
     });
     dropdown_tip(ui, menu, &more, |ui| {
-        ui.label(crate::i18n::tr_label("More: pin, keyboard shortcut, toolbar"));
+        ui.label(solidcraft_ui_text::tr_label("More: pin, keyboard shortcut, toolbar"));
     });
     if more.clicked() {
         return RowAction::Menu(mr.left_bottom());
