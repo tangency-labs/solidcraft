@@ -1858,7 +1858,7 @@ mod tests {
     /// gen0091 of the difftest unit: a pyramid's side given the plane through its edges and
     /// the side across its apex from it moved out. The four sides no longer meet in one point:
     /// the apex splits into two vertices and a new edge between the two sides the moved one
-    /// parts (with the four-face split on). The new vertex is next to the apex, a pole of the
+    /// parts on the default split path. The new vertex is next to the apex, a pole of the
     /// fourth side's B-spline patch, and on no extension of it (a side's extension narrows to
     /// nothing at the pole): the side, which lies on a plane, continues as that plane. The
     /// body is the convex solid of the five planes, a sound manifold of nine edges and six
@@ -1867,9 +1867,6 @@ mod tests {
     fn a_pyramid_side_moved_past_its_apex_splits_it_on_the_planes_beside() {
         use crate::topology::brep::validation::{check_brep, CheckLevel};
         let mut k = Kernel::default();
-        k.fixes.offset_closes_loop_gaps = true;
-        k.fixes.offset_splits_corner_vertices = true;
-        k.fixes.offset_four_face_vertex_split = true;
         let mut b = bicubic_pyramid(&mut k);
         let all = bp1::faces(&b, None).unwrap();
         // the planes of the faces, each as (point, outward unit normal)
