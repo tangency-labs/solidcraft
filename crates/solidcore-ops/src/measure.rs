@@ -1,14 +1,15 @@
 //! Measures and queries: mass properties, area, the exact box, where a point lies, the samples of
-//! the edge/face gap, the manifold test and the solid count, and the distances and normals an
-//! application's picks compare. Every number is the kernel's; ops converts and compares.
+//! the edge/face gap, the manifold test and the solid count, the distances and normals an
+//! application's picks compare, and each face's area, centroid and plane normal and each edge's
+//! length and middle. Every number is the kernel's; ops converts and compares.
 
 use solidcore::error::EntityRef;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::tol::{brep_zone_tol_3d, SmallTopoType};
 use solidcore::intersect::point_class::PointClassType;
 use solidcore::mass::integrator::properties::{
-    brep_area_about, brep_mass_properties_estimated, region_material, AreaAbout,
-    MassPropertyRequest, PropertyAttributes,
+    brep_area_about, brep_mass_properties_estimated, edge_length, face_area, face_centroid,
+    region_material, AreaAbout, MassPropertyRequest, PropertyAttributes,
 };
 use solidcore::query::api_queries::{
     self as q, brep_bounding_box, brep_is_manifold_solid, brep_material_census,
@@ -16,9 +17,11 @@ use solidcore::query::api_queries::{
 };
 use solidcore::query::brep::BrepClassifier;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
+use solidcore::topology::{edge, face};
 use solidcore::topology::{Brep, FaceId, FaceuseId, RegionId};
 use solidcore::{Point3, Vec3};
 
+use crate::blend::middle;
 use crate::body::Body;
 use crate::error::status;
 use crate::order::{self, Order};
@@ -28,6 +31,7 @@ use crate::{Error, Result};
 impl Answer for Vec<q::EdgeFaceGapSample> {}
 impl Answer for Distance {}
 impl Answer for solidcore::geom::extent3d::Extent3d {}
+impl Answer for [f64; 3] {}
 
 fn array(v: Vec3) -> [f64; 3] {
     [v.x, v.y, v.z]
@@ -63,20 +67,17 @@ pub struct MassPropertiesEstimate {
     pub moments: [f64; 3],
     /// Iyz, Izx, Ixy about the centroid: ∫yz, ∫zx, ∫xy dV relative to it.
     pub products: [f64; 3],
+    /// The inertia tensor about the centroid (row-major), the kernel's: whose off-diagonal
+    /// terms are the negated products.
+    pub tensor: [[f64; 3]; 3],
 }
 
 impl MassPropertiesEstimate {
     /// The inertia tensor about the centroid (row-major), whose off-diagonal terms are the
     /// negated products.
     #[must_use]
-    #[allow(
-        clippy::float_arithmetic,
-        reason = "negating the products is geometry; temporary until the kernel returns the tensor (#3143)"
-    )]
     pub fn inertia_tensor(&self) -> [[f64; 3]; 3] {
-        let [ixx, iyy, izz] = self.moments;
-        let [iyz, izx, ixy] = self.products;
-        [[ixx, -ixy, -izx], [-ixy, iyy, -iyz], [-izx, -iyz, izz]]
+        self.tensor
     }
 }
 
@@ -142,6 +143,16 @@ pub struct EdgePoint {
     pub distance: f64,
 }
 
+/// A face's area and the centroid of that area ([`Body::face_centroid`]), from one
+/// integration. **Estimated, not proved** ([`MassPropertiesEstimate`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FaceCentroid {
+    /// The face's area.
+    pub area: f64,
+    /// The centroid of its area.
+    pub centroid: [f64; 3],
+}
+
 /// A unit normal with its proved bound: the exact unit normal is within `bound` of `value`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Normal {
@@ -202,6 +213,7 @@ impl Body {
                 centroid: array(r.centroid),
                 moments: array(r.inertia),
                 products: array(r.products),
+                tensor: r.inertia_tensor(),
             }))
         })?
     }
@@ -381,7 +393,7 @@ impl Body {
     pub fn face_normal_at_edge(&self, order: &Order, edge: usize, face: usize) -> Result<Normal> {
         let (e, f) = (order::edge(order, edge)?, order::face(order, face)?);
         let n = with_body("face_normal_at_edge", self, |k, b| {
-            if solidcore::topology::edge::edgeuse_of_face(b, e, Some(f))?.is_none() {
+            if edge::edgeuse_of_face(b, e, Some(f))?.is_none() {
                 return Ok(Err(Error::Argument));
             }
             let fu = match outer_faceuse(b, f)? {
@@ -394,6 +406,134 @@ impl Body {
             value: array(n.normal.value),
             bound: n.normal.bound,
         })
+    }
+
+    /// The area of record face `face` (`SmApiFaceComputeArea`) at `relative_accuracy`, as the
+    /// kernel's contract takes it (ops passes it on as given). **Estimated, not proved**
+    /// ([`MassPropertiesEstimate`]).
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces; [`Error::Status`]
+    /// `SM_ERR_INVALID_INPUT` for an accuracy the kernel refuses or an area that is not finite;
+    /// the kernel's error.
+    pub fn face_area(&self, order: &Order, face: usize, relative_accuracy: f64) -> Result<f64> {
+        let f = order::face(order, face)?;
+        let a = with_body("face_area", self, |k, b| {
+            Ok(face_area(k, b, f, relative_accuracy).map_err(status))
+        })??;
+        if !a.is_finite() {
+            return Err(Error::Status(crate::error::INVALID_INPUT));
+        }
+        Ok(a)
+    }
+
+    /// The area of record face `face` and the centroid of that area
+    /// (`SmApiFaceComputeCentroid`, one integration of the area and its first moments) at
+    /// `relative_accuracy`, as the kernel's contract takes it (ops passes it on as given).
+    /// **Estimated, not proved** ([`MassPropertiesEstimate`]).
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces; [`Error::Status`]
+    /// `SM_ERR_INVALID_INPUT` for an accuracy the kernel refuses, a face of no area, or a result
+    /// that is not finite; the kernel's error.
+    pub fn face_centroid(
+        &self,
+        order: &Order,
+        face: usize,
+        relative_accuracy: f64,
+    ) -> Result<FaceCentroid> {
+        let f = order::face(order, face)?;
+        let c = with_body("face_centroid", self, |k, b| {
+            Ok(face_centroid(k, b, f, relative_accuracy)
+                .map(|(area, centroid)| FaceCentroid {
+                    area,
+                    centroid: array(centroid),
+                })
+                .map_err(status))
+        })??;
+        if !c.area.is_finite() || !c.centroid.iter().all(|x| x.is_finite()) {
+            return Err(Error::Status(crate::error::INVALID_INPUT));
+        }
+        Ok(c)
+    }
+
+    /// The outward unit normal of record face `face` if the face is planar, with its proved
+    /// bound; `None` for a face that is not. Planar is the kernel's test of the face's surface
+    /// at the face's own tolerance (`SmSurface::IsPlanar`: a plane always is; another surface
+    /// when its control net's box is that flat). The normal is the one
+    /// [`Body::face_normal_at_edge`] gives at the first edge the kernel lists for the face: the
+    /// sense of its use that faces out of its material, or for a sheet its upward use.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces; [`Error::Unsupported`] for a planar face
+    /// with no edge, or one with material on both sides (no side of it faces out);
+    /// [`Error::UnsureRegion`] for a side the kernel is unsure is material; the kernel's error
+    /// (a face without a surface, a refused certification).
+    pub fn face_plane_normal(&self, order: &Order, face: usize) -> Result<Option<Normal>> {
+        let f = order::face(order, face)?;
+        let n = with_body("face_plane_normal", self, |k, b| {
+            let planar = {
+                let surface = face::surface(b, f)?
+                    .ok_or_else(|| solidcore::SolidError::null_pointer("ops::face_plane_normal"))?;
+                surface.is_planar(k, face::tolerance(b, f)?)?.is_planar
+            };
+            if !planar {
+                return Ok(Ok(None));
+            }
+            let Some(&e) = face::edges(b, f, None, false, None)?.first() else {
+                return Ok(Err(Error::Unsupported("a planar face with no edge")));
+            };
+            let fu = match outer_faceuse(b, f)? {
+                Ok(fu) => fu,
+                Err(e) => return Ok(Err(e)),
+            };
+            face_normal_at_edge(k, b, e, f, fu).map(|n| Ok(Some(n)))
+        })??;
+        Ok(n.map(|n| Normal {
+            value: array(n.normal.value),
+            bound: n.normal.bound,
+        }))
+    }
+
+    /// The length of record edge `edge` (`SmApiEdgeComputeLength`) at `relative_accuracy`, as
+    /// the kernel's contract takes it (ops passes it on as given).
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the edges; [`Error::Status`]
+    /// `SM_ERR_INVALID_INPUT` for a length that is not finite; the kernel's error (an edge
+    /// without a curve, an accuracy it refuses).
+    pub fn edge_length(&self, order: &Order, edge: usize, relative_accuracy: f64) -> Result<f64> {
+        let e = order::edge(order, edge)?;
+        let l = with_body("edge_length", self, |k, b| {
+            Ok(edge_length(k, b, e, relative_accuracy).map_err(status))
+        })??;
+        if !l.is_finite() {
+            return Err(Error::Status(crate::error::INVALID_INPUT));
+        }
+        Ok(l)
+    }
+
+    /// The point of record edge `edge`'s curve at the middle of the edge's parameter interval
+    /// (the parameter ops chooses; the point is the kernel's evaluation of the curve there).
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the edges; [`Error::Status`]
+    /// `SM_ERR_INVALID_INPUT` for a point that is not finite; the kernel's error (an edge
+    /// without a curve, an evaluation it refuses).
+    pub fn edge_middle(&self, order: &Order, edge: usize) -> Result<[f64; 3]> {
+        let e = order::edge(order, edge)?;
+        let p = with_body("edge_middle", self, |k, b| {
+            let interval = edge::interval(b, e)?;
+            let curve = edge::curve(b, e)?
+                .ok_or_else(|| solidcore::SolidError::null_pointer("ops::edge_middle"))?;
+            curve
+                .evaluate_point(k, middle(interval.min(), interval.max()))
+                .map(array)
+        })?;
+        if !p.iter().all(|x| x.is_finite()) {
+            return Err(Error::Status(crate::error::INVALID_INPUT));
+        }
+        Ok(p)
     }
 }
 
@@ -590,7 +730,7 @@ pub(crate) mod tests {
                 for f in g.face_list().to_vec() {
                     let x = solidcore::query::api_queries::face_bounding_box(k, &g, f, true)?;
                     if x.min().x > 2.0 && x.max().x < 8.0 {
-                        solidcore::topology::face::p1::swap_uv(k, &mut g, f)?;
+                        face::p1::swap_uv(k, &mut g, f)?;
                     }
                 }
                 g.refresh_cached_topology();
@@ -683,5 +823,199 @@ pub(crate) mod tests {
         }
         // the inner cube's 6 faces at their 4 edges each
         assert_eq!(refused, 24);
+    }
+
+    /// A box's faces and edges against their closed forms: each face's area is the product of
+    /// the box's other two sizes, its centroid the middle of those two and 0 or the size along
+    /// its own axis, its normal that axis, pointing away from the box; each edge's length is
+    /// one size, its middle half way along it.
+    #[test]
+    fn a_box_faces_and_edges_measure_their_closed_forms() {
+        all_fixes();
+        let size = [1.0, 2.0, 3.0];
+        let b = make_box([0.0, 0.0, 0.0], size).unwrap();
+        let o = kernel_order(&b);
+        assert_eq!(o.faces.len(), 6);
+        let mut total = 0.0;
+        for f in 0..o.faces.len() {
+            let a = b.face_area(&o, f, 1e-8).unwrap();
+            let c = b.face_centroid(&o, f, 1e-8).unwrap();
+            assert!((c.area - a).abs() <= 1e-12 * a, "{a} {c:?}");
+            let n = b
+                .face_plane_normal(&o, f)
+                .unwrap()
+                .expect("a box face is planar");
+            let axis = n.value.iter().position(|x| x.abs() > 0.5).unwrap();
+            assert!(
+                (n.value[axis].abs() - 1.0).abs() <= n.bound + 1e-15,
+                "{n:?}"
+            );
+            let [u, v] = [(axis + 1) % 3, (axis + 2) % 3];
+            assert!(
+                n.value[u].abs() <= n.bound && n.value[v].abs() <= n.bound,
+                "{n:?}"
+            );
+            assert!((a - size[u] * size[v]).abs() < 1e-12, "face {f}: {a}");
+            assert!((c.centroid[u] - 0.5 * size[u]).abs() < 1e-12, "{c:?}");
+            assert!((c.centroid[v] - 0.5 * size[v]).abs() < 1e-12, "{c:?}");
+            let at = c.centroid[axis];
+            let far = (at - size[axis]).abs() < 1e-12;
+            assert!(far || at.abs() < 1e-12, "{c:?}");
+            // outward: along +axis on the far face, -axis on the near one
+            assert_eq!(n.value[axis] > 0.0, far, "face {f}: {n:?} {c:?}");
+            total += a;
+        }
+        assert!((total - 22.0).abs() < 1e-12, "{total}");
+        let mut lengths = [0usize; 3];
+        for e in 0..o.edges.len() {
+            let l = b.edge_length(&o, e, 1e-8).unwrap();
+            let axis = size.iter().position(|s| (l - s).abs() < 1e-12).unwrap();
+            lengths[axis] += 1;
+            let m = b.edge_middle(&o, e).unwrap();
+            assert!(
+                (m[axis] - 0.5 * size[axis]).abs() < 1e-12,
+                "edge {e}: {m:?}"
+            );
+            for i in [(axis + 1) % 3, (axis + 2) % 3] {
+                assert!(
+                    m[i].abs() < 1e-12 || (m[i] - size[i]).abs() < 1e-12,
+                    "{m:?}"
+                );
+            }
+        }
+        assert_eq!(lengths, [4, 4, 4]);
+    }
+
+    /// A cylinder r 2, h 5 and a ball r 3: the side's area 2πrh and centroid on the axis at mid
+    /// height, a cap's area πr² and its normal ∓z, the rims' length 2πr with their middles on
+    /// the rim circles, a seam's length h; the ball's area 4πr², not planar.
+    #[test]
+    fn curved_faces_and_edges_measure_their_closed_forms() {
+        use std::f64::consts::PI;
+        all_fixes();
+        let (r, h) = (2.0, 5.0);
+        let b = crate::make_cylinder([0.0, 0.0, 0.0], r, h).unwrap();
+        let o = kernel_order(&b);
+        let rel = |x: f64, y: f64| (x - y).abs() <= 1e-7 * y.abs().max(1.0);
+        let (mut side, mut caps, mut sides) = (0.0, 0.0, 0);
+        for f in 0..o.faces.len() {
+            let c = b.face_centroid(&o, f, 1e-8).unwrap();
+            assert!(rel(b.face_area(&o, f, 1e-8).unwrap(), c.area), "{c:?}");
+            if let Some(n) = b.face_plane_normal(&o, f).unwrap() {
+                // a cap: on the axis at z = 0 (normal -z) or z = h (normal +z)
+                assert!(rel(c.area, PI * r * r), "{c:?}");
+                assert!(
+                    c.centroid[0].abs() < 1e-9 && c.centroid[1].abs() < 1e-9,
+                    "{c:?}"
+                );
+                let top = (c.centroid[2] - h).abs() < 1e-9;
+                assert!(top || c.centroid[2].abs() < 1e-9, "{c:?}");
+                let want = if top { 1.0 } else { -1.0 };
+                assert!((n.value[2] - want).abs() <= n.bound + 1e-15, "{n:?}");
+                caps += c.area;
+            } else {
+                sides += 1;
+                side += c.area;
+                if o.faces.len() == 3 {
+                    assert!(
+                        c.centroid[0].abs() < 1e-7 && c.centroid[1].abs() < 1e-7,
+                        "{c:?}"
+                    );
+                    assert!(rel(c.centroid[2], 0.5 * h), "{c:?}");
+                }
+            }
+        }
+        assert!(sides >= 1);
+        assert!(rel(side, 2.0 * PI * r * h), "{side}");
+        assert!(rel(caps, 2.0 * PI * r * r), "{caps}");
+        for e in 0..o.edges.len() {
+            let l = b.edge_length(&o, e, 1e-8).unwrap();
+            let m = b.edge_middle(&o, e).unwrap();
+            // every edge of the cylinder lies on its side: r from the axis
+            assert!(rel(m[0] * m[0] + m[1] * m[1], r * r), "edge {e}: {m:?}");
+            if rel(l, h) {
+                assert!(rel(m[2], 0.5 * h), "seam {e}: {m:?}");
+            } else {
+                assert!(l <= 2.0 * PI * r * (1.0 + 1e-7), "edge {e}: {l}");
+                assert!(
+                    m[2].abs() < 1e-9 || (m[2] - h).abs() < 1e-9,
+                    "rim {e}: {m:?}"
+                );
+            }
+        }
+        let ball = crate::make_sphere([0.0, 0.0, 0.0], 3.0).unwrap();
+        let o = kernel_order(&ball);
+        let mut area = 0.0;
+        for f in 0..o.faces.len() {
+            assert_eq!(ball.face_plane_normal(&o, f).unwrap(), None);
+            area += ball.face_area(&o, f, 1e-8).unwrap();
+        }
+        assert!(rel(area, 36.0 * PI), "{area}");
+    }
+
+    /// The partition of two merged boxes: its plane normal refused (no side faces out), as
+    /// [`Body::face_normal_at_edge`] refuses it, while the outer box's faces have theirs.
+    #[test]
+    fn a_partition_has_no_plane_normal() {
+        all_fixes();
+        let a = make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+        let c = make_box([3.0, 3.0, 3.0], [4.0, 4.0, 4.0]).unwrap();
+        session::run("merge", |k| {
+            let mut g = a.lock();
+            let x = std::mem::replace(&mut *g, Brep::new());
+            *g = solidcore::boolean::api_brep::boolean_merge(k, x, c.into_inner())?;
+            Ok(())
+        })
+        .unwrap();
+        let o = kernel_order(&a);
+        let (mut refused, mut normals) = (0, 0);
+        for f in 0..o.faces.len() {
+            match a.face_plane_normal(&o, f) {
+                Err(Error::Unsupported(_)) => refused += 1,
+                Ok(Some(_)) => normals += 1,
+                other => panic!("face {f}: {other:?}"),
+            }
+        }
+        assert_eq!((refused, normals), (6, 6));
+    }
+
+    /// Indices past the lists are the caller's error, not the kernel's.
+    #[test]
+    fn face_and_edge_measures_refuse_an_index_past_the_lists() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+        let o = kernel_order(&b);
+        assert_eq!(b.face_area(&o, 6, 1e-8), Err(Error::Argument));
+        assert_eq!(b.face_centroid(&o, 6, 1e-8), Err(Error::Argument));
+        assert_eq!(b.face_plane_normal(&o, 6), Err(Error::Argument));
+        assert_eq!(b.edge_length(&o, 12, 1e-8), Err(Error::Argument));
+        assert_eq!(b.edge_middle(&o, 12), Err(Error::Argument));
+    }
+
+    /// An L-block (the boxes [0,2]×[0,1]×[0,1] and [0,1]×[1,2]×[0,1]): volume 3, centroid
+    /// (5/6, 5/6, 1/2), ∫xy dV about it 7/4 − 3·(5/6)² = −1/3 and the other products 0, so
+    /// its tensor's xy terms are +1/3 (the negated product) and the rest of it off the diagonal 0.
+    #[test]
+    fn an_l_block_tensor_holds_its_negated_product() {
+        all_fixes();
+        let a = make_box([0.0, 0.0, 0.0], [2.0, 1.0, 1.0]).unwrap();
+        let c = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 1.0]).unwrap();
+        let l = crate::boolean::boolean(a, c, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let m = l.mass_properties(1e-8).unwrap();
+        assert!((m.volume - 3.0).abs() < 1e-9, "{m:?}");
+        assert!((m.products[2] + 1.0 / 3.0).abs() < 1e-8, "{m:?}");
+        let t = m.inertia_tensor();
+        assert!(
+            (t[0][1] - 1.0 / 3.0).abs() < 1e-8 && (t[1][0] - 1.0 / 3.0).abs() < 1e-8,
+            "{t:?}"
+        );
+        for (i, j) in [(0, 2), (2, 0), (1, 2), (2, 1)] {
+            assert!(t[i][j].abs() < 1e-8, "{t:?}");
+        }
+        for (i, row) in t.iter().enumerate() {
+            assert_eq!(row[i], m.moments[i], "{t:?}");
+        }
     }
 }

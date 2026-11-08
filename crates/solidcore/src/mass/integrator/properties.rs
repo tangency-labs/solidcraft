@@ -1123,6 +1123,16 @@ pub struct EstimatedMassProperties {
     pub products: Vec3,
 }
 
+impl EstimatedMassProperties {
+    /// The inertia tensor about the point the moments are taken about (row-major): the axial
+    /// inertias on the diagonal, the negated products off it.
+    #[must_use]
+    pub fn inertia_tensor(&self) -> [[f64; 3]; 3] {
+        let (i, p) = (self.inertia, self.products);
+        [[i.x, -p.z, -p.y], [-p.z, i.y, -p.x], [-p.y, -p.x, i.z]]
+    }
+}
+
 /// Mass properties as `request` asks (one implementation:
 /// [`brep_mass_properties`] is its `SmApiBrepComputeMassProperties` request). Integrated
 /// once about the bounding box's middle: volume and moments over the material regions
