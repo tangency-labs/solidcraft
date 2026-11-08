@@ -3131,12 +3131,6 @@ impl SurfaceSheet {
         }
     }
 
-    /// Open area of all perforation fields (mm²): what they take out of the sheet's faces.
-    pub fn perforated_area(&self) -> f64 {
-        let shown = self.shown();
-        shown.perforations.iter().map(|p| shown.perforation_holes(p).len() as f64 * std::f64::consts::PI * (p.diameter / 2.0).powi(2)).sum()
-    }
-
     /// `measured`, the B-rep's measure of this sheet's body, with the holes its perforation fields
     /// leave out of the body taken off where the sheet lies now (folded, or laid out flat): a
     /// cylinder through a flat panel, or bent with a bend made after its field (see

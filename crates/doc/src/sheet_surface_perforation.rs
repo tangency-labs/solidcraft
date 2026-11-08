@@ -4,7 +4,9 @@
 //! had when the field was made (see [`SurfaceSheet::perforation_holes`]). On a flat panel it is a
 //! cylinder through the thickness. A bend made after the field runs through it, as a press brake
 //! bends perforated stock, and the hole bends with it: its part in the bend is the bend's own map
-//! of that part of the flat, and the rest lies on the two panels.
+//! of that part of the flat, and the rest lies on the two panels. A hole beside a bend's end, level
+//! with its zone, is on a panel, and one on a tab a cut left of a zone rides flat with the tab's
+//! panel.
 //!
 //! Each part is integrated in the bend's coordinates: along the joint, across the zone and through
 //! the thickness. A bend's map is linear along the joint, and its volume grows linearly through
@@ -12,7 +14,7 @@
 //! is r cos θ where w = c + r sin θ, which leaves an analytic integrand; composite Gauss–Legendre
 //! takes it to round-off. Nothing is tessellated.
 
-use solidcore_record::{Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Region2, Vec2, Vec3};
 use solidcraft_develop::{Bent, Rigid2, Rigid3, Surface};
 use solidcraft_geom::bspline::GAUSS_8;
 use solidcraft_geom::inertia::{self, Tensor3};
@@ -38,8 +40,8 @@ const GAUSS_3: [(f64, f64); 3] = [(-0.774_596_669_241_483_4, 5.0 / 9.0), (0.0, 8
 const PANELS: usize = 8;
 
 /// Every hole of `sk`'s perforation fields as what it takes out of the body. Refused: a field's
-/// numbers that make no grid, a hole on a roll, a hole two bends run through, and one a bend's end
-/// runs through (not supported yet).
+/// numbers that make no grid, a hole on a roll, a hole two bends reach, and one a bend's end runs
+/// through (not supported yet).
 pub(crate) fn hole_masses(sk: &SurfaceSheet) -> Result<Vec<HoleMass>> {
     let invalid = || DocError::Invalid(format!("invalid perforation physical properties for `{}`", sk.body));
     let t = sk.thickness;
@@ -70,7 +72,22 @@ pub(crate) fn hole_masses(sk: &SurfaceSheet) -> Result<Vec<HoleMass>> {
     let dev = sk.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
     let fold = crate::sheet_surface_convert::fold_onto(&sk.sheet, &dev, &sk.places)?;
     let frames = crate::sheet_surface_cuts::frames(sk, &dev)?;
-    let bends: Vec<Zone> = dev.zones.iter().filter_map(|z| Zone::new(z, fold.bends.get(z.joint).copied().flatten()?)).collect();
+    let mut bends = Vec::with_capacity(dev.zones.len());
+    for z in &dev.zones {
+        let Some(bent) = fold.bends.get(z.joint).copied().flatten() else { continue };
+        // The pieces the cuts left of the zone held by one panel: each runs along that panel's
+        // tangent line, as the flat sorted them.
+        let mut tabs = Vec::new();
+        for tab in sk.bends.iter().filter(|b| b.joint == z.joint).flat_map(|b| &b.tabs) {
+            let panel = match (crate::sheet_surface::along(tab, z.near), crate::sheet_surface::along(tab, z.far)) {
+                (true, false) => z.panels[0],
+                (false, true) => z.panels[1],
+                _ => return Err(invalid()),
+            };
+            tabs.push((tab.clone(), panel));
+        }
+        bends.extend(Zone::new(z, bent, tabs));
+    }
     // Each panel's material in the flat, and the loose pieces with the panels they lie in.
     let material: Vec<(usize, Region2)> = dev
         .panels
@@ -91,20 +108,25 @@ pub(crate) fn hole_masses(sk: &SurfaceSheet) -> Result<Vec<HoleMass>> {
     };
     let mut out = Vec::with_capacity(holes.len());
     for (c, r) in holes {
-        let reached: Vec<&Zone> = bends.iter().filter(|z| z.reaches(c, r)).collect();
+        let reached: Vec<(&Zone, Reach)> = bends.iter().filter_map(|z| Some((z, z.reach(c, r)?))).collect();
         match reached.as_slice() {
             [] => {
                 let (i, _) = material.iter().find(|(_, g)| g.contains(c)).ok_or_else(invalid)?;
                 let (frame, flat) = panel(*i)?;
                 out.push(cylinder(&frame, flat.inverse().point(c), r, t));
             }
-            [zone] => {
+            // A tab is laid out with its panel and folds with it: the panel's chart carried on.
+            [(_, Reach::Tab(i))] => {
+                let (frame, flat) = panel(*i)?;
+                out.push(cylinder(&frame, flat.inverse().point(c), r, t));
+            }
+            [(zone, Reach::Bends)] => {
                 if !zone.holds_along(c, r) {
                     return Err(DocError::Invalid(format!("not supported yet: a perforation hole across the end of a bend of `{}`", sk.body)));
                 }
                 out.push(zone.bent_hole(c, r, t, panel(zone.panels[0])?, panel(zone.panels[1])?)?);
             }
-            _ => return Err(DocError::Invalid(format!("not supported yet: a perforation hole two bends run through on `{}`", sk.body))),
+            _ => return Err(DocError::Invalid(format!("not supported yet: a perforation hole two bends reach on `{}`", sk.body))),
         }
     }
     Ok(out)
@@ -133,8 +155,9 @@ fn axes(frame: &Rigid3) -> Tensor3 {
 
 /// A bend's zone in the flat with the bend in space: the zone's edge on its `a` panel's side (its
 /// start and the way along it), the way across toward the `b` panel, how wide the zone is across
-/// (the bend's allowance) and the radius that width wraps onto, the panels on its two sides, and
-/// the bend.
+/// (the bend's allowance) and the radius that width wraps onto, the panels on its two sides, the
+/// bend, the zone's region of the flat, and the tabs the cuts left of it with the panel each rides
+/// with.
 struct Zone {
     start: Vec2,
     along: Vec2,
@@ -144,10 +167,20 @@ struct Zone {
     neutral: f64,
     panels: [usize; 2],
     bent: Bent,
+    region: Region2,
+    tabs: Vec<(Region2, usize)>,
+}
+
+/// What a bend's zone is to a hole that reaches into it.
+enum Reach {
+    /// The zone bends the hole with it.
+    Bends,
+    /// The hole is on a tab of the zone, which lies flat with panel `.0`.
+    Tab(usize),
 }
 
 impl Zone {
-    fn new(z: &solidcraft_develop::Zone, bent: Bent) -> Option<Zone> {
+    fn new(z: &solidcraft_develop::Zone, bent: Bent, tabs: Vec<(Region2, usize)>) -> Option<Zone> {
         let start = z.near[0];
         let along = (z.near[1] - z.near[0]).normalized()?;
         let left = Vec2::new(-along.y, along.x);
@@ -160,7 +193,7 @@ impl Zone {
         // Along the joint, where both of the zone's edges run.
         let a = |p: Vec2| (p - start).dot(along);
         let span = (a(z.near[0]).max(a(z.far[0])), a(z.near[1]).min(a(z.far[1])));
-        Some(Zone { start, along, across, span, width, neutral, panels: z.panels, bent })
+        Some(Zone { start, along, across, span, width, neutral, panels: z.panels, bent, region: z.region.clone(), tabs })
     }
 
     /// A point of the flat as its distance along the zone's `a` edge and across toward its `b`
@@ -169,10 +202,16 @@ impl Zone {
         ((p - self.start).dot(self.along), (p - self.start).dot(self.across))
     }
 
-    /// Whether the hole of radius `r` round `c` reaches into the zone across it.
-    fn reaches(&self, c: Vec2, r: f64) -> bool {
-        let (_, w) = self.coords(c);
-        w + r > 0.0 && w - r < self.width
+    /// What the zone is to the hole of radius `r` round `c`: nothing when the hole keeps clear of
+    /// the zone's region, its ends included, as one beside an end of the bend, level with its zone,
+    /// does; the tab it is on when that is a tab of the zone; else the bend. (A hole lies in the
+    /// sheet's material, clear of its cuts, so the part of it in the zone's region is on the zone's
+    /// material: a piece that bends, or a tab.)
+    fn reach(&self, c: Vec2, r: f64) -> Option<Reach> {
+        if !overlaps(&self.region, c, r) {
+            return None;
+        }
+        Some(self.tabs.iter().find(|(tab, _)| overlaps(tab, c, r)).map_or(Reach::Bends, |(_, panel)| Reach::Tab(*panel)))
     }
 
     /// Whether the hole lies between the zone's ends, along the joint.
@@ -322,6 +361,19 @@ impl Sum {
         }
         Ok(HoleMass { volume: v, area: self.walls - self.faces, centroid: middle + shift, inertia })
     }
+}
+
+/// Whether the disk of radius `r` round `c` and `region` overlap. A loop of the region nearer `c`
+/// than `r`, found on its curves, runs through the disk. Otherwise the disk lies on one side of
+/// every loop, and the side `c` is on is read from chords within `r / 2` of the curves, which can't
+/// pass a point `r` away. (Touching is not overlapping.)
+fn overlaps(region: &Region2, c: Vec2, r: f64) -> bool {
+    let loops = || std::iter::once(&region.outer).chain(&region.holes);
+    if loops().flat_map(|l| &l.segs).any(|s| s.point_at(s.closest_param(c)).dist(c) < r) {
+        return true;
+    }
+    let inside = |l: &Loop2| l.polyline(r / 2.0).contains(c);
+    inside(&region.outer) && !region.holes.iter().any(inside)
 }
 
 /// Composite Gauss–Legendre on [`PANELS`] equal panels from `a` to `b`: each node and its weight.
