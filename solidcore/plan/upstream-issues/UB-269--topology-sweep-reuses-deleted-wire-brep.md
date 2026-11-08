@@ -1,0 +1,8 @@
+#### UB-269. `SmTopologySweep::DoSweep` (whole B-rep, repetitions): a repetition without wires sweeps the wire B-rep the previous union deleted
+- **Severity:** Crash / undefined behaviour
+- **Area:** Sweeps
+- **Location:** `source/SMLib/src/SmTopologySweep.cpp:661` (`pWireBrep`, declared outside the repetition loop), `:891` (assigned only when the repetition finds wire edges or shell vertices), `:1394`-`:1425` (`if (pWireBrep != NULL)`: nested `DoSweep(pWireBrep, ...)`, then `SmMerge(..., pBrepToSweep, pWireBrep, ...).ManifoldBoolean(SM_BO_UNION, ...)`, which deletes `pWireBrep`; the pointer is never reset).
+- **What happens:** after a repetition that swept wire edges or shell vertices, `ManifoldBoolean` deletes `pWireBrep` but the pointer keeps its value. A later repetition that finds no wire edges or shell vertices (they were all swept into faces and edges) skips the assignment at `:891` and reaches `:1394` with the dangling pointer: `GetWireEdges`, `DoSweep` and a second `ManifoldBoolean` on freed memory.
+- **Trigger:** a whole-B-rep `DoSweep` (all target arrays NULL) with `SetRepetitions(n)`, `n >= 2`, on a body whose wire edges and shell vertices are all consumed before the last repetition, e.g. a lone wire edge swept twice.
+- **How found:** `sweep.topology_sweep` difftest case `nm_wire_linear_z_two_reps_ub269` (`sc_sweep_topology_sweep_body` input `[4,1,0,0,10,0,0,0,0,0,0,0,2,0,0]`: a wire edge (10,0,0)-(15,2,0) translated by (0,0,10) twice).
+- **Confirmed:** yes, on the C++ reference (Ubuntu x86_64 prebuilt, glibc): the child process crashes in 200/200 fresh processes. The Rust port clears the handle after the union. The difftest FFI guard refuses these inputs.

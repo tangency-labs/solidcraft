@@ -1,10 +1,8 @@
 //! Navigation chrome and measurements shared by the viewport and Preferences editor.
-use crate::{
-    icons,
-    navigation_bar::{Idle, Kind, Size},
-    theme::Tokens,
-};
+use crate::icons;
 use egui::{Rect, Response, Sense, Ui, pos2, vec2};
+use serde::{Deserialize, Serialize};
+use solidcraft_theme::Tokens;
 
 pub(crate) const NAV_BORDER: f32 = 1.0;
 pub(crate) const NAV_PADDING: f32 = 3.0;
@@ -41,6 +39,48 @@ pub(crate) const NAV_FADE_SECONDS: f32 = 0.12;
 pub(crate) const NAV_TOOLTIP_DELAY: f64 = 0.8;
 pub(crate) const NAV_TOOLTIP_KEY_LINE_HEIGHT: f32 = 15.0;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NavigationKind {
+    Action,
+    Tool,
+    Toggle,
+    Menu,
+    Separator,
+}
+
+/// The edge of the 3D view the bar sits on (#8183): the bottom, or the top, under the ribbon.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigationEdge {
+    #[default]
+    Bottom,
+    Top,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigationSize {
+    Compact,
+    #[default]
+    Regular,
+}
+
+impl NavigationSize {
+    // Logical points: egui's UI zoom applies the preference's scale to these dimensions.
+    pub(crate) fn points(self) -> f32 {
+        NavigationMetrics::for_size(self).button
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigationIdle {
+    Always,
+    #[default]
+    Fade,
+    Hide,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct NavigationMetrics {
     pub button: f32,
@@ -49,10 +89,10 @@ pub(crate) struct NavigationMetrics {
     pub button_radius: u8,
 }
 impl NavigationMetrics {
-    pub(crate) fn for_size(size: Size) -> Self {
+    pub(crate) fn for_size(size: NavigationSize) -> Self {
         match size {
-            Size::Regular => Self { button: 32.0, icon: 18.0, radius: 10, button_radius: 7 },
-            Size::Compact => Self { button: 26.0, icon: 16.0, radius: 9, button_radius: 6 },
+            NavigationSize::Regular => Self { button: 32.0, icon: 18.0, radius: 10, button_radius: 7 },
+            NavigationSize::Compact => Self { button: 26.0, icon: 16.0, radius: 9, button_radius: 6 },
         }
     }
     pub(crate) fn height(self) -> f32 {
@@ -65,7 +105,7 @@ pub(crate) struct NavigationButton<'a> {
     pub label: &'a str,
     pub icon: &'a str,
     pub selected: bool,
-    pub kind: Kind,
+    pub kind: NavigationKind,
     pub labels: bool,
     pub menu: bool,
 }
@@ -79,10 +119,10 @@ pub(crate) enum NavigationFill {
 }
 
 /// Actions never latch, and keyboard focus has its own outline rather than a fill.
-pub(crate) fn navigation_visual(kind: Kind, active: bool, hovered: bool, pressed: bool, keyboard_focus: bool) -> (NavigationFill, bool) {
-    let fill = if pressed || (active && kind == Kind::Menu) {
+pub(crate) fn navigation_visual(kind: NavigationKind, active: bool, hovered: bool, pressed: bool, keyboard_focus: bool) -> (NavigationFill, bool) {
+    let fill = if pressed || (active && kind == NavigationKind::Menu) {
         NavigationFill::Press
-    } else if active && matches!(kind, Kind::Tool | Kind::Toggle) {
+    } else if active && matches!(kind, NavigationKind::Tool | NavigationKind::Toggle) {
         NavigationFill::Active
     } else if hovered {
         NavigationFill::Hover
@@ -108,18 +148,18 @@ pub(crate) fn navigation_ink(t: &Tokens, fill: NavigationFill) -> egui::Color32 
     if fill != NavigationFill::Active {
         return t.form_ink;
     }
-    if crate::theme::contrast_ratio(t.form_primary, t.selected_bg) >= NAV_ACTIVE_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
+    if solidcraft_theme::contrast_ratio(t.form_primary, t.selected_bg) >= NAV_ACTIVE_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
 }
 
 /// WCAG small-text contrast for an active slot's label on its selected fill.
 pub(crate) const NAV_ACTIVE_MIN_CONTRAST: f64 = 4.5;
 
-pub(crate) fn navigation_opacity(idle: Idle, active: bool) -> f32 {
+pub(crate) fn navigation_opacity(idle: NavigationIdle, active: bool) -> f32 {
     match idle {
         _ if active => 1.0,
-        Idle::Always => 1.0,
-        Idle::Fade => NAV_IDLE_OPACITY,
-        Idle::Hide => 0.0,
+        NavigationIdle::Always => 1.0,
+        NavigationIdle::Fade => NAV_IDLE_OPACITY,
+        NavigationIdle::Hide => 0.0,
     }
 }
 
@@ -129,8 +169,11 @@ pub(crate) fn navigation_button(ui: &mut Ui, rect: Rect, button: NavigationButto
 
 pub(crate) fn navigation_button_editable(ui: &mut Ui, rect: Rect, button: NavigationButton<'_>, editing: bool) -> Response {
     let t = Tokens::get();
-    let metrics =
-        NavigationMetrics::for_size(if rect.height() < NavigationMetrics::for_size(Size::Regular).button { Size::Compact } else { Size::Regular });
+    let metrics = NavigationMetrics::for_size(if rect.height() < NavigationMetrics::for_size(NavigationSize::Regular).button {
+        NavigationSize::Compact
+    } else {
+        NavigationSize::Regular
+    });
     let response = ui.interact(rect, ui.make_persistent_id(("nav_slot", button.id)), if editing { Sense::click_and_drag() } else { Sense::click() });
     let pressed = response.is_pointer_button_down_on();
     if pressed || response.clicked_by(egui::PointerButton::Primary) {
@@ -191,8 +234,11 @@ pub(crate) fn navigation_separator(ui: &Ui, rect: Rect) {
 
 pub(crate) fn navigation_edit_outline(ui: &Ui, rect: Rect, hidden: bool, selected: bool) {
     let t = Tokens::get();
-    let metrics =
-        NavigationMetrics::for_size(if rect.height() < NavigationMetrics::for_size(Size::Regular).button { Size::Compact } else { Size::Regular });
+    let metrics = NavigationMetrics::for_size(if rect.height() < NavigationMetrics::for_size(NavigationSize::Regular).button {
+        NavigationSize::Compact
+    } else {
+        NavigationSize::Regular
+    });
     let mut painter = ui.painter().clone();
     if hidden {
         painter.multiply_opacity(NAV_HIDDEN_OPACITY);
@@ -219,7 +265,7 @@ pub(crate) fn navigation_edit_outline(ui: &Ui, rect: Rect, hidden: bool, selecte
     }
 }
 
-pub(crate) fn navigation_surface(ui: &Ui, rect: Rect, size: Size, editing: bool) {
+pub(crate) fn navigation_surface(ui: &Ui, rect: Rect, size: NavigationSize, editing: bool) {
     let t = Tokens::get();
     let frame = super::Container::new(ui.ctx(), super::Surface::Navigation)
         .frame(ui.ctx(), t.dialog_body, crate::frame::Side::Left)
@@ -235,13 +281,13 @@ mod active_ink_tests {
 
     #[test]
     fn active_navigation_slots_stay_readable_in_every_built_in_theme() {
-        let mut themes = vec![("Dark", crate::theme::Tokens::dark()), ("Light", crate::theme::Tokens::light())];
+        let mut themes = vec![("Dark", solidcraft_theme::Tokens::dark()), ("Light", solidcraft_theme::Tokens::light())];
         themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
         let mut failures = Vec::new();
         for (name, tokens) in themes {
             let Some(fill) = navigation_fill(&tokens, NavigationFill::Active) else { continue };
             let ink = navigation_ink(&tokens, NavigationFill::Active);
-            let ratio = crate::theme::contrast_ratio(ink, fill);
+            let ratio = solidcraft_theme::contrast_ratio(ink, fill);
             if ratio < 3.0 {
                 failures.push(format!("{name}: {ratio:.2}:1 ({ink:?} on {fill:?})"));
             }

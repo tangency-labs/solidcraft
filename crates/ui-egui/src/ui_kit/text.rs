@@ -1,6 +1,6 @@
 //! Text elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
-use crate::theme::Tokens;
 use egui::Ui;
+use solidcraft_theme::Tokens;
 
 /// Shorten `text` with an ellipsis in the middle so both ends stay visible (#9081).
 pub(crate) fn ellipsize_middle(ui: &Ui, text: &str, font: egui::FontId, max_width: f32) -> String {

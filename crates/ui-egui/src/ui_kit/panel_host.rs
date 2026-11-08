@@ -1,7 +1,7 @@
 //! Bounded universal workspace chrome. Placement and transactions are owned by
 //! panel_runtime; every outer surface here uses the common Container policy.
 use super::{Container, Surface};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 pub(crate) struct HostChrome<'a> {
     pub label: &'a str,
@@ -35,7 +35,7 @@ pub(crate) fn panel_host_surface<R>(
     palette: Option<&Tokens>,
     body: impl FnOnce(&mut egui::Ui, egui::Rect) -> R,
 ) -> R {
-    let _tokens = palette.map(|tokens| crate::theme::scoped_panel_tokens(*tokens));
+    let _tokens = palette.map(|tokens| solidcraft_theme::scoped_panel_tokens(*tokens));
     let container = panel_host_container(ui.ctx(), floating);
     let mut frame = panel_host_frame(ui.ctx(), floating);
     frame.fill = fill;
@@ -95,9 +95,10 @@ pub(crate) fn panel_host_control_label_opacity(
     label_opacity: f32,
 ) -> egui::Response {
     let t = Tokens::get();
-    let sense = if chrome.enabled { if chrome.drag { egui::Sense::click_and_drag() } else { egui::Sense::click() } } else { egui::Sense::hover() };
+    let enabled = chrome.enabled && ui.is_enabled();
+    let sense = if enabled { if chrome.drag { egui::Sense::click_and_drag() } else { egui::Sense::click() } } else { egui::Sense::hover() };
     let response = ui.interact(bounds, id, sense);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, chrome.enabled, chrome.label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, chrome.label));
     let fill = if chrome.selected {
         Some(t.selected_bg)
     } else if response.hovered() && chrome.enabled {
@@ -158,7 +159,12 @@ pub(crate) fn panel_host_control_label_opacity(
         };
         let icon_rect = egui::Rect::from_center_size(center, egui::vec2(extent, extent));
         if chrome.icon_only {
-            crate::icons::paint_ink(&painter, icon_rect, icon, ink);
+            if let Some(transport) = icon.strip_prefix("timeline_").filter(|name| matches!(*name, "first" | "back" | "play" | "forward" | "last")) {
+                let glyph = if transport == "play" && chrome.selected { "pause" } else { transport };
+                crate::icons::glyphs::transport_glyph(&painter, icon_rect.center(), glyph, ink);
+            } else {
+                crate::icons::paint_ink(&painter, icon_rect, icon, ink);
+            }
         } else {
             crate::icons::paint_icon(&painter, icon_rect, icon, if chrome.enabled { 1.0 } else { 0.5 });
         }
@@ -199,6 +205,7 @@ pub(crate) fn panel_host_control_label_opacity(
 
 /// The same full-header affordance collapses and restores with one click.
 /// Reuse the existing chevron master, with the kit's vertical mirror helper.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn panel_host_disclosure(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -206,6 +213,7 @@ pub(crate) fn panel_host_disclosure(
     label: &str,
     enabled: bool,
     collapsed: bool,
+    reduced: bool,
 ) -> egui::Response {
     let response = panel_host_control(
         ui,
@@ -224,32 +232,53 @@ pub(crate) fn panel_host_disclosure(
             rtl: false,
         },
     );
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(!collapsed));
     let t = Tokens::get();
     let ink = if enabled { t.form_ink } else { t.form_dim };
     let extent = (bounds.width().min(bounds.height()) - t.form_icon_inset * 2.0).max(0.0);
     let icon = egui::Rect::from_center_size(bounds.center(), egui::vec2(extent, extent));
     let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(bounds));
-    if collapsed {
-        crate::icons::paint_ink(&painter, icon, "chevron", ink);
-    } else {
-        crate::icons::paint_ink_flipped(&painter, icon, "chevron", ink);
+    // Only the two existing glyphs blend. The response, expanded state and
+    // allocated body already reflect the committed collapse state this pass.
+    let duration = solidcraft_theme::panel_motion_duration(ui.ctx(), reduced);
+    let expanded = ui.ctx().animate_bool_with_time_and_easing(id.with("disclosure_ink"), !collapsed, duration, solidcraft_theme::panel_motion_ease);
+    if expanded < 1.0 {
+        crate::icons::paint_ink(&painter, icon, "chevron", ink.linear_multiply(1.0 - expanded));
+    }
+    if expanded > 0.0 {
+        crate::icons::paint_ink_flipped(&painter, icon, "chevron", ink.linear_multiply(expanded));
     }
     response
 }
 
-pub(crate) fn panel_host_sash(ui: &mut egui::Ui, id: egui::Id, bounds: egui::Rect, name: &str) -> egui::Response {
+/// The owner supplies the controlled extent and axis; clipping or scrolling
+/// the sash must not change its accessible value or orientation.
+pub(crate) fn panel_host_sash(ui: &mut egui::Ui, id: egui::Id, bounds: egui::Rect, name: &str, horizontal: bool, extent: f32) -> egui::Response {
     let t = Tokens::get();
     let response = ui.interact(bounds, id, egui::Sense::click_and_drag());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::SpinButton, ui.is_enabled(), name));
+    if response.has_focus() {
+        ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                id,
+                egui::EventFilter {
+                    horizontal_arrows: bounds.height() >= bounds.width(),
+                    vertical_arrows: bounds.width() >= bounds.height(),
+                    ..Default::default()
+                },
+            )
+        });
+    }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, ui.is_enabled(), name));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Splitter);
+        node.set_orientation(if horizontal { egui::accesskit::Orientation::Horizontal } else { egui::accesskit::Orientation::Vertical });
+        node.set_numeric_value(f64::from(extent));
+    });
     if response.hovered() || response.has_focus() || response.dragged() {
         ui.painter().rect_filled(bounds.intersect(ui.clip_rect()), t.radius_sm, t.form_primary);
     }
     if response.hovered() {
-        ui.ctx().set_cursor_icon(if bounds.width() >= bounds.height() {
-            egui::CursorIcon::ResizeVertical
-        } else {
-            egui::CursorIcon::ResizeHorizontal
-        });
+        ui.ctx().set_cursor_icon(if horizontal { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::ResizeHorizontal });
     }
     response.on_hover_text(name)
 }
@@ -269,7 +298,19 @@ pub(crate) fn panel_host_scrollbar(
 ) -> (egui::Response, Option<f32>) {
     let t = Tokens::get();
     let response = ui.interact(bounds, id, egui::Sense::click_and_drag());
+    if response.has_focus() {
+        ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(id, egui::EventFilter { horizontal_arrows: horizontal, vertical_arrows: !horizontal, ..Default::default() })
+        });
+    }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::SpinButton, ui.is_enabled(), name));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::ScrollBar);
+        node.set_orientation(if horizontal { egui::accesskit::Orientation::Horizontal } else { egui::accesskit::Orientation::Vertical });
+        node.set_numeric_value(f64::from(offset));
+        node.set_min_numeric_value(0.0);
+        node.set_max_numeric_value(f64::from((total - visible).max(0.0)));
+    });
     let length = if horizontal { bounds.width() } else { bounds.height() };
     let maximum = (total - visible).max(0.0);
     if length <= 0.0 || maximum <= 0.0 {
@@ -305,10 +346,11 @@ pub(crate) fn panel_host_scrollbar(
         }
     }
     if response.has_focus() {
-        let delta = ui.input(|input| {
+        painter.rect_stroke(bounds.shrink(t.space_2), t.radius_sm, t.control_border_stroke(t.form_primary), egui::StrokeKind::Inside);
+        let delta = ui.input_mut(|input| {
             let back = if horizontal { egui::Key::ArrowLeft } else { egui::Key::ArrowUp };
             let forward = if horizontal { egui::Key::ArrowRight } else { egui::Key::ArrowDown };
-            u8::from(input.key_pressed(forward)) as f32 - u8::from(input.key_pressed(back)) as f32
+            u8::from(input.consume_key(egui::Modifiers::NONE, forward)) as f32 - u8::from(input.consume_key(egui::Modifiers::NONE, back)) as f32
         });
         if delta != 0.0 {
             next = Some((offset + delta * t.control_height).clamp(0.0, maximum));
@@ -401,7 +443,7 @@ pub(crate) fn panel_host_popup<R>(ui: &mut egui::Ui, id: egui::Id, bounds: egui:
             ui.set_min_size(bounds.size());
             Container::paint_frame(ui.painter(), frame, bounds - frame.total_margin());
             let inner = bounds.shrink(Tokens::get().space_6);
-            let mut content = ui.new_child(egui::UiBuilder::new().id_salt("content").max_rect(inner));
+            let mut content = ui.new_child(egui::UiBuilder::new().id_salt("content").max_rect(inner).accessibility_role(egui::accesskit::Role::Menu));
             content.set_clip_rect(inner.intersect(clip));
             body(&mut content)
         })

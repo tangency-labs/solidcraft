@@ -72,7 +72,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.thread" => &[("face", Pick), ("from", Pick), ("up_to", Plane)],
         "solid.emboss" => &[("face", Make)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
-        "solid.press_pull" => &[("face", Pick), ("edges", Picks)],
+        "solid.press_pull" => &[("face", Pick), ("edges", Picks), ("body", Body)],
         "solid.replace_face" => &[("faces", Picks), ("target_face", Pick), ("target", Plane), ("body", Body)],
         // Align finds its picks where they are shown and takes both ends into the moved bodies'
         // frame itself: a pick mapped into the frame of the body under it would put the two ends
@@ -227,11 +227,11 @@ impl Mapper<'_> {
         let m = if self.here { self.f.sketch } else { under.as_ref().map(|(m, _)| *m).unwrap_or(self.f.active) };
         self.first.get_or_insert(m);
         let out = self.local_point(&m, p);
-        // The command sees the pick in the frame of the body under it. Remember the bodies
-        // whose faces meet there, so a face of that body is found and a body that only
-        // shares its place in the model does not make the pick ambiguous (#419).
-        if let Some((_, names)) = &under {
-            remember(out.as_ref().and_then(vec3).unwrap_or(p), names.clone());
+        // The command sees the pick in the frame of the body under it. Remember where it was
+        // picked and the bodies whose faces meet there, so a face of that body is found and a
+        // body that only shares its place in the model does not make the pick ambiguous (#419).
+        if !self.here {
+            remember(out.as_ref().and_then(vec3).unwrap_or(p), p, under.map(|(_, names)| names).unwrap_or_default());
         }
         out
     }
@@ -361,9 +361,19 @@ thread_local! {
     /// The outermost command is `solid.move`, whose parameters stay in the world when its bodies
     /// lie in differently turned frames (`split_move`).
     static OUTER_MOVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// The picks of the running command: the point it sees and the bodies whose faces meet
-    /// there (the first is the body under it; more than one means the pick is ambiguous).
-    static PICKS: std::cell::RefCell<Vec<(Vec3, Vec<String>)>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The picks of the running command.
+    static PICKS: std::cell::RefCell<Vec<Pick>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A pick of the running command.
+struct Pick {
+    /// The point the command sees.
+    local: Vec3,
+    /// Where it was picked.
+    world: Vec3,
+    /// The bodies whose faces meet there: the first is the body under it, more than one means
+    /// the pick is ambiguous, and none that no face is under it.
+    bodies: Vec<String>,
 }
 
 /// How many picks of one command are remembered (a command takes few).
@@ -371,21 +381,28 @@ const MAX_PICKS: usize = 4096;
 /// How many bodies may meet at one pick (an ambiguous pick names them).
 const MAX_PICK_BODIES: usize = 64;
 
-/// Remember the bodies whose faces meet at a pick, against the point the command sees.
-fn remember(point: Vec3, names: Vec<String>) {
-    let names: Vec<String> = names.into_iter().take(MAX_PICK_BODIES).collect();
+/// Remember where a pick was made and the bodies whose faces meet there, against the point the
+/// command sees.
+fn remember(local: Vec3, world: Vec3, names: Vec<String>) {
+    let bodies: Vec<String> = names.into_iter().take(MAX_PICK_BODIES).collect();
     PICKS.with(|picks| {
         let mut picks = picks.borrow_mut();
         if picks.len() < MAX_PICKS {
-            picks.push((point, names));
+            picks.push(Pick { local, world, bodies });
         }
     });
 }
 
-/// The bodies whose faces meet at `point`, when the running command picked it: the first is
-/// the body under the pick, and more than one means the pick is ambiguous.
+/// The bodies whose faces meet at `point`, when the running command picked it on a face: the
+/// first is the body under the pick, and more than one means the pick is ambiguous.
 pub(crate) fn picked(point: Vec3) -> Option<Vec<String>> {
-    PICKS.with(|picks| picks.borrow().iter().find(|(p, _)| *p == point).map(|(_, names)| names.clone()))
+    PICKS.with(|picks| picks.borrow().iter().find(|p| p.local == point && !p.bodies.is_empty()).map(|p| p.bodies.clone()))
+}
+
+/// Where the running command's `nth` pick seen at `point` was picked (counting from 0: two picks
+/// on parts placed apart can be the same point in their own frames).
+pub(crate) fn picked_world(point: Vec3, nth: usize) -> Option<Vec3> {
+    PICKS.with(|picks| picks.borrow().iter().filter(|p| p.local == point).nth(nth).map(|p| p.world))
 }
 
 /// Forget the picks of the last command: a new one starts with none.

@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::*;
 
-mod mesh_convert;
+pub(crate) mod mesh_convert;
 
 /// Counts the copies `Session::doc_mut` makes of a shared document.
 pub(crate) mod doc_copies {
@@ -94,6 +94,74 @@ fn edge_picks_at_a_corner_are_refused() {
         let removed = if id == "solid.chamfer" { 40.0 } else { (4.0 - PI) * 20.0 };
         assert!(rel(volume(&mut s), 8000.0 - removed) < 2e-4);
     }
+}
+
+/// Edge picks on bodies apart: one pick keeps its body on the feature (the model has two), and
+/// picks on both keep none, each found where it lies.
+#[test]
+fn edge_picks_on_bodies_apart_keep_the_body_they_lie_on() {
+    let boxes = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Low"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 50], "operation": "new", "body_name": "High"}));
+        s
+    };
+    let kept = |s: &Session| match &s.doc.features.last().unwrap().kind {
+        solidcraft_doc::FeatureKind::Chamfer { body, .. } => body.as_ref().map(|b| b.0.clone()),
+        k => panic!("{k:?}"),
+    };
+    let each = |s: &Session| ["Low", "High"].map(|b| s.model.state().body(b).unwrap().measure().unwrap().volume);
+    let mut s = boxes();
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1}));
+    assert_eq!(kept(&s).as_deref(), Some("Low"));
+    let [low, high] = each(&s);
+    assert!((low - 11980.0).abs() < 0.02 && high == 12000.0, "{low} {high}");
+    let mut s = boxes();
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0], [20, 0, 60]], "distance": 1}));
+    assert_eq!(kept(&s), None);
+    let [low, high] = each(&s);
+    assert!((low - 11980.0).abs() < 0.02 && (high - 11980.0).abs() < 0.02, "{low} {high}");
+}
+
+/// The halves of a split box share the edges along the cut: a pick on one is refused naming both
+/// halves, and `body` cuts the half named.
+#[test]
+fn edge_picks_on_the_cut_of_a_split_body_name_both_halves() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Box"}));
+    run(&mut s, "solid.split_body", json!({"body": "Box", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
+    let features = s.doc.features.len();
+    let err = s.execute("solid.chamfer", &json!({"edges": [[20, 15, 10]], "distance": 1})).unwrap_err().to_string();
+    assert!(err.contains("[20, 15, 10] lies on edges of 2 bodies, Box and Box (1)") && err.contains("with `body`"), "{err}");
+    assert_eq!(s.doc.features.len(), features);
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 15, 10]], "distance": 1, "body": "Box (1)"}));
+    let half = |s: &Session, b: &str| s.model.state().body(b).unwrap().measure().unwrap().volume;
+    assert!((half(&s, "Box (1)") - 5985.0).abs() < 0.02 && (half(&s, "Box") - 6000.0).abs() < 1e-6, "{} {}", half(&s, "Box"), half(&s, "Box (1)"));
+}
+
+/// A box touching a cylinder along the cylinder's seam: the seam is not an edge to blend, so the
+/// box's edge there is cut.
+#[test]
+fn an_edge_along_another_bodys_seam_is_picked() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 10, "body_name": "Rod"}));
+    let rod = s.model.state().body("Rod").unwrap().body.clone();
+    let mesh = rod.mesh(&solidcraft_kernel::MeshTolerance::chord(0.06)).unwrap();
+    let seam = mesh.edges.iter().zip(&mesh.seams).find(|(_, seam)| **seam).unwrap().0[0];
+    // The box's quarter past the seam's line is outside the cylinder: they touch along it.
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 20, "width": 20, "height": 10, "corner": [seam.x, seam.y, 0], "operation": "new", "body_name": "Block"}),
+    );
+    run(&mut s, "solid.chamfer", json!({"edges": [[seam.x, seam.y, 5]], "distance": 1}));
+    let kept = match &s.doc.features.last().unwrap().kind {
+        solidcraft_doc::FeatureKind::Chamfer { body, .. } => body.as_ref().map(|b| b.0.clone()),
+        k => panic!("{k:?}"),
+    };
+    assert_eq!(kept.as_deref(), Some("Block"));
+    let v = |b: &str| s.model.state().body(b).unwrap().measure().unwrap().volume;
+    assert!((v("Block") - 3995.0).abs() < 0.02 && (v("Rod") - PI * 1000.0).abs() < 1.0, "{} {}", v("Block"), v("Rod"));
 }
 
 #[test]
@@ -1069,6 +1137,8 @@ fn hostile_params_never_panic() {
         "density",
         "names",
         "references",
+        "head",
+        "head_gap",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
@@ -3237,6 +3307,48 @@ fn tapped_and_clearance_holes() {
     assert!(rel(v2 - volume(&mut s), PI * 2.15 * 2.15 * 10.0) < 1e-3);
     assert!(s.execute("solid.hole", &json!({"position": [20, 25, 10], "clearance": "M7"})).is_err());
     assert!(s.execute("solid.hole", &json!({"position": [20, 25, 10]})).is_err());
+}
+
+/// A counterbore sized to the screw's head: `head` names the standard and `clearance` the size.
+/// ISO 4762 M4 has dk 7 and k 4; with the default 0.5 mm gap the recess is Ø8, 4.5 deep.
+#[test]
+fn counterbore_for_a_cap_screw_head() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 30, "height": 10}));
+    let v0 = volume(&mut s);
+    // The material a through hole of diameter `hole` with a counterbore `dk` wide and `k` deep removes.
+    let removed = |hole: f64, dk: f64, k: f64| PI * hole * hole / 4.0 * (10.0 - k) + PI * dk * dk / 4.0 * k;
+    let recess = |s: &Session| match s.doc.features.last().map(|f| &f.kind) {
+        Some(solidcraft_doc::FeatureKind::Hole { hole: solidcraft_doc::HoleKind::Counterbore { cb_diameter, cb_depth, .. }, .. }) => {
+            (cb_diameter.as_str().to_string(), cb_depth.as_str().to_string())
+        }
+        other => panic!("not a counterbore: {other:?}"),
+    };
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "clearance": "M4", "head": "ISO 4762"}));
+    let v1 = volume(&mut s);
+    assert!(rel(v0 - v1, removed(4.5, 8.0, 4.5)) < 1e-3, "{}", v0 - v1);
+    assert_eq!(recess(&s), ("8 mm".to_string(), "4.5 mm".to_string()));
+    // A button head (ISO 7380-1 M4: dk 7.6, k 2.2), a closer gap, and the depth given by hand.
+    run(&mut s, "solid.hole", json!({"position": [30, 15, 10], "clearance": "M4", "head": "ISO 7380-1", "head_gap": 0.25, "cb_depth": 3}));
+    let v2 = volume(&mut s);
+    assert!(rel(v1 - v2, removed(4.5, 8.1, 3.0)) < 1e-3, "{}", v1 - v2);
+    assert_eq!(recess(&s), ("8.1 mm".to_string(), "3".to_string()));
+    // The family name parts.insert takes, a close fit, the pitch written out, and no gap at all.
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [50, 15, 10], "clearance": "M5x0.8", "fit": "close", "head": "socket_head_cap_screw", "head_gap": "0 mm"}),
+    );
+    let v3 = volume(&mut s);
+    assert!(rel(v2 - v3, removed(5.3, 8.5, 5.0)) < 1e-3, "{}", v2 - v3);
+    // A gap that names a parameter: the recess follows the parameter.
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "0.5 mm"}));
+    run(&mut s, "solid.hole", json!({"position": [70, 15, 10], "clearance": "M4", "head": "ISO 4762", "head_gap": "gap"}));
+    let v4 = volume(&mut s);
+    assert!(rel(v3 - v4, removed(4.5, 8.0, 4.5)) < 1e-3, "{}", v3 - v4);
+    assert_eq!(recess(&s), ("7 mm + 2 * (gap)".to_string(), "4 mm + (gap)".to_string()));
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "1 mm"}));
+    assert!(rel(v3 - volume(&mut s), removed(4.5, 9.0, 5.0)) < 1e-3);
 }
 
 /// In an inch design, a bare length typed into a feature means inches (stored with the unit);

@@ -1,0 +1,12 @@
+id = "geom.periodic_extent1d"
+upstream = ["source/SMLib/inc/SmPeriodicExtent1d.h", "source/SMLib/src/SmPeriodicExtent1d.cpp"]
+rust_module = "geom::periodic_extent1d"
+depends_on = ["geom.tol"]
+soft_depends_on = []
+est_lines = 406
+layer = 2
+tests = ["prog_test:my_test_trimming_tools", "SM_API_test:TestSmTrimSurfaceWith3dCurves", "prog_test:my_test_closed_sphere_properties", "prog_test:my_test_squeeze_edge_tracks_removal", "prog_test:my_test_missing_poles_refreshes_all_faces", "SM_API_test:TestSmHealBrep"]
+status = "green"
+claimed_by = "swarm-geom.periodic_extent1d-a1"
+claimed_at = "2026-10-12T00:00:00Z"
+notes = "green: 4054 difftest cases (54 fixture + 4000 generated), 0 deferred, all bit-identical; 17 fns; largest: SmPeriodicExtent1d::AddInterval, SmPeriodicExtent1d::IsContainedBy, SmPeriodicExtent1d::SetMinMax, SmPeriodicExtent1d::AreDisjoint; unit-SCC #22 (220 units); 100 upstream test entry points reach this unit"

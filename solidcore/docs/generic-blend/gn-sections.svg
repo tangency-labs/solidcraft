@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="520" height="320" viewBox="0 0 520 320">
+  <title>The section family</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L520 0 L520 320 L0 320 Z" fill="#ffffff"/>
+    <path d="M60 90 L330 90 L330 310 L60 310 Z" fill="#f0f0f0"/>
+    <path d="M60 90 L330 90 L330 310" fill="none" stroke="#000000" stroke-width="1.6" stroke-miterlimit="10"/>
+    <path d="M170 60 L170 72 M330 60 L330 72 M170 66 L330 66 M344 90 L356 90 M344 250 L356 250 M350 90 L350 250" fill="none" stroke="#000000" stroke-width="0.8" stroke-miterlimit="10"/>
+    <path d="M170 90 L330 250" fill="none" stroke="#000000" stroke-width="1.4" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <path d="M66 246 L94 246" fill="none" stroke="#000000" stroke-width="1.4" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <path d="M170 90 L175.3 90 L180.6 90 L186 90 L191.6 90.1 L197.4 90.2 L203.6 90.5 L210.2 91 L217.4 91.9 L225.4 93.3 L234.2 95.6 L244 99.1 L254.6 103.9 L265.8 110.4 L277.3 118.7 L288.4 128.4 L298.5 139.3 L307.2 150.7 L314.3 162 L319.6 172.9 L323.5 182.9 L326.1 192 L327.8 200.2 L328.8 207.7 L329.4 214.5 L329.7 220.8 L329.9 226.7 L330 232.3 L330 237.8 L330 243.1 L330 248.4 L330 250" fill="none" stroke="#000000" stroke-width="1.6" stroke-miterlimit="10"/>
+    <path d="M66 282 L94 282" fill="none" stroke="#000000" stroke-width="1.6" stroke-miterlimit="10"/>
+    <path d="M170 90 C258.366 90 330 161.634 330 250" fill="none" stroke="#1f6fb2" stroke-width="2.2" stroke-miterlimit="10"/>
+    <path d="M66 264 L94 264" fill="none" stroke="#1f6fb2" stroke-width="2.2" stroke-miterlimit="10"/>
+    <path d="M174 90 C174 87.791 172.209 86 170 86 C167.791 86 166 87.791 166 90 C166 92.209 167.791 94 170 94 C172.209 94 174 92.209 174 90 Z" fill="#000000"/>
+    <path d="M334 250 C334 247.791 332.209 246 330 246 C327.791 246 326 247.791 326 250 C326 252.209 327.791 254 330 254 C332.209 254 334 252.209 334 250 Z" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 60 30)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">one cross-section of a square edge, both rails set back s from the edge</tspan></text>
+    <text transform="matrix(1 0 0 1 246 60)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">s</tspan></text>
+    <text transform="matrix(1 0 0 1 357 174)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">s</tspan></text>
+    <text transform="matrix(1 0 0 1 112 82)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">rail ρ1</tspan></text>
+    <text transform="matrix(1 0 0 1 338 268)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">rail ρ2</tspan></text>
+    <text transform="matrix(1 0 0 1 337 84)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">edge</tspan></text>
+    <text transform="matrix(1 0 0 1 100 250)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#000000"><tspan x="0" y="0">chord (n = 0): the chamfer</tspan></text>
+    <text transform="matrix(1 0 0 1 100 268)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#1f6fb2"><tspan x="0" y="0">circle (n = 1): the round</tspan></text>
+    <text transform="matrix(1 0 0 1 100 286)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#000000"><tspan x="0" y="0">G² (n = 2): the curvature round</tspan></text>
+    <text transform="matrix(1 0 0 1 66 304)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">G² drawn at w = 0; default w: equal area</tspan></text>
+  </g>
+</svg>

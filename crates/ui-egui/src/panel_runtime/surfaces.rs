@@ -4,7 +4,7 @@ use std::sync::Arc;
 use egui::Color32;
 use solidcraft_engine::panels::{ContrastFailure, ContrastOutcome, PanelSurface};
 
-use crate::theme::{self, Tokens};
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HostSurfaceAppearance {
@@ -32,7 +32,7 @@ impl HostSurfaceStyle {
         let authored = Tokens::get();
         let raw_fills = [crate::ui_kit::panel_host_frame(ctx, false).fill, crate::ui_kit::panel_host_frame(ctx, true).fill];
         let requested_bits = requested_opacity.map(f32::to_bits);
-        let dark = theme::is_dark();
+        let dark = solidcraft_theme::is_dark();
         if let Some(previous) = previous.filter(|previous| {
             *previous.authored == authored
                 && previous.raw_fills == raw_fills
@@ -42,7 +42,7 @@ impl HostSurfaceStyle {
         }) {
             return previous.clone();
         }
-        let fallback = theme::panel_fallback_tokens(authored);
+        let fallback = solidcraft_theme::panel_fallback_tokens(authored);
         let invalid = requested_opacity.is_some_and(|alpha| !alpha.is_finite() || !(0.0..=1.0).contains(&alpha));
         let resolve = |fill: Color32, opaque: bool| {
             if invalid {
@@ -77,7 +77,7 @@ fn fallback_appearance(tokens: &Tokens, reason: ContrastFailure) -> HostSurfaceA
 }
 
 fn resolve_appearance(fill: Color32, tokens: &Tokens, fallback: &Tokens, requested: f32) -> HostSurfaceAppearance {
-    match theme::panel_surface_fill(fill, tokens, requested) {
+    match solidcraft_theme::panel_surface_fill(fill, tokens, requested) {
         Some(fill) => HostSurfaceAppearance { fill, contrast: ContrastOutcome::Readable { effective_background_alpha: f32::from(fill.a()) / 255.0 } },
         None => fallback_appearance(fallback, ContrastFailure::UnreadableAtFullOpacity),
     }
