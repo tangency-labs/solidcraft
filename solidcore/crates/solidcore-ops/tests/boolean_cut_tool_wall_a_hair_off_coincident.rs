@@ -63,7 +63,8 @@ fn cup() -> Body {
     let x = [1.0, 0.0, 0.0];
     // The ring's tangent point with a fillet: along the line from the origin through the
     // fillet's centre, 24.75 out.
-    let t = (-23.718_292_475_621_443_f64).atan2(-7.071_428_571_428_571); // -1.8605 rad
+    // atan2(-23.718292475621443, -7.071428571428571)
+    let t = -1.860_548_028_230_959_4_f64;
     let outline = [
         line([R, 0.0, 0.0], [-R, 0.0, 0.0]),
         arc([0.0; 3], z, x, R, PI, t + TAU),
@@ -88,9 +89,10 @@ fn cup() -> Body {
 
 /// The tool: the profile Y in [-34.75, wall], Z in [5, 20], its lower corner a quarter arc of
 /// radius 10 about (-34.75, 15) ending tangent to the vertical line at (`wall`, 15), revolved
-/// `angle` about Z, placed symmetrically about the YZ plane (the profile turned by -angle/2).
-fn tool(wall: f64, angle: f64) -> Body {
-    let (s, c) = (-angle / 2.0).sin_cos();
+/// `angle` about Z, placed symmetrically about the YZ plane (the profile turned by -angle/2,
+/// whose sine and cosine `half` gives).
+fn tool(wall: f64, half: (f64, f64)) -> Body {
+    let (s, c) = (-half.0, half.1);
     let turn = |p: [f64; 3]| [c * p[0] - s * p[1], s * p[0] + c * p[1], p[2]];
     let turn_dir = |d: [f64; 3]| [c * d[0] - s * d[1], s * d[0] + c * d[1], d[2]];
     let profile = [
@@ -109,13 +111,19 @@ fn tool(wall: f64, angle: f64) -> Body {
     revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], angle, true).unwrap()
 }
 
+/// The two revolve angles, 28 and 36 degrees: their names, and the sine and cosine of half
+/// of each (the ops tests compute no geometry, so the values are written out).
+const ANGLES: [(&str, (f64, f64)); 2] = [
+    (
+        "28 deg",
+        (0.241_921_895_599_667_73, 0.970_295_726_275_996_5),
+    ),
+    ("36 deg", (0.309_016_994_374_947_4, 0.951_056_516_295_153_5)),
+];
+
 /// The cut, or why it failed: the boolean's error, or no body.
-fn cut(wall: f64, angle_deg: f64) -> Result<Body, String> {
-    match boolean(
-        cup(),
-        tool(wall, angle_deg.to_radians()),
-        BooleanOp::Subtract,
-    ) {
+fn cut(wall: f64, angle: (&str, (f64, f64))) -> Result<Body, String> {
+    match boolean(cup(), tool(wall, angle.1), BooleanOp::Subtract) {
         Ok(Some(b)) => Ok(b),
         Ok(None) => Err("no body".to_string()),
         Err(e) => Err(format!("{e}")),
@@ -126,13 +134,14 @@ fn cut(wall: f64, angle_deg: f64) -> Result<Body, String> {
 #[test]
 fn a_tool_face_on_the_wall_cuts() {
     imprint_fixes();
-    for angle in [28.0, 36.0] {
-        let b = cut(-24.75, angle).unwrap_or_else(|e| panic!("{angle} deg: {e}"));
+    for angle in ANGLES {
+        let b = cut(-24.75, angle).unwrap_or_else(|e| panic!("{}: {e}", angle.0));
         let report = b.check(CheckLevel::All).unwrap();
         assert!(
             report.is_valid(),
-            "{angle} deg:
+            "{}:
 {}",
+            angle.0,
             report.text
         );
     }
@@ -146,14 +155,15 @@ fn a_tool_face_on_the_wall_cuts() {
 fn a_tool_face_a_hair_outside_the_wall_cuts_too() {
     imprint_fixes();
     for off in [1e-10, 4e-10, 6e-10] {
-        for angle in [28.0, 36.0] {
+        for angle in ANGLES {
             let b = cut(-24.75 - off, angle)
-                .unwrap_or_else(|e| panic!("offset {off}, {angle} deg: {e}"));
+                .unwrap_or_else(|e| panic!("offset {off}, {}: {e}", angle.0));
             let report = b.check(CheckLevel::All).unwrap();
             assert!(
                 report.is_valid(),
-                "offset {off}, {angle} deg:
+                "offset {off}, {}:
 {}",
+                angle.0,
                 report.text
             );
         }
