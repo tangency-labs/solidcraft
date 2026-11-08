@@ -1,8 +1,9 @@
 //! Navigation bar editor. The shared viewport painter owns the preview's appearance.
 use crate::navigation::NavCaps;
-use crate::navigation_bar::{self, Edge, Idle, Kind, Labels, MenuDisplay, NavigationBar, Position, Size, SlotOptions};
+use crate::navigation_bar::{self, Labels, MenuDisplay, NavigationBar, Position, SlotOptions};
 use crate::navigation_bar_view;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::{NavigationEdge, NavigationIdle, NavigationKind, NavigationSize};
 use crate::{SolveApp, scenario, theme::Tokens, ui_kit};
 use egui::{Rect, Sense, vec2};
 use serde_json::json;
@@ -240,8 +241,8 @@ fn slot_count(app: &SolveApp, ui: &mut egui::Ui, stage: Rect, bar: Rect) {
         Position::Right => stage.right() - ui_kit::NAV_BORDER - ui_kit::NAV_STAGE_INSET - ui_kit::NAV_PADDING - size.x,
     };
     let y = match app.preferences.navigation_bar.edge {
-        Edge::Top => bar.bottom() + t.space_8,
-        Edge::Bottom => bar.top() - t.space_8 - size.y,
+        NavigationEdge::Top => bar.bottom() + t.space_8,
+        NavigationEdge::Bottom => bar.top() - t.space_8 - size.y,
     };
     let rect = Rect::from_min_size(egui::pos2(x, y), size);
     ui.painter().with_clip_rect(stage).galley(rect.min, galley, view.text_dim);
@@ -283,7 +284,7 @@ fn drop_on_preview(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, tar
                     selected: false,
                     kind: slot.kind,
                     labels: false,
-                    menu: slot.kind == Kind::Menu,
+                    menu: slot.kind == NavigationKind::Menu,
                 },
                 app.preferences.navigation_bar.size,
             );
@@ -437,7 +438,7 @@ fn available(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(Tokens::get().space_8, Tokens::get().space_8);
             for slot in navigation_bar::CATALOGUE {
-                if slot.kind == Kind::Separator || app.preferences.navigation_bar.slots.iter().any(|id| id == slot.id) {
+                if slot.kind == NavigationKind::Separator || app.preferences.navigation_bar.slots.iter().any(|id| id == slot.id) {
                     continue;
                 }
                 let dragging = egui::DragAndDrop::payload::<Drag>(ui.ctx()).is_some_and(|payload| payload.from_menu && payload.id.slot == slot.id);
@@ -480,9 +481,13 @@ fn option_grid(bar: &mut NavigationBar, ui: &mut egui::Ui, first: usize) {
                 ui.allocate_ui_with_layout(vec2(width.max(0.0), t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| match index {
                     0 => anchor_option(bar, ui),
                     1 => {
-                        option(ui, "size", &mut usize::from(bar.size == Size::Regular), &["navbar.custom.compact", "navbar.custom.regular"], |i| {
-                            bar.size = if i == 1 { Size::Regular } else { Size::Compact }
-                        });
+                        option(
+                            ui,
+                            "size",
+                            &mut usize::from(bar.size == NavigationSize::Regular),
+                            &["navbar.custom.compact", "navbar.custom.regular"],
+                            |i| bar.size = if i == 1 { NavigationSize::Regular } else { NavigationSize::Compact },
+                        );
                     }
                     2 => {
                         option(
@@ -498,16 +503,16 @@ fn option_grid(bar: &mut NavigationBar, ui: &mut egui::Ui, first: usize) {
                             ui,
                             "idle",
                             &mut match bar.idle {
-                                Idle::Always => 0,
-                                Idle::Fade => 1,
-                                Idle::Hide => 2,
+                                NavigationIdle::Always => 0,
+                                NavigationIdle::Fade => 1,
+                                NavigationIdle::Hide => 2,
                             },
                             &["navbar.custom.always", "navbar.custom.fade", "navbar.custom.hide_idle"],
                             |i| {
                                 bar.idle = match i {
-                                    0 => Idle::Always,
-                                    2 => Idle::Hide,
-                                    _ => Idle::Fade,
+                                    0 => NavigationIdle::Always,
+                                    2 => NavigationIdle::Hide,
+                                    _ => NavigationIdle::Fade,
                                 }
                             },
                         );
@@ -520,7 +525,7 @@ fn option_grid(bar: &mut NavigationBar, ui: &mut egui::Ui, first: usize) {
 }
 
 fn anchor_option(bar: &mut NavigationBar, ui: &mut egui::Ui) {
-    let selected = usize::from(bar.edge == Edge::Bottom) * 3
+    let selected = usize::from(bar.edge == NavigationEdge::Bottom) * 3
         + match bar.position {
             Position::Left => 0,
             Position::Centre => 1,
@@ -536,7 +541,7 @@ fn anchor_option(bar: &mut NavigationBar, ui: &mut egui::Ui) {
     ]
     .map(crate::i18n::tr);
     if let Some(index) = ui_kit::settings_anchor_field(ui, crate::i18n::tr("navbar.custom.position"), selected, &names) {
-        bar.edge = if index >= 3 { Edge::Bottom } else { Edge::Top };
+        bar.edge = if index >= 3 { NavigationEdge::Bottom } else { NavigationEdge::Top };
         bar.position = match index % 3 {
             0 => Position::Left,
             2 => Position::Right,

@@ -29,7 +29,7 @@ macro_rules! element {
     };
 }
 
-fn navigation_sample(ui: &mut Ui, size: crate::navigation_bar::Size) {
+fn navigation_sample(ui: &mut Ui, size: NavigationSize) {
     let metrics = NavigationMetrics::for_size(size);
     let inset = NAV_PADDING + NAV_BORDER;
     let menu_width = metrics.icon + NAV_MENU_LEFT + NAV_MENU_RIGHT + NAV_MENU_GAP + NAV_CHEVRON;
@@ -38,16 +38,12 @@ fn navigation_sample(ui: &mut Ui, size: crate::navigation_bar::Size) {
     navigation_surface(ui, rect, size, true);
     let mut x = rect.left() + inset;
     for (id, icon, kind, selected, width) in [
-        ("pan", "pan", crate::navigation_bar::Kind::Tool, true, metrics.button),
-        ("fit", "fit", crate::navigation_bar::Kind::Action, false, metrics.button),
-        ("visual_style", "style_shaded_edges", crate::navigation_bar::Kind::Menu, false, menu_width),
+        ("pan", "pan", NavigationKind::Tool, true, metrics.button),
+        ("fit", "fit", NavigationKind::Action, false, metrics.button),
+        ("visual_style", "style_shaded_edges", NavigationKind::Menu, false, menu_width),
     ] {
         let bounds = egui::Rect::from_min_size(egui::pos2(x, rect.top() + inset), vec2(width, metrics.button));
-        navigation_button(
-            ui,
-            bounds,
-            NavigationButton { id, icon, label: id, kind, selected, labels: false, menu: kind == crate::navigation_bar::Kind::Menu },
-        );
+        navigation_button(ui, bounds, NavigationButton { id, icon, label: id, kind, selected, labels: false, menu: kind == NavigationKind::Menu });
         if id == "fit" {
             navigation_edit_outline(ui, bounds, true, false);
         }
@@ -220,8 +216,8 @@ const ELEMENTS: &[Element] = &[
     element!("look_chain_empty", |ui, _| {
         look_chain(ui, "gallery:empty-chain", ["Face", "Body", "Component", "Material"], [None; 4], LookStep::Face);
     }),
-    element!("navigation_regular", |ui, _| navigation_sample(ui, crate::navigation_bar::Size::Regular)),
-    element!("navigation_compact", |ui, _| navigation_sample(ui, crate::navigation_bar::Size::Compact)),
+    element!("navigation_regular", |ui, _| navigation_sample(ui, NavigationSize::Regular)),
+    element!("navigation_compact", |ui, _| navigation_sample(ui, NavigationSize::Compact)),
     element!("navigation_popup", |ui, _| {
         navigation_menu(ui, NAV_POPUP_WIDTH, |ui| {
             navigation_menu_heading(ui, "Visual style");

@@ -4681,7 +4681,8 @@ mod tests {
 
     #[test]
     fn navigation_bar_preferences_round_trip_and_recover_hostile_fields() {
-        use crate::navigation_bar::{Edge, Idle, Labels, NavigationBar, Position, Size};
+        use crate::navigation_bar::{Labels, NavigationBar, Position};
+        use crate::ui_kit::{NavigationEdge, NavigationIdle, NavigationSize};
         use serde_json::json;
         assert_eq!(super::lenient(&json!({})).navigation_bar, NavigationBar::default());
         let p = super::lenient(&json!({"navigation_bar": {
@@ -4691,7 +4692,7 @@ mod tests {
         assert_eq!(p.navigation_bar.slots, ["pan", "future_slot", "separator", "separator", "separator", "separator", "fit"]);
         assert_eq!(
             (p.navigation_bar.position, p.navigation_bar.edge, p.navigation_bar.size, p.navigation_bar.labels, p.navigation_bar.idle),
-            (Position::Left, Edge::Top, Size::Regular, Labels::Labels, Idle::Hide)
+            (Position::Left, NavigationEdge::Top, NavigationSize::Regular, Labels::Labels, NavigationIdle::Hide)
         );
         let saved = serde_json::to_value(&p).unwrap();
         assert_eq!(serde_json::from_value::<super::Prefs>(saved).unwrap(), p);
@@ -4701,10 +4702,10 @@ mod tests {
             let mut expected = p.clone();
             match field {
                 "position" => expected.navigation_bar.position = Position::default(),
-                "edge" => expected.navigation_bar.edge = Edge::default(),
-                "size" => expected.navigation_bar.size = Size::default(),
+                "edge" => expected.navigation_bar.edge = NavigationEdge::default(),
+                "size" => expected.navigation_bar.size = NavigationSize::default(),
                 "labels" => expected.navigation_bar.labels = Labels::default(),
-                _ => expected.navigation_bar.idle = Idle::default(),
+                _ => expected.navigation_bar.idle = NavigationIdle::default(),
             }
             assert_eq!(super::lenient(&value), expected, "{field}");
             value["navigation_bar"][field] = json!("unknown");
@@ -4768,7 +4769,8 @@ mod tests {
 
     #[test]
     fn navigation_bar_editor_buttons_and_appearance_update_preferences() {
-        use crate::navigation_bar::{Idle, Labels, MenuDisplay, Position, Size};
+        use crate::navigation_bar::{Labels, MenuDisplay, Position};
+        use crate::ui_kit::{NavigationIdle, NavigationSize};
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.resize", json!({"width":1600,"height":1100}));
@@ -4785,20 +4787,20 @@ mod tests {
         assert_eq!(h.app.preferences.navigation_bar.menu_display("visual_style"), MenuDisplay::IconAndValue);
         navbar_click(&mut h, "prefs:navbar:anchor:0");
         assert_eq!(h.app.preferences.navigation_bar.position, Position::Left);
-        assert_eq!(h.app.preferences.navigation_bar.edge, crate::navigation_bar::Edge::Top);
+        assert_eq!(h.app.preferences.navigation_bar.edge, crate::ui_kit::NavigationEdge::Top);
         navbar_click(&mut h, "prefs:navbar:anchor:5");
         assert_eq!(h.app.preferences.navigation_bar.position, Position::Right);
-        assert_eq!(h.app.preferences.navigation_bar.edge, crate::navigation_bar::Edge::Bottom);
+        assert_eq!(h.app.preferences.navigation_bar.edge, crate::ui_kit::NavigationEdge::Bottom);
         navbar_click(&mut h, "prefs:navbar:size:0");
-        assert_eq!(h.app.preferences.navigation_bar.size, Size::Compact);
+        assert_eq!(h.app.preferences.navigation_bar.size, NavigationSize::Compact);
         navbar_click(&mut h, "prefs:navbar:size:1");
-        assert_eq!(h.app.preferences.navigation_bar.size, Size::Regular);
+        assert_eq!(h.app.preferences.navigation_bar.size, NavigationSize::Regular);
         navbar_click(&mut h, "prefs:navbar:buttons:1");
         assert_eq!(h.app.preferences.navigation_bar.labels, Labels::Labels);
         navbar_click(&mut h, "prefs:navbar:idle:0");
-        assert_eq!(h.app.preferences.navigation_bar.idle, Idle::Always);
+        assert_eq!(h.app.preferences.navigation_bar.idle, NavigationIdle::Always);
         navbar_click(&mut h, "prefs:navbar:idle:2");
-        assert_eq!(h.app.preferences.navigation_bar.idle, Idle::Hide);
+        assert_eq!(h.app.preferences.navigation_bar.idle, NavigationIdle::Hide);
         let before = h.app.preferences.navigation_bar.clone();
         navbar_click(&mut h, "prefs:navbar:preview_as:1");
         assert_eq!(h.app.preferences.navigation_bar, before, "canvas preview is transient");
@@ -5014,18 +5016,19 @@ mod tests {
 
     #[test]
     fn navigation_bar_preview_stage_follows_anchor_live() {
-        use crate::navigation_bar::{Edge, Position};
+        use crate::navigation_bar::Position;
+        use crate::ui_kit::NavigationEdge;
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.resize", json!({"width":1600,"height":1100}));
         h.call("ui.prefs", json!({"open":"Interface/Navigation bar","navigation_bar":{"slots":["pan","fit","display"]}}));
         for (index, edge, position) in [
-            (0, Edge::Top, Position::Left),
-            (1, Edge::Top, Position::Centre),
-            (2, Edge::Top, Position::Right),
-            (3, Edge::Bottom, Position::Left),
-            (4, Edge::Bottom, Position::Centre),
-            (5, Edge::Bottom, Position::Right),
+            (0, NavigationEdge::Top, Position::Left),
+            (1, NavigationEdge::Top, Position::Centre),
+            (2, NavigationEdge::Top, Position::Right),
+            (3, NavigationEdge::Bottom, Position::Left),
+            (4, NavigationEdge::Bottom, Position::Centre),
+            (5, NavigationEdge::Bottom, Position::Right),
         ] {
             navbar_click(&mut h, &format!("prefs:navbar:anchor:{index}"));
             h.frames(3);
@@ -5036,11 +5039,11 @@ mod tests {
             assert_eq!(stage.height(), crate::ui_kit::NAV_STAGE_HEIGHT);
             let inset = crate::ui_kit::NAV_BORDER + crate::ui_kit::NAV_STAGE_INSET;
             match edge {
-                Edge::Top => {
+                NavigationEdge::Top => {
                     assert_eq!(bar.top(), stage.top() + inset);
                     assert!(count.top() >= bar.bottom(), "the count sits below a top bar");
                 }
-                Edge::Bottom => {
+                NavigationEdge::Bottom => {
                     assert_eq!(bar.bottom(), stage.bottom() - inset);
                     assert!(count.bottom() <= bar.top(), "the count sits above a bottom bar");
                 }

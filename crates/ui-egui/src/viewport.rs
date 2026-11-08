@@ -5775,7 +5775,7 @@ fn agent_chip(app: &mut SolveApp, ui: &egui::Ui, view: Rect, taken: &[Rect]) -> 
             .layout
             .as_ref()
             .map(|l| l.navigation)
-            .filter(|n| n.is_positive() && n.is_finite() && app.preferences.navigation_bar.edge == crate::navigation_bar::Edge::Bottom);
+            .filter(|n| n.is_positive() && n.is_finite() && app.preferences.navigation_bar.edge == crate::ui_kit::NavigationEdge::Bottom);
         let (x, bottom) = nav.map_or((view.center().x, view.bottom() - t.space_8), |n| (n.center().x, n.top() - t.space_8));
         let x = x.clamp(view.left() + size.x * 0.5, (view.right() - size.x * 0.5).max(view.left() + size.x * 0.5));
         let mut r = Rect::from_min_size(pos2(x - size.x * 0.5, bottom - size.y), size);

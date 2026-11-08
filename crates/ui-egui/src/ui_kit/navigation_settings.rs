@@ -241,7 +241,7 @@ pub(crate) fn navigation_tile(ui: &mut Ui, id: &str, label: &str, icon: &str, dr
     (response, add)
 }
 
-pub(crate) fn navigation_drag_ghost(ui: &Ui, at: egui::Pos2, button: NavigationButton<'_>, size: crate::navigation_bar::Size) {
+pub(crate) fn navigation_drag_ghost(ui: &Ui, at: egui::Pos2, button: NavigationButton<'_>, size: NavigationSize) {
     let ctx = ui.ctx();
     let t = Tokens::get();
     let metrics = NavigationMetrics::for_size(size);

@@ -58,6 +58,7 @@ mod theme_picker;
 mod tree;
 mod value_focus;
 mod viewport_status;
+mod wheel;
 
 pub(crate) use actions::*;
 pub use actions::{Button, button};
@@ -78,7 +79,7 @@ pub(crate) use details::*;
 pub(crate) use disclosure::*;
 pub(crate) use drag::*;
 pub(crate) use fields::*;
-pub use fields::{cell_editor, wide_cell_editor};
+pub use fields::{Expressions, cell_editor, install_expressions, wide_cell_editor};
 pub(crate) use file_view::{FileView, RecentRow, RecoveryMessage, SampleCard};
 pub(crate) use framing::*;
 pub(crate) use history::*;
@@ -90,6 +91,7 @@ pub(crate) use menu::{Menu, MenuItem, rename_menu, workspace_menu};
 pub(crate) use metrics::{ContentWidth, header_height, row_height, table_row_height};
 pub use name_list::{NameList, NameRow, name_list};
 pub(crate) use navigation::*;
+pub use navigation::{NavigationEdge, NavigationIdle, NavigationSize};
 pub(crate) use navigation_menu::*;
 pub(crate) use navigation_settings::*;
 pub(crate) use panel::{
