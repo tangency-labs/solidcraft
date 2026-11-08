@@ -265,6 +265,8 @@ fn frame(m: &Map<String, Value>, key: &str) -> Result<Option<Value>, String> {
     let frame_key = format!("{key}_frame");
     match m.get(&frame_key) {
         None | Some(Value::Null) => Ok(None),
+        // The handler refuses a frame given beside the side's other keys before it reads the frame.
+        Some(v) if [key.to_string(), format!("{key}_face"), format!("{key}_plane")].iter().any(|k| m.contains_key(k)) => Ok(Some(v.clone())),
         Some(v) => frame_problem(v, &frame_key).map_or_else(|| Ok(Some(v.clone())), Err),
     }
 }

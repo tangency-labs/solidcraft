@@ -93,6 +93,9 @@ fn strict_keeps_todays_errors() {
         call(json!({"from_plane": {}, "to": [0, 0, 0]})),
         call(json!({"from": [0, 0, 0], "to_plane": [1]})),
         call(json!({"from_frame": 5, "to": [0, 0, 0]})),
+        // A frame beside the side's other keys is refused as "not both" before it is read.
+        call(json!({"from_frame": 5, "from": [0, 0, 0], "to": [1, 1, 1]})),
+        call(json!({"from_plane": "XY", "from_frame": {"sketch": "S"}, "to": [0, 0, 0]})),
         call(json!({"from_frame": {}, "to": [0, 0, 0]})),
         call(json!({"from_frame": {"frame": {}}, "to": [0, 0, 0]})),
         call(json!({"from_frame": {"sketch": true, "point": "p"}, "to": [0, 0, 0]})),
