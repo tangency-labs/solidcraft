@@ -566,6 +566,51 @@ fn a_stopped_call_ends_at_its_next_check_and_holds_up_nothing() {
     assert!((v - 1000.0).abs() < 1e-6, "{v}");
 }
 
+/// Work entered under a token while another is over it stops when either does (#10577): a
+/// dialog's Cancel stops the kernel work of its design's job, and the design's own token, and
+/// later work under it, go on.
+#[test]
+fn a_token_under_another_stops_when_either_does() {
+    let looping = |design: stop::Stop, dialog: stop::Stop| {
+        let (started, is_started) = std::sync::mpsc::channel();
+        let running = std::thread::spawn(move || {
+            design.within(|| {
+                dialog.within(|| {
+                    core::run("nested_stop", |k| {
+                        let _ = started.send(());
+                        loop {
+                            k.check_cancelled("nested_stop")?;
+                            std::thread::yield_now();
+                        }
+                    })
+                })
+            })
+        });
+        is_started.recv().unwrap();
+        running
+    };
+    // The inner token stopped: the work stops, the design's token does not.
+    let (design, dialog) = (stop::Stop::new(), stop::Stop::new());
+    let running = looping(design.clone(), dialog.clone());
+    dialog.stop();
+    let result: Result<()> = answered(move || running.join().unwrap());
+    assert!(result.is_err_and(|e| e.to_string().contains("cancel")));
+    assert!(!design.is_stopped());
+    assert!(design.within(|| Brep::make_box([0.0; 3], [1.0; 3])).is_ok(), "later work under the design's token runs");
+    // The outer token stopped: the work stops too.
+    let (design, dialog) = (stop::Stop::new(), stop::Stop::new());
+    let running = looping(design.clone(), dialog.clone());
+    design.stop();
+    let result: Result<()> = answered(move || running.join().unwrap());
+    assert!(result.is_err_and(|e| e.to_string().contains("cancel")));
+    assert!(!dialog.is_stopped(), "the token entered beneath is not stopped itself");
+    // A token stopped before the work is entered under it: refused before it starts.
+    let (design, dialog) = (stop::Stop::new(), stop::Stop::new());
+    dialog.stop();
+    assert!(design.within(|| dialog.within(|| Brep::make_box([0.0; 3], [1.0; 3]))).is_err());
+    assert!(dialog.within(|| design.within(|| Brep::make_box([0.0; 3], [1.0; 3]))).is_err(), "either way round");
+}
+
 /// Every call starts with the same draws of random rays, whatever its kernel did before: what
 /// depends on them answers the same on any kernel of the pool.
 #[test]
