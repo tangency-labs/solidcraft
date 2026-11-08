@@ -21,8 +21,8 @@ fn sketch3(features: &mut serde_json::Value) -> &mut serde_json::Value {
 #[test]
 fn a_sketch_on_a_cap_that_a_join_left_uncertified_is_found_by_its_name() {
     let model = old_design(|_| {});
-    for id in [3, 5] {
-        assert!(model.result(id).unwrap().error.is_none(), "feature {id}: {:?}", model.result(id));
+    for id in [1, 2, 3, 4, 5] {
+        assert!(model.result(id).unwrap().error.is_none(), "feature {id}: {:?}", model.result(id).map(|r| (&r.name, &r.error)));
     }
     let state = model.state();
     let sketch = &state.sketch(5).expect("Sketch3 should be built").plane;
