@@ -4086,7 +4086,11 @@ fn closed_panel_reopens_with_column_identity_width_rank_and_saved_weight() {
         }]))
         .unwrap();
     service
-        .dispatch(transaction(vec![Mutation::Collapse { section: section("inner"), collapsed: true }, Mutation::Close { instance: id("two") }]))
+        .dispatch(transaction(vec![
+            Mutation::SetColumnWidth { column: column.clone(), width: 310.0 },
+            Mutation::Collapse { section: section("inner"), collapsed: true },
+            Mutation::Close { instance: id("two") },
+        ]))
         .unwrap();
     let memory = service.layout().instance(&id("two")).unwrap().memory.clone();
     assert_eq!(memory.column, Some(column.clone()));

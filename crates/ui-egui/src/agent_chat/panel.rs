@@ -968,7 +968,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     // taller up to `edit_max`, then it scrolls, and the conversation takes what is left above. It
     // is a panel of its own at the bottom, as high as its content this frame, so the buttons under
     // the box are always in view.
-    let edit_max = if shared { 160.0 } else { (ui.available_height() * 0.4).clamp(48.0, 160.0) };
+    let edit_max = (ui.available_height() * 0.4).clamp(48.0, 160.0);
     let busy = state == State::Busy;
     // Enter sends (queues while the agent works); Ctrl/Cmd+Enter sends now; Esc stops. They are
     // read before the field sees them so no newline is typed.
@@ -1002,7 +1002,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .max_height(edit_max)
                     // Grow the bottom panel to the editor's scroll limit instead of letting
                     // its previous short-message height clip the action rows below it.
-                    .min_scrolled_height(if shared { 48.0 } else { edit_max })
+                    .min_scrolled_height(edit_max)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
                         ui_kit::assistant_input(
@@ -1127,8 +1127,11 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_rect("agent_chat:composer_box", boxed.response.rect);
         });
         crate::scenario::publish_rect("agent_chat:composer_footer", footer.response.rect);
+        // The enclosing bottom panel can clamp its response to the remaining
+        // viewport. Reserve the actual footer content on the next frame.
+        footer.response.rect.height()
     });
-    crate::panel_runtime::report_content_composer_height(ui.ctx(), composer.response.rect.height());
+    crate::panel_runtime::report_content_composer_height(ui.ctx(), composer.inner);
     if let Some(at) = remove_picked_at {
         remove_picked(app, at);
     }
@@ -1150,7 +1153,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             scroll_while_selecting(ui);
         });
     crate::scenario::publish_rect("agent_chat:conversation", conversation.inner_rect);
-    crate::panel_runtime::report_content_extent(ui, top, top_height + composer.response.rect.height() + conversation.content_size.y, false);
+    crate::panel_runtime::report_content_extent(ui, top, top_height + composer.inner + conversation.content_size.y, false);
     if esc || stop_clicked {
         cancel(app);
     }

@@ -13312,15 +13312,21 @@ fn production_short_render_assistant_keeps_conversation_above_the_pinned_compose
     let mut h = production_content_harness(false, true);
     h.call("ui.resize", serde_json::json!({"width":1600,"height":720}));
     h.app.ui.tab = "RENDER".into();
-    h.frames(3);
-    let conversation = crate::scenario::rect_of("agent_chat:conversation").unwrap();
-    let composer = crate::scenario::rect_of("agent_chat:composer_footer").unwrap();
-    assert!(conversation.height() < 64.0, "exercise the short viewport that formerly expanded over the composer");
-    assert!(
-        !conversation.is_positive() || conversation.bottom() <= composer.top() + 1.0,
-        "a short transcript viewport must not paint or scroll over the composer"
-    );
-    assert!(crate::scenario::rect_of("agent_chat:input").is_some());
+    for draft in [String::new(), "Retained panel draft\n".repeat(40)] {
+        h.app.agent_chat.input = draft.clone();
+        h.frames(8);
+        let conversation = crate::scenario::rect_of("agent_chat:conversation").unwrap();
+        let composer = crate::scenario::rect_of("agent_chat:composer_footer").unwrap();
+        assert!(conversation.height() < 64.0, "exercise the short viewport that formerly expanded over the composer");
+        assert!(
+            !conversation.is_positive() || conversation.bottom() <= composer.top() + 1.0,
+            "a short transcript viewport must not paint or scroll over the composer"
+        );
+        let body = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|card| card.instance == id("assistant")).unwrap().body.unwrap();
+        assert!(composer.bottom() <= body.origin.y + body.size.height + 1.0, "the full footer remains inside the shared content slot");
+        assert!(crate::scenario::rect_of("agent_chat:input").is_some());
+        assert_eq!(h.app.agent_chat.input, draft);
+    }
 }
 
 #[test]
