@@ -8587,7 +8587,7 @@ fn eval_sketch(
         Some(Ok(frame)) => frame,
         _ => doc.component_transform(f.component),
     };
-    let mut warns = crate::project::refresh_links_at(doc, vals, &fst, &plane, &mut sk, anchor, lost_names, Some(&link_frame))?;
+    let mut warns = crate::project::refresh_links_with(doc, vals, &fst, &plane, &mut sk, anchor, lost_names, Some(&link_frame))?;
     drop(fst);
     sk.refresh_offsets()?;
     if let Some(w) = face_warning {

@@ -100,6 +100,8 @@ pub(crate) enum RefForm<'a> {
     Sketch { key: String, curve: Option<&'a str>, point: Option<&'a str> },
     /// `{body: name}`.
     Body(&'a str),
+    /// `{point: name}`: a construction point (#12075).
+    Point(&'a str),
     /// `{axis: X|Y|Z|name}`.
     Axis(&'a str),
     /// `{plane: XY|XZ|YZ|name}`.
@@ -134,7 +136,7 @@ pub(crate) fn ref_form(v: &Value) -> std::result::Result<RefForm<'_>, String> {
         return Ok(RefForm::Sketch { key, curve: str_(v, "curve"), point: str_(v, "point") });
     }
     if let Some(p) = str_(v, "point") {
-        return point_source(s, p, cmd);
+        return Ok(RefForm::Point(p));
     }
     if let Some(b) = str_(v, "body") {
         return Ok(RefForm::Body(b));
@@ -180,6 +182,7 @@ fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
             Err(bad(cmd, "a sketch reference needs `curve` or `point`"))
         }
         RefForm::Body(b) => Ok(LinkSource::Body { body: b.to_string() }),
+        RefForm::Point(p) => point_source(s, p, cmd),
         RefForm::Axis(a) => axis_source(s, a, cmd),
         RefForm::Plane(p) => Ok(LinkSource::Plane { name: p.to_string() }),
         RefForm::Origin => Ok(LinkSource::Origin),

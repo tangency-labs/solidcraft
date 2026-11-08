@@ -957,9 +957,22 @@ pub(crate) enum LostNames {
 }
 
 /// [`refresh_links`] (or [`refresh_face_anchor_links`] with `anchor`) for a sketch evaluated in
-/// `frame`, as [`resolve_at`] takes it; with `lost_names` [`LostNames::Mark`], a link whose named
-/// face or edge is gone is marked lost instead of failing the sketch.
-pub(crate) fn refresh_links_at(
+/// `frame`, as [`resolve_at`] takes it.
+pub fn refresh_links_at(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    plane: &Plane,
+    sk: &mut Sketch,
+    anchor: Option<&crate::FaceAnchor>,
+    frame: Option<&crate::Mat>,
+) -> Result<Vec<String>> {
+    refresh_links_in(doc, vals, st, plane, sk, anchor, LostNames::Fail, frame)
+}
+
+/// [`refresh_links_at`] with `lost_names` [`LostNames::Mark`] for a link whose named face or edge
+/// is gone to be marked lost instead of failing the sketch.
+pub(crate) fn refresh_links_with(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
     st: &ModelState,
