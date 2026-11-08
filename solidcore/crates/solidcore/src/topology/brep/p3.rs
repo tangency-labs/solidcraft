@@ -1401,13 +1401,26 @@ pub(crate) fn rebind_geometry_owners(
     session: impl Fn(EntityRef) -> ObjectRef,
     to: impl Fn(EntityRef) -> ObjectRef,
 ) -> Result<()> {
-    let edges: Vec<EdgeId> = b.edges().ids().collect();
+    // (not upstream) the candidates are found by reading, and only they are written (and
+    // asked again), so an edit that bound nothing writes nothing: every edit of a stitch
+    // ends here
+    let owned = |e: EntityRef, owner: Option<ObjectRef>| owner == Some(session(e));
+    let edges: Vec<EdgeId> = b
+        .edges()
+        .iter()
+        .filter(|(id, edge)| {
+            let e = EntityRef::Edge(*id);
+            edge.curve
+                .as_ref()
+                .is_some_and(|curve| owned(e, curve.owner()))
+        })
+        .map(|(id, _)| id)
+        .collect();
     for edge in edges {
         let e = EntityRef::Edge(edge);
-        let from = session(e);
         let new_owner = to(e);
         let rebound = b.edge_mut(edge)?.curve.as_mut().is_some_and(|curve| {
-            let matched = curve.owner() == Some(from);
+            let matched = owned(e, curve.owner());
             if matched {
                 curve.set_owner(Some(new_owner), None);
             }
@@ -1417,17 +1430,26 @@ pub(crate) fn rebind_geometry_owners(
             b.set_geometry_owner_key(e, Some(new_owner));
         }
     }
-    let edgeuses: Vec<EdgeuseId> = b.edgeuses().ids().collect();
+    let edgeuses: Vec<EdgeuseId> = b
+        .edgeuses()
+        .iter()
+        .filter(|(id, eu)| {
+            let e = EntityRef::Edgeuse(*id);
+            eu.uv_trim_curve
+                .as_ref()
+                .is_some_and(|curve| owned(e, curve.owner()))
+        })
+        .map(|(id, _)| id)
+        .collect();
     for eu in edgeuses {
         let e = EntityRef::Edgeuse(eu);
-        let from = session(e);
         let new_owner = to(e);
         let rebound = b
             .edgeuse_mut(eu)?
             .uv_trim_curve
             .as_mut()
             .is_some_and(|curve| {
-                let matched = curve.owner() == Some(from);
+                let matched = owned(e, curve.owner());
                 if matched {
                     curve.set_owner(Some(new_owner), None);
                 }
@@ -1437,13 +1459,22 @@ pub(crate) fn rebind_geometry_owners(
             b.set_geometry_owner_key(e, Some(new_owner));
         }
     }
-    let faces: Vec<FaceId> = b.faces().ids().collect();
+    let faces: Vec<FaceId> = b
+        .faces()
+        .iter()
+        .filter(|(id, face)| {
+            let e = EntityRef::Face(*id);
+            face.surface
+                .as_ref()
+                .is_some_and(|surface| owned(e, surface.owner()))
+        })
+        .map(|(id, _)| id)
+        .collect();
     for face in faces {
         let e = EntityRef::Face(face);
-        let from = session(e);
         let new_owner = to(e);
         let rebound = b.face_mut(face)?.surface.as_mut().is_some_and(|surface| {
-            let matched = surface.owner() == Some(from);
+            let matched = owned(e, surface.owner());
             if matched {
                 surface.set_owner(Some(new_owner));
             }
