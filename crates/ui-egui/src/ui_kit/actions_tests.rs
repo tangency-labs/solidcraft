@@ -175,7 +175,7 @@ fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_the
                                     ui,
                                     label,
                                     rects[index],
-                                    RichText::new(label).font(crate::fonts::semibold(Tokens::get().font_button)),
+                                    RichText::new(label).font(crate::ui_kit::type_face::semibold(Tokens::get().font_button)),
                                     variant,
                                 );
                                 assert_eq!(response.rect, rects[index]);

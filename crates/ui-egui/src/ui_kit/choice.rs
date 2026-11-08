@@ -70,7 +70,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         .iter()
         .enumerate()
         .map(|(index, option)| {
-            ui.painter().layout_no_wrap((*option).to_owned(), crate::fonts::semibold(font_size), t.form_ink).size().x.ceil()
+            ui.painter().layout_no_wrap((*option).to_owned(), crate::ui_kit::type_face::semibold(font_size), t.form_ink).size().x.ceil()
                 + t.space_16
                 + if icons.get(index).is_some() { t.space_14 + t.space_6 + t.space_4 } else { 0.0 }
         })
@@ -79,7 +79,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
     let segment_width = dimension(ui.available_width()) / options.len().max(1) as f32;
     let widest = shown
         .iter()
-        .map(|option| ui.painter().layout_no_wrap((*option).to_owned(), crate::fonts::semibold(font_size), t.form_ink).size().x)
+        .map(|option| ui.painter().layout_no_wrap((*option).to_owned(), crate::ui_kit::type_face::semibold(font_size), t.form_ink).size().x)
         .fold(0.0, f32::max);
     // Judged on the whole row, which is what a scrollbar narrows, not on one segment.
     let need = if intrinsic { total } else { (widest + 2.0 * t.space_8) * options.len() as f32 };
@@ -159,7 +159,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         if index > 0 {
             ui.painter().vline(segment.left(), segment.y_range(), t.control_border_stroke(t.control_border));
         }
-        let font = if on { crate::fonts::semibold(font_size) } else { egui::FontId::proportional(font_size) };
+        let font = if on { crate::ui_kit::type_face::semibold(font_size) } else { egui::FontId::proportional(font_size) };
         let galley = ui.painter().layout_no_wrap((*text).to_string(), font.clone(), t.form_ink);
         let icon_width = if icons.get(index).is_some() { t.space_14 + t.space_6 } else { 0.0 };
         let text_rect = egui::Rect::from_min_size(
@@ -351,7 +351,7 @@ pub(crate) fn checkbox_row(ui: &mut egui::Ui, key: &str, label: &str, on: bool) 
 /// Compact bold/italic toggles for text. Tokens: scope font/control tokens.
 /// The glyphs keep the familiar B/I treatment; accessible names use translated style names.
 pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool, bold_enabled: bool) {
-    use crate::fonts::RichTextExt as _;
+    use crate::ui_kit::type_face::RichTextExt as _;
     for (key, text, value, id, enabled) in [
         ("Bold", egui::RichText::new("B").semibold(), bold, "sketch_text.bold", bold_enabled),
         ("Italic", egui::RichText::new("I").italics(), italic, "sketch_text.italic", true),
@@ -447,7 +447,7 @@ pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) ->
     }
     let t = Tokens::get();
     if super::settings_page_active(ui) {
-        let font = if selected { crate::fonts::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
+        let font = if selected { crate::ui_kit::type_face::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
         let width = ui.painter().layout_no_wrap(text.to_owned(), font.clone(), t.form_ink).size().x + t.space_16;
         let response = ui.add_sized(
             vec2(width.min(dimension(ui.max_rect().width())), t.space_24 - t.space_2),
@@ -463,14 +463,14 @@ pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) ->
     }
     if super::layout::in_catalog(ui) {
         let accent = solidcraft_theme::TabAccent::current(ui.ctx());
-        let width = ui.painter().layout_no_wrap(text.to_string(), crate::fonts::semibold(t.font_small), t.form_ink).size().x + t.space_16;
+        let width = ui.painter().layout_no_wrap(text.to_string(), crate::ui_kit::type_face::semibold(t.font_small), t.form_ink).size().x + t.space_16;
         let (rect, response) = ui.allocate_exact_size(vec2(width, t.space_16 + t.space_4), egui::Sense::click());
         ui.painter().rect_filled(rect, t.radius_xl, if selected { accent.soft } else { t.control_fill });
         paint_text(
             ui,
             rect.shrink2(vec2(t.space_8, 0.0)),
             text,
-            if selected { crate::fonts::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) },
+            if selected { crate::ui_kit::type_face::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) },
             if selected { accent.ink } else { t.form_ink },
             false,
         );
@@ -478,7 +478,7 @@ pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) ->
         solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), rect);
         return response;
     }
-    let width = (ui.painter().layout_no_wrap(text.to_owned(), crate::fonts::semibold(t.font_label), t.text).size().x + t.space_24)
+    let width = (ui.painter().layout_no_wrap(text.to_owned(), crate::ui_kit::type_face::semibold(t.font_label), t.text).size().x + t.space_24)
         .clamp(t.control_height * 2.0, t.form_card_width);
     let response = ui.add_sized(vec2(width, super::row_height()), egui::Button::selectable(selected, text).truncate());
     solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), response.rect);
@@ -518,7 +518,7 @@ pub(crate) fn thumbnail_choice(ui: &mut Ui, key: &str, text: &str, state: Thumbn
     let t = Tokens::get();
     let thumb_size = vec2(t.control_height + t.space_24, t.control_height + t.space_2);
     let height = thumb_size.y + t.space_8;
-    let font = crate::fonts::semibold(t.font_small);
+    let font = crate::ui_kit::type_face::semibold(t.font_small);
     let width = ui.painter().layout_no_wrap(text.to_owned(), font.clone(), t.form_ink).size().x.min(t.form_label_width * 2.0)
         + thumb_size.x
         + t.space_8

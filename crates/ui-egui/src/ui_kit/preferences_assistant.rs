@@ -72,7 +72,7 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
     let icon_width = if choice.icon.is_some() { t.space_14 + t.space_6 } else { 0.0 };
     let title_galley = ui.painter().layout(
         choice.title.to_owned(),
-        crate::fonts::semibold(t.font_label),
+        crate::ui_kit::type_face::semibold(t.font_label),
         if selected { selected_ink } else { t.form_ink },
         (width - t.space_24 * 2.0 - icon_width).max(1.0),
     );
@@ -111,7 +111,14 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
         let title = Rect::from_min_max(pos2(radio.x + t.space_12, rect.top()), pos2(rect.right() - t.space_8, rect.bottom()));
         let summary_width = ui.painter().layout_no_wrap(choice.summary.into(), FontId::proportional(t.font_small), t.form_dim).size().x;
         let title = Rect::from_min_max(title.min, title.max - vec2(summary_width + t.space_8, 0.0));
-        paint_text(ui, title, choice.title, crate::fonts::semibold(t.font_label), if selected { selected_ink } else { t.form_ink }, false);
+        paint_text(
+            ui,
+            title,
+            choice.title,
+            crate::ui_kit::type_face::semibold(t.font_label),
+            if selected { selected_ink } else { t.form_ink },
+            false,
+        );
         let body = Rect::from_min_max(pos2(rect.right() - t.space_8 - summary_width, rect.top()), rect.max - vec2(t.space_8, 0.0));
         paint_text(ui, body, choice.summary, FontId::proportional(t.font_small), t.form_dim, false);
     } else {

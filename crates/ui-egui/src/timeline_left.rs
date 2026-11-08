@@ -385,7 +385,7 @@ fn timeline_transport(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         }
         let controls_width = crate::ui_kit::history_controls_width(controls.len());
         let title = solidcraft_ui_text::tr("ui.history_title");
-        let galley = ui.painter().layout_no_wrap(title.to_owned(), crate::fonts::semibold(t.font_heading), t.text);
+        let galley = ui.painter().layout_no_wrap(title.to_owned(), crate::ui_kit::type_face::semibold(t.font_heading), t.text);
         let text_left = handle.right() + t.space_8;
         let text_right = controls_right - controls_width - t.space_8;
         let drag_rect = if text_right - text_left >= galley.size().x {
@@ -489,7 +489,7 @@ pub(crate) fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response
                 Dock::Left => "ui.timeline_left_sidebar",
                 Dock::UnderBrowser => "ui.history_below_browser",
             });
-            painter.text(zone.center(), egui::Align2::CENTER_CENTER, label, crate::fonts::semibold(t.font_heading), t.text);
+            painter.text(zone.center(), egui::Align2::CENTER_CENTER, label, crate::ui_kit::type_face::semibold(t.font_heading), t.text);
         }
     }
     if drag.drag_stopped()

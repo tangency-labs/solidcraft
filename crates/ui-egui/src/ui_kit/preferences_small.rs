@@ -73,8 +73,8 @@ pub(crate) fn settings_profile_button(ui: &mut Ui, label: &str, name: &str, edit
         let text_right = (chevron.left() - t.space_6 - if edited { t.space_8 + t.space_6 } else { 0.0 }).max(text_left);
         let overline = Rect::from_min_max(pos2(text_left, rect.center().y - t.space_16), pos2(text_right, rect.center().y - t.space_2));
         let value = Rect::from_min_max(pos2(text_left, overline.bottom()), pos2(text_right, rect.center().y + t.space_16));
-        super::text::paint_text(ui, overline, &label.to_uppercase(), crate::fonts::semibold(t.font_panel), t.form_dim, true);
-        super::text::paint_text(ui, value, name, crate::fonts::semibold(t.font_label), t.form_ink, false);
+        super::text::paint_text(ui, overline, &label.to_uppercase(), crate::ui_kit::type_face::semibold(t.font_panel), t.form_dim, true);
+        super::text::paint_text(ui, value, name, crate::ui_kit::type_face::semibold(t.font_label), t.form_ink, false);
         solidcraft_ui_registry::publish_rect("prefs:profile:icon", icon);
         solidcraft_ui_registry::publish_rect("prefs:profile:label", overline);
         solidcraft_ui_registry::publish_rect("prefs:profile:name", value);
@@ -114,14 +114,21 @@ pub(crate) fn settings_state_badge(ui: &mut Ui, label: &str, tone: SettingsBadge
         SettingsBadgeTone::Warning => (t.pref_note, t.pref_note_fill),
         SettingsBadgeTone::Success => (t.pref_ok, t.pref_ok_fill),
     };
-    let galley = ui.painter().layout_no_wrap(label.to_owned(), crate::fonts::semibold(t.font_small), ink);
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), crate::ui_kit::type_face::semibold(t.font_small), ink);
     let natural = galley.size().x + t.space_16;
     let width = if settings_page_active(ui) { natural.min(super::metrics::dimension(ui.max_rect().width())) } else { natural };
     let clipped = width < natural;
     let (rect, response) = ui.allocate_exact_size(vec2(width, t.space_16 + t.space_2), Sense::hover());
     ui.painter().rect_filled(rect, t.radius_xl, fill);
     if clipped {
-        super::text::paint_text(ui, rect.shrink2(vec2(t.space_8.min(width / 2.0), 0.0)), label, crate::fonts::semibold(t.font_small), ink, false);
+        super::text::paint_text(
+            ui,
+            rect.shrink2(vec2(t.space_8.min(width / 2.0), 0.0)),
+            label,
+            crate::ui_kit::type_face::semibold(t.font_small),
+            ink,
+            false,
+        );
     } else {
         ui.painter().galley(rect.center() - galley.size() / 2.0, galley, ink);
     }
@@ -148,7 +155,7 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
     let t = Tokens::get();
     let ink = if chip.accent { t.selected_ink } else { t.form_dim };
     let font = if chip.accent {
-        crate::fonts::semibold(t.font_caption)
+        crate::ui_kit::type_face::semibold(t.font_caption)
     } else if chip.monospace {
         FontId::monospace(t.font_caption)
     } else {

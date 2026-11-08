@@ -3445,7 +3445,7 @@ mod workspace_menu_tests {
             })
             .collect();
         assert_eq!(titles.len(), 1, "workspace titles must never be drawn twice");
-        assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::fonts::semibold(14.0));
+        assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::ui_kit::type_face::semibold(14.0));
     }
 
     #[test]

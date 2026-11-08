@@ -107,7 +107,14 @@ fn header_actions(
     };
     let left = (icon_rect.right() + t.space_8).min(right);
     let title_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(right.max(left), rect.bottom()));
-    paint_text(ui, title_rect, title, crate::fonts::semibold(if icon.0.is_empty() { t.font_label } else { t.font_heading }), t.form_ink, false);
+    paint_text(
+        ui,
+        title_rect,
+        title,
+        crate::ui_kit::type_face::semibold(if icon.0.is_empty() { t.font_label } else { t.font_heading }),
+        t.form_ink,
+        false,
+    );
     let title_response = ui.interact(title_rect, ui.make_persistent_id("title_text"), egui::Sense::hover());
     title_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
     solidcraft_ui_registry::publish_rect("dialog:header", rect);
@@ -218,9 +225,9 @@ impl<'a> TopHeader<'a> {
         } else {
             crate::icons::paint_icon(ui.painter(), self.icon, icon, 1.0);
         }
-        let heading = crate::fonts::semibold(t.font_heading);
+        let heading = crate::ui_kit::type_face::semibold(t.font_heading);
         match state.text.as_deref() {
-            Some(status) => paint_text(ui, self.title, status, crate::fonts::medium(t.font_label), t.form_dim, false),
+            Some(status) => paint_text(ui, self.title, status, crate::ui_kit::type_face::medium(t.font_label), t.form_dim, false),
             None => paint_text(ui, self.title, title, heading.clone(), t.form_ink, false),
         }
         let title_response = ui.interact(self.title, ui.make_persistent_id("title_text"), egui::Sense::hover());
@@ -266,7 +273,8 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
             }
         });
     }
-    let badge_width = ui.painter().layout_no_wrap(kind.to_owned(), crate::fonts::semibold(t.font_small), t.form_ink).size().x + t.space_16;
+    let badge_width =
+        ui.painter().layout_no_wrap(kind.to_owned(), crate::ui_kit::type_face::semibold(t.font_small), t.form_ink).size().x + t.space_16;
     let badge = egui::Rect::from_center_size(
         egui::pos2(more_rect.left() - t.space_8 - badge_width / 2.0, rect.center().y),
         vec2(badge_width, t.space_16 + t.space_4),
@@ -276,7 +284,7 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
         super::workspace_chip(&mut badge_ui, kind);
     }
     let name = egui::Rect::from_min_max(egui::pos2(icon_rect.right() + t.space_8, rect.top()), egui::pos2(badge.left() - t.space_8, rect.bottom()));
-    paint_text(ui, name, title, crate::fonts::semibold(t.font_label), t.form_ink, false);
+    paint_text(ui, name, title, crate::ui_kit::type_face::semibold(t.font_label), t.form_ink, false);
     ui.interact(name, ui.make_persistent_id("inspector_title"), egui::Sense::hover())
         .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
     t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
@@ -1362,7 +1370,14 @@ fn page_list_sized<S>(
                     ui.add_space(t.space_8);
                     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_24), egui::Sense::hover());
                     let rect = rect.shrink2(vec2(t.space_10, 0.0));
-                    paint_text(ui, rect, &solidcraft_ui_text::tr(group).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim, true);
+                    paint_text(
+                        ui,
+                        rect,
+                        &solidcraft_ui_text::tr(group).to_uppercase(),
+                        crate::ui_kit::type_face::semibold(t.font_small),
+                        t.form_dim,
+                        true,
+                    );
                 }
                 let label = solidcraft_ui_text::tr(page.label);
                 let (rect, response) =
@@ -1389,7 +1404,7 @@ fn page_list_sized<S>(
                     ui,
                     text_rect,
                     label,
-                    if on { crate::fonts::semibold(t.font_label) } else { egui::FontId::proportional(t.font_label) },
+                    if on { crate::ui_kit::type_face::semibold(t.font_label) } else { egui::FontId::proportional(t.font_label) },
                     ink,
                     false,
                 );

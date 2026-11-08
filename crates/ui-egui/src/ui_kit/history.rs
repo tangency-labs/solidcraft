@@ -13,7 +13,7 @@ pub(crate) struct StripHeading(std::sync::Arc<egui::Galley>);
 impl StripHeading {
     pub fn new(painter: &Painter, title: &str) -> Self {
         let t = Tokens::get();
-        Self(painter.layout_no_wrap(title.to_owned(), crate::fonts::semibold(t.font_heading), t.text))
+        Self(painter.layout_no_wrap(title.to_owned(), crate::ui_kit::type_face::semibold(t.font_heading), t.text))
     }
 
     pub fn width(&self) -> f32 {
@@ -149,7 +149,7 @@ impl HistoryChip<'_> {
             } else {
                 t.text
             };
-            let font = if self.selected { crate::fonts::semibold(t.font_body) } else { egui::FontId::proportional(t.font_body) };
+            let font = if self.selected { crate::ui_kit::type_face::semibold(t.font_body) } else { egui::FontId::proportional(t.font_body) };
             let text_rect = Rect::from_min_max(
                 pos2(icon.right() + t.space_6 + 1.0, rect.top()),
                 pos2(rect.right() - if self.error || self.warning { t.space_16 } else { t.space_8 }, rect.bottom()),
@@ -393,7 +393,7 @@ pub(crate) fn history_seam(ui: &mut egui::Ui, card: Rect, names: bool) -> Histor
         tip.popup = tip.popup.anchor(seam.pill).align(egui::RectAlign::RIGHT_START).frame(frame);
         crate::ui_kit::Container::show_tooltip(response.id, tip, |ui| {
             let t = Tokens::get();
-            ui.label(egui::RichText::new(label).font(crate::fonts::semibold(t.font_body)).color(t.text));
+            ui.label(egui::RichText::new(label).font(crate::ui_kit::type_face::semibold(t.font_body)).color(t.text));
             ui.label(egui::RichText::new(solidcraft_ui_text::tr("ui.history_edge_hint")).size(t.font_small).color(t.text_dim));
         });
     }

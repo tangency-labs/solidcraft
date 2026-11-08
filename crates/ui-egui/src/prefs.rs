@@ -2879,7 +2879,9 @@ fn panel_restore_banner(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 let (icon, _) = ui.allocate_exact_size(egui::vec2(t.space_16, t.space_16), egui::Sense::hover());
                 crate::icons::paint_ink(ui.painter(), icon, "status_warning", t.form_error);
                 ui.label(
-                    egui::RichText::new(app.tr("ui.panel_layout.restore_failed")).font(crate::fonts::semibold(t.font_label)).color(t.form_error),
+                    egui::RichText::new(app.tr("ui.panel_layout.restore_failed"))
+                        .font(crate::ui_kit::type_face::semibold(t.font_label))
+                        .color(t.form_error),
                 );
                 let retry = ui_kit::button(ui, app.tr("ui.panel_layout.try_again"), ui_kit::Button::Primary);
                 crate::scenario::publish_target("prefs:panel_restore_retry", retry.rect);

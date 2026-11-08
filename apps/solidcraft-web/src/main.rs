@@ -360,7 +360,7 @@ mod web {
         /// The start page's recent designs were filled from the stored ones.
         recents_synced: bool,
         /// On-demand script fonts: fetched only when a CJK language is selected.
-        font: solidcraft_ui_egui::fonts::CjkFontLoader,
+        font: solidcraft_ui_egui::ui_kit::type_face::CjkFontLoader,
         font_result: FontLoadResult,
         /// The fetched Japanese font's bytes: kept so a language change can re-order the fallbacks.
         cjk_bytes: Option<Vec<u8>>,
@@ -1016,7 +1016,8 @@ mod web {
 
         /// Whether the shell already has the on-demand face the live language needs.
         fn script_font_ready(&self) -> bool {
-            match solidcraft_ui_egui::fonts::web_script_font_kind(solidcraft_ui_text::effective_language(&self.app.preferences.language)) {
+            match solidcraft_ui_egui::ui_kit::type_face::web_script_font_kind(solidcraft_ui_text::effective_language(&self.app.preferences.language))
+            {
                 Some("zh") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh"),
                 Some("zh-TW") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh-TW"),
                 Some("ja") => self.cjk_bytes.is_some(),
@@ -1059,7 +1060,7 @@ mod web {
                     }
                 };
                 let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
-                if !installed && solidcraft_ui_egui::fonts::needs_cjk_font(effective) {
+                if !installed && solidcraft_ui_egui::ui_kit::type_face::needs_cjk_font(effective) {
                     log::warn!("script font unavailable; showing English for this session");
                 }
                 self.font.finished(installed, &mut self.app.preferences.language);
@@ -1069,7 +1070,7 @@ mod web {
             let ready = self.script_font_ready();
             let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
             if self.font.tick(&mut self.app.preferences.language, ready) {
-                self.fetch_font(ctx, solidcraft_ui_egui::fonts::web_script_font_kind(effective).unwrap_or("ja"));
+                self.fetch_font(ctx, solidcraft_ui_egui::ui_kit::type_face::web_script_font_kind(effective).unwrap_or("ja"));
             }
             // The CJK face leads only a CJK UI: its Cyrillic glyphs are full-width, so switching
             // to Ukrainian (or English) must put the Latin face back in front.
@@ -1093,7 +1094,7 @@ mod web {
         /// CJK text on screen with no Japanese font yet (an English UI showing a Japanese name):
         /// fetch the Japanese font, so the text does not stay tofu (#720).
         fn watch_text_for_font(&mut self, ctx: &egui::Context) {
-            if self.font.watching_text() && solidcraft_ui_egui::fonts::painted_cjk(ctx) && self.font.text_needs_font() {
+            if self.font.watching_text() && solidcraft_ui_egui::ui_kit::type_face::painted_cjk(ctx) && self.font.text_needs_font() {
                 self.fetch_font(ctx, "ja");
             }
         }

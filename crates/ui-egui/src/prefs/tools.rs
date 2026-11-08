@@ -248,7 +248,7 @@ fn create_row(ui: &mut egui::Ui, label: &str, icons: &[&str], first: bool, add: 
                     }
                     ui.add_space(t.space_4);
                     if !label.is_empty() {
-                        ui.label(egui::RichText::new(label).font(crate::fonts::semibold(t.font_label)).color(t.form_ink));
+                        ui.label(egui::RichText::new(label).font(crate::ui_kit::type_face::semibold(t.font_label)).color(t.form_ink));
                     }
                 },
             );

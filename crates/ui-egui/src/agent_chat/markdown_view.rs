@@ -5,8 +5,8 @@
 //! so the parsed blocks are kept per conversation item and parsed again only when its text
 //! changes.
 
-use crate::fonts::RichTextExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::type_face::RichTextExt as _;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -43,7 +43,7 @@ fn job(ui: &egui::Ui, spans: &[Span], size: f32, color: Color32) -> LayoutJob {
         let plain = TextFormat { font_id: base.clone(), color, ..Default::default() };
         match s {
             Span::Text(x) => j.append(x, 0.0, plain),
-            Span::Bold(x) => j.append(x, 0.0, TextFormat { font_id: crate::fonts::semibold(size), color: t.text, ..plain }),
+            Span::Bold(x) => j.append(x, 0.0, TextFormat { font_id: crate::ui_kit::type_face::semibold(size), color: t.text, ..plain }),
             Span::Italic(x) => j.append(x, 0.0, TextFormat { italics: true, ..plain }),
             Span::Code(x) => {
                 j.append(x, 0.0, TextFormat { font_id: FontId::monospace(size - (t.font_button - t.font_body)), background: t.field, ..plain })

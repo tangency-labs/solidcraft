@@ -232,7 +232,10 @@ pub(crate) fn assistant_approval<R>(ui: &mut Ui, title: &str, body: impl FnOnce(
                         ui.spacing_mut().item_spacing.x = t.space_6;
                         let (icon, _) = ui.allocate_exact_size(vec2(t.space_16, t.space_16), egui::Sense::hover());
                         crate::icons::paint_ink(ui.painter(), icon, "shield", t.selected_ink);
-                        ui.add(egui::Label::new(egui::RichText::new(title).font(crate::fonts::semibold(t.font_label)).color(t.form_ink)).wrap());
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(title).font(crate::ui_kit::type_face::semibold(t.font_label)).color(t.form_ink))
+                                .wrap(),
+                        );
                     });
                 },
             );
@@ -375,7 +378,9 @@ pub(crate) fn assistant_empty<R>(ui: &mut Ui, title: &str, body: &str, add: impl
         let (disc, _) = ui.allocate_exact_size(vec2(diameter, diameter), egui::Sense::hover());
         ui.painter().circle_filled(disc.center(), diameter / 2.0, t.accent_soft);
         crate::icons::paint_ink(ui.painter(), disc.shrink(t.space_8), "assistant", t.selected_ink);
-        ui.add(egui::Label::new(egui::RichText::new(title).font(crate::fonts::semibold(t.font_body + t.space_2)).color(t.form_ink)).wrap());
+        ui.add(
+            egui::Label::new(egui::RichText::new(title).font(crate::ui_kit::type_face::semibold(t.font_body + t.space_2)).color(t.form_ink)).wrap(),
+        );
         ui.add(egui::Label::new(egui::RichText::new(body).size(t.font_label).color(t.form_dim)).wrap());
         add(ui)
     })

@@ -1,6 +1,6 @@
 //! Menus share one popup surface and one row painter. Command dispatch stays with callers.
 use crate::ui_kit::{Container, Surface};
-use crate::{fonts::RichTextExt as _, icons};
+use crate::{icons, ui_kit::type_face::RichTextExt as _};
 use egui::{Color32, FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 use serde::Serialize;
 use serde_json::Value;
@@ -307,7 +307,7 @@ impl Menu {
         let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_24), Sense::hover());
         let mut job = egui::text::LayoutJob::simple_singleline(
             solidcraft_ui_text::tr_label(label).to_uppercase(),
-            crate::fonts::semibold(t.font_small),
+            crate::ui_kit::type_face::semibold(t.font_small),
             t.form_dim,
         );
         for section in &mut job.sections {

@@ -404,7 +404,8 @@ fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesVie
         ui.painter().circle_filled(pos2(text_rect.left() + 3.5, text_rect.center().y), 3.5, t.pref_note);
         text_rect.min.x += t.space_12;
     }
-    let font = if selected || matches!(item, Tile::Save) { crate::fonts::semibold(t.font_body) } else { FontId::proportional(t.font_body) };
+    let font =
+        if selected || matches!(item, Tile::Save) { crate::ui_kit::type_face::semibold(t.font_body) } else { FontId::proportional(t.font_body) };
     let mut job = egui::text::LayoutJob::single_section(name.to_owned(), egui::TextFormat::simple(font, ink));
     job.wrap.max_width = text_rect.width();
     job.wrap.max_rows = 1;

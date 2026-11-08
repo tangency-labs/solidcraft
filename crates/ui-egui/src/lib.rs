@@ -816,7 +816,7 @@ pub struct SolveApp {
     pub(crate) frame_watch: frame_watch::Watch,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
-    /// The language the installed font fallback chain is ordered for (`fonts::fallback_order`);
+    /// The language the installed font fallback chain is ordered for (`ui_kit::type_face::fallback_order`);
     /// changing `preferences.language` re-installs the fonts on the next frame.
     applied_fonts_language: String,
     /// The interface font the fonts were last set up with (`Prefs::ui_font`).

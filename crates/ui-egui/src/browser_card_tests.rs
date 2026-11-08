@@ -605,7 +605,7 @@ fn browser_title_uses_a_single_semibold_run() {
         })
         .collect();
     assert_eq!(titles.len(), 1);
-    assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::fonts::semibold(Tokens::get().font_heading));
+    assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::ui_kit::type_face::semibold(Tokens::get().font_heading));
 }
 
 #[test]

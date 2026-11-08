@@ -1,8 +1,8 @@
 //! Application bar, the workspace toolbar (tabs and panels) and keyboard shortcuts.
 
-use crate::fonts::RichTextExt as _;
 use crate::icons::glyphs::pin_icon;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::type_face::RichTextExt as _;
 use crate::ui_kit::{self, Container, Edge, Surface};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
@@ -423,7 +423,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     pos2(left + 36.0, r.center().y),
                     Align2::LEFT_CENTER,
                     "SolidCraft",
-                    crate::fonts::semibold(t.font_heading),
+                    crate::ui_kit::type_face::semibold(t.font_heading),
                     t.app_bar_text,
                 );
             }
@@ -1287,7 +1287,7 @@ fn ribbon_button_galley_weight(painter: &egui::Painter, label: &str, width: f32,
     let size = solidcraft_theme::Tokens::get().font_body;
     let mut job = egui::text::LayoutJob::simple(
         lines.join("\n"),
-        if selected { crate::fonts::semibold(size) } else { FontId::proportional(size) },
+        if selected { crate::ui_kit::type_face::semibold(size) } else { FontId::proportional(size) },
         color,
         f32::INFINITY,
     );
@@ -1369,7 +1369,10 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
     let widths: Vec<_> = tabs
         .iter()
         .map(|tab| {
-            ui.painter().layout_no_wrap(ribbon_label(app, tab), crate::fonts::semibold(solidcraft_theme::Tokens::get().font_button), t.text).size().x
+            ui.painter()
+                .layout_no_wrap(ribbon_label(app, tab), crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_button), t.text)
+                .size()
+                .x
                 + 24.0
         })
         .collect();
@@ -1395,7 +1398,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
     let action_labels = [app.tr_label("Render").to_string(), app.tr_label("Cancel").to_string()];
     let action_widths = action_labels
         .each_ref()
-        .map(|label| ui.painter().layout_no_wrap(label.clone(), crate::fonts::semibold(t.font_button), t.text).size().x + 24.0);
+        .map(|label| ui.painter().layout_no_wrap(label.clone(), crate::ui_kit::type_face::semibold(t.font_button), t.text).size().x + 24.0);
     let action_width = if render { action_widths.iter().sum::<f32>() + 2.0 * t.space_2 } else { 0.0 };
     let search = Rect::from_min_size(
         pos2(row.right() - search_width - inset - action_width, row.top() + inset),
@@ -2195,7 +2198,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             let label = if finish { app.tr("ui.ribbon_exit").to_string() } else { ribbon_label(app, panel) };
             let panel_open = panel_open || hidden_running;
             let font = if panel_open || hot {
-                crate::fonts::semibold(solidcraft_theme::Tokens::get().font_caption)
+                crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_caption)
             } else {
                 FontId::proportional(solidcraft_theme::Tokens::get().font_caption)
             };
@@ -2578,8 +2581,11 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
     response.backing_on_hover_ui(|ui| {
         let t = Tokens::get();
         let name = app.tr_label(crate::render_workspace::interactive_command_info(app, command).label);
-        let name_width =
-            ui.painter().layout_no_wrap(name.to_string(), crate::fonts::semibold(solidcraft_theme::Tokens::get().font_heading), t.text).size().x;
+        let name_width = ui
+            .painter()
+            .layout_no_wrap(name.to_string(), crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_heading), t.text)
+            .size()
+            .x;
         let key_width = crate::keymap::display_for(app, command.id)
             .map(|key| {
                 ui.painter().layout_no_wrap(key.to_string(), FontId::monospace(solidcraft_theme::Tokens::get().font_body), t.text_dim).size().x + 24.0
@@ -2676,7 +2682,7 @@ fn reveal_tooltip(app: &SolveApp, ui: &egui::Ui, rect: Rect, command: &solidcraf
 /// the grid: a step below the drop-down's own header (`font_caption`) and written as named, not
 /// in capitals, so it reads as part of the menu rather than above it.
 fn group_heading_font() -> FontId {
-    crate::fonts::semibold(Tokens::get().font_micro)
+    crate::ui_kit::type_face::semibold(Tokens::get().font_micro)
 }
 
 /// A group heading's text: its name in the interface language, as written.
@@ -5702,7 +5708,7 @@ mod ribbon_label_tests {
                 .collect();
             assert_eq!(text.len(), 1, "ribbon labels must never be drawn twice");
             let text = text[0];
-            assert_eq!(text.galley.job.sections[0].format.font_id, crate::fonts::semibold(13.0));
+            assert_eq!(text.galley.job.sections[0].format.font_id, crate::ui_kit::type_face::semibold(13.0));
             assert_eq!(text.galley.job.sections[0].format.color, ink);
             assert!((text.pos.x * scale - (text.pos.x * scale).round()).abs() < 0.001);
             assert!((text.pos.y * scale - (text.pos.y * scale).round()).abs() < 0.001);
@@ -6291,7 +6297,7 @@ mod persistent_ribbon_tests {
                 })
                 .unwrap_or_else(|| panic!("missing {id} label"));
             let font = &text.galley.job.sections[0].format.font_id;
-            assert_eq!(*font, if selected { crate::fonts::semibold(t.font_body) } else { FontId::proportional(t.font_body) });
+            assert_eq!(*font, if selected { crate::ui_kit::type_face::semibold(t.font_body) } else { FontId::proportional(t.font_body) });
             assert_eq!(text.galley.job.sections[0].format.color, if selected { t.selected_ink } else { t.text });
         }
     }

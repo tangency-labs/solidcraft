@@ -16,7 +16,7 @@ use serde_json::json;
 use solidcraft_engine::render::{Camera, ViewAngles};
 
 use crate::SolveApp;
-use crate::fonts::RichTextExt as _;
+use crate::ui_kit::type_face::RichTextExt as _;
 use crate::ui_kit::{self, Container, Surface};
 use solidcraft_theme::Tokens;
 

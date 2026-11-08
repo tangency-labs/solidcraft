@@ -53,7 +53,7 @@ impl ContentWidth {
     /// Width of a strong configuration name, using the same font as its table cell.
     pub(crate) fn name(ui: &Ui, text: &str) -> f32 {
         let t = Tokens::get();
-        ui.painter().layout_no_wrap(text.to_owned(), crate::fonts::semibold(t.font_label), t.form_ink).size().x.ceil()
+        ui.painter().layout_no_wrap(text.to_owned(), crate::ui_kit::type_face::semibold(t.font_label), t.form_ink).size().x.ceil()
     }
 
     pub(crate) fn button(ui: &Ui, label: &str) -> f32 {

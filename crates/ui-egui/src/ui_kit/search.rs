@@ -293,7 +293,7 @@ impl super::MenuItem<'_> {
                 SearchBadge::Valid => t.form_success,
                 SearchBadge::Invalid => t.form_error,
             };
-            let galley = painter.layout_no_wrap(self.shortcut.to_owned(), crate::fonts::semibold(t.font_small), ink);
+            let galley = painter.layout_no_wrap(self.shortcut.to_owned(), crate::ui_kit::type_face::semibold(t.font_small), ink);
             let size = galley.size() + vec2(t.space_16, t.space_4);
             let rect = Rect::from_min_size(pos2(right - size.x, r.center().y - size.y / 2.0), size);
             painter.rect_filled(
@@ -335,7 +335,11 @@ impl super::MenuItem<'_> {
             .flatten();
         if let Some((start, end)) = hit {
             job.append(label.get(..start).unwrap_or_default(), 0.0, normal.clone());
-            job.append(label.get(start..end).unwrap_or_default(), 0.0, egui::TextFormat::simple(crate::fonts::bold(t.font_label), t.selected_ink));
+            job.append(
+                label.get(start..end).unwrap_or_default(),
+                0.0,
+                egui::TextFormat::simple(crate::ui_kit::type_face::bold(t.font_label), t.selected_ink),
+            );
             job.append(label.get(end..).unwrap_or_default(), 0.0, normal);
         } else {
             job.append(label, 0.0, normal);

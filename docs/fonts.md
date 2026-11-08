@@ -30,13 +30,14 @@ palettes in `crates/theme/src/palettes.rs`. The compact scale runs from
 existing designs: `font_triad` (8), `font_compass` (13.5), `font_subtitle` (15),
 `font_intro` (16), `font_article_heading` (17), `font_title` (22), and
 `font_display` (26). Scaled labels derive from these tokens. Weight helpers in
-`fonts.rs` choose the family independently of size.
+`ui_kit/type_face.rs` (the kit's type API, which holds no font data) choose the
+family independently of size; `fonts.rs` embeds and installs the faces.
 
 Dense forms also use tokens for control height/radius, label width, row gap,
 header/footer/card dimensions, icons, text insets, checkbox and action heights,
 and section letter spacing. Existing `space_*` tokens supply shared padding.
 The `font_literals_tests` source guard scans production Rust, including the
 viewport icon sources, and rejects numeric font sizes, private font families
-outside `fonts.rs`, and direct dense-form spacing literals. Its small per-file
+outside `ui_kit/type_face.rs`, and direct dense-form spacing literals. Its small per-file
 allowance table documents graphic spinner diameters; it permits no text sizes.
 Run it with `cargo test -p solidcraft-ui-egui --lib font_literals_tests`.
