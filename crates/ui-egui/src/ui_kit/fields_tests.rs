@@ -889,11 +889,15 @@ fn selection_field_has_three_distinct_looks_in_every_theme() {
     let mut palettes: Vec<(String, Option<crate::theme::FilePalette>, bool)> = vec![("dark".into(), None, true), ("light".into(), None, false)];
     for theme in crate::theme_files::builtin() {
         let dark = theme.base.is_dark();
-        palettes.push((theme.id.clone(), Some(crate::theme::FilePalette {
+        palettes.push((
+            theme.id.clone(),
+            Some(crate::theme::FilePalette {
                 dark,
                 tokens: crate::theme_files::resolve(theme),
                 icons: crate::theme_files::resolve_icon_palette(theme, &Default::default()),
-            }), dark));
+            }),
+            dark,
+        ));
     }
     let previous = solidcraft_theme::is_dark();
     for (name, custom, dark) in palettes {
