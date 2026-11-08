@@ -1822,11 +1822,25 @@ fn pose_moved(old: Option<&FeatureResult>, f: &Feature, fp: u64, state: &ModelSt
     same.then_some(after)
 }
 
-/// `old` (a result after the moved pose-only features) with their new bodies in place of theirs.
+/// The bodies feature `f` changed when evaluated again (to `state`) only because it reads bodies
+/// a pose-only feature moved: the result `old` was on the same definitions, the state has the
+/// same bodies by name and nothing besides, and the bodies it gives are those not shared with it.
+fn read_moved(old: Option<&FeatureResult>, f: &Feature, fp: u64, state: &ModelState) -> Option<Vec<ModelBody>> {
+    let old = old.filter(|o| o.id == f.id && o.fingerprint == fp && !o.stale && !o.skipped && !o.unkept && o.error.is_none())?;
+    let names = |st: &ModelState| st.bodies.iter().map(|b| b.name.clone()).collect::<std::collections::BTreeSet<_>>();
+    let same = names(&old.state) == names(state)
+        && old.state.bodies.len() == state.bodies.len()
+        && old.state.threads.len() == state.threads.len()
+        && old.state.sheets.len() == state.sheets.len()
+        && old.state.construct.len() == state.construct.len();
+    same.then(|| state.bodies.iter().filter(|b| !old.state.body(&b.name).is_some_and(|o| Arc::ptr_eq(&o.mesh, &b.mesh))).cloned().collect())
+}
+
+/// `old` (a result after the moved features) with their new bodies, by name, in place of its own.
 fn with_moved(old: &Arc<ModelState>, moved: &[(u64, Vec<ModelBody>)]) -> Arc<ModelState> {
     let mut st = (**old).clone();
     for b in &mut st.bodies {
-        if let Some(new) = moved.iter().filter(|(id, _)| *id == b.feature).flat_map(|(_, bodies)| bodies).find(|n| n.name == b.name) {
+        if let Some(new) = moved.iter().rev().flat_map(|(_, bodies)| bodies).find(|n| n.name == b.name) {
             *b = new.clone();
         }
     }
@@ -2404,7 +2418,8 @@ impl Model {
                 continue;
             }
             // Reuse goes on past a pose-only feature evaluated again for its pose alone.
-            let reusing = reuse && !unkept && pose.is_some();
+            // So does it past a feature evaluated again only because it reads their moved bodies.
+            let reusing = reuse && !unkept && (pose.is_some() || !moved.is_empty());
             reuse = unkept && !cancelled;
             if f.suppressed || rolled_back || cancelled {
                 out.push(FeatureResult {
@@ -2482,7 +2497,8 @@ impl Model {
                 reuse &= c.error.is_none();
                 if reusing
                     && c.error.is_none()
-                    && let Some(bodies) = pose_moved(self.results.get(i), f, fp, &state)
+                    && let Some(bodies) =
+                        if pose.is_some() { pose_moved(self.results.get(i), f, fp, &state) } else { read_moved(self.results.get(i), f, fp, &state) }
                 {
                     moved.retain(|(id, _)| *id != f.id);
                     moved.push((f.id, bodies));
@@ -2654,7 +2670,8 @@ impl Model {
             reuse &= error.is_none();
             if reusing
                 && error.is_none()
-                && let Some(bodies) = pose_moved(self.results.get(i), f, fp, &state)
+                && let Some(bodies) =
+                    if pose.is_some() { pose_moved(self.results.get(i), f, fp, &state) } else { read_moved(self.results.get(i), f, fp, &state) }
             {
                 moved.retain(|(id, _)| *id != f.id);
                 moved.push((f.id, bodies));

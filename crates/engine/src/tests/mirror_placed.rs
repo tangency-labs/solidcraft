@@ -424,7 +424,7 @@ fn assert_model_as_evaluated_afresh(s: &Session) {
 
 /// Driving a joint evaluates a mirror of the part it moves again, and the features after it
 /// only when they read its copy: a box, a sketch and its extrusion, and a cut into another
-/// body are kept (#12139).
+/// body are kept, also after a move of the copy, which is evaluated again (#12139).
 #[test]
 fn a_joint_drive_evaluates_only_what_reads_the_mirrored_copy() {
     for dependent in [false, true] {
@@ -436,15 +436,16 @@ fn a_joint_drive_evaluates_only_what_reads_the_mirrored_copy() {
             json!({"type": "revolute", "name": "Pan", "a": 0, "b": "Arm", "at": {"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]}}),
         );
         let copy = created(&run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody"], "plane": "YZ"})));
+        // A reader of the copy before the features that read none of it.
+        if dependent {
+            run(&mut s, "solid.move", json!({"bodies": [copy.clone()], "translate": [0, 0, 5]}));
+        }
         run(&mut s, "solid.box", json!({"corner": [0, -100, 0], "length": 10, "width": 10, "height": 10, "body_name": "Later"}));
         run(&mut s, "sketch.create", json!({"plane": "XY"}));
         run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-100, -100], "p1": [-90, -90]}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"distance": 4, "operation": "new"}));
         run(&mut s, "solid.box", json!({"corner": [2, -98, 5], "length": 2, "width": 2, "height": 10, "operation": "cut", "targets": ["Later"]}));
-        if dependent {
-            run(&mut s, "solid.move", json!({"bodies": [copy.clone()], "translate": [0, 0, 5]}));
-        }
         for angle in [20, -35, 60] {
             run(&mut s, "joint.drive", json!({"joint": "Pan", "value": angle, "quiet": true}));
             let recomputed = s.model.last_recomputed + s.model.last_restored;
