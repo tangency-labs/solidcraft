@@ -27,6 +27,17 @@ import and export, or tessellation. The pinned issue on the tracker explains it.
 and data loss are still taken as issues. Pull requests outside those directories carry on as normal,
 including the dialogs and tools for these features.
 
+### Updating a PR that was moved from solidcore
+
+solidcore's open PRs were re-opened here on `moved/solidcore-N` branches in tangency-labs, so
+contributors without write access can't push to them. To update one:
+
+1. `git fetch https://github.com/tangency-labs/solidcraft moved/solidcore-N:moved/solidcore-N`, then
+   `git switch moved/solidcore-N`.
+2. Commit your changes on it and push it to your fork: `git push <your-fork> moved/solidcore-N`.
+3. Open a PR against `kernel` that says "Replaces #M" (M is the moved PR's number). The moved one
+   gets closed.
+
 ## Get it running (about 10 minutes on a fast machine)
 
 You need stable Rust 1.95 or newer (required by egui/eframe 0.36). For the web
@@ -428,6 +439,10 @@ Much of SolidCraft so far was written by AI coding agents (Claude) working in pa
 owning one area, with a human setting direction and reporting bugs. Their working notes are in
 [AGENTS.md](AGENTS.md). Human contributors are just as welcome. Use whatever tools you like, as
 long as the change meets the rules above.
+
+If you run an agent, keep one long-running session rather than restarting it, don't `--resume` one
+whose prompt cache has gone cold (it re-reads the whole history at full price), and act on CodeRabbit
+comments only when they're about crashes, wrong results, data loss or security.
 
 Two quick checks run on every pull request (`.github/workflows/pr-checks.yml`, not required): it
 fails when a lower-numbered open PR by someone else already closes the same issue (the label
