@@ -44,6 +44,7 @@ pub mod session;
 pub mod split;
 pub mod stitch;
 pub mod sweep;
+pub mod tangent;
 pub mod untrim;
 
 pub use blend::{
