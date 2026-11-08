@@ -3071,6 +3071,34 @@ fn an_app_that_quits_during_a_call_may_have_run_it() {
     assert!(!e.starts_with(crate::backend::NOT_RUNNING) && e.contains("may have quit") && e.contains("Inspect the design"), "{e}");
 }
 
+/// #10967: an app whose connections are all taken refuses the call unrun and closes the
+/// connection. The error says so (not that the app may have quit), and the next call connects
+/// again.
+#[test]
+fn an_app_with_every_connection_taken_refuses_the_call_unrun() {
+    use std::io::{BufRead, BufReader, Write};
+
+    use crate::backend::Backend;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let app = std::thread::spawn(move || {
+        for refused in [true, false] {
+            let (stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(stream.try_clone().unwrap()).read_line(&mut line).unwrap();
+            let req: Value = serde_json::from_str(&line).unwrap();
+            let reply =
+                if refused { json!({"ok": false, "error": "too many connections"}) } else { json!({"id": req["id"], "ok": true, "result": "ran"}) };
+            writeln!(&stream, "{reply}").unwrap();
+        }
+    });
+    let mut remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap();
+    let e = remote.call("engine.execute", json!({"command": "solid.box"})).unwrap_err();
+    assert!(e.contains("refused this call without running it") && !e.contains("may have quit"), "{e}");
+    assert_eq!(remote.call("engine.execute", json!({"command": "solid.box"})).unwrap(), "ran");
+    app.join().unwrap();
+}
+
 /// Tool annotations never understate what a tool may do (#205): `screenshot` writes a file when
 /// given a `path`, and `execute`, `batch`, `save`, `export` and `open` can overwrite or delete
 /// files, so none of them is read-only and all are destructive and reach the file system.

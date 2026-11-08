@@ -193,12 +193,13 @@ jobs:
           }
           # Whether the NUL-separated paths in $1 (the diff $2) reach what the Windows D3D12 jobs
           # exercise: the GPU crate and its shaders, the app and its startup, the viewport's wgpu
-          # glue, the vendored egui-wgpu and kernel, their scripts, or a lockfile change that moves
-          # the graphics stack (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
+          # glue, the vendored egui-wgpu and kernel, their scripts, the control server (its refusals,
+          # #10967), or a lockfile change that moves the graphics stack (wgpu, naga, egui, winit,
+          # windows). Pull requests and merge groups share it.
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
-                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*|solidcore/*) windows=true ;;
+                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*|solidcore/*|crates/control/src/server.rs) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
               esac
             done < "$1"
@@ -1025,6 +1026,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Backend order and probing on Windows
         run: cargo test -p solidcraft --profile ci --locked -- startup::tests native_crash::tests native_frame::tests
+      # On Windows a reset loses the reply sent before it, so only here does this test see one (#10967).
+      - name: Control channel refusals on Windows
+        run: cargo test -p solidcraft-control --profile ci --locked -- server::tests::a_connection_past_the_limit_reads_why
       - name: Build the app
         run: cargo build -p solidcraft --profile ci --locked
       - name: Start the app under different settings

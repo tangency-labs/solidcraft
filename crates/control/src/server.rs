@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use crate::Effect;
-use crate::auth::tokens_match;
+use crate::auth::{TOO_MANY_CONNECTIONS, tokens_match};
 use crate::request::{ControlRequest, DOCUMENT_WATCH, DocumentWatch, Subscriber};
 
 /// What the server needs to know of a request before it sends it to the window: how to name it
@@ -60,7 +60,7 @@ pub struct Hub {
     waits: Waits,
     watch: &'static DocumentWatch,
     running: Arc<Running>,
-    open: AtomicUsize,
+    open: Arc<AtomicUsize>,
 }
 
 impl Hub {
@@ -73,7 +73,7 @@ impl Hub {
             waits: Waits::default(),
             watch: &DOCUMENT_WATCH,
             running: Arc::new(Running::new()),
-            open: AtomicUsize::new(0),
+            open: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -98,24 +98,36 @@ impl Hub {
         if !addr.ip().is_loopback() {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("the control channel listens on loopback only, not {addr}")));
         }
-        let hub = Arc::clone(self);
+        let (hub, open, max_line) = (Arc::clone(self), Arc::clone(&self.open), self.max_line);
         let token = Arc::new(token);
         std::thread::spawn(move || {
-            for stream in listener.incoming().flatten() {
-                if hub.open.fetch_add(1, Ordering::Relaxed) >= MAX_CONNECTIONS {
-                    hub.open.fetch_sub(1, Ordering::Relaxed);
-                    let mut refused = stream;
-                    let _ = send(&mut refused, &json!({"ok": false, "error": "too many connections"}));
-                    continue;
-                }
-                let (hub, tx, token) = (Arc::clone(&hub), requests.clone(), Arc::clone(&token));
-                std::thread::spawn(move || {
-                    hub.serve(stream, &token, tx, patient);
-                    hub.open.fetch_sub(1, Ordering::Relaxed);
-                });
-            }
+            accept(listener, open, MAX_CONNECTIONS, max_line, move |stream| hub.serve(stream, &token, requests.clone(), patient))
         });
         Ok(())
+    }
+}
+
+/// Serve each connection of `listener` on a thread of its own, at most `max` at once (`open`
+/// counts them). One past that is refused here, on the accepting thread, as [`refuse`] does, so the
+/// client reads why instead of a reset (#10967): it has usually sent its request already. A thread
+/// for each refusal is what the limit is there to prevent; a refusal holds up the next connection
+/// for at most [`refuse`]'s half second.
+fn accept(listener: TcpListener, open: Arc<AtomicUsize>, max: usize, max_line: usize, handle: impl Fn(TcpStream) + Clone + Send + 'static) {
+    for stream in listener.incoming().flatten() {
+        if open.fetch_add(1, Ordering::Relaxed) >= max {
+            open.fetch_sub(1, Ordering::Relaxed);
+            if let Ok(socket) = stream.try_clone() {
+                let mut out = stream;
+                let mut reader = BufReader::new(ClientInput { socket, deadline: None });
+                refuse(&mut out, &mut reader, &json!({"ok": false, "error": TOO_MANY_CONNECTIONS}), max_line);
+            }
+            continue;
+        }
+        let (handle, open) = (handle.clone(), Arc::clone(&open));
+        std::thread::spawn(move || {
+            handle(stream);
+            open.fetch_sub(1, Ordering::Relaxed);
+        });
     }
 }
 
@@ -215,14 +227,15 @@ fn unauthorized(docs: &str) -> Value {
 }
 
 /// Refuse the connection: the reply, then the end of what we send, then what the client had
-/// already sent read and dropped (a little, briefly). Closing a socket with unread input resets
-/// the connection, and a reset can reach the client before it has read the refusal.
-fn refuse(out: &mut TcpStream, reader: &mut BufReader<ClientInput>, docs: &str) {
+/// already sent read and dropped (briefly, and at most a request's length, `max_line`, which a
+/// connection refused before reading anything may have on its way). Closing a socket with unread
+/// input resets the connection, and a reset can reach the client before it has read the refusal.
+fn refuse(out: &mut TcpStream, reader: &mut BufReader<ClientInput>, reply: &Value, max_line: usize) {
     use std::io::Read;
-    let _ = send(out, &unauthorized(docs));
+    let _ = send(out, reply);
     let _ = out.shutdown(std::net::Shutdown::Write);
     reader.get_mut().deadline = Some(Instant::now() + Duration::from_millis(500));
-    let _ = std::io::copy(&mut reader.by_ref().take(64 * 1024), &mut std::io::sink());
+    let _ = std::io::copy(&mut reader.by_ref().take((max_line as u64).saturating_add(1)), &mut std::io::sink());
 }
 
 /// What a client sends. Until it shows the token, all of its reads share one deadline, so neither
@@ -574,7 +587,7 @@ impl Hub {
                         authenticated = true;
                     }
                     _ => {
-                        refuse(&mut out, &mut reader, self.protocol.docs());
+                        refuse(&mut out, &mut reader, &unauthorized(self.protocol.docs()), self.max_line);
                         break;
                     }
                 }
@@ -731,6 +744,36 @@ mod tests {
         assert!(e.to_string().contains("loopback only"), "{e}");
         let local = TcpListener::bind("127.0.0.1:0").unwrap();
         assert!(hub(Waits::default(), &DOCUMENT_WATCH).listen(local, "0123456789abcdef0123456789abcdef".into(), tx, false).is_ok());
+    }
+
+    /// #10967: a connection past the limit reads why it was refused, and then the end of the
+    /// connection, although its request was on its way. Closed with that request unread, it was
+    /// reset, and on Windows the reset reached the client before the refusal (os error 10054).
+    #[test]
+    fn a_connection_past_the_limit_reads_why() {
+        use std::io::Read;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            accept(listener, Arc::new(AtomicUsize::new(0)), 1, MAX_LINE, |mut s: TcpStream| {
+                let _ = std::io::copy(&mut s, &mut std::io::sink());
+            })
+        });
+        // Accepted first, so it holds the one seat while the next one connects.
+        let _first = TcpStream::connect(addr).unwrap();
+        let mut late = TcpStream::connect(addr).unwrap();
+        late.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        // A long one, as a batch is: the app reads all of it before it closes. Sent in one write, as
+        // the MCP server sends: written a token at a time it takes longer than the app waits.
+        let steps = vec![json!({"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}); 4000];
+        let request = json!({"id": 1, "method": "engine.batch", "params": {"commands": steps}, "token": "0123456789abcdef0123456789abcdef"});
+        late.write_all(format!("{request}\n").as_bytes()).unwrap();
+        // Arrived before the app is done with the connection, and read by nobody else.
+        std::thread::sleep(Duration::from_millis(200));
+        let mut line = String::new();
+        BufReader::new(late.try_clone().unwrap()).read_line(&mut line).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), json!({"ok": false, "error": "too many connections"}));
+        assert_eq!(late.read(&mut [0u8; 1]).unwrap(), 0, "closed, not reset");
     }
 
     /// A connection that doesn't show the token in time is closed without a word, however it fills

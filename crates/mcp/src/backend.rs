@@ -494,6 +494,15 @@ impl Remote {
             self.settle_earlier()?;
             return self.call_once(method, params, false);
         }
+        // Every connection the app serves is taken (#10967): it ran nothing and closed this one.
+        if v.get("error").and_then(Value::as_str) == Some(solidcraft_control::auth::TOO_MANY_CONNECTIONS) {
+            self.drop_conn();
+            return Err(format!(
+                "the SolidCraft app at {} refused this call without running it: it is serving as many connections as it takes (each \
+                 MCP server, CLI run or script connected to it holds one). Close one of them, or send the call again once one has ended",
+                self.addr
+            ));
+        }
         // A refused token: say which token file it came from (and whether it is stale).
         outcome(&v).map_err(|error| {
             solidcraft_engine::control_auth::APP

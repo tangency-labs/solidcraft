@@ -20,4 +20,5 @@ from an `App` value the app defines. No app types and no engine.
 | `auth::tokens_match`, `auth::remove_token_file`, `auth::TokenFile`, `auth::pid_path`, `auth::MIN_TOKEN_LEN` | Constant-time compare and token file housekeeping |
 | `Effect` | What a request still running does when it finishes: reads only, writes a file, or changes; `when_done(document)` says it |
 | `server::Hub`, `server::Protocol`, `server::Summary`, `server::Waits`, `server::new_token` | The loopback JSON-lines server behind the token (desktop only); the app says what its requests mean |
+| `server::MAX_CONNECTIONS`, `auth::TOO_MANY_CONNECTIONS` | Connections served at once, and the error one past that is refused with before it is closed (in `auth` so clients on every target can read it) |
 | `ControlRequest`, `ControlResponse`, `DocumentWatch`, `DOCUMENT_WATCH` | A request as the window gets it; the document id and revision subscribed connections wait on |
