@@ -37,8 +37,6 @@ render.status
 sheet.export_dxf
 sketch.dimension
 sketch.draw.dimensioned
-sketch.slot.center_to_center
-sketch.slot.overall
 solid.align
 solid.chamfer
 solid.coil

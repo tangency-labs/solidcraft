@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use super::{
     ArcCenterPointParams, ArcThreePointParams, CircleCenterParams, CircleThreePointParams, CircleTwoPointParams, DrawResult, LineParams, PointParams,
     PointResult, PolygonCircumscribedParams, PolygonEdgeParams, PolygonInscribedParams, PolygonResult, RectCenterParams, RectResult,
-    RectRoundedParams, RectThreePointParams, RectTwoPointParams, RoundedRectResult,
+    RectRoundedParams, RectThreePointParams, RectTwoPointParams, RoundedRectResult, SlotCenterToCenterParams, SlotOverallParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, conforms};
@@ -29,6 +29,8 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<CircleTwoPointParams>(), &["connect", "construction", "p0", "p1", "sketch"]);
     assert_keys(input_schema_for::<CircleThreePointParams>(), &["connect", "construction", "p0", "p1", "p2", "sketch"]);
     assert_keys(input_schema_for::<ArcThreePointParams>(), &["connect", "construction", "end", "id", "sketch", "start", "through"]);
+    assert_keys(input_schema_for::<SlotCenterToCenterParams>(), &["connect", "p0", "p1", "sketch", "width"]);
+    assert_keys(input_schema_for::<SlotOverallParams>(), &["connect", "p0", "p1", "sketch", "width"]);
     assert_keys(
         input_schema_for::<ArcCenterPointParams>(),
         &["center", "clockwise", "connect", "construction", "end", "id", "sketch", "start", "sweep"],
@@ -114,6 +116,21 @@ fn strict_keeps_todays_errors() {
         ("sketch.polygon.edge", json!({"p0": [0, 0], "p1": [0, 0]})),
         ("sketch.polygon.edge", json!({"p0": [0, 0], "p1": [5, 0], "sides": 2.5})),
         ("sketch.polygon.edge", json!({"p0": [0, 0], "p1": ["5", 0]})),
+        ("sketch.slot.center_to_center", json!({"p1": [10, 0], "width": 4})),
+        ("sketch.slot.center_to_center", json!({"p0": "l1.end", "p1": [10, 0], "width": 4})),
+        ("sketch.slot.center_to_center", json!({"p0": ["1", 0], "p1": [10, 0], "width": 4})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5]})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": 0})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": -2})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": "4"})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": 1e12})),
+        ("sketch.slot.center_to_center", json!({"p0": [3, 5], "p1": [3, 5], "width": 4})),
+        ("sketch.slot.overall", json!({"p0": [0, 5], "p1": [10, 5]})),
+        ("sketch.slot.overall", json!({"p0": [0, 5], "p1": 7, "width": 4})),
+        ("sketch.slot.overall", json!({"p0": [0, 5], "p1": [10, 5], "width": true})),
+        ("sketch.slot.overall", json!({"p0": [3, 5], "p1": [3, 5], "width": 4})),
+        ("sketch.slot.overall", json!({"p0": [0, 5], "p1": [4, 5], "width": 4})),
+        ("sketch.slot.overall", json!({"p0": [0, 5], "p1": [3, 5], "width": 4})),
     ];
     for (id, p) in &cases {
         let error = |level| session(level).execute(id, p).err().map(|e| e.to_string());
@@ -151,6 +168,10 @@ fn replies_match_the_output_schema_and_forms_are_accepted() {
         ("sketch.arc.center_point", json!({"center": [0, 50], "start": [5, 50], "end": [0, 55], "clockwise": true, "id": "arc_two"})),
         ("sketch.arc.center_point", json!({"center": [0, 60], "start": [5, 60], "sweep": 90})),
         ("sketch.arc.center_point", json!({"center": [0, 70], "start": [5, 70], "sweep": -45, "end": [0, 75]})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 100], "p1": [20, 100], "width": 6})),
+        ("sketch.slot.center_to_center", json!({"p0": {"x": 0, "y": 120}, "p1": {"x": 20, "y": 120}, "width": 0.5, "connect": false})),
+        ("sketch.slot.overall", json!({"p0": [0, 140], "p1": [20, 140], "width": 6})),
+        ("sketch.slot.overall", json!({"p0": [0, 160], "p1": [20, 170], "width": 6, "connect": true, "sketch": null})),
     ];
     let point_calls = [
         json!({"point": [30, 30]}),
@@ -192,6 +213,8 @@ fn the_check_does_not_change_the_reply() {
         ("sketch.circle.three_point", json!({"p0": [90, 0], "p1": [100, 10], "p2": [110, 0]})),
         ("sketch.arc.three_point", json!({"start": [0, 20], "end": [10, 20], "through": [5, 25]})),
         ("sketch.arc.center_point", json!({"center": [0, 40], "start": [5, 40], "sweep": 90})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 100], "p1": [20, 100], "width": 6})),
+        ("sketch.slot.overall", json!({"p0": [0, 140], "p1": [20, 140], "width": 6})),
     ];
     let (mut off, mut strict) = (session(ParamCheck::Off), session(ParamCheck::Strict));
     for (id, p) in &calls {
@@ -219,6 +242,8 @@ fn wrong_typed_keys_are_reported() {
         ("sketch.circle.three_point", json!({"p0": [0, 0], "p1": [5, 5], "p2": [10, 0]})),
         ("sketch.arc.three_point", json!({"start": [0, 0], "end": [10, 0], "through": [5, 5]})),
         ("sketch.arc.center_point", json!({"center": [0, 0], "start": [5, 0], "sweep": 90})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": 4})),
+        ("sketch.slot.overall", json!({"p0": [0, 5], "p1": [10, 5], "width": 4})),
     ];
     for (id, p) in &base {
         assert!(issues(id, p).is_empty(), "{id} {p}");

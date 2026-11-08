@@ -22,7 +22,8 @@ use crate::schema::sketch_session::{
 use crate::schema::sketch_shapes::{
     ArcCenterPointParams, ArcThreePointParams, CircleCenterParams, CircleThreePointParams, CircleTwoPointParams, Created, DrawResult, LineParams,
     PointParams, PointResult, PolygonCircumscribedParams, PolygonEdgeParams, PolygonInscribedParams, PolygonResult, RectCenterParams, RectCorners,
-    RectResult, RectRoundedParams, RectSides, RectThreePointParams, RectTwoPointParams, RoundedRectResult,
+    RectResult, RectRoundedParams, RectSides, RectThreePointParams, RectTwoPointParams, RoundedRectResult, SlotCenterToCenterParams,
+    SlotOverallParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session, SketchEntry, Snapshot};
@@ -80,6 +81,8 @@ const CIRCLE_CENTER_CONTRACT: TypedContract<CircleCenterParams> = TypedContract:
 const CIRCLE_TWO_POINT_CONTRACT: TypedContract<CircleTwoPointParams> = TypedContract::new();
 const CIRCLE_THREE_POINT_CONTRACT: TypedContract<CircleThreePointParams> = TypedContract::new();
 const ARC_THREE_POINT_CONTRACT: TypedContract<ArcThreePointParams> = TypedContract::new();
+const SLOT_CENTER_TO_CENTER_CONTRACT: TypedContract<SlotCenterToCenterParams> = TypedContract::new();
+const SLOT_OVERALL_CONTRACT: TypedContract<SlotOverallParams> = TypedContract::new();
 const ARC_CENTER_POINT_CONTRACT: TypedContract<ArcCenterPointParams> = TypedContract::new();
 const RECT_TWO_POINT_CONTRACT: TypedContract<RectTwoPointParams> = TypedContract::new();
 const RECT_THREE_POINT_CONTRACT: TypedContract<RectThreePointParams> = TypedContract::new();
@@ -205,15 +208,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&POLYGON_EDGE_CONTRACT)
         .output(output_schema_for::<PolygonResult>)
         .params(concat!("p0, p1: one edge, sides", connect_doc!(), created_doc!())),
-    CommandSpec::new("sketch.slot.center_to_center", "Center to Center Slot", slot_c2c)
+    CommandSpec::new("sketch.slot.center_to_center", "Center to Center Slot", crate::checked!("sketch.slot.center_to_center", slot_c2c))
         .at("SKETCH", "CREATE")
         .icon("slot")
         .enabled(in_sketch)
+        .contract(&SLOT_CENTER_TO_CENTER_CONTRACT)
+        .output(output_schema_for::<DrawResult>)
         .params(concat!("p0, p1: arc centres, width", connect_doc!(), created_doc!())),
-    CommandSpec::new("sketch.slot.overall", "Overall Slot", slot_overall)
+    CommandSpec::new("sketch.slot.overall", "Overall Slot", crate::checked!("sketch.slot.overall", slot_overall))
         .at("SKETCH", "CREATE")
         .icon("slot_overall")
         .enabled(in_sketch)
+        .contract(&SLOT_OVERALL_CONTRACT)
+        .output(output_schema_for::<DrawResult>)
         .params(concat!("p0, p1: overall ends, width", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
@@ -2053,7 +2060,7 @@ fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<Value> {
     let (out, info) = slot_parts(s, p, cmd, c0, c1, w)?;
-    Ok(result(out, info))
+    draw_reply(out, info)
 }
 
 /// What [`slot`] adds: the curve and constraint ids, and the sketch's solve.
