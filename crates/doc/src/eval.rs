@@ -1849,7 +1849,7 @@ fn reads_none_of(f: &Feature, st: &ModelState, moved: &[(u64, Vec<ModelBody>)], 
             bodies.iter().map(|b| b.0.clone()).collect()
         }
         FeatureKind::Extrude { extent, .. } if extent.to.is_some() || extent.from.is_some() => return false,
-        FeatureKind::Revolve { to: Some(_), .. } => return false,
+        FeatureKind::Revolve { to: Some(_), .. } | FeatureKind::Revolve { axis: AxisRef::Model { .. }, .. } => return false,
         kind if drawn_tools_change_bodies(kind) => {
             let mut reads = PlacementReads::default();
             reads.drawn_targets(Some(st), f);

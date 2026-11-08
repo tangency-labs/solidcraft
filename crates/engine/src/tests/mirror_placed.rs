@@ -408,7 +408,8 @@ fn assert_model_as_evaluated_afresh(s: &Session) {
     let mut fresh = solidcraft_doc::Model::new();
     fresh.no_cache = true;
     fresh.evaluate(&s.doc);
-    assert!(fresh.results.iter().all(|r| r.error.is_none()));
+    let errors: Vec<_> = fresh.results.iter().filter_map(|r| r.error.as_ref()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
     let (got, want) = (s.model.state(), fresh.state());
     assert_eq!(got.bodies.len(), want.bodies.len());
     for (a, b) in got.bodies.iter().zip(&want.bodies) {
@@ -487,4 +488,36 @@ fn an_adopted_model_mirrors_at_the_designs_own_pose() {
     s.model.evaluate(&s.doc);
     assert_eq!(s.model.recomputed, before, "the adopted model is current");
     assert_model_as_evaluated_afresh(&s);
+}
+
+/// A cut revolved about an edge of a mirrored copy turns about it where the copy now is, when
+/// a joint drive moves the copy: the axis is a pick of the model, not a body by name (#12139).
+/// (Not checked against a fresh evaluation: one without the cache finds no edge at the pick.)
+#[test]
+fn a_revolve_about_a_mirrored_copys_edge_follows_a_joint_drive() {
+    let mut s = Session::default();
+    moved_arm(&mut s);
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"type": "revolute", "name": "Pan", "a": 0, "b": "Arm", "at": {"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]}}),
+    );
+    let copy = created(&run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody"], "plane": "YZ"})));
+    // An edge of the copy along X, on its lowest Y and Z.
+    let (lo, hi) = world_box(&s, &copy);
+    let edge = [(lo.x + hi.x) / 2., lo.y, lo.z];
+    let (x, y) = (edge[0], lo.y - 30.);
+    run(&mut s, "solid.box", json!({"corner": [x - 50., y - 30., -40], "length": 100, "width": 60, "height": 80, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [x - 5., y], "p1": [x + 5., y + 10.]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": {"edge": edge}, "angle": "360 deg", "operation": "cut", "targets": ["Block"]}));
+    let block = |s: &Session| s.model.state().body("Block").unwrap().mesh().positions.clone();
+    let before = block(&s);
+    for angle in [5, -5] {
+        run(&mut s, "joint.drive", json!({"joint": "Pan", "value": angle, "quiet": true}));
+        assert_eq!(s.model.last_recomputed + s.model.last_restored, 2, "the mirror and the revolve at {angle}°");
+        let after = block(&s);
+        assert_ne!(after, before, "the cut turned about the old axis at {angle}°");
+    }
 }
