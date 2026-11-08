@@ -42,6 +42,7 @@ pub mod prism;
 pub mod provenance;
 pub mod session;
 pub mod split;
+pub mod step_assembly;
 pub mod stitch;
 pub mod sweep;
 pub mod untrim;
@@ -61,6 +62,7 @@ pub use measure::{
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;
+pub use step_assembly::{placed_bodies, PlacedBody};
 
 #[cfg(test)]
 mod test_corpus;
