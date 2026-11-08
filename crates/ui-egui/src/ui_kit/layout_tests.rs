@@ -1,14 +1,75 @@
 use crate::ui_kit::test_support::*;
 use crate::ui_kit::*;
 
-use crate::{scenario, theme::Tokens};
+use crate::scenario;
 use egui::Ui;
+use solidcraft_theme::Tokens;
+
+#[test]
+fn theme_browser_has_equal_end_padding_and_screenful_arrows_without_selecting() {
+    let ctx = crate::fonts::test_context();
+    let clicked = std::cell::Cell::new(false);
+    let draw = |ui: &mut Ui| {
+        theme_browser(ui, "padding_browser", 10, false, None, |ui, i, width| {
+            let card = theme_card(
+                ui,
+                &ThemeCard {
+                    name: "Example",
+                    note: "Built in",
+                    options: None,
+                    sample: ThemeSample::from_tokens(&Tokens::light()),
+                    selected: i == 0,
+                    dark: false,
+                    high: false,
+                    day: false,
+                    night: false,
+                },
+                width,
+            );
+            clicked.set(clicked.get() || card.clicked());
+            scenario::publish_rect(&format!("test:theme_card:{i}"), card.rect);
+        });
+    };
+    for _ in 0..3 {
+        frame(&ctx, vec![], draw);
+    }
+    let viewport = scenario::rect_of("prefs:theme_viewport").unwrap();
+    let first = scenario::rect_of("test:theme_card:0").unwrap();
+    for gap in [first.left() - viewport.left(), first.top() - viewport.top(), viewport.bottom() - first.bottom()] {
+        assert!((gap - Tokens::get().space_10).abs() < 0.1, "same padding on every resting side: {gap}");
+    }
+    assert!(scenario::handle_at("prefs:theme_previous").is_none());
+    let advance = || {
+        let at = scenario::handle_at("prefs:theme_next").unwrap();
+        frame(&ctx, pointer(at, true), draw);
+        frame(&ctx, pointer(at, false), draw);
+        frame(&ctx, vec![], draw);
+    };
+    let stride = scenario::rect_of("test:theme_card:1").unwrap().left() - first.left();
+    let page = ((viewport.width() / stride).floor() as usize).max(1);
+    advance();
+    let moved = scenario::rect_of(&format!("test:theme_card:{page}")).unwrap();
+    assert!((moved.left() - first.left()).abs() < 0.1, "arrow moves a screenful of {page} cards");
+    assert!(scenario::handle_at("prefs:theme_previous").is_some());
+    assert!(scenario::handle_at("prefs:theme_next").is_some());
+    for _ in 0..10 {
+        if scenario::handle_at("prefs:theme_next").is_none() {
+            break;
+        }
+        advance();
+    }
+    let viewport = scenario::rect_of("prefs:theme_viewport").unwrap();
+    let last = scenario::rect_of("test:theme_card:9").unwrap();
+    assert!((viewport.right() - last.right() - Tokens::get().space_10).abs() < 0.1);
+    assert!(scenario::handle_at("prefs:theme_next").is_none());
+    assert!(!clicked.get(), "floating arrows never select the card under them");
+}
 
 #[test]
 fn navigation_cards_keep_their_proportions_and_native_targets_at_narrow_widths() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for available in [140.0, 280.0, 646.0] {
             for (label, width, aspect, options) in [
                 (
@@ -26,7 +87,13 @@ fn navigation_cards_keep_their_proportions_and_native_targets_at_narrow_widths()
                     190.0,
                     178.0 / 115.0,
                     vec![
-                        PictureChoice { key: "axes", label: "Axes (signed)", figure: paint_navigation_axes },
+                        PictureChoice {
+                            key: "axes",
+                            label: "Axes (signed)",
+                            figure: |p, rect| {
+                                paint_navigation_axes(p, rect, &crate::viewport::navigator_axes(&solidcraft_engine::render::Camera::default()))
+                            },
+                        },
                         PictureChoice { key: "cube", label: "Cube (compact)", figure: paint_navigation_cube },
                     ],
                 ),
@@ -60,14 +127,14 @@ fn navigation_cards_keep_their_proportions_and_native_targets_at_narrow_widths()
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn axis_gain_invert_and_source_stay_inside_the_same_row_when_it_stacks() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for width in [180.0, 280.0, 646.0] {
             let ctx = crate::fonts::test_context();
             let mut reverse = false;
@@ -135,14 +202,14 @@ fn axis_gain_invert_and_source_stay_inside_the_same_row_when_it_stacks() {
             assert_eq!((reverse, gain, source), (false, 1.0, 0));
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn mouse_mapping_chords_and_actions_wrap_without_overpainting_each_other() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for width in [160.0, 280.0, 528.0] {
             let ctx = crate::fonts::test_context();
             let mut bounds = egui::Rect::NOTHING;
@@ -192,7 +259,7 @@ fn mouse_mapping_chords_and_actions_wrap_without_overpainting_each_other() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -202,7 +269,7 @@ fn mouse_mapping_search_keeps_main_gesture_chords_and_actions() {
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
             scope(ui, |ui| {
                 ui.set_width(280.0);
-                let _search = crate::prefs_search::begin(ui, query);
+                let _search = crate::ui_kit::settings_search::begin(ui, query);
                 settings_mouse_mapping(
                     ui,
                     &[(vec!["Ctrl/Cmd".into(), "Middle drag".into()], "Zoom toward the cursor".into()), (vec!["Alt/Option".into()], "Orbit".into())],
@@ -218,13 +285,13 @@ fn mouse_mapping_search_keeps_main_gesture_chords_and_actions() {
 
 #[test]
 fn status_lines_wrap_at_form_width_and_leave_room_for_the_next_row() {
-    let previous_dark = crate::theme::is_dark();
+    let previous_dark = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let base = Tokens::get();
         for width in [160.0, 280.0] {
             for font_label in [base.font_label, base.font_label * 1.8] {
-                let _theme = crate::theme::scoped_tokens(Tokens { font_label, ..base });
+                let _theme = solidcraft_theme::scoped_tokens(Tokens { font_label, ..base });
                 for (tone, ink) in [(StatusTone::Dim, base.text_dim), (StatusTone::Warning, base.warning), (StatusTone::Error, base.error)] {
                     let ctx = crate::fonts::test_context();
                     let message = "needs a joint that turns and one that slides";
@@ -269,17 +336,7 @@ fn status_lines_wrap_at_form_width_and_leave_room_for_the_next_row() {
             }
         }
     }
-    crate::theme::set_dark(previous_dark);
-}
-
-#[test]
-fn carousel_window_clamps_offsets_and_keeps_a_card_on_narrow_pages() {
-    use crate::ui_kit::preferences_cards::carousel_window;
-    assert_eq!(carousel_window(0, 9, 280.0, 88.0, 8.0, 26.0), (0, 0));
-    assert_eq!(carousel_window(6, 0, 280.0, 88.0, 8.0, 26.0), (0, 2));
-    assert_eq!(carousel_window(6, 2, 280.0, 88.0, 8.0, 26.0), (2, 2));
-    assert_eq!(carousel_window(6, 99, 280.0, 88.0, 8.0, 26.0), (4, 2));
-    assert_eq!(carousel_window(6, 99, 100.0, 88.0, 8.0, 26.0), (5, 1));
+    solidcraft_theme::set_dark(previous_dark);
 }
 
 #[test]
@@ -290,7 +347,7 @@ fn shared_picture_choices_wrap_inside_the_row_and_reserve_their_height() {
         PictureChoice { key: "third", label: "Third", figure: |_, _| {} },
     ];
     for dark in [false, true] {
-        let _theme = crate::theme::scoped_tokens(if dark { Tokens::dark() } else { Tokens::light() });
+        let _theme = solidcraft_theme::scoped_tokens(if dark { Tokens::dark() } else { Tokens::light() });
         for width in [120.0, 260.0, 600.0] {
             for sized in [false, true] {
                 let ctx = crate::fonts::test_context();
@@ -365,170 +422,10 @@ fn shared_picture_choices_return_clicks_and_respect_both_disabled_states() {
 
 /// #11434: an arrow moves by the cards that fit, not by one, and the last page ends on the last card.
 #[test]
-fn carousel_arrows_move_a_page_of_the_cards_that_fit_at_each_width() {
-    let count = 11;
-    for width in [280.0_f32, 480.0, 700.0] {
-        let ctx = crate::fonts::test_context();
-        let shown = || -> Vec<usize> { (0..count).filter(|i| scenario::rect_of(&format!("page:item:{i}")).is_some()).collect() };
-        let draw = |events: Vec<egui::Event>| {
-            scenario::clear_handles();
-            crate::test_support::frame(
-                &ctx,
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width + 40.0, 400.0))),
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    ui.set_width(width);
-                    scope(ui, |ui| {
-                        carousel(ui, ("page_carousel", width as u32), count, 88.0, 96.0, |ui, i| {
-                            let (r, _) = ui.allocate_exact_size(egui::vec2(88.0, 90.0), egui::Sense::hover());
-                            scenario::publish_rect(&format!("page:item:{i}"), r);
-                        });
-                    });
-                },
-            );
-        };
-        let click = |label: &str| {
-            let at = scenario::handle_at(&format!("prefs:carousel:{}", crate::i18n::tr(label))).unwrap();
-            draw(pointer(at, true));
-            draw(pointer(at, false));
-            draw(vec![]);
-        };
-        draw(vec![]);
-        draw(vec![]);
-        let page = shown().len();
-        assert!(page > 1 && page < count, "width {width}: {page} cards fit");
-        assert_eq!(shown(), (0..page).collect::<Vec<_>>());
-        click("prefs.carousel_previous");
-        assert_eq!(shown(), (0..page).collect::<Vec<_>>(), "width {width}: previous is inert at the start");
-        click("prefs.carousel_next");
-        let second = page.min(count - page);
-        assert_eq!(shown(), (second..second + page).collect::<Vec<_>>(), "width {width}: next shows the cards that were hidden");
-        for _ in 0..count {
-            click("prefs.carousel_next");
-        }
-        let last: Vec<usize> = (count - page..count).collect();
-        assert_eq!(shown(), last, "width {width}: the last page ends on the last card");
-        click("prefs.carousel_previous");
-        let back = (count - page).saturating_sub(page);
-        assert_eq!(shown(), (back..back + page).collect::<Vec<_>>(), "width {width}: previous shows the cards before");
-        for _ in 0..count {
-            click("prefs.carousel_previous");
-        }
-        assert_eq!(shown(), (0..page).collect::<Vec<_>>(), "width {width}: previous stops at the first card");
-    }
-}
-
-#[test]
-fn theme_carousel_moves_and_disables_its_ends_without_selecting() {
-    let ctx = crate::fonts::test_context();
-    let sample = ThemeSample::from_tokens(&Tokens::light());
-    let draw = |ui: &mut Ui| {
-        let bounds = ui.max_rect();
-        carousel(ui, "test_themes", 3, 88.0, 96.0, |ui, index| {
-            let label = ["Light", "Dark", "System"][index];
-            let response = picture_card(
-                ui,
-                &Card {
-                    label,
-                    sub: Some("Built in"),
-                    selected: index == 0,
-                    enabled: true,
-                    options: (index == 2).then_some("Has options"),
-                    check: false,
-                    aspect: 124.0 / 76.0,
-                    figure: &|p, r| paint_theme_thumbnail(p, r, &sample),
-                },
-                88.0,
-            );
-            assert!(!response.clicked(), "scrolling must not select a card");
-            assert!(bounds.contains_rect(response.rect));
-            scenario::publish_target(&format!("test:theme:{index}"), response.rect);
-        });
-    };
-    for _ in 0..3 {
-        frame(&ctx, vec![], draw);
-    }
-    let previous = format!("prefs:carousel:{}", crate::i18n::tr("prefs.carousel_previous"));
-    let next = format!("prefs:carousel:{}", crate::i18n::tr("prefs.carousel_next"));
-    let click = |handle: &str| {
-        let at = scenario::handle_at(handle).unwrap();
-        frame(&ctx, pointer(at, true), draw);
-        frame(&ctx, pointer(at, false), draw);
-        frame(&ctx, vec![], draw);
-    };
-    let start = scenario::rect_of("test:theme:0").unwrap().left();
-    click(&previous);
-    assert_eq!(scenario::rect_of("test:theme:0").unwrap().left(), start, "previous is inert at the start");
-    click(&next);
-    assert!(scenario::rect_of("test:theme:0").is_none());
-    assert!((scenario::rect_of("test:theme:1").unwrap().left() - start).abs() < 1.0, "the last page ends on the last card");
-    assert!(scenario::rect_of("test:theme:2").is_some());
-    click(&next);
-    assert!((scenario::rect_of("test:theme:1").unwrap().left() - start).abs() < 1.0, "next is inert at the end");
-    click(&previous);
-    assert!(scenario::rect_of("test:theme:0").is_some());
-    assert!(scenario::rect_of("test:theme:2").is_none());
-}
-
-#[test]
-fn carousel_arrows_expose_disabled_state_hover_and_keyboard_focus() {
-    let ctx = crate::fonts::test_context();
-    ctx.enable_accesskit();
-    let draw = |events| {
-        scenario::clear_handles();
-        crate::test_support::frame(
-            &ctx,
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
-                events,
-                focused: true,
-                ..Default::default()
-            },
-            |ui| {
-                ui.set_width(280.0);
-                scope(ui, |ui| {
-                    carousel(ui, "keyboard_carousel", 3, 88.0, 96.0, |ui, i| {
-                        let (r, _) = ui.allocate_exact_size(egui::vec2(88.0, 90.0), egui::Sense::hover());
-                        scenario::publish_rect(&format!("keyboard:item:{i}"), r);
-                    });
-                });
-            },
-        )
-    };
-    let previous = crate::i18n::tr("prefs.carousel_previous");
-    let next = crate::i18n::tr("prefs.carousel_next");
-    draw(vec![]);
-    let idle = draw(vec![]);
-    let tree = idle.platform_output.accesskit_update.as_ref().unwrap();
-    for (label, disabled) in [(previous, true), (next, false)] {
-        let nodes: Vec<_> =
-            tree.nodes.iter().filter(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(label)).collect();
-        assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].1.is_disabled(), disabled);
-    }
-    let at = scenario::handle_at(&format!("prefs:carousel:{next}")).unwrap();
-    let hover = draw(vec![egui::Event::PointerMoved(at)]);
-    assert_eq!(hover.platform_output.cursor_icon, egui::CursorIcon::PointingHand);
-    draw(vec![egui::Event::PointerMoved(egui::pos2(310.0, 390.0))]);
-    let focus = draw(key(egui::Key::Tab));
-    assert!(
-        focus.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.stroke.color == Tokens::get().form_primary)),
-        "keyboard focus uses the standard ring"
-    );
-    draw(key(egui::Key::Enter));
-    draw(vec![]);
-    assert!(scenario::rect_of("keyboard:item:0").is_none(), "keyboard activates Next");
-    assert!(scenario::rect_of("keyboard:item:2").is_some());
-}
-
-#[test]
 fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for width in [140.0, 280.0, 646.0] {
             let ctx = crate::fonts::test_context();
             let options = [
@@ -559,7 +456,7 @@ fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]

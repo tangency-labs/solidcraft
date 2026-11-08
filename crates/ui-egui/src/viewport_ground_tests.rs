@@ -2,26 +2,30 @@ use super::*;
 use solidcraft_engine::{Session, geom::Aabb3, render::UpAxis};
 
 #[test]
-fn ground_ao_follows_the_existing_plane_in_both_up_axes_without_origin_clamping() {
+fn ground_ao_shares_the_selected_ground_plane_in_both_up_axes() {
+    let mut app = SolveApp::new(Session::default(), crate::Services::default());
     for up in [UpAxis::Z, UpAxis::Y] {
         let cam = Camera { up, ..Default::default() };
-        for bottom in [-20.0, 20.0] {
+        app.cam = cam;
+        for (bottom, follows_model) in [(-20.0, false), (20.0, false), (-20.0, true), (20.0, true)] {
+            app.preferences.ground_shadow_follows_model = follows_model;
             // A 3 x 4 x 12 box has diagonal 13: the original ground offset is .014 mm.
             let bounds = Aabb3 { min: Vec3::new(-1.5, -2.0, bottom), max: Vec3::new(1.5, 2.0, bottom + 12.0) };
-            let ground = solidcraft_gpu::view::GroundAo::new(bounds, ground_height(bounds), cam.up, 2.0).unwrap();
+            let ground = solidcraft_gpu::view::GroundAo::new(bounds, ground_height(&app, bounds), cam.up, 2.0).unwrap();
             let bytes = ground.vertices(None);
             assert_eq!(bytes.len(), 6 * crate::gpu::TRI_SIZE);
             for vertex in bytes.as_chunks::<{ crate::gpu::TRI_SIZE }>().0 {
                 let read = |i| f64::from(f32::from_le_bytes(vertex[i..i + 4].try_into().unwrap()));
                 let point = cam.to_frame(Vec3::new(read(0), read(4), read(8)));
-                assert!((point.z - (bottom - 0.014)).abs() < 1e-5);
+                let expected = if follows_model { bottom } else { bottom.min(0.0) };
+                assert!((point.z - (expected - 0.014)).abs() < 1e-5);
                 assert!(point.x >= -5.5 && point.x <= 5.5 && point.y >= -6.0 && point.y <= 6.0);
                 assert_eq!(cam.to_frame(Vec3::new(read(12), read(16), read(20))), Vec3::Z);
             }
         }
     }
     for (bounds, radius) in [(Aabb3::EMPTY, 2.0), (Aabb3 { min: Vec3::ZERO, max: Vec3::X }, f32::NAN)] {
-        assert!(solidcraft_gpu::view::GroundAo::new(bounds, ground_height(bounds), Camera::default().up, radius).is_none());
+        assert!(solidcraft_gpu::view::GroundAo::new(bounds, ground_height(&app, bounds), Camera::default().up, radius).is_none());
     }
 }
 

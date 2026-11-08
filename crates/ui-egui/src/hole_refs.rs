@@ -21,8 +21,8 @@ use solidcraft_engine::{Sel, Session};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::selection::{EDGES, FACES, PLANAR_FACES, SelInput, VERTICES};
-use crate::theme::Tokens;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 /// The reference edge inputs, after the face input.
 pub(crate) const REFERENCES: [&str; 2] = ["Reference 1", "Reference 2"];
@@ -413,7 +413,7 @@ pub(crate) fn canvas(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter,
         let at = box_beyond(a, b);
         let r = crate::canvas::value_box_in(
             ui,
-            (egui::Id::new(("sc_hole_ref_area", *k)), egui::Id::new(("sc_hole_ref", *k))),
+            (egui::Id::unique(("sc_hole_ref_area", *k)), egui::Id::unique(("sc_hole_ref", *k))),
             label,
             value,
             at,

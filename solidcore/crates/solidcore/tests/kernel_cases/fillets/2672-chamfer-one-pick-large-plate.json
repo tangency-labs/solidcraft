@@ -1,0 +1,223 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  20.0,
+                  5.0,
+                  20.0
+                ],
+                [
+                  -20.0,
+                  5.0,
+                  20.0
+                ]
+              ],
+              "index": 21
+            },
+            {
+              "at": [
+                [
+                  20.0,
+                  -5.0,
+                  20.0
+                ],
+                [
+                  20.0,
+                  5.0,
+                  20.0
+                ]
+              ],
+              "index": 20
+            },
+            {
+              "at": [
+                [
+                  -20.0,
+                  5.0,
+                  20.0
+                ],
+                [
+                  -20.0,
+                  -5.0,
+                  20.0
+                ]
+              ],
+              "index": 18
+            },
+            {
+              "at": [
+                [
+                  -20.0,
+                  -5.0,
+                  20.0
+                ],
+                [
+                  20.0,
+                  -5.0,
+                  20.0
+                ]
+              ],
+              "index": 19
+            }
+          ],
+          "points": [
+            [
+              0.0,
+              5.0,
+              20.0
+            ],
+            [
+              25.0,
+              -2.643050192578212e-16,
+              20.000000000000004
+            ],
+            [
+              -25.0,
+              2.643050192578212e-16,
+              20.000000000000004
+            ],
+            [
+              0.0,
+              -5.0,
+              20.0
+            ]
+          ],
+          "tolerance": 10.302698889018258
+        },
+        "kind": "chamfer",
+        "sizes": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "2672-chamfer-one-pick-large-plate",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g0"
+    },
+    "faces": 15,
+    "method": "plate 145x145x10 + stadium boss (straights 40, end arcs R5) 10 tall = 145^2*10 + 10*(40*10 + pi*25). One pick takes the whole tangent chain: 2 straight edges of c^2/2*40 = 20 each, plus the two end half-arcs, one full revolution of the triangle (c^2/2) about the boss axis at its centroid radius R - c/3 (Pappus): c^2/2*2*pi*(R - c/3) = 14.66, with c=1, R=5. Removed 54.66 in all. The tolerance is tightened to 5e-6 because the whole-rim result differs from the one-edge result (21.5) by 0.015% of the part volume. Faces: plate 6 (the top with the boss footprint cut out stays one face) + boss walls 4 + boss top 1 + 4 chamfer faces = 15.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2672",
+      "tangency-labs/solidcraft#3295"
+    ],
+    "tolerance": {
+      "rel": 5e-6
+    },
+    "volume_mm3": 214980.7373976807,
+    "what": "one pick on a stadium boss top rim chamfers the whole tangent loop, also when the part is more than 200 mm across"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 32,
+      "faces": 15,
+      "vertices": 20
+    }
+  },
+  "records": "2672-chamfer-one-pick-large-plate.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 48897.592036470225,
+      "body_count": 1,
+      "edges": 32,
+      "faces": 15,
+      "vertices": 20,
+      "volume_mm3": 214980.73739845798
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2672",
+    "tangency-labs/solidcraft#3295"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "one pick on a stadium boss top rim chamfers the whole tangent loop, also when the part is more than 200 mm across",
+  "why_not": []
+}

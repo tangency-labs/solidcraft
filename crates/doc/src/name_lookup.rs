@@ -339,6 +339,27 @@ pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
     locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p).ok()
 }
 
+/// The one body of `st` with a face the stored face name finds, as [`locate_face`] looks for it.
+/// `None` when no body has one, several do, or the name is one saved before format 14.
+pub(crate) fn face_body<'a>(st: &'a ModelState, name: &str) -> Option<&'a ModelBody> {
+    if let Some((body, _)) = crate::sheet::split_sheet_face_name(name) {
+        return st.bodies.iter().find(|b| b.name == body && !b.body.is_mesh());
+    }
+    if name.is_empty() || legacy_name(name).is_some() {
+        return None;
+    }
+    let solids = || st.bodies.iter().filter(|b| !b.body.is_mesh());
+    naming::warm_names(solids());
+    let mut holders = solids().filter(|b| {
+        let names = naming::names(b);
+        (0..names.faces.len()).any(|face| crate::history_names::matches(&names, face, name).is_some_and(exactly))
+    });
+    match (holders.next(), holders.next()) {
+        (Some(b), None) => Some(b),
+        _ => None,
+    }
+}
+
 /// [`locate_face`] for a feature that works on the faces of the body called `body` (a shell, a
 /// draft…): the face of that body the name finds, found without working out the names of every
 /// other body (a body named from geometry is meshed for it: seconds in a large model). When

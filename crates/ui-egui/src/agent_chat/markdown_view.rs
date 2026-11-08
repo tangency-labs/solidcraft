@@ -14,8 +14,8 @@ use super::markdown::{self, Block, Span};
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId, Margin, RichText, Stroke, vec2};
 
-use crate::i18n::tr;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
+use solidcraft_ui_text::tr;
 
 /// The parsed blocks of `src`, kept in the context's temporary memory under `slot` (the item's
 /// index) and replaced when the text changes.
@@ -23,7 +23,7 @@ fn blocks(ctx: &egui::Context, slot: usize, src: &str) -> Arc<Vec<Block>> {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     src.hash(&mut h);
     let key = h.finish();
-    let id = egui::Id::new(("agent_chat_markdown", slot));
+    let id = egui::Id::unique(("agent_chat_markdown", slot));
     if let Some((k, b)) = ctx.data(|d| d.get_temp::<(u64, Arc<Vec<Block>>)>(id))
         && k == key
     {
@@ -67,7 +67,7 @@ fn host(url: &str) -> &str {
 pub(super) fn selectable(ui: &mut egui::Ui, label: egui::Label) -> egui::Response {
     use egui::text_selection::LabelSelectionState;
     let (pos, galley, response) = label.selectable(true).layout_in_ui(ui);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), galley.text()));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), galley.text()));
     // As `egui::Label` draws a label that is not a button.
     let colour = ui.visuals().text_color();
     if ui.is_rect_visible(response.rect) {

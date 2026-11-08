@@ -1,8 +1,9 @@
 //! Popup and tooltip skin from the approved navigation boards.
 use super::{Container, Surface, navigation::*};
+use crate::icons;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{icons, navigation_bar::Edge, theme::Tokens};
 use egui::{Align2, FontId, Rect, Response, Sense, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) fn navigation_popup_frame() -> egui::Frame {
     Container::menu_frame().inner_margin(egui::Margin::same(NAV_POPUP_PADDING))
@@ -42,7 +43,7 @@ impl<'a> NavigationMenuRow<'a> {
     pub(crate) fn show(self, ui: &mut Ui) -> Response {
         let t = Tokens::get();
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), NAV_MENU_ROW), Sense::hover());
-        let response = ui.interact(rect, ui.id().with(self.id), if self.enabled { Sense::click() } else { Sense::hover() });
+        let response = ui.interact(rect, ui.scope_id().with(self.id), if self.enabled { Sense::click() } else { Sense::hover() });
         let ink = if self.selected { t.form_primary } else { t.form_ink };
         let bg = if self.selected {
             Some(t.selected_bg)
@@ -88,7 +89,7 @@ impl<'a> NavigationMenuRow<'a> {
                 Rect::from_center_size(pos2(rect.right() - NAV_MENU_INSET - NAV_CHEVRON / 2.0, rect.center().y), vec2(NAV_CHEVRON, NAV_CHEVRON));
             icons::paint_ink(ui.painter(), arrow, "chevron", t.form_dim);
         }
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, self.enabled && ui.is_enabled(), self.selected, self.label));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, self.enabled && ui.is_enabled(), self.selected, self.label));
         if cut { response.backing_on_hover_text(self.label) } else { response }
     }
 }
@@ -110,7 +111,7 @@ pub(crate) fn navigation_menu_separator(ui: &mut Ui) {
 
 /// A tip beyond `along` (the bar, or the row it names): above it, or below it for a bar on the
 /// view's top edge.
-pub(crate) fn navigation_tooltip(response: &Response, along: Rect, edge: Edge, label: &str, shortcut: Option<&str>) {
+pub(crate) fn navigation_tooltip(response: &Response, along: Rect, edge: NavigationEdge, label: &str, shortcut: Option<&str>) {
     let ctx = &response.ctx;
     let id = response.id.with("nav_tooltip_delay");
     if !response.hovered() {
@@ -130,10 +131,10 @@ pub(crate) fn navigation_tooltip(response: &Response, along: Rect, edge: Edge, l
         .area(response.id.with("nav_tooltip"))
         .order(egui::Order::Tooltip)
         .interactable(false)
-        .pivot(if edge == Edge::Top { Align2::CENTER_TOP } else { Align2::CENTER_BOTTOM })
+        .pivot(if edge == NavigationEdge::Top { Align2::CENTER_TOP } else { Align2::CENTER_BOTTOM })
         .fixed_pos(match edge {
-            Edge::Bottom => pos2(response.rect.center().x, along.top() - NAV_POPUP_GAP),
-            Edge::Top => pos2(response.rect.center().x, along.bottom() + NAV_POPUP_GAP),
+            NavigationEdge::Bottom => pos2(response.rect.center().x, along.top() - NAV_POPUP_GAP),
+            NavigationEdge::Top => pos2(response.rect.center().x, along.bottom() + NAV_POPUP_GAP),
         })
         .show(ctx, |ui| {
             Container::new(ctx, Surface::Popup).show_frame(ui, frame, ui.max_rect(), |ui| {

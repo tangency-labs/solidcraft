@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::prelude::*;
+use std::collections::BTreeMap;
 
+use crate::link::{LinkGeom, LinkKind, LinkSource, sketch_axis_geom};
 use crate::union_find::{find, union};
 
 /// Hard caps that keep hostile input from exhausting memory or time.
@@ -294,6 +296,16 @@ pub enum ConstraintKind {
         p: usize,
         c: usize,
     },
+    /// Point `p` on curve `c` at `at`, its share (0 to 1) of the curve's length from the curve's
+    /// start: a line's first point, an arc's start (counter-clockwise), a circle's point on sketch
+    /// +X (counter-clockwise), an ellipse's major-axis end (counter-clockwise), a spline's or a
+    /// conic's first point. Divide Curve places its points with it, so they keep equal shares of
+    /// the curve's length as the curve changes. The length is measured along the exact curve.
+    PointAlong {
+        p: usize,
+        c: usize,
+        at: f64,
+    },
     Horizontal {
         l: usize,
     },
@@ -538,6 +550,7 @@ impl ConstraintKind {
         match self {
             PatternPoint { .. } | PatternRadius { .. } => "Pattern",
             Coincident { .. } | PointOnCurve { .. } => "Coincident",
+            PointAlong { .. } => "PointAlong",
             Horizontal { .. } | HorizontalPoints { .. } => "Horizontal",
             Vertical { .. } | VerticalPoints { .. } => "Vertical",
             Parallel { .. } => "Parallel",
@@ -582,7 +595,7 @@ impl ConstraintKind {
             PatternRadius { a, b } => (vec![], vec![a, b]),
             Coincident { p, q } | HorizontalPoints { p, q } | VerticalPoints { p, q } => (vec![p, q], vec![]),
             Distance { p, q, .. } | DistanceX { p, q, .. } | DistanceY { p, q, .. } => (vec![p, q], vec![]),
-            PointOnCurve { p, c } => (vec![p], vec![c]),
+            PointOnCurve { p, c } | PointAlong { p, c, .. } => (vec![p], vec![c]),
             Horizontal { l } | Vertical { l } | Length { l, .. } | LineAngle { l, .. } => (vec![], vec![l]),
             Radius { c, .. } | Diameter { c, .. } | ArcSweep { c, .. } => (vec![], vec![c]),
             Parallel { a, b } | Perpendicular { a, b } | Collinear { a, b } | Tangent { a, b } | Equal { a, b } | Concentric { a, b } => {
@@ -640,7 +653,7 @@ impl ConstraintKind {
                 fp(p);
                 fp(q);
             }
-            PointOnCurve { p, c } => {
+            PointOnCurve { p, c } | PointAlong { p, c, .. } => {
                 fp(p);
                 fc(c);
             }
@@ -800,6 +813,14 @@ impl Sketch {
             counters: Default::default(),
             view: SketchView::default(),
         }
+    }
+
+    /// Forget the id counters a fingerprint must not see: they advance with every id made,
+    /// including ones since deleted. The document keeps them; only a copy about to be hashed
+    /// calls this. The display options stay, because `three_d` and the `hide_*` flags change
+    /// what the evaluated sketch does.
+    pub fn clear_id_counters(&mut self) {
+        self.counters.clear();
     }
 
     /// A new unused id with the given prefix (`l` → `l3`).
@@ -1126,6 +1147,14 @@ impl Sketch {
                 need_line(a)?;
                 need_line(b)?;
             }
+            PointAlong { p, c, at } => {
+                if !(at.is_finite() && (0.0..=1.0).contains(&at)) {
+                    return Err(SketchError::Invalid("a point along a curve needs a share of its length from 0 to 1".into()));
+                }
+                if self.curves.get(c).is_some_and(|x| x.kind.uses(p)) {
+                    return Err(SketchError::Invalid("a curve's own point cannot be placed along it".into()));
+                }
+            }
             // On an ellipse, a radius dimension holds its minor radius.
             Radius { c, .. } if matches!(self.curves.get(c).map(|x| &x.kind), Some(CurveKind::Ellipse { .. })) => {}
             Radius { c, .. } | Diameter { c, .. } => need_round(c)?,
@@ -1214,9 +1243,10 @@ impl Sketch {
     /// geometry has no size of its own until a dimension gives it one, so the first length
     /// dimension scales the whole sketch to its value instead of distorting it. Only a sketch
     /// with nothing that fixes a size: no other driving length dimension, nothing fixed,
-    /// projected or patterned, no offsets and no 3D curves. Every geometric constraint
-    /// (coincident, horizontal, parallel, tangent, equal, symmetric, …) and every angle holds
-    /// on the scaled sketch as it held before. `None` when the sketch does not qualify, also
+    /// projected or patterned, no offsets and no 3D curves. A linked sketch axis can give a
+    /// direction or symmetry line through the origin without giving the drawing a size. Every
+    /// geometric constraint and angle holds on the scaled sketch as it held before.
+    /// `None` when the sketch does not qualify, also
     /// when its curves form several separate chains (#3786): the dimension sizes only its own.
     pub fn scaled_for_first_dimension(&self, factor: f64) -> Option<Sketch> {
         if !(factor.is_finite() && (1e-6..=1e6).contains(&factor)) {
@@ -1229,21 +1259,41 @@ impl Sketch {
             ConstraintKind::Pierce { .. } => true,
             ref k => k.is_dimension() && !k.is_angle() && !c.driven,
         });
-        if sizes
-            || !self.links.is_empty()
-            || !self.patterns.is_empty()
-            || !self.offsets.is_empty()
-            || !self.freeform_offsets.is_empty()
-            || !self.wires.is_empty()
-            || self.curves.iter().any(|c| c.fixed || c.link.is_some())
-            || self.points.iter().enumerate().any(|(i, p)| (p.fixed || p.link.is_some()) && (i != 0 || p.pos != Vec2::ZERO))
-        {
+        if sizes || !self.patterns.is_empty() || !self.offsets.is_empty() || !self.freeform_offsets.is_empty() || !self.wires.is_empty() {
             return None;
         }
+        let mut axes = BTreeMap::new();
+        for link in &self.links {
+            let LinkSource::SketchAxis { name } = &link.source else { return None };
+            let LinkGeom::Line(a, b) = sketch_axis_geom(name)? else { return None };
+            if link.kind != LinkKind::Project || link.lost {
+                return None;
+            }
+            axes.insert(link.id.as_str(), [a, b]);
+        }
+        let axis_point = |i: usize| self.points.get(i).is_some_and(|p| p.link.as_deref().is_some_and(|id| axes.contains_key(id)));
+        if self.points.iter().enumerate().any(|(i, p)| (p.fixed || p.link.is_some()) && (i != 0 || p.pos != Vec2::ZERO) && !axis_point(i)) {
+            return None;
+        }
+        let drawn_curves = || self.curves.iter().filter(|c| c.link.is_none());
+        for curve in &self.curves {
+            if let Some(link) = curve.link.as_deref() {
+                let &[from, to] = axes.get(link)?;
+                let CurveKind::Line { a, b } = curve.kind else { return None };
+                let endpoint = |i: usize| self.points.get(i).filter(|p| p.link.as_deref() == Some(link)).map(|p| p.pos);
+                let ends = [endpoint(a)?, endpoint(b)?];
+                if ends != [from, to] && ends != [to, from] {
+                    return None;
+                }
+            } else if curve.fixed || !axes.is_empty() && curve.kind.point_ids().into_iter().any(axis_point) {
+                return None;
+            }
+        }
         // Shapes nothing joins (#3786) are not one drawing: only one connected chain of curves
-        // scales. Curves and driving constraints join their points; the origin is a point too.
+        // scales. A sketch axis is shared by references to its direction, and does not by
+        // itself connect separate drawings.
         let mut parent: Vec<usize> = (0..self.points.len()).collect();
-        for c in &self.curves {
+        for c in drawn_curves() {
             let ids = c.kind.point_ids();
             for w in ids.windows(2) {
                 if let [a, b] = *w {
@@ -1252,21 +1302,29 @@ impl Sketch {
             }
         }
         for c in self.constraints.iter().filter(|c| !c.driven) {
-            let ids = self.constraint_points(&c.kind);
-            for w in ids.windows(2) {
+            let (mut points, curves) = c.kind.indices();
+            // An explicit endpoint or the length of the axis segment does give a size.
+            if !axes.is_empty()
+                && (points.iter().copied().any(axis_point)
+                    || matches!(c.kind, ConstraintKind::Equal { .. }) && curves.iter().any(|&i| self.curves.get(i).is_some_and(|c| c.link.is_some())))
+            {
+                return None;
+            }
+            points.extend(curves.into_iter().filter_map(|i| self.curves.get(i)).filter(|c| c.link.is_none()).flat_map(|c| c.kind.point_ids()));
+            for w in points.windows(2) {
                 if let [a, b] = *w {
                     union(&mut parent, a, b);
                 }
             }
         }
-        let mut roots = self.curves.iter().filter_map(|c| c.kind.point_ids().first().map(|&p| find(&mut parent, p)));
+        let mut roots = drawn_curves().filter_map(|c| c.kind.point_ids().first().map(|&p| find(&mut parent, p)));
         if let Some(first) = roots.next()
             && roots.any(|r| r != first)
         {
             return None;
         }
         let mut out = self.clone();
-        for p in out.points.iter_mut().filter(|p| !p.fixed) {
+        for p in out.points.iter_mut().filter(|p| !p.fixed && p.link.is_none()) {
             p.pos = p.pos * factor;
             if !in_range(p.pos) {
                 return None;

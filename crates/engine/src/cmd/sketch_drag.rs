@@ -38,7 +38,8 @@ const MAX_STEPS: usize = 64;
 /// shorter than a step over this; at most `MAX_STEPS` such solves per drag.
 const HALVINGS: usize = 16;
 /// Steps of a drag that isn't live solved at once past a failed step, at most (see
-/// [`drag_entity`] and [`ahead_batch`]).
+/// [`drag_entity`] and [`ahead_batch`]). The browser build solves one at a time.
+#[cfg(not(target_arch = "wasm32"))]
 const AHEAD: usize = 8;
 /// An arc whose sweep gets this close (radians) to 0 or a full turn has run into its start.
 const SWEEP_EPS: f64 = 1e-6;
@@ -592,12 +593,17 @@ pub(super) struct Dragged {
 }
 
 impl Dragged {
-    pub(super) fn at(&self, sk: &Sketch, from: Vec2) -> Vec2 {
+    /// Where the grab went on its way from `from` to `to`: moved as the moving point that got
+    /// furthest toward `to` moved. A selection part of which is held back (a rectangle with a
+    /// corner on the origin) has its free part follow the pointer; the average of all its points
+    /// lagged the grab, and the next frame's catch-up took the free part past the pointer.
+    pub(super) fn at(&self, sk: &Sketch, from: Vec2, to: Vec2) -> Vec2 {
         if let Some(at) = self.line_grab.and_then(|g| g.point(sk)) {
             return at;
         }
-        let moves: Vec<_> = self.moving.iter().filter_map(|&(q, was)| Some(sk.point(q)? - was)).collect();
-        from + moves.iter().fold(Vec2::ZERO, |a, m| a + *m) * (1.0 / moves.len().max(1) as f64)
+        let d = to - from;
+        let furthest = self.moving.iter().filter_map(|&(q, was)| Some(sk.point(q)? - was)).max_by(|a, b| a.dot(d).total_cmp(&b.dot(d)));
+        from + furthest.unwrap_or(Vec2::ZERO)
     }
 }
 

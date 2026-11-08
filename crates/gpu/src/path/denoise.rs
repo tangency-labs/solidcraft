@@ -35,7 +35,7 @@ impl Pipelines {
             layout: Some(&guide_layout),
             module: &guide_shader,
             entry_point: Some("denoise_guides"),
-            compilation_options: Default::default(),
+            compilation_options: wgpu::PipelineCompilationOptions { constants: &[("HAS_TEXTURES", 1.0)], ..Default::default() },
             cache: None,
         });
         let entries: Vec<_> = (0..4)
@@ -82,6 +82,7 @@ impl Pipelines {
 }
 
 pub(super) struct Resources {
+    adaptive: Option<AdaptiveInput>,
     guide_pipeline: wgpu::ComputePipeline,
     guide_bind: wgpu::BindGroup,
     filter_pipeline: wgpu::ComputePipeline,
@@ -99,6 +100,7 @@ impl Resources {
         scene: [&wgpu::Buffer; 5],
         accumulation: &wgpu::Buffer,
         size: u64,
+        adaptive_preview: bool,
     ) -> Result<Self> {
         let pipelines = Pipelines::shared(context)?;
         let device = &context.device;
@@ -142,8 +144,10 @@ impl Resources {
                 })
             })
             .collect();
+        let adaptive = adaptive_preview.then(|| AdaptiveInput::new(context, pipelines, accumulation, &guides, &filter_uniform, &output, size));
         checked(error_scopes)?;
         Ok(Self {
+            adaptive,
             guide_pipeline: pipelines.guide.clone(),
             guide_bind,
             filter_pipeline: pipelines.filter.clone(),
@@ -159,13 +163,20 @@ impl Resources {
     }
 
     pub(super) fn run(&self, task: &Task) -> Result<()> {
+        self.run_with_input(task, false)
+    }
+    pub(super) fn run_adaptive_preview(&self, task: &Task) -> Result<()> {
+        self.adaptive.as_ref().ok_or_else(|| super::gpu("missing adaptive denoise preview input"))?.normalize(task)?;
+        self.run_with_input(task, true)
+    }
+    fn run_with_input(&self, task: &Task, preview: bool) -> Result<()> {
         let pixels = task.request.width * task.request.height;
         let mut budget = super::dispatch::Budget::default();
         let mut offset = 0;
         while offset < pixels {
             task.cancel.check()?;
             let count = budget.count(pixels - offset);
-            let mut parameters = task.parameters(count);
+            let mut parameters = task.parameters(count)?;
             if let Some(bytes) = parameters.get_mut(12..16) {
                 bytes.copy_from_slice(&offset.to_le_bytes());
             }
@@ -175,12 +186,17 @@ impl Resources {
             budget.observe(count, started.elapsed());
             offset += count;
         }
-        self.run_filter(task)
+        self.run_filter(task, preview)
     }
 
-    fn run_filter(&self, task: &Task) -> Result<()> {
+    fn run_filter(&self, task: &Task, preview: bool) -> Result<()> {
         let pixels = task.request.width * task.request.height;
         for (pass, bind) in self.filter_binds.iter().enumerate() {
+            let bind = if preview && pass == 0 {
+                &self.adaptive.as_ref().ok_or_else(|| super::gpu("missing adaptive denoise preview input"))?.filter_bind
+            } else {
+                bind
+            };
             let mut budget = super::dispatch::Budget::default();
             let mut offset = 0;
             while offset < pixels {
@@ -196,6 +212,112 @@ impl Resources {
                 budget.observe(count, started.elapsed());
                 offset += count;
             }
+        }
+        task.cancel.check()
+    }
+}
+
+/// A distinct normalized input for adaptive display only. The final filter stays bound
+/// to the original production accumulation, and this pass never writes that film.
+struct AdaptiveInput {
+    _pixels: wgpu::Buffer,
+    uniform: wgpu::Buffer,
+    pipeline: wgpu::ComputePipeline,
+    bind: wgpu::BindGroup,
+    filter_bind: wgpu::BindGroup,
+}
+impl AdaptiveInput {
+    fn new(
+        context: &Context,
+        pipelines: &Pipelines,
+        accumulation: &wgpu::Buffer,
+        guides: &wgpu::Buffer,
+        filter_uniform: &wgpu::Buffer,
+        output: &wgpu::Buffer,
+        size: u64,
+    ) -> Self {
+        let device = &context.device;
+        let pixels = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("adaptive preview denoise input"),
+            size,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("adaptive preview parameters"),
+            contents: &[0; 32],
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let entries: Vec<_> = (0..3)
+            .map(|binding| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: if binding == 0 { wgpu::BufferBindingType::Uniform } else { wgpu::BufferBindingType::Storage { read_only: binding == 1 } },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            })
+            .collect();
+        let layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("adaptive preview normalization"), entries: &entries });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("adaptive preview normalization"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("adaptive preview normalization"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("adaptive_preview.wgsl").into()),
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("adaptive preview normalization"),
+            layout: Some(&pipeline_layout),
+            module: &module,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let entries: Vec<_> = [&uniform, accumulation, &pixels]
+            .into_iter()
+            .enumerate()
+            .map(|(binding, buffer)| wgpu::BindGroupEntry { binding: binding as u32, resource: buffer.as_entire_binding() })
+            .collect();
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("adaptive preview normalization"),
+            layout: &layout,
+            entries: &entries,
+        });
+        let entries: Vec<_> = [filter_uniform, guides, &pixels, output]
+            .into_iter()
+            .enumerate()
+            .map(|(binding, buffer)| wgpu::BindGroupEntry { binding: binding as u32, resource: buffer.as_entire_binding() })
+            .collect();
+        let filter_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("adaptive preview filter"),
+            layout: &pipelines.filter_layout,
+            entries: &entries,
+        });
+        Self { _pixels: pixels, uniform, pipeline, bind, filter_bind }
+    }
+    fn normalize(&self, task: &Task) -> Result<()> {
+        let options = task.options.adaptive.ok_or_else(|| super::gpu("missing adaptive preview options"))?;
+        let pixels = task.request.width * task.request.height;
+        let mut budget = super::dispatch::Budget::default();
+        let mut offset = 0;
+        while offset < pixels {
+            task.cancel.check()?;
+            let count = budget.count(pixels - offset);
+            let mut bytes = Vec::with_capacity(32);
+            for word in [task.request.width, task.request.height, task.sample, offset, count, options.pilot_samples, 0, 0] {
+                bytes.extend_from_slice(&word.to_le_bytes());
+            }
+            task.context.queue.write_buffer(&self.uniform, 0, &bytes);
+            let started = std::time::Instant::now();
+            dispatch(&task.context, &self.pipeline, &self.bind, count)?;
+            budget.observe(count, started.elapsed());
+            offset += count;
         }
         task.cancel.check()
     }

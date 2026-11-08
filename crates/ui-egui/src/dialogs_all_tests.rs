@@ -84,6 +84,136 @@ fn point_at_edge_and_plane_picks_a_construction_axis() {
     }
 }
 
+#[test]
+fn command_dialog_remembers_values_for_the_same_command_only_in_this_session() {
+    let mut h = Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    let mut pattern = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    if let Kind::PatternRect { count, spacing, count2, spacing2 } = &mut pattern.kind {
+        *count = "7".into();
+        *spacing = "12 mm".into();
+        *count2 = "3".into();
+        *spacing2 = "8 mm".into();
+    } else {
+        panic!("rectangular pattern dialog has the wrong kind");
+    }
+    remember(&mut h.app, &pattern);
+
+    let recalled = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    assert!(matches!(
+        &recalled.kind,
+        Kind::PatternRect { count, spacing, count2, spacing2 }
+            if count == "7" && spacing == "12 mm" && count2 == "3" && spacing2 == "8 mm"
+    ));
+
+    let fresh_app = Harness::new();
+    let fresh = Dialog::for_command(&fresh_app.app, "solid.pattern.rectangular").unwrap();
+    assert!(matches!(
+        &fresh.kind,
+        Kind::PatternRect { count, count2, .. } if count == "3" && count2 == "1"
+    ));
+}
+
+#[test]
+fn primitive_dialog_remembers_values_without_reusing_its_picked_placement() {
+    let mut h = Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    let mut box_dialog = Dialog::for_command(&h.app, "solid.box").unwrap();
+    if let Kind::Primitive { fields, operation, at, .. } = &mut box_dialog.kind {
+        fields[0].1 = "42 mm".into();
+        *operation = 2;
+        *at = Some((Vec3::ZERO, None));
+    } else {
+        panic!("box dialog has the wrong kind");
+    }
+    remember(&mut h.app, &box_dialog);
+
+    let recalled = Dialog::for_command(&h.app, "solid.box").unwrap();
+    assert!(matches!(
+        &recalled.kind,
+        Kind::Primitive { fields, operation: 2, at: None, .. } if fields[0].1 == "42 mm"
+    ));
+
+    let different_command = Dialog::for_command(&h.app, "solid.cylinder").unwrap();
+    assert!(matches!(
+        &different_command.kind,
+        Kind::Primitive { fields, operation: 0, .. } if fields[0].1 == "20 mm"
+    ));
+}
+
+#[test]
+fn command_dialog_remembers_option_fields() {
+    let mut h = Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    let mut shell = Dialog::for_command(&h.app, "solid.shell").unwrap();
+    shell.extra.insert("direction".into(), json!("outside"));
+    shell.extra.insert("tangent_chain".into(), json!(false));
+    remember(&mut h.app, &shell);
+
+    let recalled = Dialog::for_command(&h.app, "solid.shell").unwrap();
+    assert_eq!(recalled.extra.get("direction"), Some(&json!("outside")));
+    assert_eq!(recalled.extra.get("tangent_chain"), Some(&json!(false)));
+}
+
+#[test]
+fn thread_recall_drops_a_remembered_suggestion_but_keeps_an_authored_size() {
+    let mut h = Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    let mut thread = Dialog::for_command(&h.app, "solid.thread").unwrap();
+    if let Kind::Thread { designation, suggested, .. } = &mut thread.kind {
+        *designation = "M6x1".into();
+        *suggested = Some("M6x1".into());
+    }
+    remember(&mut h.app, &thread);
+    let recalled = Dialog::for_command(&h.app, "solid.thread").unwrap();
+    assert!(matches!(&recalled.kind, Kind::Thread { designation, .. } if designation.is_empty()), "{:?}", recalled.kind);
+
+    if let Kind::Thread { designation, .. } = &mut thread.kind {
+        *designation = "M8x1.25".into();
+    }
+    remember(&mut h.app, &thread);
+    let recalled = Dialog::for_command(&h.app, "solid.thread").unwrap();
+    assert!(matches!(&recalled.kind, Kind::Thread { designation, .. } if designation == "M8x1.25"));
+}
+
+#[test]
+fn move_and_hole_recall_rebuild_the_inputs_of_the_remembered_mode() {
+    let mut h = Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    let mut rotate = Dialog::for_command(&h.app, "solid.move").unwrap();
+    rotate.kind = crate::dialogs_move::kind(crate::dialogs_move::ROTATE, &h.app.session.doc);
+    rotate.inputs = crate::dialogs_move::inputs(crate::dialogs_move::ROTATE);
+    remember(&mut h.app, &rotate);
+    let recalled = Dialog::for_command(&h.app, "solid.move").unwrap();
+    let labels: Vec<&str> = recalled.inputs.iter().map(|i| i.label).collect();
+    assert!(labels.contains(&"Axis") && !labels.contains(&"Pivot"), "{labels:?}");
+
+    let mut hole = Dialog::for_command(&h.app, "solid.hole").unwrap();
+    if let Kind::Hole { opts, .. } = &mut hole.kind {
+        opts.multiple = true;
+    }
+    remember(&mut h.app, &hole);
+    let recalled = Dialog::for_command(&h.app, "solid.hole").unwrap();
+    assert_eq!(recalled.inputs.len(), 1);
+    assert_eq!(recalled.inputs[0].label, "Points");
+}
+
+#[test]
+fn command_dialog_value_memory_is_off_by_default_and_resets_each_time() {
+    let mut h = Harness::new();
+    assert!(!h.app.preferences.remember_dialog_values);
+    let mut pattern = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    if let Kind::PatternRect { count, .. } = &mut pattern.kind {
+        *count = "7".into();
+    } else {
+        panic!("rectangular pattern dialog has the wrong kind");
+    }
+    remember(&mut h.app, &pattern);
+
+    let recalled = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    assert!(matches!(&recalled.kind, Kind::PatternRect { count, .. } if count == "3"));
+}
+
 fn fixture() -> Harness {
     let mut h = Harness::new();
     for (name, x) in [("A", 0), ("B", 30), ("C", 60), ("D", 90)] {
@@ -244,6 +374,7 @@ fn check_form(command: &str, labels: &[&str]) {
         "joint.rack_pinion" | "joint.screw" => &["Reverse"],
         "joint.cam" => &["Other side"],
         "frame.member" => &["All Lines", "Mirror"],
+        "construct.plane.at_angle" => &["Use axis direction only"],
         _ => &[],
     };
     for label in checks {
@@ -322,7 +453,7 @@ fn motion_dialog_hints_are_translated() {
     }
     let mut h = fixture();
     h.app.preferences.language = "ja".into();
-    let _japanese = crate::i18n::scope("ja");
+    let _japanese = solidcraft_ui_text::scope("ja");
     for (command, english) in [("motion.study", "add a key for a joint first"), ("motion.trace", "select a point on a component")] {
         let mut d = Dialog::for_command(&h.app, command).unwrap();
         let mut painted = Vec::new();
@@ -341,7 +472,7 @@ fn motion_dialog_hints_are_translated() {
             out.shapes.iter().for_each(|shape| texts(&shape.shape, &mut painted));
         }
         assert!(!painted.iter().any(|p| p == english), "{command} paints {english:?} in Japanese");
-        assert!(painted.iter().any(|p| p == crate::i18n::tr_label(english)), "{command} paints {painted:?}");
+        assert!(painted.iter().any(|p| p == solidcraft_ui_text::tr_label(english)), "{command} paints {painted:?}");
     }
 }
 
@@ -615,7 +746,7 @@ fn hand_drawn_dialog_texts_are_translated() {
     }
     let mut h = fixture();
     h.app.preferences.language = "ja".into();
-    let _japanese = crate::i18n::scope("ja");
+    let _japanese = solidcraft_ui_text::scope("ja");
     for (command, english) in [
         ("joint.gear", "▶ Play"),
         ("motion.study", "Loop"),
@@ -659,7 +790,7 @@ fn revolve_layout_fixture_builds_a_valid_solid() {
 
 #[test]
 fn new_cards_settle_before_the_first_click_in_both_layouts() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         for command in ["solid.box", "solid.revolve", "solid.shell", "joint.create"] {
             let mut h = fixture();
             h.call("ui.set", json!({"layout":mode}));
@@ -1270,13 +1401,13 @@ fn extrude_builds_the_one_region_clicked_where_the_face_outline_cuts_a_profile()
 #[test]
 fn every_selection_field_label_is_translated() {
     let h = fixture();
-    let _japanese = crate::i18n::scope("ja");
+    let _japanese = solidcraft_ui_text::scope("ja");
     let mut missing = std::collections::BTreeSet::new();
     for spec in solidcraft_engine::command_specs() {
         let Some(d) = Dialog::for_command(&h.app, spec.id) else { continue };
         for input in &d.inputs {
             let label = input.label.trim();
-            if label.chars().any(|c| c.is_ascii_alphabetic()) && crate::i18n::tr_label(label) == label {
+            if label.chars().any(|c| c.is_ascii_alphabetic()) && solidcraft_ui_text::tr_label(label) == label {
                 missing.insert(format!("{}: {label}", spec.id));
             }
         }
@@ -1439,9 +1570,9 @@ fn pattern_says_why_a_clicked_sketch_is_not_taken() {
         }
     }
     assert!(crate::dialogs::missing_pick(crate::dialogs::SKETCH_NOT_OBJECT), "shown as what to pick, with no Create Issue");
-    let _japanese = crate::i18n::scope("ja");
-    assert!(!crate::i18n::tr_label(crate::dialogs::SKETCH_NOT_OBJECT).is_ascii(), "the hint reads in the user's language");
-    assert!(!crate::i18n::tr("ui.pattern_object_type_tip").is_ascii(), "so does the Object Type tooltip");
+    let _japanese = solidcraft_ui_text::scope("ja");
+    assert!(!solidcraft_ui_text::tr_label(crate::dialogs::SKETCH_NOT_OBJECT).is_ascii(), "the hint reads in the user's language");
+    assert!(!solidcraft_ui_text::tr("ui.pattern_object_type_tip").is_ascii(), "so does the Object Type tooltip");
 }
 
 /// Features stored with bare numbers edit with their units written out, as the Plastic ones do
@@ -1551,7 +1682,7 @@ fn dialog_sketch_selection_labels_translate_and_keep_identifiers() {
         (Sel::SketchConstraint { id: "k3".into() }, "Constraint k3", "Bedingung k3"),
     ] {
         for (language, expected) in [("en", english), ("de", german)] {
-            let _language = crate::i18n::scope(language);
+            let _language = solidcraft_ui_text::scope(language);
             assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, &d, &d.inputs[0], &sel), expected);
         }
     }

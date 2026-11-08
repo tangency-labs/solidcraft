@@ -13,6 +13,12 @@ cursor, replacing selected text and keeping what you typed, so typing `10 + ` an
 the expression or **Escape** to cancel the edit.
 Add and edit user parameters through the existing **Change Parameters** command.
 
+![The Parameters dialog, numbered 1 to 5](../media/parameters/dialog.png)
+
+**1** Apply each change as you leave its field · **2** User parameters, and **Add parameter** ·
+**3** Model parameters, grouped by the sketch or feature they belong to · **4** An expression ·
+**5** The value it works out to
+
 ## Naming a value as you type it
 
 Any value input can name its value: type `width = 40` (or `#width = 40`) for a dimension, a
@@ -39,6 +45,11 @@ Scripts, the control channel and MCP tools take the same form in any expression 
 In the MANAGE tab's PARAMETERS section, click **Parameters** to open the user and model
 parameter editor. The **Configurations** button in CONFIGURATIONS opens the configuration table;
 **Configure** remains in the dropdown for configuring columns.
+
+The **Filter** box lists the parameters whose name, expression, comment or group contains what
+you type, in any case. It also finds a name by the starts of its words, in order: `toodia`,
+`toofla` and `outdia` all find `tooth_outward_flange_diameter`. Underscores, hyphens and
+camelCase (`boltHoleDepth`) separate the words. Autocomplete offers parameters the same way.
 
 Press **Enter** in the new parameter's name, expression or comment field to add it.
 Valid entries return focus to the name field for the next parameter; invalid entries remain

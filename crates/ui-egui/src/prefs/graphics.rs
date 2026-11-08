@@ -55,7 +55,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui.spacing_mut().item_spacing = egui::vec2(t.space_10, t.space_10);
                 for ((q, figure), note) in DisplayQuality::ALL.into_iter().zip(figures).zip(notes) {
                     let label_id = format!("ui.display_quality_{}", q.id());
-                    let label = crate::i18n::tr(&label_id);
+                    let label = solidcraft_ui_text::tr(&label_id);
                     let width = (t.space_24 * 5.0 + t.space_10).max(ui_kit::ContentWidth::name(ui, label) + t.space_12).min(ui.max_rect().width());
                     let response = ui_kit::picture_card(
                         ui,
@@ -199,9 +199,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 }
             });
+            ui.add_enabled_ui(app.ui.ground_shadow, |ui| {
+                let response = setting::ground_shadow_follows_model(app, ui).on_hover_text(app.tr("prefs.ground_shadow_follows_model_help"));
+                crate::scenario::publish_handle("prefs:ground_shadow_follows_model", response.rect.center());
+            });
             ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
                 ui_kit::row(ui, app.tr_label("Visual style"), |ui| {
-                    let options = crate::navigation_bar::VISUAL_STYLES.map(|(_, label)| crate::i18n::tr_label(label));
+                    let options = crate::navigation_bar::VISUAL_STYLES.map(|(_, label)| solidcraft_ui_text::tr_label(label));
                     let choices: Vec<_> =
                         options.into_iter().zip(["style_shaded_edges", "style_shaded", "style_wireframe", "style_hidden_edges"]).collect();
                     let mut selected = usize::from(app.ui.visual_style.min(3));
@@ -307,10 +311,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let response = ui_kit::choice_chip(
                         ui,
                         id,
-                        if id == "viewport_section_status" { crate::i18n::tr_label(label) } else { crate::i18n::tr(label) },
+                        if id == "viewport_section_status" { solidcraft_ui_text::tr_label(label) } else { solidcraft_ui_text::tr(label) },
                         *value,
                     )
-                    .backing_on_hover_text(crate::i18n::tr(help));
+                    .backing_on_hover_text(solidcraft_ui_text::tr(help));
                     crate::scenario::publish_target(&format!("prefs:{id}"), response.rect);
                     if response.clicked() {
                         *value = !*value;
@@ -365,6 +369,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 #[cfg(target_os = "linux")]
                 window_system_row(app, ui, help_label_width);
                 setting::render_previous_geometry_budget(app, ui).backing_on_hover_text(app.tr("prefs.render_previous_geometry_budget_help"));
+                setting::render_legacy_image_defaults(app, ui).backing_on_hover_text(app.tr("prefs.render_legacy_image_defaults_help"));
             });
         });
     });
@@ -429,7 +434,7 @@ fn paint_monitor(p: &egui::Painter, rect: egui::Rect, ink: egui::Color32) {
 /// shows the rows without it, like every other card.
 fn computer_card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     let t = Tokens::get();
-    if crate::prefs_search::suppress_chrome(ui) {
+    if crate::ui_kit::settings_search::suppress_chrome(ui) {
         add(ui);
         return;
     }

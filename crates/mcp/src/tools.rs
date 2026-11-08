@@ -7,11 +7,16 @@ use serde_json::{Map, Value, json};
 use solidcraft_engine::io::vfs;
 use solidcraft_engine::timing;
 
+use solidcraft_mcp_server::{Effect, object, string, tool};
+
 use crate::backend::{Backend, STILL_RUNNING};
 use crate::options::Options;
 
 /// Most commands in one `batch` call.
 const MAX_BATCH: usize = 10_000;
+
+/// The largest script file `batch` reads (`path`).
+const MAX_SCRIPT_BYTES: usize = 32 << 20;
 /// Largest image returned by `screenshot`.
 const MAX_IMAGE_BYTES: usize = 32 << 20;
 /// Relative tolerance on an expected volume (`expect.tol`) when the call gives none.
@@ -22,48 +27,6 @@ const EXPECT_BBOX_TOL_MM: f64 = 0.05;
 const VIEWS: &[&str] = &["iso", "home", "front", "back", "top", "bottom", "left", "right", "fit"];
 /// What `check_parameters` can report.
 const REPORTS: &[&str] = &["measure", "cylinders", "errors"];
-
-fn obj(props: Value, required: &[&str]) -> Value {
-    let mut o = json!({"type": "object", "properties": props, "additionalProperties": false});
-    if !required.is_empty() {
-        o["required"] = json!(required);
-    }
-    o
-}
-
-/// What a tool may do, for the client's approval prompts (MCP tool annotations). Clients that
-/// auto-approve on these hints must not be told less than the truth (#205).
-#[derive(Clone, Copy)]
-enum Effect {
-    /// Only looks.
-    ReadOnly,
-    /// Changes the design in memory, undoably.
-    Edits,
-    /// Replaces the design in memory (unsaved changes are lost).
-    Replaces,
-    /// May read, write, overwrite or delete files on disk (any command, a file path).
-    Files,
-}
-
-fn tool(name: &str, title: &str, desc: &str, schema: Value, effect: Effect) -> Value {
-    let (read_only, destructive, open_world) = match effect {
-        Effect::ReadOnly => (true, false, false),
-        Effect::Edits => (false, false, false),
-        Effect::Replaces => (false, true, false),
-        Effect::Files => (false, true, true),
-    };
-    json!({
-        "name": name,
-        "title": title,
-        "description": desc,
-        "inputSchema": schema,
-        "annotations": {"title": title, "readOnlyHint": read_only, "destructiveHint": destructive, "idempotentHint": read_only, "openWorldHint": open_world},
-    })
-}
-
-fn string(desc: &str) -> Value {
-    json!({"type": "string", "description": desc})
-}
 
 /// The `expect` argument of `execute` and `batch`: what the design should measure once the
 /// call has gone through.
@@ -114,7 +77,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              (start of the id) and `panel` (a whole panel or tab name); shrink each entry with `compact` (id and label) \
              or `fields`; page it with `limit` and `offset`, which make the reply {commands, total, offset, next_offset}. \
              With none of these the reply is the whole catalog, about 350 KB.",
-            obj(
+            object(
                 json!({
                     "filter": string("Substring to match, e.g. \"sketch\", \"fillet\", \"pattern\""),
                     "prefix": string("Case-insensitive start of the command id, e.g. \"sketch.\""),
@@ -137,7 +100,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "Describe a command",
             "One command's parameter docs and, for commands with a typed contract (every new command, and more of the older ones as they are converted), the \
              JSON Schemas (2020-12) of its parameters (`input`) and of a successful result (`output`); null for the others.",
-            obj(json!({"id": string("Command id, e.g. \"solid.extrude\"")}), &["id"]),
+            object(json!({"id": string("Command id, e.g. \"solid.extrude\"")}), &["id"]),
             Effect::ReadOnly,
         ),
         tool(
@@ -155,7 +118,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              and name, every body (bodies) and the bodies the feature created, changed and removed (created_bodies, changed_bodies, removed_bodies). \
              view.pick {pixels: [[x,y]…]} answers the body, face, exact world point, normal and depth under pixels of a screenshot (read-only; docs/control-protocol.md). \
              `expect` {volume_mm3, tol, bodies, bbox} checks the design after the command (as `batch` does) and flags a mismatch.",
-            obj(
+            object(
                 json!({
                     "command": string("Command id (see list_commands)"),
                     "params": {"type": "object", "description": "The command's parameters"},
@@ -179,16 +142,20 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              rollback: false), so the batch is all-or-nothing; the reply names the failing step (index from 0), its error, \
              every result before it, whether the design really went back (rolled_back), the steps whose changes are in the \
              design (applied) and those never sent (not_run). The usual way to build a part: sketch, draw, dimension, \
-             finish, extrude, fillet… in one call. Give `expect` {volume_mm3, tol, bodies, bbox} with the numbers you computed \
-             beforehand: after the last step the design is measured and compared, so no separate measure call is needed; a \
-             mismatch is flagged as an error naming it, and the design is kept as built.",
-            obj(
+             finish, extrude, fillet… in one call. A long one (a polyline of hundreds of points) can be written to a JSON \
+             file and passed as `path` instead of `commands`. Give `expect` {volume_mm3, tol, bodies, bbox} with the numbers \
+             you computed beforehand: after the last step the design is measured and compared, so no separate measure call is \
+             needed; a mismatch is flagged as an error naming it, and the design is kept as built.",
+            object(
                 json!({
                     "commands": {
                         "type": "array",
                         "description": "Steps: [{\"command\": id, \"params\": {...}}, ...]",
                         "items": {"type": "object", "properties": {"command": {"type": "string"}, "params": {"type": "object"}}, "required": ["command"]},
                     },
+                    "path": string("Instead of `commands`: a JSON file holding the steps, an array or {\"commands\": [...]} (as \
+                     `solidcraft-cli run` takes and `solidcraft-cli script` writes), read by this server within the folders the \
+                     agent may use; the steps run as if they had been sent here"),
                     "rollback": {"type": "boolean", "description": "Undo completed steps when one fails (default true)"},
                     "coalesce_parameters": {"type": "boolean", "description": "Set each run of consecutive plain parameter edits (parameters.change or set_parameter with a name and a value, or changes) together, rebuilding the design once for the run instead of once per edit; a run that is refused goes step by step, naming the refused step. Other steps still see the design up to date. Each step keeps its own result; the run is one undo step (default false)"},
                     "timings": {"type": "boolean", "description": "Add `timings`: [{index, command, ms}] for every step run (the failing one included) and `total_ms` (default false)"},
@@ -196,7 +163,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created` (default true)"},
                     "expect": expect_schema(),
                 }),
-                &["commands"],
+                &[],
             ),
             Effect::Files,
         ),
@@ -211,7 +178,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              `min` and `max` distance and, where one is round, `center_distance` (centre to centre, or from its axis). \
              `summary: true` keeps one short object per body (name, volume_mm3, bbox, faces, closed) and the total volume: \
              enough to check a stage against the numbers you computed, at a fraction of the size.",
-            obj(
+            object(
                 json!({
                     "body": string("Body name (default: all bodies)"),
                     "names_only": {"type": "boolean", "description": "Only each body's name (assembly occurrences included) and its definition's, without measuring (default false)"},
@@ -231,7 +198,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              `faces: \"cylinders\"` lists only the cylindrical faces, as `cylinders`, with the halves the kernel splits one cylinder \
              into merged: {radius, origin, axis, extent, names}, `extent` the [min, max] distance along `axis` from `origin` that \
              the cylinder spans, and no edges. That is enough to check where every hole and boss is, at a fraction of the size.",
-            obj(
+            object(
                 json!({
                     "body": string("Body name, e.g. \"Body1\""),
                     "faces": {"type": "string", "enum": ["all", "cylinders"], "description": "\"all\" (default): every edge and face. \"cylinders\": only the cylindrical faces, merged, with their extent along the axis, and no edges"},
@@ -248,7 +215,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              uses. Give one of the two (both only when they agree). Returns the new value, the features recomputed (`recomputed`), the \
              features whose earlier result for the same inputs was reused instead (`restored`, e.g. after setting a value back) and any \
              features that now fail.",
-            obj(
+            object(
                 json!({
                     "name": string("Parameter name"),
                     "value": {"type": ["number", "string"], "description": "Number or expression (or give it as `expression`)"},
@@ -271,7 +238,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              `restored: true`; if the design could not be put back the call is an error with `restored: false` and the values \
              still applied. An unknown parameter name is an error and nothing changes. Replaces the loop set_parameter, \
              measure, body_topology, set_parameter back.",
-            obj(
+            object(
                 json!({
                     "set": {
                         "type": "object",
@@ -298,7 +265,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              `grid: false` and `axes: false` leave the ground grid (on Z 0) and the origin's axes out of a model render. \
              A body whose appearance is see-through (appearance.assign with an `opacity` below 1) is drawn see-through, \
              so what is inside it shows: that is how to look at the body a cut would remove inside the material it meets.",
-            obj(
+            object(
                 json!({
                     "view": string(
                         "Standard view (iso, home, front, back, top, bottom, left, right, fit) or the name of a saved named view                          (default: keep the current one; headless starts at iso)"
@@ -328,7 +295,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              \"both\" scales by width and reports `aspect_mismatch` when the shapes differ. Returns as text the overlap (0..1) and the model's top, \
              bottom, left and right edges against the picture's in mm at nine stations (positive where the model reaches past the picture), and as \
              an image the overlay PNG: model red, picture blue.",
-            obj(
+            object(
                 json!({
                     "reference": string("PNG or JPEG to match, inside the server's folders"),
                     "view": string("Standard view (front, top, right, iso, ...) the picture is seen from (default front)"),
@@ -350,7 +317,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              comes from the extension unless given. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
              next to it (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/.",
-            obj(
+            object(
                 json!({
                     "path": string("Output file"),
                     "format": {"type": "string", "enum": ["step", "3mf", "3mf-tagged", "stl", "stla", "obj", "urdf"]},
@@ -371,7 +338,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              message, location, backtrace, app version and commit, system, the command that crashed and the recent ones, \
              and design_path / replay_path when it can be replayed: `solidcraft-cli crashes replay <id>`, or \
              `solidcraft-cli run <replay_path> --in <design_path>`. Reports never leave this computer.",
-            obj(
+            object(
                 json!({
                     "id": string("A report id from the list"),
                     "limit": {"type": "integer", "description": "Reports to list (default 20)"},
@@ -387,7 +354,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              command id (a batch's step count), seconds since it arrived (running_s) and whether it still waits its turn \
              (queued); `self` marks a request sent on the connection that asks. Answers at once, even while the app is busy, \
              and never shows parameters. Ask it when a call timed out or the app seems slow, before sending a change again.",
-            obj(json!({}), &[]),
+            object(json!({}), &[]),
             Effect::ReadOnly,
         ),
         tool(
@@ -397,16 +364,16 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              starting \"still running:\"). Waits for it up to 60 s: then its own result (or error), or done: false while \
              it still runs (call again). pending: null when nothing is running. A request still running was not \
              cancelled: don't send it again; other calls wait for it before they are sent.",
-            obj(json!({}), &[]),
+            object(json!({}), &[]),
             Effect::ReadOnly,
         ),
-        tool("undo", "Undo", "Undo the last change to the design.", obj(json!({}), &[]), Effect::Edits),
-        tool("redo", "Redo", "Redo the last undone change.", obj(json!({}), &[]), Effect::Edits),
+        tool("undo", "Undo", "Undo the last change to the design.", object(json!({}), &[]), Effect::Edits),
+        tool("redo", "Redo", "Redo the last undone change.", object(json!({}), &[]), Effect::Edits),
         tool(
             "new_design",
             "New design",
             "Start a new, empty design (unsaved changes to the current one are discarded).",
-            obj(json!({"name": string("Design name (default Untitled)")}), &[]),
+            object(json!({"name": string("Design name (default Untitled)")}), &[]),
             Effect::Replaces,
         ),
         tool(
@@ -419,7 +386,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              instead with the file.insert_step (STEP) or file.insert_mesh (mesh) commands. A STEP file from a system \
              that has Y up opens lying on its back: `up: \"y\"` turns its component a quarter turn about X (Y becomes Z). glTF is Y up, \
              so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful.",
-            obj(
+            object(
                 json!({
                     "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb or .gltf file"),
                     "up": {"type": "string", "enum": ["z", "y"], "description": "STEP and glTF only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for STEP, y for glTF"},
@@ -436,7 +403,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              By default the path must lie in one of the agent's folders: the folder of a design opened or saved in this session (not its hidden files), \
              SolidCraft's recovery folder, or a folder this server was started with `--allow-path DIR`. For a folder outside them, ask the user \
              to add `--allow-path` and that folder to this server's arguments in their MCP client configuration.",
-            obj(
+            object(
                 json!({"path": string("Path to save to, e.g. part.sc (default: the current file)"), "format": {"type": "string", "enum": ["container", "json"], "description": "Design encoding (default: JSON for .json, container otherwise)"}}),
                 &[],
             ),
@@ -448,7 +415,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "Read a document of SolidCraft's bundled agent skills (solidcraft-modeling, solidcraft-mechanisms, \
              solidcraft-editing, solidcraft-checking) from the copy built into SolidCraft. `file` defaults to reference.md; \
              each skill also has SKILL.md. Unknown skills or files are refused with the available ones.",
-            obj(
+            object(
                 json!({
                     "skill": string("Skill name, such as solidcraft-modeling"),
                     "file": {"type": "string", "description": "Document of that skill", "default": "reference.md"},
@@ -473,7 +440,7 @@ fn inspect_design_tool(opts: Options) -> Value {
          status), assembly joints (what each origin is attached to: occurrence, the feature, face, edge or sketch \
          curve its face names refer to, whether it resolves and why not; `execute` `joint.inspect {joint}` gives one), \
          the active sketch, selection and undo depth.",
-            obj(
+            object(
                 json!({
                     "measure": {"type": "boolean", "description": "Measure bodies (default true)"},
                     "sketches": {"type": "boolean", "description": "Full sketch contents (default true; false = summary only)"},
@@ -494,7 +461,7 @@ fn inspect_design_tool(opts: Options) -> Value {
          (curves with ids and coordinates, points, constraints, profiles) only for the sketches named in `sketches`, or \
          all with `sketches: true` (large: a 720-point sketch is some 200 KB). Assembly joints: what each origin is \
          attached to (`execute` `joint.inspect {joint}` gives one). Arguments: measure, sketches, bodies, joints.",
-        obj(
+        object(
             json!({
                 "measure": {"type": "boolean", "description": "Measure bodies (default true)"},
                 "sketches": {
@@ -511,65 +478,6 @@ fn inspect_design_tool(opts: Options) -> Value {
     )
 }
 
-fn type_matches(t: &str, v: &Value) -> bool {
-    match t {
-        "string" => v.is_string(),
-        "number" => v.is_number(),
-        "integer" => v.is_i64() || v.is_u64(),
-        "boolean" => v.is_boolean(),
-        "array" => v.is_array(),
-        "object" => v.is_object(),
-        "null" => v.is_null(),
-        _ => true,
-    }
-}
-
-/// [`check_arguments_with`] the default options.
-#[cfg(test)]
-pub(crate) fn check_arguments(name: &str, args: &Value) -> Result<(), String> {
-    check_arguments_with(name, args, Options::default())
-}
-
-/// Validates `args` against the tool's schema as listed with these [`Options`] (top level):
-/// unknown tool, missing required arguments, unknown arguments, type and enum mismatches.
-pub(crate) fn check_arguments_with(name: &str, args: &Value, opts: Options) -> Result<(), String> {
-    let defs = tool_definitions_with(opts);
-    let def = defs.iter().find(|d| d["name"] == name).ok_or_else(|| format!("unknown tool `{name}`"))?;
-    let schema = &def["inputSchema"];
-    let Some(a) = args.as_object() else { return Err(format!("{name}: arguments must be an object")) };
-    for r in schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str) {
-        if a.get(r).is_none_or(Value::is_null) {
-            return Err(format!("{name}: missing required argument `{r}`"));
-        }
-    }
-    let props = schema["properties"].as_object();
-    for (k, v) in a {
-        let Some(p) = props.and_then(|p| p.get(k)) else {
-            let valid: Vec<&str> = props.map(|p| p.keys().map(String::as_str).collect()).unwrap_or_default();
-            let valid = if valid.is_empty() { "none".to_string() } else { valid.join(", ") };
-            let k: String = k.chars().take(64).collect();
-            return Err(format!("{name}: unknown argument `{k}`; its arguments are: {valid}"));
-        };
-        if v.is_null() {
-            continue;
-        }
-        let ok = match &p["type"] {
-            Value::String(t) => type_matches(t, v),
-            Value::Array(ts) => ts.iter().filter_map(Value::as_str).any(|t| type_matches(t, v)),
-            _ => true,
-        };
-        if !ok {
-            return Err(format!("{name}: argument `{k}` must be of type {}", p["type"]));
-        }
-        if let Some(allowed) = p["enum"].as_array()
-            && !allowed.contains(v)
-        {
-            return Err(format!("{name}: `{k}` must be one of {}", Value::Array(allowed.clone())));
-        }
-    }
-    Ok(())
-}
-
 /// A tool result: content blocks plus the error flag. JSON is pretty-printed, or compact with
 /// compact output.
 fn text_result(v: &Value, is_error: bool, opts: Options) -> Value {
@@ -577,16 +485,14 @@ fn text_result(v: &Value, is_error: bool, opts: Options) -> Value {
         Value::String(s) => s.clone(),
         v => opts.json_text(v),
     };
-    let mut r = json!({"content": [{"type": "text", "text": text}]});
-    if is_error {
-        r["isError"] = json!(true);
-        if let Some(reason) = v
+    let mut r = solidcraft_mcp_server::text_result(text, is_error);
+    if is_error
+        && let Some(reason) = v
             .as_str()
             .and_then(solidcraft_engine::panels::commands::structured_error)
             .or_else(|| v.get("failed").and_then(|failed| failed.get("panel_error")).cloned())
-        {
-            r["structuredContent"] = json!({"panel_error":reason});
-        }
+    {
+        r["structuredContent"] = json!({"panel_error":reason});
     }
     r
 }
@@ -1359,6 +1265,32 @@ fn inspect_design_compact(b: &mut dyn Backend, a: &Map<String, Value>) -> Result
     Ok(d)
 }
 
+/// The steps of the script file `batch` was given as `path` (`None`: it was given `commands`).
+/// A file it can't read, or whose steps aren't a list, fails the batch before anything is sent.
+fn script_file(a: &Map<String, Value>) -> Result<Option<Vec<Value>>, String> {
+    let Some(path) = a.get("path") else { return Ok(None) };
+    let Some(path) = path.as_str().map(str::trim).filter(|p| !p.is_empty()) else {
+        return Err("`path` must name a script file".into());
+    };
+    if a.contains_key("commands") {
+        return Err("give `commands` or `path`, not both".into());
+    }
+    let text = vfs::read_to_string(path, MAX_SCRIPT_BYTES).map_err(|e| format!("script file `{path}`: {e}"))?;
+    let script: Value = serde_json::from_str(&text).map_err(|e| format!("script file `{path}` is not JSON: {e}"))?;
+    let steps = match script {
+        Value::Array(steps) => steps,
+        Value::Object(mut o) => match o.remove("commands") {
+            Some(Value::Array(steps)) => steps,
+            _ => return Err(format!("script file `{path}`: no `commands` array")),
+        },
+        _ => return Err(format!("script file `{path}`: steps must be an array or {{\"commands\": [...]}}")),
+    };
+    if steps.is_empty() {
+        return Err(format!("script file `{path}` has no steps"));
+    }
+    Ok(Some(steps))
+}
+
 /// `set_parameter`'s new value: `value` or `expression` (the parameters.change name), one of
 /// them, or both when they agree (`50` and `"50"` do).
 fn parameter_value(a: &Map<String, Value>) -> Result<Value, String> {
@@ -1466,7 +1398,11 @@ fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, de
 
 /// The batch itself: its reply and whether it failed.
 fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
-    let Some(steps) = a.get("commands").and_then(Value::as_array) else {
+    let from_file = match script_file(a) {
+        Ok(f) => f,
+        Err(e) => return (json!(e), true),
+    };
+    let Some(steps) = from_file.as_ref().map_or_else(|| a.get("commands").and_then(Value::as_array), Some) else {
         return (json!("`commands` must be an array of {command, params}"), true);
     };
     if steps.len() > MAX_BATCH {
@@ -2130,10 +2066,7 @@ static SHOT: AtomicU64 = AtomicU64::new(0);
 /// `screenshot`: render or capture to a file, return it as an MCP image content block.
 fn screenshot(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
     match capture(b, a) {
-        Ok((png, info)) => json!({"content": [
-            {"type": "image", "data": base64(&png), "mimeType": "image/png"},
-            {"type": "text", "text": info.to_string()},
-        ]}),
+        Ok((png, info)) => solidcraft_mcp_server::image_result(&png, "image/png", info.to_string()),
         Err(e) => text_result(&Value::String(e), true, Options::default()),
     }
 }
@@ -2244,22 +2177,4 @@ fn capture(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<(Vec<u8>, Valu
         }
     }
     Ok((png, reply))
-}
-
-/// Standard base64 with padding (RFC 4648).
-pub(crate) fn base64(data: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b = [chunk.first().copied().unwrap_or(0), chunk.get(1).copied().unwrap_or(0), chunk.get(2).copied().unwrap_or(0)];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        for (i, shift) in [18u32, 12, 6, 0].into_iter().enumerate() {
-            if i <= chunk.len() {
-                out.push(char::from(T[((n >> shift) & 63) as usize]));
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
 }

@@ -16,17 +16,20 @@ fn denoise_guides(@builtin(global_invocation_id) gid: vec3<u32>) {
     if u.environment.w>0.0 && emitter_hit_bounded(ray.origin,ray.direction,u.lighting.x).distance<hit.distance { return; }
     var t=triangle(hit.triangle);
     let position=surface_point(t,hit.bary);
-    t=texture_surface(t,position);
+    var geometric=unit(cross(t.p1.xyz-t.p0.xyz,t.p2.xyz-t.p0.xyz));
+    if dot(geometric,-ray.direction)<0.0 { geometric=-geometric; }
+    let map_record=texture_record(t.optics.w);
+    let gradients=texture_gradients(map_record,geometric,ray.direction,hit.distance,length(position-ray.origin),0u);
+    let mapped_surface=texture_surface(map_record,t.base.xyz,t.parameters.x,t.parameters.y,position,gradients,(u32(t.interior.z)&2u)!=0u);
+    t.base=vec4<f32>(mapped_surface.color,t.base.w);t.parameters=vec4<f32>(mapped_surface.metallic,mapped_surface.roughness,t.parameters.zw);
     t=aged_surface(t,position,unit(cross(t.p1.xyz-t.p0.xyz,t.p2.xyz-t.p0.xyz)));
     // Single first-hit guides cannot describe refracted or sharp reflected images.
     if t.base.w>0.0 || (t.parameters.x>0.5 && t.parameters.y<0.25) || (t.coat.x>0.0 && t.coat.y<0.05) { return; }
-    var geometric=unit(cross(t.p1.xyz-t.p0.xyz,t.p2.xyz-t.p0.xyz));
-    if dot(geometric,-ray.direction)<0.0 { geometric=-geometric; }
     var n=unit(t.n0.xyz*hit.bary.x+t.n1.xyz*hit.bary.y+t.n2.xyz*hit.bary.z);
     if dot(n,geometric)<0.0 { n=-n; }
     if dot(n,-ray.direction)<=0.0 { n=geometric; }
-    let mapped=texture_normal(t,position,n,geometric);
-    if dot(mapped,-ray.direction)>0.0 { n=mapped; }
+    let mapped_normal=texture_normal(map_record,mapped_surface.normal,n,geometric);
+    if dot(mapped_normal,-ray.direction)>0.0 { n=mapped_normal; }
     let depth=dot(position-u.eye.xyz,-u.back.xyz);
     var footprint=2.0*length(u.up.xyz)/f32(u.image.y);
     if u.eye.w>0.5 { footprint*=max(depth,0.0)/u.back.w; }

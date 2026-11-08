@@ -227,7 +227,7 @@ fn without_value_boxes_a_number_typed_after_an_edge_pick_sets_its_distance() {
     let left = screen(&mut h, Vec3::new(0.0, 20.0, 10.0));
     h.step(&json!({"click": left})).unwrap();
     h.frames(2);
-    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_hole_ref_area", 0usize)))).is_none(), "a distance box in the view");
+    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_hole_ref_area", 0usize)))).is_none(), "a distance box in the view");
     h.step(&json!({"text": "7 mm"})).unwrap();
     h.frames(2);
     assert_eq!(distances(&h)[0], "7 mm");
@@ -358,7 +358,7 @@ fn a_pick_field_clicked_into_waits_for_its_pick_and_says_what_it_takes() {
         assert_eq!(tips, [Some("dialog.primitive_point_tip")], "{cmd}");
     }
     for id in ["dialog.cylinder_face_tip", "dialog.reference_edge_tip", "dialog.primitive_point_tip"] {
-        assert_ne!(crate::i18n::tr(id), id, "{id} is in the catalog");
+        assert_ne!(solidcraft_ui_text::tr(id), id, "{id} is in the catalog");
     }
 }
 
@@ -367,7 +367,7 @@ fn a_pick_field_clicked_into_waits_for_its_pick_and_says_what_it_takes() {
 /// nothing leaves the field waiting and the note shown. A new note scrolls into view once.
 #[test]
 fn a_pick_fields_note_goes_with_a_value_field_or_a_marquee_that_takes_something() {
-    let note_shown = egui::Id::new("sc_dialog_pick_refused_shown");
+    let note_shown = egui::Id::unique("sc_dialog_pick_refused_shown");
     let mut h = plate();
     h.step(&json!({"start": "solid.cylinder"})).unwrap();
     h.frames(2);

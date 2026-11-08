@@ -78,7 +78,7 @@ fn enabled_buttons_show_the_pointing_hand_and_disabled_ones_do_not() {
 /// Cancel are not affected. The same holds for a confirmation's third action on the left.
 #[test]
 fn apply_with_nothing_to_apply_is_disabled_for_pointer_keyboard_and_accessibility() {
-    use crate::theme::Tokens;
+    use solidcraft_theme::Tokens;
     for confirm in [false, true] {
         for nothing_to_apply in [true, false] {
             let live = !nothing_to_apply;
@@ -154,19 +154,19 @@ fn apply_with_nothing_to_apply_is_disabled_for_pointer_keyboard_and_accessibilit
 
 #[test]
 fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_themes() {
-    use crate::theme::Tokens;
     use egui::{Pos2, RawInput, Rect, RichText, Shape, vec2};
-    let previous = crate::theme::is_dark();
+    use solidcraft_theme::Tokens;
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for enabled in [false, true] {
             let ctx = crate::fonts::test_context();
-            crate::theme::apply(&ctx);
+            solidcraft_theme::apply(&ctx);
             let rects =
                 [Rect::from_min_size(egui::pos2(20.0, 30.0), vec2(108.0, 32.0)), Rect::from_min_size(egui::pos2(140.0, 30.0), vec2(108.0, 32.0))];
             let mut clicks = [0_usize; 2];
             let mut draw = |events| {
-                ctx.run_ui(
+                let mut output = ctx.run_ui(
                     RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(320.0, 200.0))), events, focused: true, ..Default::default() },
                     |ui| {
                         ui.add_enabled_ui(enabled, |ui| {
@@ -186,7 +186,9 @@ fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_the
                             }
                         });
                     },
-                )
+                );
+                output.textures_delta.clear();
+                output
             };
             let output = draw(vec![]);
             for (index, label) in ["Recover", "Discard"].into_iter().enumerate() {
@@ -200,7 +202,7 @@ fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_the
                     .expect("native button label is painted");
                 if enabled && index == 0 {
                     let ink = text.galley.job.sections.first().expect("primary text format").format.color;
-                    assert!(crate::theme::contrast_ratio(ink, Tokens::get().form_primary) >= 4.5, "primary label remains legible in both themes");
+                    assert!(solidcraft_theme::contrast_ratio(ink, Tokens::get().form_primary) >= 4.5, "primary label remains legible in both themes");
                 }
                 let center = text.pos + text.galley.size() / 2.0;
                 assert!((center.x - rects[index].center().x).abs() <= 1.0, "{label} horizontal center: {center:?}");
@@ -213,13 +215,13 @@ fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_the
             assert_eq!(clicks, if enabled { [1, 1] } else { [0, 0] });
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn one_bit_primary_actions_keep_inverted_labels_and_legacy_fills() {
-    use crate::theme::{Tokens, scoped_tokens};
     use egui::{Color32, Shape};
+    use solidcraft_theme::{Tokens, scoped_tokens};
 
     for base in [crate::theme_files::Base::Dark, crate::theme_files::Base::Light] {
         let old = crate::theme_files::parse(&format!(
@@ -278,12 +280,12 @@ fn persistent_native_selected_recipe_is_opt_in_and_preserves_small_selected_cont
     }
     let mut themes: Vec<_> = [false, true]
         .into_iter()
-        .flat_map(|dark| crate::theme::ColorVision::ALL.into_iter().map(move |vision| crate::theme::Tokens::themed(dark, vision)))
+        .flat_map(|dark| solidcraft_theme::ColorVision::ALL.into_iter().map(move |vision| solidcraft_theme::Tokens::themed(dark, vision)))
         .collect();
     themes.extend(crate::theme_files::builtin().iter().map(crate::theme_files::resolve).filter(|t| t.borders.bevel.is_some()));
     assert!(themes.iter().any(|t| t.borders.bevel.is_some()), "include a real bevel theme");
     for t in themes {
-        let _theme = crate::theme::scoped_tokens(t);
+        let _theme = solidcraft_theme::scoped_tokens(t);
         let ctx = crate::fonts::test_context();
         let mut selected = egui::Shape::Noop;
         let mut native = egui::Rect::NOTHING;

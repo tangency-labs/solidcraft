@@ -16,10 +16,10 @@ use solidcraft_engine::{
 
 use crate::{
     SolveApp,
-    theme::Tokens,
     ui_kit::{Container, Surface},
     viewport::Proj,
 };
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Mode {
@@ -248,7 +248,7 @@ impl Blocked {
         if self.conflicts.is_empty() {
             app.tr("joint_move.fixed").to_string()
         } else {
-            crate::i18n::format("joint_move.conflict", &[("joint", &self.conflicts.join(", "))])
+            solidcraft_ui_text::format("joint_move.conflict", &[("joint", &self.conflicts.join(", "))])
         }
     }
 }
@@ -263,16 +263,17 @@ pub(crate) fn show_warning(app: &mut SolveApp, ctx: &egui::Context) {
         app.menu.joint_move_warning = None;
         return;
     }
-    let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new("sc_joint_move_blocked"), "status_warning", app.tr("joint_move.blocked_title"))
-        .tone(crate::ui_kit::Tone::Warning)
-        .actions(app.tr("ui.heading_ok"), "", None)
-        .show(ctx, true, |ui| {
-            if !blocked.part.is_empty() {
-                crate::ui_kit::text(ui, &blocked.part, crate::ui_kit::Text::Report("part", false));
-            }
-            crate::ui_kit::text(ui, &reason, crate::ui_kit::Text::Report("reason", false));
-            crate::ui_kit::text(ui, app.tr(hint), crate::ui_kit::Text::Hint("remedy"));
-        });
+    let (closed, action) =
+        crate::ui_kit::Confirm::new(egui::Id::unique("sc_joint_move_blocked"), "status_warning", app.tr("joint_move.blocked_title"))
+            .tone(crate::ui_kit::Tone::Warning)
+            .actions(app.tr("ui.heading_ok"), "", None)
+            .show(ctx, true, |ui| {
+                if !blocked.part.is_empty() {
+                    crate::ui_kit::text(ui, &blocked.part, crate::ui_kit::Text::Report("part", false));
+                }
+                crate::ui_kit::text(ui, &reason, crate::ui_kit::Text::Report("reason", false));
+                crate::ui_kit::text(ui, app.tr(hint), crate::ui_kit::Text::Hint("remedy"));
+            });
     app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
     if closed || action != crate::ui_kit::Action::None {
         app.menu.joint_move_warning = None;
@@ -644,7 +645,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         if let Some(p) = pointer {
             let at = (p + vec2(20.0, 22.0)).clamp(proj.rect.min, proj.rect.max - vec2(260.0, 82.0).min(proj.rect.size()));
             let host = Container::new(ui.ctx(), Surface::Canvas);
-            host.area(egui::Id::new("joint_move_readout")).interactable(false).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+            host.area(egui::Id::unique("joint_move_readout")).interactable(false).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
                 let frame = host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8);
                 Container::show_backing(ui, frame, |ui| {
                     let value = if d.axis.angular {
@@ -678,7 +679,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     }
     let host = Container::new(ui.ctx(), Surface::Canvas);
     let mut done = false;
-    host.area(egui::Id::new("joint_move_help")).fixed_pos(proj.rect.left_bottom() + vec2(16.0, -148.0)).show(ui.ctx(), |ui| {
+    host.area(egui::Id::unique("joint_move_help")).fixed_pos(proj.rect.left_bottom() + vec2(16.0, -148.0)).show(ui.ctx(), |ui| {
         let frame = host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8);
         Container::show_backing(ui, frame, |ui| {
             ui.label(app.tr("joint_move.help"));

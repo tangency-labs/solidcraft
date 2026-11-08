@@ -18,8 +18,16 @@ pub(super) struct Triangle {
     pub surface: OpaqueSurface,
     pub transmission: Option<Transmission>,
     pub medium: u32,
+    pub scalar_face: bool,
 }
 type MediumEdge = (usize, usize, i32);
+// The material header word reserves the high two bits for model lanes and wavelength sampling.
+pub(super) const MATERIAL_OFFSET_MASK: u32 = 0x3fff_ffff;
+
+pub(super) fn model_bytes_per_triangle(scene: &ProductScene) -> u64 {
+    let modeled = |t: Option<Transmission>| t.is_some_and(|t| t.model().is_some());
+    if scene.meshes.iter().any(|m| modeled(m.transmission) || m.faces.iter().any(|f| modeled(f.transmission))) { 16 } else { 0 }
+}
 pub(super) fn medium_preparation_bytes(scene: &ProductScene) -> u64 {
     // Validation consumes one body's scratch at a time. Opaque/thin-sheet bodies
     // allocate none of the weld table: do not charge their triangles for it.
@@ -62,6 +70,7 @@ pub(super) struct Upload {
     pub geometry: Vec<u8>,
     pub nodes: Vec<u8>,
     pub epsilon: f32,
+    pub active_glass_model: bool,
 }
 
 fn invalid(message: &str) -> JobError {
@@ -78,6 +87,19 @@ pub(super) fn flatten(scene: &ProductScene, origin: Vec3, cancel: &CancelToken) 
     flatten_with_media(scene, origin, cancel, false)
 }
 pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &CancelToken, nested: bool) -> Result<Upload> {
+    let model_bytes = model_bytes_per_triangle(scene) as usize;
+    let material_bytes = 80 + model_bytes;
+    let mut material_flags = if model_bytes > 0 { 0x80000000 } else { 0 };
+    let mut active_glass_model = false;
+    let transmissions =
+        scene.meshes.iter().flat_map(|body| std::iter::once(body.transmission).chain(body.faces.iter().map(|face| face.transmission)));
+    for model in transmissions.filter_map(|transmission| transmission.and_then(Transmission::model)) {
+        active_glass_model |= !model.is_identity();
+        if model.spectral() {
+            material_flags |= 0x40000000;
+            break;
+        }
+    }
     let count = scene.meshes.iter().map(|m| m.mesh.triangles.len()).sum::<usize>();
     let mut triangles = reserved(count)?;
     let vertex_count = scene.meshes.iter().map(|m| m.mesh.positions.len()).sum::<usize>();
@@ -87,6 +109,7 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
     for (body_index, body) in scene.meshes.iter().enumerate() {
         cancel.check()?;
         let body_start = triangles.len();
+        let mut authored_optical = false;
         let mut faces = reserved(body.faces.len())?;
         faces.extend(body.faces.iter());
         faces.sort_unstable_by_key(|f| f.face);
@@ -117,6 +140,7 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
             let look = faces.binary_search_by_key(&face, |f| f.face).ok().and_then(|i| faces.get(i));
             let opacity = look.map_or(body.opacity, |f| f.opacity);
             let transmission = look.map_or(body.transmission, |f| f.transmission);
+            authored_optical |= transmission.is_some();
             if opacity != 1.0 && transmission.is_none() {
                 return Err(invalid("gpu-path requires explicit transmission for nonopaque preview appearances"));
             }
@@ -143,6 +167,10 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
                 }
             }
             if (p[1] - p[0]).cross(p[2] - p[0]).len() <= 1e-12 {
+                // Preserve the historical source-degenerate pole-face skip for
+                // both sheets and solids. The optical target must retain faces,
+                // every retained face must survive upload, and closed targets
+                // still require the complete source and uploaded shell proofs.
                 continue;
             }
             if let Some(t) = transmission
@@ -150,13 +178,48 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
             {
                 t.with_subsurface(scatter).map_err(|e| invalid(&e.to_string()))?;
             }
+            if let Some(model) = transmission.and_then(|t| t.model()) {
+                model.validate(surface.dielectric_ior()).map_err(|e| invalid(&e.to_string()))?;
+                let roughness = model.roughness as f32;
+                let alpha = roughness * roughness;
+                if model.roughness > 0.0 && (alpha * alpha < f32::MIN_POSITIVE || !(1.0_f32 / (std::f32::consts::PI * alpha * alpha)).is_finite()) {
+                    return Err(invalid("authored glass roughness is below GPU microfacet arithmetic precision"));
+                }
+            }
+            if transmission
+                .is_some_and(|t| t.model().is_some_and(|m| m.roughness > 0.0) && t.thin_wall_thickness_mm().is_some() && t.shadow_transmission())
+            {
+                return Err(invalid("rough thin-sheet glass requires disabled straight shadow transmission"));
+            }
             if transmission.is_some() && surface.clear_coat().is_some() {
                 return Err(invalid("clear coat and transmission cannot share a surface"));
             }
             if transmission.is_some() && surface.metallic() != 0.0 {
                 return Err(invalid("transmission requires a nonmetallic surface"));
             }
-            triangles.push(Triangle { p, indices: global_indices, surface, transmission, medium: body_index as u32 + 1 });
+            triangles.push(Triangle {
+                p,
+                indices: global_indices,
+                surface,
+                transmission,
+                medium: body_index as u32 + 1,
+                scalar_face: look.is_some(),
+            });
+        }
+        if authored_optical && !triangles[body_start..].iter().any(|t| t.transmission.is_some()) {
+            return Err(invalid("glass boundary has no nondegenerate optical triangles"));
+        }
+        validate_medium(&triangles[body_start..], cancel)?;
+        // Prove the boundary actually sent to the shader as well as the source
+        // seam topology. Rounding must not close an authored gap, collapse a
+        // valid face, reverse its orientation or break its uploaded shell.
+        for (index, triangle) in triangles[body_start..].iter_mut().enumerate() {
+            if index % 1024 == 0 {
+                cancel.check()?;
+            }
+            if triangle.transmission.is_some() {
+                triangle.p = uploaded_optical_positions(triangle.p)?;
+            }
         }
         validate_medium(&triangles[body_start..], cancel)?;
         let body_triangles = &triangles[body_start..];
@@ -195,12 +258,16 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
     }
     let patches = planar_patches::ids(&triangles, cancel)?;
     let extent = nodes.first().map_or(1.0, |n| n.lo.iter().zip(n.hi).map(|(a, b)| b - a).fold(0.0f32, f32::max));
-    let mut geometry = reserved(16 + triangles.len().max(1) * 100 + vertices.len())?;
-    let mut materials = reserved(triangles.len().max(1) * 80)?;
+    let mut geometry = reserved(16 + triangles.len().max(1) * (100 + model_bytes) + vertices.len())?;
+    let mut materials = reserved(triangles.len().max(1) * material_bytes)?;
     let vertex_word = 4 + triangles.len().max(1) * 4;
     let material_word = vertex_word + vertices.len() / 4;
-    let patch_word = material_word + triangles.len().max(1) * 20;
-    for word in [triangles.len() as u32, vertex_word as u32, material_word as u32, patch_word as u32] {
+    let patch_word = material_word + triangles.len().max(1) * (material_bytes / 4);
+    let material_word = u32::try_from(material_word)
+        .ok()
+        .filter(|word| word & !MATERIAL_OFFSET_MASK == 0)
+        .ok_or_else(|| invalid("material table offset exceeds its packed geometry layout"))?;
+    for word in [triangles.len() as u32, vertex_word as u32, material_word | material_flags, patch_word as u32] {
         geometry.extend_from_slice(&word.to_le_bytes());
     }
     for (material, t) in triangles.into_iter().enumerate() {
@@ -235,18 +302,27 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
             Vec3::new(
                 scatter.map_or(0.0, |s| s.scattering_per_mm),
                 scatter.map_or(0.0, |s| s.anisotropy),
-                if scene.meshes.get(t.medium.saturating_sub(1) as usize).is_some_and(|body| body.name.starts_with("__render_stage__/")) {
-                    1.0
-                } else {
-                    0.0
-                },
+                (u32::from(scene.meshes.get(t.medium.saturating_sub(1) as usize).is_some_and(|body| body.name.starts_with("__render_stage__/")))
+                    | (u32::from(t.scalar_face) << 1)) as f64,
             ),
             parent_triangle as f32,
         );
+        if model_bytes > 0 {
+            let model = t.transmission.and_then(|t| t.model());
+            vector(
+                &mut materials,
+                Vec3::new(
+                    model.map_or(0.0, |m| m.roughness),
+                    model.and_then(|m| m.dispersion).map_or(0.0, |d| d.abbe_number),
+                    model.and_then(|m| m.thin_film).map_or(0.0, |f| f.thickness_nm),
+                ),
+                model.and_then(|m| m.thin_film).map_or(0.0, |f| f.ior) as f32,
+            );
+        }
     }
     if geometry.len() == 16 {
         geometry.resize(32, 0);
-        materials.resize(80, 0);
+        materials.resize(material_bytes, 0);
     }
     geometry.extend_from_slice(&vertices);
     drop(vertices);
@@ -273,7 +349,26 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
         }
         node_bytes.extend_from_slice(&node.count.to_le_bytes());
     }
-    Ok(Upload { geometry, nodes: node_bytes, epsilon: (extent * 1e-7).max(1e-5) })
+    Ok(Upload { geometry, nodes: node_bytes, epsilon: (extent * 1e-7).max(1e-5), active_glass_model })
+}
+
+fn uploaded_optical_positions(source: [Vec3; 3]) -> Result<[Vec3; 3]> {
+    let stored = source.map(|p| Vec3::new(f64::from(p.x as f32), f64::from(p.y as f32), f64::from(p.z as f32)));
+    let original_normal = (source[1] - source[0]).cross(source[2] - source[0]);
+    let stored_normal = (stored[1] - stored[0]).cross(stored[2] - stored[0]);
+    let [a, b, c] = stored.map(|p| [p.x as f32, p.y as f32, p.z as f32]);
+    let u: [f32; 3] = std::array::from_fn(|i| b[i] - a[i]);
+    let v: [f32; 3] = std::array::from_fn(|i| c[i] - a[i]);
+    let shader_normal = Vec3::new(f64::from(u[1] * v[2] - u[2] * v[1]), f64::from(u[2] * v[0] - u[0] * v[2]), f64::from(u[0] * v[1] - u[1] * v[0]));
+    if !stored.iter().all(|p| p.is_finite())
+        || stored_normal.len() == 0.0
+        || original_normal.dot(stored_normal) <= 0.0
+        || !shader_normal.is_finite()
+        || stored_normal.dot(shader_normal) <= 0.0
+    {
+        return Err(invalid("glass triangle collapses or reverses orientation at camera-relative GPU position precision"));
+    }
+    Ok(stored)
 }
 
 const MEDIUM_WELD_MM: f64 = 1e-6;
@@ -397,8 +492,66 @@ fn validate_medium(triangles: &[Triangle], cancel: &CancelToken) -> Result<()> {
             return Err(invalid("closed dielectric body must contain exactly one connected shell"));
         }
     }
+    validate_vertex_links(&mut edges, &mut parents, cancel)?;
     if six_volume <= 0.0 || !six_volume.is_finite() {
         return Err(invalid("glass mesh must enclose positive outward-oriented volume"));
+    }
+    cancel.check()
+}
+
+// Reuse the already prepaid edge and face-component scratch. Each matched edge
+// supplies one outgoing corner at either endpoint and the adjacent face there.
+// In a two-manifold each vertex's incident faces form one circular link; a
+// pinched vertex has multiple links even when every edge and the shell pass.
+fn validate_vertex_links(edges: &mut [MediumEdge], parents: &mut [usize], cancel: &CancelToken) -> Result<()> {
+    for (index, edge) in edges.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+        if index % 1024 == 0 {
+            cancel.check()?;
+        }
+        let [a, b] = edge;
+        let first = *a;
+        let second = *b;
+        *a = (if first.2 > 0 { first.0 } else { first.1 }, second.2.unsigned_abs() as usize - 1, first.2.unsigned_abs() as i32);
+        *b = (if second.2 > 0 { second.0 } else { second.1 }, first.2.unsigned_abs() as usize - 1, second.2.unsigned_abs() as i32);
+    }
+    edges.sort_unstable();
+    let mut start = 0;
+    while start < edges.len() {
+        cancel.check()?;
+        let vertex = edges.get(start).ok_or_else(|| invalid("missing glass vertex link"))?.0;
+        let mut end = start + 1;
+        while edges.get(end).is_some_and(|e| e.0 == vertex) {
+            if end % 1024 == 0 {
+                cancel.check()?;
+            }
+            end += 1;
+        }
+        let link = edges.get(start..end).ok_or_else(|| invalid("invalid glass vertex-link range"))?;
+        for (index, edge) in link.iter().enumerate() {
+            if index % 1024 == 0 {
+                cancel.check()?;
+            }
+            let face = edge.2 as usize - 1;
+            *parents.get_mut(face).ok_or_else(|| invalid("invalid glass vertex-link face"))? = face;
+        }
+        for (index, edge) in link.iter().enumerate() {
+            if index % 1024 == 0 {
+                cancel.check()?;
+            }
+            let first = medium_root(parents, edge.2 as usize - 1)?;
+            let second = medium_root(parents, edge.1)?;
+            *parents.get_mut(first).ok_or_else(|| invalid("invalid glass vertex-link component"))? = second;
+        }
+        let root = medium_root(parents, link.first().ok_or_else(|| invalid("empty glass vertex link"))?.2 as usize - 1)?;
+        for (index, edge) in link.iter().enumerate() {
+            if index % 1024 == 0 {
+                cancel.check()?;
+            }
+            if medium_root(parents, edge.2 as usize - 1)? != root {
+                return Err(invalid("closed glass vertex link must be one connected circular fan; pinched boundaries are unsupported"));
+            }
+        }
+        start = end;
     }
     cancel.check()
 }

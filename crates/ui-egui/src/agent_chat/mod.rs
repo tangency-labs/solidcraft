@@ -45,11 +45,11 @@ use serde_json::{Value, json};
 
 use context::Context;
 
-use crate::i18n::{format as trf, tr};
 use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
+use solidcraft_ui_text::{format as trf, tr};
 
-pub(crate) use panel::{left_inset, owns_keyboard_input, tool_space};
+pub(crate) use panel::{finish_shared, left_inset, owns_keyboard_input, prepare_shared, request_new_chat, shared_content, tool_space};
 pub use panel::{show, tip as panel_tip, toggle, toggle_shortcut};
 
 /// Most entries kept in the conversation; older ones are dropped.
@@ -377,6 +377,8 @@ pub struct AgentChat {
     pub panel_rect: Option<egui::Rect>,
     /// A pointer press in the transcript owns keys just like a focused text editor.
     keyboard_owned: bool,
+    /// The panel forgets its own width the next time it is drawn, so the preference applies.
+    pub(crate) forget_width: bool,
     /// Unreserved sheet space, shared by the actual dock and its drag preview.
     pub(crate) dock_space: Option<egui::Rect>,
     /// The last message sent, kept to send again after a sign-in (its files too).
@@ -467,6 +469,7 @@ impl AgentChat {
     pub(crate) fn swap_document(&mut self, other: &mut Self) {
         std::mem::swap(self, other);
         std::mem::swap(&mut self.open, &mut other.open);
+        std::mem::swap(&mut self.forget_width, &mut other.forget_width);
         std::mem::swap(&mut self.following_document, &mut other.following_document);
         std::mem::swap(&mut self.settings, &mut other.settings);
         std::mem::swap(&mut self.control_starter, &mut other.control_starter);
@@ -562,11 +565,11 @@ impl AgentChat {
         job: impl FnOnce() -> std::result::Result<attach::Attachment, String> + Send + 'static,
     ) -> std::result::Result<String, String> {
         let (tx, rx) = std::sync::mpsc::channel();
-        let language = crate::i18n::language();
+        let language = solidcraft_ui_text::language();
         std::thread::Builder::new()
             .name("chat-file".into())
             .spawn(move || {
-                let _language = crate::i18n::scope(language);
+                let _language = solidcraft_ui_text::scope(language);
                 let _ = tx.send(job());
             })
             .map_err(|e| trf("ui.agent_chat_file_error", &[("name", &name), ("error", &e.to_string())]))?;
@@ -2384,8 +2387,8 @@ fn set_config_option_checked(app: &mut SolveApp, id: &str, value: &str, listed_o
 
 /// `ui.agent_chat` on the control channel (tests and screenshots): `enabled`, `command`,
 /// `connect_at_start` and `open_at_start` (the launch preferences), `instructions` (the custom
-/// instructions, #8220), `open`,
-/// `side`, `minimized`, `width`, `refresh`, `connect`, `stop`, `attach` (a file's path, for the
+/// instructions, #8220), `open`, `toggle` (show or hide the panel as its button does, unfolding a
+/// folded one), `side`, `minimized`, `width`, `refresh`, `connect`, `stop`, `attach` (a file's path, for the
 /// next message), `remove_file` (index), `send`, `attach_view`, `attach_selection`, `pick`,
 /// `permission` (an option id, or `"cancel"`), `approve` (`true`/`false`, the oldest held
 /// request), `cancel` (Stop), `send_now` (steer: stop, then send the queue), `remove_pending` (index), `undo` (the newest message's changes); returns the panel's state.
@@ -2500,6 +2503,9 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
     if let Some(o) = p.get("open").and_then(Value::as_bool) {
         app.agent_chat.open = o;
     }
+    if p.get("toggle").and_then(Value::as_bool) == Some(true) {
+        toggle(app);
+    }
     if let Some(s) = p.get("side").and_then(Value::as_str) {
         if !matches!(s, "left" | "right") {
             return Err("side must be left or right".into());
@@ -2514,7 +2520,7 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
     }
     if let Some(w) = p.get("width").and_then(Value::as_f64).filter(|w| w.is_finite()) {
         app.preferences.agent_chat_width = (w as f32).clamp(panel::MIN_WIDTH, panel::MAX_WIDTH);
-        panel::forget_width(ctx);
+        app.agent_chat.forget_width = true;
     }
     if let Some(path) = p.get("attach").and_then(Value::as_str) {
         attach_path(app, path)?;

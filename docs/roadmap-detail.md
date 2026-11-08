@@ -151,6 +151,12 @@ completed drawings publish atomically. The browser still exports synchronously.
 
 ## Render foundation
 
+- Wood surface images (#1345): native CPU and GPU opaque rendering share physical
+  repeat frames and filtered mip chains. Imported maps retain exact bytes and
+  declared provenance in the design, reopen offline, and expose grain-angle
+  controls. Scalar face appearances suppress body maps. Planar projection and
+  CPU encoding/optical limits remain explicit; see [portable surfaces](render-portable-surfaces-and-stages.md).
+
 - Original starter appearances (#1722): 34 opaque recipes through existing commands, with six explicitly unavailable glass recipes and preserved legacy looks; see [the contract](render-starter-appearances.md).
 
 - Bounded linear film accumulation (#1696) supplies caller-admitted mean/variance storage and complete-pass views; actual progressive consumers remain separate. See [the film contract](render-film.md).
@@ -659,7 +665,7 @@ and reference-object placement remain separate work, as do loft rails and center
   a seekable reader defers original blobs until after provisional display.
   See [container format](design-container.md) and [performance measurements](perf.md).
 - Warm saves with explicit `cache: true` can include a versioned native B-rep cache through SolidCraft-owned topology
-  and geometry records, with a separate truck adapter and bounded binary reader. Exact
+  and geometry records, with a separate kernel adapter and bounded binary reader. Exact
   face-source certificates and operation history survive codec round trips. A provisional
   picture can be generated before original blobs are read; editing and measurement wait
   for authoritative reconstruction. Cached metadata binds preview and reconstruction to

@@ -28,20 +28,6 @@ const MAX_URL: usize = 6000;
 /// past about 7,600 characters GitHub drops it and the form comes back empty after signing in.
 const MAX_SIGN_IN_URL: usize = 7000;
 
-thread_local! {
-    static CAD_INPUT_BLOCKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Tests set the barrier by hand to see what ignores it.
-#[cfg(test)]
-pub(crate) fn set_cad_input_blocked_for_test(blocked: bool) {
-    CAD_INPUT_BLOCKED.with(|cell| cell.set(blocked));
-}
-
-pub(crate) fn cad_input_blocked() -> bool {
-    CAD_INPUT_BLOCKED.with(std::cell::Cell::get)
-}
-
 /// Draw CAD behind a report or native picker without delivering input or focus to editors.
 /// Fresh focus history also prevents inline editors from committing on report focus loss.
 pub(crate) struct CadInput {
@@ -85,14 +71,15 @@ impl CadInput {
             *m = neutral;
             saved
         });
-        let previous_blocked = CAD_INPUT_BLOCKED.with(|blocked| blocked.replace(true));
+        let previous_blocked = crate::ui_kit::input_blocked();
+        crate::ui_kit::set_input_blocked(true);
         Some(Self { ctx: ctx.clone(), input: Some(input), memory: Some(memory), previous_blocked })
     }
 }
 
 impl Drop for CadInput {
     fn drop(&mut self) {
-        CAD_INPUT_BLOCKED.with(|blocked| blocked.set(self.previous_blocked));
+        crate::ui_kit::set_input_blocked(self.previous_blocked);
         if let Some(input) = self.input.take() {
             self.ctx.input_mut(|i| *i = input);
         }
@@ -704,7 +691,7 @@ fn retake(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dial
 fn cancel_capture(app: &mut SolveApp) {
     app.issue_report.waiting = None;
     if let Some(pending) = app.issue_report.pending.take() {
-        app.queued_shots.retain(|(token, ..)| *token != pending.token);
+        app.shots.queued.retain(|(token, ..)| *token != pending.token);
     }
 }
 
@@ -718,7 +705,7 @@ fn capture_unless_busy(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&
     cancel_capture(app);
     let current_source = source_signature(app, dialog);
     let context = context_signature(app, dialog);
-    let full = app.queued_shots.len() >= 16;
+    let full = app.shots.queued.len() >= 16;
     let busy = app.preview.busy;
     // The screenshot the draft has stays until a new one is taken (#7350).
     let Some(draft) = app.issue_report.draft.as_mut() else { return };
@@ -757,11 +744,11 @@ fn capture_unless_busy(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&
     if draft.focus_requested {
         app.issue_report.refocus = ctx.memory(|m| m.focused());
     }
-    let Some(token) = app.shot_token.checked_add(1) else {
+    let Some(token) = app.shots.token.checked_add(1) else {
         draft.note = "Screenshot request limit reached; restart the app to capture another frame.".into();
         return;
     };
-    app.shot_token = token;
+    app.shots.token = token;
     if !busy {
         draft.note = "Capturing the current app view locally…".into();
     }
@@ -774,7 +761,7 @@ fn capture_unless_busy(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&
         pixels_per_point: ctx.pixels_per_point(),
         max_side: ctx.input(|i| i.max_texture_side),
     });
-    app.queued_shots.push((token, now + 150.0, 0));
+    app.shots.queued.push((token, now + 150.0, 0));
     ctx.request_repaint();
 }
 
@@ -809,7 +796,7 @@ pub(crate) fn hold_input(app: &mut SolveApp, raw: &mut egui::RawInput) {
 }
 
 /// What [`hold_input`] keeps for the form.
-fn typing(event: &egui::Event) -> bool {
+pub(crate) fn typing(event: &egui::Event) -> bool {
     matches!(
         event,
         egui::Event::Text(_) | egui::Event::Key { .. } | egui::Event::Paste(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Ime(_)
@@ -818,7 +805,7 @@ fn typing(event: &egui::Event) -> bool {
 
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(waiting) = &app.issue_report.waiting {
-        let settled = !app.preview.busy && app.queued_shots.len() < 16;
+        let settled = !app.preview.busy && app.shots.queued.len() < 16;
         let (late, context) = (crate::now_ms() >= waiting.deadline, waiting.context);
         if settled || late {
             app.issue_report.waiting = None;
@@ -961,8 +948,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         crate::dim_view::drag_end();
         crate::sketch3d::drag_end();
         crate::drag_snap::clear();
-        crate::gizmo::cancel(ctx, egui::Id::new("sc_move_triad"));
-        crate::gizmo::cancel(ctx, egui::Id::new("sc_occ_triad"));
+        crate::gizmo::cancel(ctx, egui::Id::unique("sc_move_triad"));
+        crate::gizmo::cancel(ctx, egui::Id::unique("sc_occ_triad"));
         if let Some(focus) = app.issue_report.cad_focus.take() {
             ctx.memory_mut(|m| m.request_focus(focus));
         }
@@ -1167,7 +1154,7 @@ mod tests {
         h.app.home.open = false;
         h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
         h.frames(16);
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("issue_report_body")));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("issue_report_body")));
         h.frames(1);
         h.frame_with(vec![egui::Event::Paste("故障".repeat(1500))]);
         h.frames(4);
@@ -1202,7 +1189,7 @@ mod tests {
             let commands = open_commands(&mut h);
             assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))));
             assert!(h.app.issue_report.draft.as_ref().unwrap().missing_description);
-            assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("issue_report_body")));
+            assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("issue_report_body")));
             h.step(&json!({"text":"The preview disappeared"})).unwrap();
             let commands = open_commands(&mut h);
             assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL))));
@@ -1219,11 +1206,11 @@ mod tests {
         h.app.home.open = false;
         h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
         h.frames(16);
-        let description = Some(egui::Id::new("issue_report_body"));
+        let description = Some(egui::Id::unique("issue_report_body"));
         open_commands(&mut h);
         assert_eq!(h.ctx.memory(|m| m.focused()), description);
         // Click the Summary field (found by its id: it has no label of its own) and type.
-        let title = egui::Id::new("issue_report_title").accesskit_id();
+        let title = egui::Id::unique("issue_report_title").accesskit_id();
         let tree = h.output.accesskit_update.as_ref().unwrap();
         let b = tree.nodes.iter().find(|(id, _)| *id == title).and_then(|(_, n)| n.bounds()).unwrap();
         h.step(&json!({"click":[(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]})).unwrap();
@@ -1257,28 +1244,20 @@ mod tests {
                     h.step(&json!({"widget":"Technical details"})).unwrap();
                     h.call("ui.scroll", json!({"x":800,"y":600,"delta":-1000}));
                 }
-                h.ctx.memory_mut(|m| m.request_focus(egui::Id::new(field)));
+                h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique(field)));
                 h.frames(1);
                 let [x, y] = h.widget("Open GitHub issue form").unwrap();
                 let pos = egui::pos2(x as f32, y as f32);
                 let modifiers = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
-                let raw = egui::RawInput {
-                    screen_rect: Some(h.ctx.content_rect()),
-                    focused: true,
-                    events: vec![
-                        egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
-                        egui::Event::Paste("Latest reviewed content".into()),
-                        egui::Event::PointerMoved(pos),
-                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
-                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
-                    ],
-                    ..Default::default()
-                };
-                let app = &mut h.app;
-                let mut output = h.ctx.run_ui(raw, |ui| {
-                    app.logic(ui.ctx());
-                    app.ui(ui);
-                });
+                h.frame_with(vec![
+                    egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
+                    egui::Event::Paste("Latest reviewed content".into()),
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+                ]);
+                // The click waits one frame for the typing before it.
+                h.frame();
                 let draft = h.app.issue_report.draft.as_ref().unwrap();
                 let edited = match field {
                     "issue_report_body" => &draft.description,
@@ -1291,13 +1270,12 @@ mod tests {
                 let body = draft.report_body();
                 let (url, copy_needed) = draft_url(&draft.report_title(), &body);
                 assert!(
-                    output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(u) if u.url == url)),
-                    "handoff must use this frame's edits: {field}, clipboard={clipboard}"
+                    h.output.commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(u) if u.url == url)),
+                    "handoff must use the click frame's edits: {field}, clipboard={clipboard}"
                 );
                 if copy_needed {
-                    assert!(output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &body)));
+                    assert!(h.output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &body)));
                 }
-                output.textures_delta.clear();
                 assert!(draft.opened_github && !draft.missing_description);
             }
         }
@@ -1666,7 +1644,8 @@ mod tests {
                 draft.image = Some(Arc::new(ColorImage::new([1600, 1000], vec![egui::Color32::GREEN; 1_600_000])));
                 h.app.issue_report.draft = Some(draft);
                 h.frames(20);
-                let rect = |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::new("sc_issue_report")).unwrap().rect();
+                let rect =
+                    |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::unique("sc_issue_report")).unwrap().rect();
                 let settled = rect(&h);
                 h.frames(120);
                 let idle = rect(&h);
@@ -1695,7 +1674,7 @@ mod tests {
             }
             h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
             h.frames(10);
-            let rect = |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::new("sc_issue_report")).unwrap().rect();
+            let rect = |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::unique("sc_issue_report")).unwrap().rect();
             let at = rect(&h);
             assert!((at.center().x - h.ctx.content_rect().center().x).abs() < 1.0, "sketch={sketch}: it opens at the top middle: {at:?}");
             // On the title, clear of the close button.
@@ -1748,7 +1727,7 @@ mod tests {
         h.frames(4);
         let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
         for field in ["issue_report_title", "issue_report_body"] {
-            let id = egui::Id::new(field);
+            let id = egui::Id::unique(field);
             h.ctx.memory_mut(|m| m.request_focus(id));
             h.frames(1);
             h.step(&json!({"text":"edited-report-marker"})).unwrap();
@@ -1787,7 +1766,7 @@ mod tests {
         receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
         for field in ["issue_report_title", "issue_report_body"] {
-            let id = egui::Id::new(field);
+            let id = egui::Id::unique(field);
             h.ctx.memory_mut(|m| m.request_focus(id));
             h.frames(2);
             assert_eq!(h.ctx.memory(|m| m.focused()), Some(id), "placed Text must not steal report focus");
@@ -1816,8 +1795,8 @@ mod tests {
     fn issue_report_boundary_preserves_opacity_widget_state_and_real_focus() {
         let mut app = app();
         let ctx = crate::fonts::test_context();
-        let focus = egui::Id::new("report-review-focus");
-        let state = egui::Id::new("cad-layout-state");
+        let focus = egui::Id::unique("report-review-focus");
+        let state = egui::Id::unique("cad-layout-state");
         begin(&mut app, &ctx, None, None);
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
@@ -1831,20 +1810,20 @@ mod tests {
             ui.disable();
             assert_eq!(ui.opacity(), 1.0, "capture must retain normal drawing opacity");
             assert!(!ui.is_enabled());
-            Container::new(&ctx, Surface::Popup).area(egui::Id::new("cad-boundary-proof")).fade_in(false).show(&ctx, |ui| {
+            Container::new(&ctx, Surface::Popup).area(egui::Id::unique("cad-boundary-proof")).fade_in(false).show(&ctx, |ui| {
                 assert!(!ui.is_enabled());
                 assert_eq!(ui.opacity(), 1.0);
                 ui.ctx().data_mut(|d| d.insert_temp(state, 42_u32));
-                ui.ctx().memory_mut(|m| m.request_focus(egui::Id::new("underlying-editor")));
+                ui.ctx().memory_mut(|m| m.request_focus(egui::Id::unique("underlying-editor")));
             });
             drop(barrier);
             assert_eq!(ctx.memory(|m| m.focused()), Some(focus));
             assert_eq!(ctx.data(|d| d.get_temp::<u32>(state)), Some(42));
-            assert!(Container::new(&ctx, Surface::Popup).area(egui::Id::new("report-boundary-proof")).is_enabled());
+            assert!(Container::new(&ctx, Surface::Popup).area(egui::Id::unique("report-boundary-proof")).is_enabled());
         });
         output.textures_delta.clear();
         app.issue_report.draft = None;
-        assert!(!cad_input_blocked());
+        assert!(!crate::ui_kit::input_blocked());
     }
 
     #[test]
@@ -1913,7 +1892,7 @@ mod tests {
         let token = h.app.issue_report.pending.as_ref().unwrap().token;
         receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("issue_report_body")));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("issue_report_body")));
         h.step(&json!({"text":"Typing here describes the bug, not a CAD dimension."})).unwrap();
         h.step(&json!({"key":"Enter"})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
@@ -1922,7 +1901,7 @@ mod tests {
         assert!(h.app.issue_report.draft.as_ref().unwrap().description.contains("Typing here describes"));
         h.step(&json!({"widget":"Close draft"})).unwrap();
         h.frames(2);
-        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
         assert_eq!(h.app.session.undo.len(), before.1 + 1);
@@ -1950,7 +1929,7 @@ mod tests {
         let token = h.app.issue_report.pending.as_ref().unwrap().token;
         receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("issue_report_body")));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("issue_report_body")));
         h.step(&json!({"text":"report only"})).unwrap();
         h.step(&json!({"key":"Enter"})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
@@ -2240,15 +2219,15 @@ mod tests {
         begin(&mut app, &ctx, None, None);
         let token = app.issue_report.pending.as_ref().unwrap().token;
         let (reply, _receiver) = std::sync::mpsc::channel();
-        app.pending_shots.push((token + 1, None, reply, crate::now_ms() + 8000.0));
-        app.shot_token = token + 1;
+        app.shots.pending.push((token + 1, None, reply, crate::now_ms() + 8000.0));
+        app.shots.token = token + 1;
         let image = Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12]));
         receive(&mut app, token + 1, image.clone());
         assert!(pending(&app) && app.issue_report.draft.as_ref().unwrap().image.is_none());
         receive(&mut app, token, image.clone());
         assert!(!pending(&app));
         assert_eq!(app.issue_report.draft.as_ref().unwrap().image.as_ref().unwrap().size, [4, 3]);
-        assert_eq!(app.pending_shots.len(), 1, "report cannot consume the control request");
+        assert_eq!(app.shots.pending.len(), 1, "report cannot consume the control request");
         begin(&mut app, &ctx, None, None);
         let token = app.issue_report.pending.as_ref().unwrap().token;
         app.cam.distance *= 2.0;
@@ -2290,7 +2269,7 @@ mod tests {
         h.app.home.open = false;
         let ctx = h.ctx.clone();
         begin(&mut h.app, &ctx, None, None);
-        let token = h.app.shot_token;
+        let token = h.app.shots.token;
         receive(&mut h.app, token, Arc::new(ColorImage::new([10_320, 1440], vec![egui::Color32::GREEN; 10_320 * 1440])));
         h.frames(4);
         let max_side = h.ctx.input(|i| i.max_texture_side);

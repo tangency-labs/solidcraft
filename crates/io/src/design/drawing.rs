@@ -49,13 +49,15 @@ pub fn file_kind(bytes: &[u8]) -> Result<FileKind> {
 /// What a container holds, by its `container.json`: no `content` is a design.
 pub(super) fn container_kind<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<FileKind> {
     let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
-    if !matches!(container.get("format").and_then(Value::as_str), Some(super::VERSION | super::LEGACY_VERSION)) {
+    if !container.get("format").and_then(Value::as_str).is_some_and(super::is_container_version) {
         return Err(invalid("unsupported container version"));
     }
     match container.get("content") {
         None => Ok(FileKind::Design),
         Some(Value::String(content)) if content == DRAWING_CONTENT => Ok(FileKind::Drawing),
-        Some(other) => Err(invalid(format!("this build doesn't know container content {other}"))),
+        // A later kind of content that still holds a design opens as one.
+        Some(_) if reader.has_part("document.json") => Ok(FileKind::Design),
+        Some(other) => Err(invalid(format!("it holds {other}, which this version doesn't know: update SolidCraft to open it"))),
     }
 }
 

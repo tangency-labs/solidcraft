@@ -73,43 +73,43 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         r.revision = app.session.revision;
         r.result = read(app, r.sketch);
     }
-    let title = crate::i18n::tr_label("Sketch Report");
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_sketch_report"), "inspect", title)
+    let title = solidcraft_ui_text::tr_label("Sketch Report");
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_sketch_report"), "inspect", title)
         .fields()
-        .actions("", crate::i18n::tr("ui.close"), None)
+        .actions("", solidcraft_ui_text::tr("ui.close"), None)
         .show(ctx, true, |ui| match &r.result {
             Err(e) => {
                 ui_kit::text(ui, e, ui_kit::Text::Error("error"));
             }
             Ok(v) => {
                 let name = v["name"].as_str().unwrap_or_default();
-                ui_kit::row(ui, crate::i18n::tr_label("Sketch"), |ui| ui_kit::text(ui, name, ui_kit::Text::Cell));
-                ui_kit::row(ui, crate::i18n::tr_label("Status"), |ui| ui_kit::text(ui, &status(v), ui_kit::Text::Cell));
+                ui_kit::row(ui, solidcraft_ui_text::tr_label("Sketch"), |ui| ui_kit::text(ui, name, ui_kit::Text::Cell));
+                ui_kit::row(ui, solidcraft_ui_text::tr_label("Status"), |ui| ui_kit::text(ui, &status(v), ui_kit::Text::Cell));
                 let dof = v["dof"].as_u64().map(|d| d.to_string()).unwrap_or_else(|| v["dof"].to_string());
-                ui_kit::row(ui, crate::i18n::tr_label("Degrees of freedom"), |ui| ui_kit::text(ui, &dof, ui_kit::Text::Cell));
+                ui_kit::row(ui, solidcraft_ui_text::tr_label("Degrees of freedom"), |ui| ui_kit::text(ui, &dof, ui_kit::Text::Cell));
                 let construction = v["curves"].as_array().map_or(0, |a| a.iter().filter(|c| c["construction"].as_bool() == Some(true)).count());
                 let curves =
                     if construction > 0 { format!("{} ({construction} construction)", count(v, "curves")) } else { count(v, "curves").to_string() };
-                ui_kit::row(ui, crate::i18n::tr_label("Curves"), |ui| ui_kit::text(ui, &curves, ui_kit::Text::Cell));
+                ui_kit::row(ui, solidcraft_ui_text::tr_label("Curves"), |ui| ui_kit::text(ui, &curves, ui_kit::Text::Cell));
                 for (label, list) in [("Points", "points"), ("Constraints", "constraints"), ("Profiles", "profiles")] {
-                    ui_kit::row(ui, crate::i18n::tr_label(label), |ui| ui_kit::text(ui, &count(v, list).to_string(), ui_kit::Text::Cell));
+                    ui_kit::row(ui, solidcraft_ui_text::tr_label(label), |ui| ui_kit::text(ui, &count(v, list).to_string(), ui_kit::Text::Cell));
                 }
                 let (curves, points) = (loose(v, "curves"), loose(v, "points"));
                 if curves.is_empty() && points.is_empty() {
-                    ui_kit::text(ui, crate::i18n::tr_label("Everything is fully constrained."), ui_kit::Text::Note("all_constrained"));
+                    ui_kit::text(ui, solidcraft_ui_text::tr_label("Everything is fully constrained."), ui_kit::Text::Note("all_constrained"));
                 } else {
-                    let heading = format!("{} ({})", crate::i18n::tr_label("Not fully constrained"), curves.len() + points.len());
+                    let heading = format!("{} ({})", solidcraft_ui_text::tr_label("Not fully constrained"), curves.len() + points.len());
                     ui_kit::section(ui, "sc_sketch_report_loose", &heading, true, |ui| {
                         egui::ScrollArea::vertical().max_height(ui_kit::row_height() * LIST_ROWS).show(ui, |ui| {
                             for (label, ids) in [("Curve", &curves), ("Point", &points)] {
                                 for id in ids {
-                                    ui_kit::row(ui, crate::i18n::tr_label(label), |ui| ui_kit::text(ui, id, ui_kit::Text::Cell));
+                                    ui_kit::row(ui, solidcraft_ui_text::tr_label(label), |ui| ui_kit::text(ui, id, ui_kit::Text::Cell));
                                 }
                             }
                         });
                     });
                 }
-                if ui_kit::icon_label_button(ui, crate::i18n::tr_label("Copy JSON"), "copy", true, false).clicked() {
+                if ui_kit::icon_label_button(ui, solidcraft_ui_text::tr_label("Copy JSON"), "copy", true, false).clicked() {
                     ctx.copy_text(serde_json::to_string_pretty(v).unwrap_or_default());
                 }
             }

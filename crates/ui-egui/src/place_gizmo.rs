@@ -38,8 +38,8 @@ use crate::dialogs::Dialog;
 pub(crate) use crate::dialogs::vec3_of;
 use crate::motion;
 pub(crate) use crate::selection::point_value as pt;
-use crate::theme::Tokens;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 /// One tool's use of the handles.
 pub(crate) struct Spec {
@@ -244,7 +244,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let Some(bs) = proj.to_screen(base) else { return };
     let t = Tokens::get();
     let area = |c: Pos2| egui::Rect::from_center_size(c, vec2(2.0 * REACH, 2.0 * REACH));
-    let id = |what: &str| egui::Id::new(("sc_place", sp.name, what));
+    let id = |what: &str| egui::Id::unique(("sc_place", sp.name, what));
 
     // The crosshair that moves the feature. The press lands where the finger is, not always the
     // centre: the drag keeps that gap.
@@ -264,7 +264,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let (hovered, dragging) = (r.hovered(), r.dragged());
     // The tip while pointing, not while dragging: the hand is busy and the footprint says it all.
     if hovered && !dragging {
-        r.clone().backing_on_hover_text(crate::i18n::tr_label(sp.move_tip));
+        r.clone().backing_on_hover_text(solidcraft_ui_text::tr_label(sp.move_tip));
     }
     // The handle not in use steps back while the other one works (the ring's drag is last frame's).
     let turning = ui.data(|m| m.get_temp::<bool>(id("turning"))).unwrap_or(false);
@@ -354,7 +354,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         compass(painter, &on, &dirs, style.active);
     }
     if hovered && !dragging {
-        r.clone().backing_on_hover_text(crate::i18n::tr_label(turn.tip));
+        r.clone().backing_on_hover_text(solidcraft_ui_text::tr_label(turn.tip));
     }
     if hovered || dragging {
         ui.ctx().set_cursor_icon(if dragging { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
@@ -384,7 +384,7 @@ fn ring_radius(proj: &Proj, base: Vec3, x: Vec3, y: Vec3) -> Option<f64> {
 /// `anchor` (the arrow's tip) or above it, whichever is clear first. Seen straight down the arrow
 /// collapses onto the place and the box sits just right of it, where the ring's grip often is.
 pub(crate) fn yield_box(ui: &egui::Ui, anchor: Pos2, at: Pos2) -> Pos2 {
-    let Some(size) = ui.ctx().memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).map(|r| r.size()) else { return at };
+    let Some(size) = ui.ctx().memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).map(|r| r.size()) else { return at };
     let target = match RING_ABOUT.with(|c| c.get()) {
         // With a ring, the box keeps out of the whole circle the ring, its grip, the compass and
         // the readout sweep, whatever the turn: one place per view, nothing moves when a turn
@@ -403,7 +403,7 @@ pub(crate) fn yield_box(ui: &egui::Ui, anchor: Pos2, at: Pos2) -> Pos2 {
     };
     // The step aside slides, as an offset from where the box would be, so the box still follows
     // the arrow's tip at once when the view moves.
-    at + motion::slide(ui.ctx(), egui::Id::new("sc_place_box"), target - at, DIM_S)
+    at + motion::slide(ui.ctx(), egui::Id::unique("sc_place_box"), target - at, DIM_S)
 }
 
 /// What the ring needs around it beyond its radius (pixels): the grip, the compass and the

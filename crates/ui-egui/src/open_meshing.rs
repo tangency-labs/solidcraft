@@ -162,10 +162,10 @@ pub(crate) fn progress(app: &SolveApp) -> Option<(usize, usize)> {
 /// a part not drawn yet can't be picked yet either, and this says why.
 pub(crate) fn show(app: &SolveApp, ctx: &egui::Context) {
     let (Some((done, total)), Some(view)) = (progress(app), app.viewport.rect) else { return };
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let at = egui::pos2(view.left() + 12.0, view.bottom() - 12.0);
     Container::new(ctx, Surface::Toast)
-        .area(egui::Id::new("open_meshing"))
+        .area(egui::Id::unique("open_meshing"))
         .order(egui::Order::Foreground)
         .pivot(egui::Align2::LEFT_BOTTOM)
         .fixed_pos(at)

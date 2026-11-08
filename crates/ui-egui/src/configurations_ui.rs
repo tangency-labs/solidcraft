@@ -26,7 +26,7 @@ pub(super) fn configurations_rows(
     let run = |app: &mut SolveApp, error: &mut Option<String>, id: &str, p: Value| {
         *error = app.run(id, p).err();
     };
-    let labels: Vec<_> = std::iter::once(crate::i18n::tr_label("Configuration").to_owned())
+    let labels: Vec<_> = std::iter::once(solidcraft_ui_text::tr_label("Configuration").to_owned())
         .chain(tb.columns.iter().map(|c| {
             let (kind, name) = column_parts(c);
             v["targets"]
@@ -36,13 +36,13 @@ pub(super) fn configurations_rows(
                 .filter(|_| matches!(kind, "component_appearance" | "face_appearance"))
                 .map(str::to_string)
                 .unwrap_or_else(|| match kind {
-                    "material" => format!("{}: {name}", crate::i18n::tr_label("Material")),
-                    "appearance" => format!("{}: {name}", crate::i18n::tr_label("Appearance")),
-                    "suppress" => format!("{}: {name}", crate::i18n::tr_label("Suppress")),
+                    "material" => format!("{}: {name}", solidcraft_ui_text::tr_label("Material")),
+                    "appearance" => format!("{}: {name}", solidcraft_ui_text::tr_label("Appearance")),
+                    "suppress" => format!("{}: {name}", solidcraft_ui_text::tr_label("Suppress")),
                     _ => name.to_owned(),
                 })
         }))
-        .chain(std::iter::once(crate::i18n::tr_label("Actions").to_owned()))
+        .chain(std::iter::once(solidcraft_ui_text::tr_label("Actions").to_owned()))
         .collect();
     let gap = ui.spacing().item_spacing.x;
     let name_width = tb.rows.iter().map(|(name, _)| ui_kit::ContentWidth::name(ui, name)).fold(0.0, f32::max);
@@ -53,14 +53,14 @@ pub(super) fn configurations_rows(
         .enumerate()
         .map(|(index, label)| {
             let min_width = if index == 0 {
-                name_width + gap + status_width + crate::theme::Tokens::get().space_24
+                name_width + gap + status_width + solidcraft_theme::Tokens::get().space_24
             } else {
-                ui_kit::row_height() * 2.0 + crate::theme::Tokens::get().space_24
+                ui_kit::row_height() * 2.0 + solidcraft_theme::Tokens::get().space_24
             };
             if index == labels.len() - 1 {
                 ui_kit::Column::new(label, 0.0)
                     .icon_only()
-                    .min_content_width(crate::theme::Tokens::get().control_height + crate::theme::Tokens::get().space_12)
+                    .min_content_width(solidcraft_theme::Tokens::get().control_height + solidcraft_theme::Tokens::get().space_12)
             } else {
                 let weight = if index == 0 {
                     1.6
@@ -76,7 +76,7 @@ pub(super) fn configurations_rows(
             }
         })
         .collect();
-    ui_kit::table_custom(ui, "configuration_table", &columns, crate::i18n::tr("manage.empty"), |ui, table| {
+    ui_kit::table_custom(ui, "configuration_table", &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
         table.headers(ui, |ui, index| {
             if index == labels.len() - 1 {
                 column_menu(app, ui, error, &tb.columns, rule_editor);
@@ -112,14 +112,14 @@ pub(super) fn configurations_rows(
                     if active {
                         ui_kit::active_pill(ui);
                         if v.get("matches").and_then(Value::as_bool) == Some(false) {
-                            let apply = ui_kit::button(ui, crate::i18n::tr_label("Apply"), ui_kit::Button::Small);
+                            let apply = ui_kit::button(ui, solidcraft_ui_text::tr_label("Apply"), ui_kit::Button::Small);
                             crate::scenario::publish_handle(&format!("config:activate:{name}"), apply.rect.center());
                             if apply.clicked() {
                                 run(app, error, "config.activate", json!({"row":name}));
                             }
                         }
                     } else {
-                        let activate = ui_kit::button(ui, crate::i18n::tr_label("Activate"), ui_kit::Button::Small);
+                        let activate = ui_kit::button(ui, solidcraft_ui_text::tr_label("Activate"), ui_kit::Button::Small);
                         crate::scenario::publish_handle(&format!("config:activate:{name}"), activate.rect.center());
                         if activate.clicked() {
                             run(app, error, "config.activate", json!({"row":name}));
@@ -190,7 +190,7 @@ pub(super) fn configurations_rows(
                                         .unwrap_or_default()
                                 });
                                 let (kind, _) = column_parts(column);
-                                let (response, choice) = value_control(ui, ui.id().with(column), &mut value, kind, &material_names);
+                                let (response, choice) = value_control(ui, ui.scope_id().with(column), &mut value, kind, &material_names);
                                 let picked = choice.is_some();
                                 if let Some(choice) = choice {
                                     value = choice;
@@ -343,7 +343,7 @@ fn column_menu(
     let mut pick: Option<Value> = None;
     let filter = &mut rule_editor.column_filter;
     let was_open = rule_editor.column_menu_open;
-    let face_appearance = crate::i18n::tr_label("Face Appearance");
+    let face_appearance = solidcraft_ui_text::tr_label("Face Appearance");
     let shown = ui_kit::plus_header(ui, |ui| {
         // A design has many parameters, features and bodies: a filter narrows the list as the
         // Parameters dialog's does. It takes focus as the menu opens, so typing filters at once.
@@ -361,11 +361,11 @@ fn column_menu(
         }
         let faces = query.is_empty() || face_appearance.to_lowercase().contains(&query);
         if matching.is_empty() && !faces {
-            ui_kit::text(ui, crate::i18n::tr("config.column_filter_empty"), ui_kit::Text::Note("column_filter_empty"));
+            ui_kit::text(ui, solidcraft_ui_text::tr("config.column_filter_empty"), ui_kit::Text::Note("column_filter_empty"));
         }
         // The popup remembers its size: once the filter has emptied the list, a list that fills
         // again would be clipped to that small height, so a list that scrolls takes the full one.
-        let list_height = crate::theme::Tokens::get().space_24 * 12.0;
+        let list_height = solidcraft_theme::Tokens::get().space_24 * 12.0;
         egui::ScrollArea::vertical().max_height(list_height).min_scrolled_height(list_height).show(ui, |ui| {
             for (label, p) in &matching {
                 if ui_kit::button(ui, label.as_str(), ui_kit::Button::Normal).clicked() {
@@ -379,7 +379,7 @@ fn column_menu(
             ui_kit::action_menu(ui, "Face Appearance", |ui| {
                 ui_kit::text(
                     ui,
-                    crate::i18n::tr_label("Semantic faces share their appearance across instances."),
+                    solidcraft_ui_text::tr_label("Semantic faces share their appearance across instances."),
                     ui_kit::Text::Note("semantic_faces"),
                 );
                 let state = app.session.model.state();
@@ -486,7 +486,7 @@ fn value_control(ui: &mut egui::Ui, id: egui::Id, text: &mut String, kind: &str,
             "Default material"
         };
         ui_kit::library_cell(ui, id, text, follow, |ui| {
-            if ui_kit::button(ui, crate::i18n::tr_label(follow), ui_kit::Button::Normal).clicked() {
+            if ui_kit::button(ui, solidcraft_ui_text::tr_label(follow), ui_kit::Button::Normal).clicked() {
                 // An appearance's "Default" keyword follows; a material's is the default material.
                 let follow_value = if appearance { "Default" } else { DEFAULT_MATERIAL };
                 choice = Some(follow_value.to_owned());

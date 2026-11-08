@@ -1506,3 +1506,25 @@ fn editing_a_saved_automatic_thread_keeps_its_old_size() {
     run(&mut s, "timeline.redefine", json!({"feature": made["feature"], "command": "solid.thread", "params": {"face": [6, 0, 10], "hand": "left"}}));
     assert_eq!(designations(&s), ["M14"]);
 }
+
+/// #11367: a modelled thread on one hole must not stop the next hole's wall from being found
+/// as a cylinder to thread. The cut the modelled thread makes must not take the body's other
+/// cylinders with it: the second hole still takes a thread, modelled or cosmetic.
+#[test]
+fn a_modelled_thread_leaves_the_next_hole_a_cylinder_to_thread() {
+    for gap in [40.0, 20.0, 12.0, 8.0] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 80, "width": 80, "height": 20, "body_name": "Blk"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 40, 20], "diameter": 5, "direction": [0, 0, -1]}));
+        run(&mut s, "solid.hole", json!({"position": [20.0 + gap, 40.0, 20.0], "diameter": 5, "direction": [0, 0, -1]}));
+        // The first hole takes a modelled M6 thread.
+        let t1 = s.execute("solid.thread", &json!({"face": [22.5, 40.0, 10.0], "designation": "M6", "modeled": true}));
+        assert!(t1.is_ok(), "gap {gap}: the first hole takes its thread: {t1:?}");
+        // The second hole's wall is still a cylinder: it takes a cosmetic thread...
+        let t2 = s.execute("solid.thread", &json!({"face": [22.5 + gap, 40.0, 10.0], "designation": "M6"}));
+        assert!(t2.is_ok(), "gap {gap}: the second hole still has a cylinder to thread: {t2:?}");
+        // ...and a modelled one.
+        let t3 = s.execute("solid.thread", &json!({"face": [22.5 + gap, 40.0, 10.0], "designation": "M6", "modeled": true}));
+        assert!(t3.is_ok(), "gap {gap}: the second hole takes a modelled thread: {t3:?}");
+    }
+}
