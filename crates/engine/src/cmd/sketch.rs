@@ -8,10 +8,16 @@ use solidcraft_sketch::{Analysis, Budget, ConstraintKind, CurveKind, Hold, Point
 
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec3};
+use crate::schema::frame::SketchSolve;
 use crate::schema::sketch::{
     CancelResult, CoincidentMade, CoincidentParams, CoincidentResult, CollinearParams, ConcentricParams, Constrained, ConstraintResult, EditParams,
     EditResult, EqualMade, EqualParams, EqualResult, ExitParams, FinishResult, FixOutcome, FixParams, FixResult, HorizontalVerticalParams,
     MidpointParams, ParallelParams, PerpendicularParams, SymmetryParams, SymmetryResult, TangentMade, TangentParams, TangentResult,
+};
+use crate::schema::sketch_session::{
+    Activated, Attachment, ChainParams, ChainResult, ConstructionParams, ConstructionResult, CreateParams, CreateResult, DeleteParams, DeleteResult,
+    DimensionTextParams, DimensionTextResult, DragEndParams, DragEndResult, DragParams, DragResult, Frame, MovePointParams, MovePointResult,
+    OptionsParams, OptionsReply, OptionsResult, SketchOptions, SolveParams, SolveResult,
 };
 use crate::schema::sketch_shapes::{
     ArcCenterPointParams, ArcThreePointParams, CircleCenterParams, CircleThreePointParams, CircleTwoPointParams, Created, DrawResult, LineParams,
@@ -44,6 +50,16 @@ macro_rules! model_operand_doc {
     };
 }
 
+const CREATE_CONTRACT: TypedContract<CreateParams> = TypedContract::new();
+const CONSTRUCTION_CONTRACT: TypedContract<ConstructionParams> = TypedContract::new();
+const DELETE_CONTRACT: TypedContract<DeleteParams> = TypedContract::new();
+const MOVE_POINT_CONTRACT: TypedContract<MovePointParams> = TypedContract::new();
+const DRAG_CONTRACT: TypedContract<DragParams> = TypedContract::new();
+const DRAG_END_CONTRACT: TypedContract<DragEndParams> = TypedContract::new();
+const DIMENSION_TEXT_CONTRACT: TypedContract<DimensionTextParams> = TypedContract::new();
+const OPTIONS_CONTRACT: TypedContract<OptionsParams> = TypedContract::new();
+const CHAIN_CONTRACT: TypedContract<ChainParams> = TypedContract::new();
+const SOLVE_CONTRACT: TypedContract<SolveParams> = TypedContract::new();
 const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
 const EXIT_CONTRACT: TypedContract<ExitParams> = TypedContract::new();
 const HORIZONTAL_VERTICAL_CONTRACT: TypedContract<HorizontalVerticalParams> = TypedContract::new();
@@ -66,9 +82,11 @@ const ARC_THREE_POINT_CONTRACT: TypedContract<ArcThreePointParams> = TypedContra
 const ARC_CENTER_POINT_CONTRACT: TypedContract<ArcCenterPointParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.create", "Create Sketch", create_sketch)
+    CommandSpec::new("sketch.create", "Create Sketch", crate::checked!("sketch.create", create_sketch))
         .at("SOLID", "CREATE")
         .icon("sketch")
+        .contract(&CREATE_CONTRACT)
+        .output(output_schema_for::<CreateResult>)
         .params("plane: XY|XZ|YZ (sketch x, y along world +X, +Y on XY; +X, -Z on XZ; +Y, +Z on YZ) | construction plane name or id | {origin?: [x,y,z] numbers in mm, default [0,0,0] (not an expression), x_dir, y_dir} (in world coordinates unless frame says otherwise; a named plane is the active component's own) | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), frame?: world (default) | component (which coordinates an explicit plane is in; the reply's `frame` says which, with a `note` when the active component is moved or turned), project_edges?: bool, activate_part?: bool (default false; on a face of a body of another component than the active one: activate that component at the picked placement first, as component.activate would, and make the sketch there; it stays active afterwards and the reply's `activated` names it), name?"),
     CommandSpec::new("sketch.edit", "Edit Sketch", crate::checked!("sketch.edit", edit_sketch))
         .noundo().icon("sketch")
@@ -256,40 +274,71 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SYMMETRY_CONTRACT)
         .output(output_schema_for::<SymmetryResult>)
         .params(concat!("a, b: two points or two curves (lines mirror their ends, circles/arcs their centres); line: symmetry line id, or x / y for the sketch's own axes (a curve with that id wins; an axis becomes a linked construction line on it, reported in created); or point (or a point id as line, \"origin\" too): symmetric about that point, each pair joined by a construction line it is the midpoint of", model_operand_doc!())),
-    CommandSpec::new("sketch.construction", "Normal/Construction", construction)
+    CommandSpec::new("sketch.construction", "Normal/Construction", crate::checked!("sketch.construction", construction))
         .at("SKETCH", "CREATE")
         .icon("construction")
         .key("X")
         .enabled(in_sketch)
+        .contract(&CONSTRUCTION_CONTRACT)
+        .output(output_schema_for::<ConstructionResult>)
         .params("curves: [ids], value?: bool (default: construction unless all of them already are)"),
-    CommandSpec::new("sketch.delete", "Delete Sketch Entities", sketch_delete).icon("delete")
+    CommandSpec::new("sketch.delete", "Delete Sketch Entities", crate::checked!("sketch.delete", sketch_delete)).icon("delete")
         .enabled(in_sketch)
+        .contract(&DELETE_CONTRACT)
+        .output(output_schema_for::<DeleteResult>)
         .params("entities: [curve, point or constraint ids]"),
-    CommandSpec::new("sketch.move_point", "Drag Sketch Point", move_point).icon("sketch_move").enabled(in_sketch).params("point: ref, to: [x,y]"),
+    CommandSpec::new("sketch.move_point", "Drag Sketch Point", crate::checked!("sketch.move_point", move_point))
+        .icon("sketch_move")
+        .enabled(in_sketch)
+        .contract(&MOVE_POINT_CONTRACT)
+        .output(output_schema_for::<MovePointResult>)
+        .params("point: ref, to: [x,y]"),
     CommandSpec::new("sketch.move_points", "Move Sketch Points", move_points).icon("sketch_move").enabled(in_sketch).params(
         "moves: [{point: ref | near: [x,y], to: [x,y]}] (each point to its own target; `near`: the sketch point closest to it, \
          refused when none lies within `tolerance` or two are as close), tolerance?: mm (default 0.1); sketch? → moved: \
          [{point, to, at, reached}] (`at`: where it ended up after the one solve; `reached`: whether that is `to`)",
     ),
-    CommandSpec::new("sketch.drag", "Drag Sketch Geometry", drag).icon("sketch_move").enabled(in_sketch).live(drag_live).params(
+    CommandSpec::new("sketch.drag", "Drag Sketch Geometry", crate::checked!("sketch.drag", drag))
+        .icon("sketch_move")
+        .enabled(in_sketch)
+        .live(drag_live)
+        .contract(&DRAG_CONTRACT)
+        .output(output_schema_for::<DragResult>)
+        .params(
         "entity: point or curve, from: [x,y] where it was grabbed, to: [x,y], live?: bool: points and the material point grabbed on a line move toward `to` within the design constraints. When exact placement is impossible, bounded feasible steps minimize cursor distance. Splines slide by to - from; a circle or arc grabbed on its edge takes the radius to `to`. `with?`: [point or curve ids] moves the rest of a selection with the entity as one translation (circles keep their radii). Long moves retain the solution branch; arcs cannot sweep through their starts. Returns `reached`: progress projected onto the requested move (0..1), `at`: the grabbed position for the next frame, and `retry`: budget-limited progress can continue in another frame. `live: true` shares a work budget across held-solve decomposition and cursor correction; ordinary recovery and the final model evaluation retain their existing limits, not a wall-clock deadline. Later features stay stale until `sketch.drag_end`; `dof` stays from before the drag",
     ),
-    CommandSpec::new("sketch.drag_end", "End Sketch Drag", drag_end).icon("sketch_move").enabled(in_sketch).doc_only().params(
+    CommandSpec::new("sketch.drag_end", "End Sketch Drag", crate::checked!("sketch.drag_end", drag_end))
+        .icon("sketch_move")
+        .enabled(in_sketch)
+        .doc_only()
+        .contract(&DRAG_END_CONTRACT)
+        .output(output_schema_for::<DragEndResult>)
+        .params(
         "constraint?: {command: a sketch.constraint.* id, params}: ends a drag made of `sketch.drag` `live: true` frames: adds the constraint it let go on (not kept if it over-constrains the sketch), then evaluates the whole model once; returns the constraint's result and the sketch's solved state and degrees of freedom",
     ),
-    CommandSpec::new("sketch.dimension_text", "Move Dimension Text", dimension_text).icon("edit")
+    CommandSpec::new("sketch.dimension_text", "Move Dimension Text", crate::checked!("sketch.dimension_text", dimension_text)).icon("edit")
         .enabled(in_sketch)
+        .contract(&DIMENSION_TEXT_CONTRACT)
+        .output(output_schema_for::<DimensionTextResult>)
         .params("dimension: constraint id or parameter name; at: [x,y] text centre (sketch coordinates) | reset: true (default place)"),
-    CommandSpec::new("sketch.options", "Sketch Palette Options", sketch_options).icon("sketch").params(
+    CommandSpec::new("sketch.options", "Sketch Palette Options", crate::checked!("sketch.options", sketch_options))
+        .icon("sketch")
+        .contract(&OPTIONS_CONTRACT)
+        .output(output_schema_for::<OptionsResult>)
+        .params(
         "sketch?: id|name (default active); any of show_profile, show_points, show_dimensions, show_constraints, show_projected, show_construction, grid, snap, slice, sketch_3d: bool. Returns them all",
     ),
-    CommandSpec::new("sketch.chain", "Chain", chain_cmd).icon("chain")
+    CommandSpec::new("sketch.chain", "Chain", crate::checked!("sketch.chain", chain_cmd)).icon("chain")
         .enabled(in_sketch)
         .noundo()
+        .contract(&CHAIN_CONTRACT)
+        .output(output_schema_for::<ChainResult>)
         .params("curve: id: the curves joined to it end to end (what a double-click selects)"),
-    CommandSpec::new("sketch.solve", "Solve Sketch", solve_cmd).icon("compute")
+    CommandSpec::new("sketch.solve", "Solve Sketch", crate::checked!("sketch.solve", solve_cmd)).icon("compute")
         .enabled(in_sketch)
         .noundo()
+        .contract(&SOLVE_CONTRACT)
+        .output(output_schema_for::<SolveResult>)
         .params("reports the solver status and degrees of freedom"),
 ];
 
@@ -305,14 +354,31 @@ pub(super) fn edit<T>(
     strict: bool,
     f: impl FnOnce(&mut Sketch, &mut solidcraft_doc::Document) -> Result<T>,
 ) -> Result<(T, Value)> {
+    let (out, info) = edit_solve(s, p, cmd, strict, f)?;
+    Ok((out, info.and_then(|info| serde_json::to_value(info).ok()).unwrap_or(Value::Null)))
+}
+
+/// [`edit`] with the solve as its typed value (`None`: the edit did not solve the sketch again).
+pub(super) fn edit_solve<T>(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    strict: bool,
+    f: impl FnOnce(&mut Sketch, &mut solidcraft_doc::Document) -> Result<T>,
+) -> Result<(T, Option<SketchSolve>)> {
     let id = sketch_store::target(s, p, cmd)?;
     let (out, rep) = edit_solved(s, id, strict, Analysis::Freedom, |sk, doc| Ok((f(sk, doc)?, Left::Unsolved)))?;
-    Ok((out, rep.map(|rep| report_json(&rep)).unwrap_or(Value::Null)))
+    Ok((out, rep.as_ref().map(solve_info)))
 }
 
 /// A solve's outcome as commands return it.
+pub(super) fn solve_info(rep: &SolveReport) -> SketchSolve {
+    SketchSolve { solved: rep.keeps_orientation(), dof: rep.dof }
+}
+
+/// A solve's outcome as commands return it, as JSON.
 pub(super) fn report_json(rep: &SolveReport) -> Value {
-    json!({"solved": rep.keeps_orientation(), "dof": rep.dof})
+    serde_json::to_value(solve_info(rep)).unwrap_or(Value::Null)
 }
 
 /// What an [`edit_solved`] step leaves for the edit's own solve.
@@ -893,13 +959,10 @@ pub(super) fn frame_note(frame: Option<&str>, placement: &solidcraft_doc::Mat) -
 
 /// The reply's `frame` for an explicit plane, with a note when a world plane went into a moved
 /// or turned component (`placement`: that component's), where it differs from the component's own.
-pub(super) fn frame_reply(out: &mut Value, frame: Option<&str>, placement: &solidcraft_doc::Mat) {
-    let Some(o) = out.as_object_mut() else { return };
+fn frame_reply(out: &mut CreateResult, frame: Option<&str>, placement: &solidcraft_doc::Mat) {
     let Some(frame) = frame else { return };
-    o.insert("frame".into(), json!(frame));
-    if let Some(note) = frame_note(Some(frame), placement) {
-        o.insert("note".into(), json!(note));
-    }
+    out.frame = Frame::named(frame);
+    out.note = frame_note(Some(frame), placement).map(str::to_string);
 }
 
 /// The indices of `m`'s triangles by face, for `faces` faces (triangles of a face past that
@@ -935,6 +998,11 @@ pub(super) fn face_contains(m: &solidcraft_geom::Mesh, tris: &[usize], p: Vec3, 
 }
 
 fn create_sketch(s: &mut Session, p: &Value) -> Result<Value> {
+    reply("sketch.create", new_sketch(s, p)?)
+}
+
+/// What `sketch.create` makes, from its parameters.
+fn new_sketch(s: &mut Session, p: &Value) -> Result<CreateResult> {
     let cmd = "sketch.create";
     // These name the plane, so they belong inside `plane`. Next to it they were ignored and the
     // sketch went to XY (or the plane given) without a word.
@@ -973,7 +1041,7 @@ fn create_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let made = plane_ref(s, p, cmd).and_then(|plane| create_sketch_on(s, p, plane, frame, cmd));
     match made {
         Ok(mut out) => {
-            out["activated"] = json!({"component": component, "path": path});
+            out.activated = Some(Activated { component, path });
             Ok(out)
         }
         Err(error) => {
@@ -984,11 +1052,11 @@ fn create_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The rest of `sketch.create` once the active component is settled: `flip`, the sketch, the reply's `frame`.
-fn create_sketch_on(s: &mut Session, p: &Value, mut plane: PlaneRef, frame: Option<&str>, cmd: &str) -> Result<Value> {
+fn create_sketch_on(s: &mut Session, p: &Value, mut plane: PlaneRef, frame: Option<&str>, cmd: &str) -> Result<CreateResult> {
     if let Some(about_y) = flip_param(s, p, &plane, cmd)? {
         plane = PlaneRef::Flipped { base: Box::new(plane), about_y };
     }
-    let mut out = create_sketch_with_plane(s, p, plane, None)?;
+    let mut out = sketch_on_plane(s, p, plane, None)?;
     frame_reply(&mut out, frame, &s.active_component_frame());
     Ok(out)
 }
@@ -1021,6 +1089,11 @@ pub(super) fn create_face_profile(s: &mut Session, p: &Value, body: &str, index:
 }
 
 pub(super) fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<Value> {
+    reply("sketch.create", sketch_on_plane(s, p, plane, internal_body)?)
+}
+
+/// A new sketch on `plane`, as `sketch.create` replies.
+fn sketch_on_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<CreateResult> {
     let before = entry_point(s);
     if face::is_face(p) {
         face::capture_positions(s, &plane)?;
@@ -1056,17 +1129,17 @@ pub(super) fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneR
     }
     let attachment = s.doc.feature(id).and_then(|feature| match &feature.kind {
         FeatureKind::Sketch { plane, .. } => Some(if face::anchor(plane).is_some() {
-            "exact_face"
+            Attachment::ExactFace
         } else if solidcraft_doc::sheet::plane_sheet_face(plane).is_some() {
-            "sheet_face"
+            Attachment::SheetFace
         } else if internal_body.is_some() {
-            "internal_legacy_face"
+            Attachment::InternalLegacyFace
         } else {
-            "fixed"
+            Attachment::Fixed
         }),
         _ => None,
     });
-    Ok(json!({"sketch": id, "name": name, "projected": link,"attachment":attachment}))
+    Ok(CreateResult { sketch: id, name, projected: link, attachment, frame: None, note: None, activated: None, param_warnings: Vec::new() })
 }
 
 fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3696,7 +3769,7 @@ fn dimension_text(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.dimension_text";
     let key = str_(p, "dimension").ok_or_else(|| bad(cmd, "`dimension` must be a dimension id or parameter name"))?.to_string();
     let at = if bool_(p, "reset").unwrap_or(false) { None } else { Some(req_vec2(cmd, p, "at")?) };
-    let (id, info) = edit(s, p, cmd, false, |sk, _| {
+    let (id, info) = edit_solve(s, p, cmd, false, |sk, _| {
         let c = sk
             .constraints
             .iter()
@@ -3706,7 +3779,7 @@ fn dimension_text(s: &mut Session, p: &Value) -> Result<Value> {
         place_text(sk, &id, at);
         Ok(id)
     })?;
-    Ok(json!({"dimension": id, "sketch": info}))
+    reply(cmd, DimensionTextResult { dimension: id, sketch: info, param_warnings: Vec::new() })
 }
 
 /// Dimension a point (or a parallel line) to line `l` as a diameter: when `l` is a centerline
@@ -3852,7 +3925,7 @@ fn construction(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`curves` must list curve ids"));
     }
     let want = bool_(p, "value");
-    let (n, info) = edit(s, p, cmd, false, |sk, _| {
+    let (n, info) = edit_solve(s, p, cmd, false, |sk, _| {
         let cs: Vec<usize> =
             ids.iter().map(|id| sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))).collect::<Result<_>>()?;
         // The selection switches together (a slot or polygon as a whole): to construction
@@ -3876,7 +3949,7 @@ fn construction(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok((n, to))
     })?;
-    Ok(json!({"changed": n.0, "construction": n.1, "sketch": info}))
+    reply(cmd, ConstructionResult { changed: n.0, construction: n.1, sketch: info, param_warnings: Vec::new() })
 }
 
 fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3885,7 +3958,7 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
     if ids.is_empty() {
         return Err(bad(cmd, "`entities` must list sketch entity ids"));
     }
-    let (n, info) = edit(s, p, cmd, false, |sk, doc| {
+    let (n, info) = edit_solve(s, p, cmd, false, |sk, doc| {
         let mut curves = Vec::new();
         let mut points = Vec::new();
         let mut cons = Vec::new();
@@ -3960,7 +4033,7 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     // Dimension parameters may have been dropped; prune again with the stored sketch.
     s.doc_mut().prune_model_params();
-    Ok(json!({"deleted": n, "sketch": info}))
+    reply(cmd, DeleteResult { deleted: n, sketch: info, param_warnings: Vec::new() })
 }
 
 fn move_point(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3973,7 +4046,7 @@ fn move_point(s: &mut Session, p: &Value) -> Result<Value> {
         let q = point_ref(sk, p.get("point"), cmd, "point")?;
         Ok(((), drag_entity(sk, Ent::Point(q), &[], to, to, false, last).1.solve_again()))
     })?;
-    Ok(json!({"sketch": rep.as_ref().map(report_json)}))
+    reply(cmd, MovePointResult { sketch: rep.as_ref().map(solve_info), param_warnings: Vec::new() })
 }
 
 /// `sketch.move_points`: several points, each dragged to its own target, in one edit (one undo
@@ -4093,7 +4166,10 @@ fn drag_frame(s: &mut Session, p: &Value, live: bool) -> Result<(Value, Option<c
     let sk = sketch_store::read(&s.doc, id)?;
     let at = d.at(sk, from, to);
     let rep = rep.or_else(|| last.map(|ss| SolveReport { status: solidcraft_sketch::SolveStatus::Solved, failing: Vec::new(), ..ss.report.clone() }));
-    let out = json!({"sketch": rep.as_ref().map(report_json), "reached": d.reached, "at": [at.x, at.y], "retry": d.retry});
+    let out = reply(
+        cmd,
+        DragResult { sketch: rep.as_ref().map(solve_info), reached: d.reached, at: [at.x, at.y], retry: d.retry, param_warnings: Vec::new() },
+    )?;
     Ok((out, rep.filter(|_| live).map(|report| crate::LiveEdit { sketch: id, report })))
 }
 
@@ -4119,29 +4195,30 @@ fn drag_end(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // A new constraint changed the document: `execute` evaluates the model after this.
     if !std::sync::Arc::ptr_eq(&start, &s.doc) {
-        return Ok(json!({"constraint": constraint, "sketch": constraint.get("sketch")}));
+        let sketch = constraint.get("sketch").and_then(|solve| serde_json::from_value(solve.clone()).ok());
+        return reply(cmd, DragEndResult { constraint, sketch, param_warnings: Vec::new() });
     }
     if s.model.is_stale() {
         s.refresh();
     }
-    let report = s.model.result(id).and_then(|r| r.state.sketch(id)).map(|ss| report_json(&ss.report));
-    Ok(json!({"constraint": constraint, "sketch": report}))
+    let sketch = s.model.result(id).and_then(|r| r.state.sketch(id)).map(|ss| solve_info(&ss.report));
+    reply(cmd, DragEndResult { constraint, sketch, param_warnings: Vec::new() })
 }
 
 /// The Sketch Palette options of a sketch, by their palette names (true = shown / on).
-fn options_json(v: &solidcraft_sketch::SketchView) -> Value {
-    json!({
-        "show_profile": !v.hide_profile,
-        "show_points": !v.hide_points,
-        "show_dimensions": !v.hide_dimensions,
-        "show_constraints": !v.hide_constraints,
-        "show_projected": !v.hide_projected,
-        "show_construction": !v.hide_construction,
-        "grid": !v.hide_grid,
-        "snap": !v.no_snap,
-        "slice": v.slice,
-        "sketch_3d": v.three_d,
-    })
+fn options_of(v: &solidcraft_sketch::SketchView) -> SketchOptions {
+    SketchOptions {
+        show_profile: !v.hide_profile,
+        show_points: !v.hide_points,
+        show_dimensions: !v.hide_dimensions,
+        show_constraints: !v.hide_constraints,
+        show_projected: !v.hide_projected,
+        show_construction: !v.hide_construction,
+        grid: !v.hide_grid,
+        snap: !v.no_snap,
+        slice: v.slice,
+        sketch_3d: v.three_d,
+    }
 }
 
 fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
@@ -4166,9 +4243,10 @@ fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
     let set = |k: &str| bool_(p, k);
     if keys.iter().all(|k| set(k).is_none()) {
         let id = sketch_store::target(s, p, cmd)?;
-        return Ok(json!({"options": options_json(&sketch_store::read(&s.doc, id)?.view)}));
+        let options = OptionsReply::Read { options: options_of(&sketch_store::read(&s.doc, id)?.view) };
+        return reply(cmd, OptionsResult { options, param_warnings: Vec::new() });
     }
-    let (v, info) = edit(s, p, cmd, false, |sk, _| {
+    let (v, info) = edit_solve(s, p, cmd, false, |sk, _| {
         let v = &mut sk.view;
         let put = |k: &str, flag: &mut bool, shown_means_off: bool| {
             if let Some(b) = set(k) {
@@ -4185,9 +4263,9 @@ fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
         put("snap", &mut v.no_snap, true);
         put("slice", &mut v.slice, false);
         put("sketch_3d", &mut v.three_d, false);
-        Ok(options_json(v))
+        Ok(options_of(v))
     })?;
-    Ok(json!({"options": v, "sketch": info}))
+    reply(cmd, OptionsResult { options: OptionsReply::Changed { options: v, sketch: info }, param_warnings: Vec::new() })
 }
 
 fn chain_cmd(s: &mut Session, p: &Value) -> Result<Value> {
@@ -4195,14 +4273,16 @@ fn chain_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let id = sketch_store::target(s, p, cmd)?;
     let sk = sketch_store::read(&s.doc, id)?;
     let c = curve_ref(sk, p.get("curve"), cmd, "curve")?;
-    Ok(json!({"curves": ids_of(sk, &sk.chain(c))}))
+    reply(cmd, ChainResult { curves: ids_of(sk, &sk.chain(c)), param_warnings: Vec::new() })
 }
 
 fn solve_cmd(s: &mut Session, p: &Value) -> Result<Value> {
-    let id = sketch_store::target(s, p, "sketch.solve")?;
+    let cmd = "sketch.solve";
+    let id = sketch_store::target(s, p, cmd)?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch has not been evaluated".into()))?;
-    Ok(json!({"status": ss.report.status, "dof": ss.report.dof, "failing": ss.report.failing, "profiles": ss.profiles.len()}))
+    let (status, dof, failing, profiles) = (ss.report.status.into(), ss.report.dof, ss.report.failing.clone(), ss.profiles.len());
+    reply(cmd, SolveResult { status, dof, failing, profiles, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]
