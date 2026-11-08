@@ -178,7 +178,7 @@ pub fn step_note(app: &SolveApp) -> Option<String> {
 /// It sits below the pointer, clear of the distance box at the arrow tip.
 pub fn show(app: &SolveApp, painter: &egui::Painter) {
     let Some(g) = app.viewport.drag_extrude.gesture.as_ref().filter(|g| g.started) else { return };
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let now = nearest_step(g.step);
     let galley = |i: usize, current: bool| {
         let size = if current { t.font_body * 1.25 } else { t.font_body };

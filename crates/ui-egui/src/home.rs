@@ -9,8 +9,8 @@ use solidcraft_engine::Session;
 use solidcraft_engine::render::{Camera, StandardView};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit::{self, FileView, RecoveryMessage};
+use solidcraft_theme::Tokens;
 
 /// Recent designs kept.
 pub const MAX_RECENT: usize = 12;

@@ -646,7 +646,7 @@ pub(crate) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     if response.clicked() {
         let _ = app.run("view.render_live", json!({"paused":!paused}));
     }
-    let max_width = ui.available_width().min(crate::theme::Tokens::get().control_height * 10.0);
+    let max_width = ui.available_width().min(solidcraft_theme::Tokens::get().control_height * 10.0);
     let mut help = format!("{status}\n\n{}", app.tr("render.live.quality_help"));
     if app.render_workspace.live.picture.as_ref().is_some_and(|picture| picture.adaptive.is_some()) {
         help.push_str("\n\n");

@@ -29,7 +29,7 @@ impl ReviewAndApply<'_> {
                 sphere_thumbnail(
                     ui,
                     "review:sphere",
-                    Sphere { color: crate::theme::Tokens::get().body, kind: super::FinishKind::Satin, opacity: None },
+                    Sphere { color: solidcraft_theme::Tokens::get().body, kind: super::FinishKind::Satin, opacity: None },
                     40.0,
                 );
                 ui.vertical(|ui| {
@@ -39,7 +39,7 @@ impl ReviewAndApply<'_> {
             });
         });
         if let Some(notice) = self.notice {
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             crate::ui_kit::Container::show_backing(
                 ui,
                 egui::Frame::NONE.fill(t.accent_soft).corner_radius(t.control_radius).inner_margin(egui::Margin::same(t.space_8 as i8)),
@@ -55,7 +55,7 @@ impl ReviewAndApply<'_> {
             // Impact text wraps independently of ordinary one-line form rows.
             ui.horizontal_top(|ui| {
                 ui.vertical(|ui| {
-                    ui.set_width(crate::theme::Tokens::get().space_16 * 4.0);
+                    ui.set_width(solidcraft_theme::Tokens::get().space_16 * 4.0);
                     text(ui, label, Text::Inline);
                 });
                 ui.vertical(|ui| {

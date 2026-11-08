@@ -4,9 +4,10 @@ use crate::navigation_bar::{self, Labels, MenuDisplay, NavigationBar, Position, 
 use crate::navigation_bar_view;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{NavigationEdge, NavigationIdle, NavigationKind, NavigationSize};
-use crate::{SolveApp, scenario, theme::Tokens, ui_kit};
+use crate::{SolveApp, scenario, ui_kit};
 use egui::{Rect, Sense, vec2};
 use serde_json::json;
+use solidcraft_theme::Tokens;
 
 #[derive(Default)]
 pub(super) struct State {

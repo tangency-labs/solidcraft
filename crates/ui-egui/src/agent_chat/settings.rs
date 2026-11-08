@@ -618,7 +618,7 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             let names: std::collections::HashMap<_, _> = agents::entries(app).into_iter().map(|entry| (entry.id, entry.name)).collect();
             for (agent, tools) in remembered {
-                let t = crate::theme::Tokens::get();
+                let t = solidcraft_theme::Tokens::get();
                 ui_kit::settings_block(ui, names.get(&agent).unwrap_or(&agent), t.space_24 * 6.0 + t.space_6, |ui| {
                     ui.horizontal(|ui| {
                         let reset = ui_kit::button(ui, tr("ui.ai_reset"), ui_kit::Button::Small);
@@ -635,7 +635,7 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     ui_kit::settings_section(ui, "panel", tr("ui.ai_panel"), |ui| {
         let label_width = [tr("ui.agent_chat_side"), tr("ui.agent_chat_turn_limit")]
             .iter()
@@ -702,7 +702,7 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .backing_on_hover_text(solidcraft_ui_text::tr_label("Show the pointer an AI agent moves (#35)"));
                 crate::scenario::publish_target("prefs:agent_pointer_show", response.rect);
                 ui.add_enabled_ui(app.ui.agent_cursor.show, |ui| {
-                    let speed_label_width = ui_kit::ContentWidth::label(ui, tr("ai.prefs.pointer_speed")) + crate::theme::Tokens::get().space_4;
+                    let speed_label_width = ui_kit::ContentWidth::label(ui, tr("ai.prefs.pointer_speed")) + solidcraft_theme::Tokens::get().space_4;
                     ui_kit::settings_form(ui, speed_label_width, |ui| {
                         ui_kit::row(ui, tr("ai.prefs.pointer_speed"), |ui| {
                             let name = tr("prefs.assistant_pointer_speed");
@@ -767,7 +767,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut retimed: Option<(String, u64)> = None;
     let mut reeffort: Option<(String, String)> = None;
     let mut picked_model: Option<(String, ui_kit::Picked)> = None;
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     ui_kit::settings_section_count(ui, "agents", tr("ui.ai_agents"), Some(&all.len().to_string()), |ui| {
         if app.agent_chat.detecting.is_some() {
             ui_kit::text(ui, tr("ui.agent_chat_detecting"), ui_kit::Text::Hint("detecting"));
@@ -1496,7 +1496,7 @@ mod card_tests {
                                     .job
                                     .sections
                                     .iter()
-                                    .all(|section| section.format.font_id.size == crate::theme::Tokens::get().font_page_heading);
+                                    .all(|section| section.format.font_id.size == solidcraft_theme::Tokens::get().font_page_heading);
                         }
                     });
                 }
@@ -1513,7 +1513,7 @@ mod card_tests {
             for key in ["assistant_availability", "permissions", "agents", "instructions", "panel", "assistant_connecting", "agent_pointer"] {
                 let section = scenario::rect_of(&format!("prefs:section:{key}")).unwrap();
                 assert!((section.left() - body.left()).abs() <= 1.0 && (section.right() - body.right()).abs() <= 1.0);
-                assert!((section.height() - (crate::theme::Tokens::get().control_height + crate::theme::Tokens::get().space_2)).abs() <= 1.0);
+                assert!((section.height() - (solidcraft_theme::Tokens::get().control_height + solidcraft_theme::Tokens::get().space_2)).abs() <= 1.0);
                 if let Some(bottom) = previous {
                     assert!((section.top() - bottom - 38.0).abs() <= 1.0, "{theme}: {key} retains the page section rhythm");
                 }

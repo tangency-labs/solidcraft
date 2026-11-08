@@ -2,10 +2,10 @@
 use super::preferences_figures::{ThemeSample, paint_theme_thumbnail};
 use super::*;
 use crate::dialogs_surface::{continuity_row, continuity_row_explained, continuity_tip};
-use crate::theme::Tokens;
 use crate::ui_kit::{Container, Surface};
 use egui::{Ui, vec2};
 use solidcraft_engine::kernel::Continuity;
+use solidcraft_theme::Tokens;
 
 struct Sample {
     value: String,
@@ -902,7 +902,7 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("preference_specimens", |ui, _| {
         scale_specimen(ui, 1.1);
-        status_palette_sample(ui, crate::theme::ColorVision::Deutan);
+        status_palette_sample(ui, solidcraft_theme::ColorVision::Deutan);
         colour_vision_sample(ui, &Tokens::get());
         settings_autosave_timeline(ui, 5.0);
         settings_axis_row(ui, "Push X", 0.6, [0.1, 0.2], |_| {}, |_| {}, |_| {});
@@ -1040,7 +1040,7 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("history_marker", |ui, _| {
         let t = Tokens::get();
-        let accent = crate::theme::TabAccent::for_tab(&t, "SURFACE");
+        let accent = solidcraft_theme::TabAccent::for_tab(&t, "SURFACE");
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(vec2(t.space_24 * 7.0, t.space_12), egui::Sense::hover());
             ui.painter().rect_filled(rect, 0.0, t.panel);
@@ -2097,9 +2097,9 @@ fn example(ui: &mut Ui, element: &Element) -> (&'static str, Option<&'static str
 
 #[test]
 fn every_element_has_geometry_and_stays_in_its_allocation_in_both_themes() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for element in ELEMENTS {
             let name = element.name;
             let ctx = crate::fonts::test_context();
@@ -2159,15 +2159,15 @@ fn every_element_has_geometry_and_stays_in_its_allocation_in_both_themes() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     let element = ELEMENTS.iter().find(|element| element.name == "dropdown_icons").unwrap();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let ctx = crate::fonts::test_context();
         let sample = std::cell::RefCell::new(Sample { value: String::new(), second: String::new(), selected: 0, checked: false });
         let mut draw = |ui: &mut Ui| {
@@ -2200,7 +2200,7 @@ fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() 
             assert!(solidcraft_ui_registry::handle_at("dialog:Visual style:Wireframe").is_none(), "the native popup closes after selection");
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -2252,9 +2252,9 @@ fn picked_item_remove_and_paired_values_have_independent_targets() {
 
 #[test]
 fn gallery_rows_share_a_label_column_after_measurement_in_both_themes() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let ctx = crate::fonts::test_context();
         let mut value = "3".to_owned();
         for _ in 0..3 {
@@ -2275,7 +2275,7 @@ fn gallery_rows_share_a_label_column_after_measurement_in_both_themes() {
         let width = solidcraft_ui_registry::rect_of("dialog:label:Edges").unwrap().width();
         assert!(width >= Tokens::get().form_label_width && width <= Tokens::get().form_label_width * 1.6);
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -2536,12 +2536,12 @@ fn history_example(ui: &mut Ui, names: bool) {
 fn history_board_in_both_themes_and_widths() {
     use super::checks::tests::{raster, textures_update};
     use std::collections::HashMap;
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         for names in [false, true] {
             for collapsed in [false, true] {
                 for state in [HistoryHandleState::Rest, HistoryHandleState::Hover, HistoryHandleState::Drag] {
-                    crate::theme::set_dark(dark);
+                    solidcraft_theme::set_dark(dark);
                     let ctx = crate::fonts::test_context();
                     ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
                     ctx.global_style_mut(|style| style.animation_time = 0.0);
@@ -2605,7 +2605,7 @@ fn history_board_in_both_themes_and_widths() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 /// Render actual egui geometry without a desktop window. Opt-in PNGs are reviewer evidence.
@@ -2613,9 +2613,9 @@ fn history_board_in_both_themes_and_widths() {
 fn menu_board_in_both_themes() {
     use super::checks::tests::{raster, textures_update};
     use std::collections::HashMap;
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let ctx = crate::fonts::test_context();
         ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
         let mut textures = HashMap::new();
@@ -2648,7 +2648,7 @@ fn menu_board_in_both_themes() {
             image.save(std::path::Path::new(&dir).join(if dark { "menus-dark.png" } else { "menus-light.png" })).unwrap();
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 /// CPU raster of the actual popup in all five board states. No display or GPU required.
@@ -2656,12 +2656,12 @@ fn menu_board_in_both_themes() {
 fn command_search_board_in_both_themes() {
     use super::checks::tests::{raster, textures_update};
     use std::collections::HashMap;
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let t = Tokens::get();
-        assert!(crate::theme::contrast_ratio(t.form_success, t.form_success_fill) >= 4.5);
-        assert!(crate::theme::contrast_ratio(t.selected_ink, t.accent_soft) >= 4.5);
+        assert!(solidcraft_theme::contrast_ratio(t.form_success, t.form_success_fill) >= 4.5);
+        assert!(solidcraft_theme::contrast_ratio(t.selected_ink, t.accent_soft) >= 4.5);
         for (state, query) in [
             ("empty", ""),
             ("matches", "fillet"),
@@ -2720,16 +2720,16 @@ fn command_search_board_in_both_themes() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 /// Exercise the actual surface painters, including deliberately shared artwork whose
 /// own accent differs from its tone, tab or feature kind.
 #[test]
 fn confirm_radial_and_history_rows_keep_multitone_artwork() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let mut cases = vec![
             ("warning", "extrude", "", "MODEL", Some("construction"), 20),
             ("danger", "extrude", "", "MODEL", Some("constraint"), 20),
@@ -2805,7 +2805,7 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
                             error: false,
                             warning: false,
                             reference: false,
-                            accent: crate::theme::TabAccent::for_tab(&Tokens::get(), "MODEL"),
+                            accent: solidcraft_theme::TabAccent::for_tab(&Tokens::get(), "MODEL"),
                             ink: None,
                         }
                         .paint(
@@ -2838,7 +2838,7 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
             assert!(colours.len() >= 2, "{surface}/{icon}/{kind}/{tab}, dark={dark}: opaque artwork is a silhouette");
             let resolved = crate::icon_svg::resolve(icon);
             assert!(!resolved.placeholder, "{icon} needs a master");
-            let look = crate::icon_svg::Look::themed(dark, ramp.and_then(crate::icon_svg::accent_index), crate::theme::vision());
+            let look = crate::icon_svg::Look::themed(dark, ramp.and_then(crate::icon_svg::accent_index), solidcraft_theme::vision());
             let doc = crate::icon_svg::doc_for(resolved.master, side as u32).unwrap();
             let expected = if matches!(surface, "danger" | "danger_menu") {
                 crate::icon_svg::render_tinted(doc, look, side as u32)
@@ -2887,7 +2887,7 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
             assert_eq!(dominant_accents[group].len(), count, "{group}, dark={dark}: dominant accent pixels must differ across mappings");
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 /// Run the application UI, including the ribbon, and optionally save each transition.
@@ -2895,9 +2895,9 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
 fn command_search_ribbon_transition_clips_content_in_both_themes() {
     use super::checks::tests::{raster, textures_update};
     use std::collections::HashMap;
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let ctx = crate::fonts::test_context();
         ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
         let mut app = crate::test_support::sample_app();
@@ -2970,7 +2970,7 @@ fn command_search_ribbon_transition_clips_content_in_both_themes() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 /// Opt-in CPU capture of the actual File view, with public temporary fixtures only.
@@ -2987,7 +2987,7 @@ fn file_view_application_evidence_in_both_themes_and_widths() {
     let fixture = path.to_string_lossy().to_string();
     let mut sample = crate::test_support::sample_app();
     sample.session.execute("file.save_as", &serde_json::json!({"path":fixture})).unwrap();
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         for (name, size) in [("desktop", vec2(1440.0, 1000.0)), ("narrow", vec2(420.0, 1000.0))] {
             let ctx = crate::fonts::test_context();
@@ -3007,8 +3007,8 @@ fn file_view_application_evidence_in_both_themes_and_widths() {
                 saved_at: web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).unwrap().as_secs().saturating_sub(120),
                 features: 14,
             });
-            crate::theme::set_dark(dark);
-            crate::theme::apply(&ctx);
+            solidcraft_theme::set_dark(dark);
+            solidcraft_theme::apply(&ctx);
             let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
             let mut textures = HashMap::new();
             for frame in 0..6 {
@@ -3032,7 +3032,7 @@ fn file_view_application_evidence_in_both_themes_and_widths() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
     std::fs::remove_file(path).unwrap();
     std::fs::remove_dir(fixture_dir).unwrap();
 }
@@ -3042,9 +3042,9 @@ fn file_view_application_evidence_in_both_themes_and_widths() {
 fn material_widgets_board_in_both_themes() {
     use super::checks::tests::{raster, textures_update};
     use std::collections::HashMap;
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let ctx = crate::fonts::test_context();
         let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(360.0, 240.0));
         let mut textures = HashMap::new();
@@ -3071,7 +3071,7 @@ fn material_widgets_board_in_both_themes() {
             image.save(std::path::Path::new(&dir).join(if dark { "material-widgets-dark.png" } else { "material-widgets-light.png" })).unwrap();
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -3190,9 +3190,9 @@ fn preset_card_and_help_icon_behave() {
 fn preference_widgets_and_figures_board_in_both_themes() {
     use super::checks::tests::{raster, textures_update};
     use std::collections::HashMap;
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for (board, names) in [
             ("widgets", &["picture_card", "toggle_tile", "preset_card", "help_icon", "theme_browser", "preference_theme_thumbnails"][..]),
             ("figures", &["preference_figures"][..]),
@@ -3234,5 +3234,5 @@ fn preference_widgets_and_figures_board_in_both_themes() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }

@@ -73,16 +73,16 @@ fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
         let center = galley.pos.y + galley.galley.rect.center().y;
         assert!((center - rect.center().y).abs() < 0.01, "{case}: galley centre {center} differs from field {rect:?}");
         if case == "search" {
-            assert!(galley.pos.x >= rect.left() + crate::theme::Tokens::get().space_24, "search text leaves room for its icon");
+            assert!(galley.pos.x >= rect.left() + solidcraft_theme::Tokens::get().space_24, "search text leaves room for its icon");
         }
         if case == "placement" {
-            let font = egui::FontId::proportional(crate::theme::Tokens::get().font_body);
+            let font = egui::FontId::proportional(solidcraft_theme::Tokens::get().font_body);
             let native = ctx.fonts_mut(|fonts| fonts.row_height(&font))
                 + ctx.style_of(egui::Theme::Light).spacing.extra_text_line_spacing
-                + crate::theme::Tokens::get().space_4;
+                + solidcraft_theme::Tokens::get().space_4;
             assert_eq!(rect.height(), native, "canvas editor retains its native hit target");
         } else if !matches!(case, "multiline" | "area" | "message") {
-            assert_eq!(rect.height(), crate::theme::Tokens::get().control_height, "{case}");
+            assert_eq!(rect.height(), solidcraft_theme::Tokens::get().control_height, "{case}");
         }
     }
 }
@@ -120,7 +120,7 @@ fn multiline_text_retains_focus_id_and_three_line_geometry() {
     };
     frame(&ctx, vec![], &mut draw);
     let row = scenario::rect_of("dialog:row:Text").unwrap();
-    assert_eq!(row.height(), 3.0 * crate::theme::Tokens::get().control_height);
+    assert_eq!(row.height(), 3.0 * solidcraft_theme::Tokens::get().control_height);
     let at = scenario::handle_at("dialog:Text").unwrap();
     frame(&ctx, pointer(at, true), &mut draw);
     frame(&ctx, pointer(at, false), &mut draw);
@@ -563,9 +563,9 @@ fn preference_dropdown_keeps_disabled_choices_inert_and_closes_after_selection()
 #[test]
 fn dropdown_popups_own_escape_and_return_focus_without_canceling_the_window() {
     use std::cell::Cell;
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for kind in ["plain", "icons", "compact", "editable"] {
             let ctx = crate::fonts::test_context();
             let action = Cell::new(Action::None);
@@ -647,7 +647,7 @@ fn dropdown_popups_own_escape_and_return_focus_without_canceling_the_window() {
             assert_eq!(selected.get(), 0, "dismissal does not select an option");
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -886,16 +886,24 @@ fn selection_field_has_three_distinct_looks_in_every_theme() {
         });
         (rects, ink)
     };
-    let mut palettes: Vec<(String, Option<crate::theme::Custom>, bool)> = vec![("dark".into(), None, true), ("light".into(), None, false)];
+    let mut palettes: Vec<(String, Option<crate::theme::FilePalette>, bool)> = vec![("dark".into(), None, true), ("light".into(), None, false)];
     for theme in crate::theme_files::builtin() {
         let dark = theme.base.is_dark();
-        palettes.push((theme.id.clone(), Some(crate::theme::Custom { dark, tokens: crate::theme_files::resolve(theme) }), dark));
+        palettes.push((
+            theme.id.clone(),
+            Some(crate::theme::FilePalette {
+                dark,
+                tokens: crate::theme_files::resolve(theme),
+                icons: crate::theme_files::resolve_icon_palette(theme, &Default::default()),
+            }),
+            dark,
+        ));
     }
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for (name, custom, dark) in palettes {
-        crate::theme::set_dark(dark);
-        crate::theme::set_custom(custom);
-        let t = crate::theme::Tokens::get();
+        solidcraft_theme::set_dark(dark);
+        crate::theme::set_file_palette(custom);
+        let t = solidcraft_theme::Tokens::get();
         let [active_filled, active_empty, filled, empty] = [(true, true), (true, false), (false, true), (false, false)].map(|(a, f)| look(a, f));
         let accented = |l: &Look| l.0.iter().any(|&(fill, stroke)| stroke == t.form_primary || fill == t.selected_bg);
         assert!(accented(&active_filled) && accented(&active_empty), "{name}: the active input is accented");
@@ -930,16 +938,16 @@ fn selection_field_has_three_distinct_looks_in_every_theme() {
         assert_eq!(filled.1, Some(t.form_ink), "{name}: a filled input's count is in text colour");
         assert_eq!(empty.1, Some(t.form_dim), "{name}: an empty input's prompt is dim");
     }
-    crate::theme::set_custom(None);
-    crate::theme::set_dark(previous);
+    crate::theme::set_file_palette(None);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn navigation_dropdown_popups_own_escape_and_return_focus_without_canceling_the_window() {
     use std::cell::Cell;
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for kind in ["plain", "compact", "bounded", "editable"] {
             let ctx = crate::fonts::test_context();
             let action = Cell::new(Action::None);
@@ -1016,7 +1024,7 @@ fn navigation_dropdown_popups_own_escape_and_return_focus_without_canceling_the_
             assert_eq!(selected.get(), 0, "dismissal does not select an option");
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 // The text fields' right-click menu (#8875).

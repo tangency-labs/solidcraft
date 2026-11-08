@@ -29,7 +29,7 @@ fn assert_navigator_shared_zoom(app: &crate::SolveApp, camera: Camera) {
                 .fit_rect_with_clearance(
                     1.0,
                     solidcraft_engine::panels::Point { x: picture.viewport.center().x, y: picture.viewport.center().y },
-                    crate::theme::Tokens::get().space_8,
+                    solidcraft_theme::Tokens::get().space_8,
                 )
                 .is_some(),
             "the Render fixture must leave clear picture room: {context}; free={:?}",
@@ -234,7 +234,7 @@ fn host_picture_fit_keeps_product_lens_and_padded_corners_in_the_picture_contour
                     }
                 }
                 assert!(
-                    region.contains_rect(logical_rect(footprint.expand(crate::theme::Tokens::get().space_4))),
+                    region.contains_rect(logical_rect(footprint.expand(solidcraft_theme::Tokens::get().space_4))),
                     "{footprint:?} in {:?}",
                     egui_rect(region.domain)
                 );
@@ -442,7 +442,7 @@ fn host_fit_uses_the_actual_contour_and_model_extent_with_the_full_projection() 
             assert!(usable.contains_rect(logical_rect(control)));
             assert!(obstacles.iter().all(|obstacle| !control.intersect(*obstacle).is_positive()));
         }
-        assert!(!layout.axis_view.expand(crate::theme::Tokens::get().space_4).intersect(layout.navigation).is_positive());
+        assert!(!layout.axis_view.expand(solidcraft_theme::Tokens::get().space_4).intersect(layout.navigation).is_positive());
         for bounds in [
             Aabb3 { min: Vec3::new(-90.0, -5.0, -2.0), max: Vec3::new(110.0, 5.0, 2.0) },
             Aabb3 { min: Vec3::new(-5.0, -90.0, -2.0), max: Vec3::new(5.0, 110.0, 2.0) },
@@ -532,7 +532,7 @@ fn host_fit_keeps_thin_and_degenerate_model_footprints_padded_at_both_scales() {
                             }
                         }
                         assert!(projected.is_finite());
-                        let padding = crate::theme::Tokens::get().space_8;
+                        let padding = solidcraft_theme::Tokens::get().space_8;
                         let padded = projected.expand(padding - 0.01);
                         assert!(
                             safe.contains_rect(logical_rect(padded)),

@@ -2,9 +2,9 @@
 //! never additional application viewports; every colour and control metric comes from tokens.
 pub(crate) use super::preferences_figure_data::{paint_assembly_move, paint_direct_interaction, paint_measure_axis_distances, paint_tool_cursor};
 use super::{metrics::dimension, text::paint_text};
-use crate::theme::{ColorVision, Tokens};
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::{ColorVision, Tokens};
 
 pub(super) const PAGE_SCROLL_GUTTER: &str = "sc_page_scroll_gutter";
 
@@ -616,7 +616,7 @@ pub(crate) fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
         return;
     }
     let ink =
-        if warning { if crate::theme::contrast_ratio(t.warning, t.dialog_body) >= 4.5 { t.warning } else { t.form_ink } } else { t.form_success };
+        if warning { if solidcraft_theme::contrast_ratio(t.warning, t.dialog_body) >= 4.5 { t.warning } else { t.form_ink } } else { t.form_success };
     let fill = if warning { t.warning.gamma_multiply(0.1) } else { t.form_success_fill };
     let galley = ui.painter().layout_no_wrap(text.to_owned(), crate::fonts::semibold(t.font_small), ink);
     let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + t.space_16, t.space_24), Sense::hover());
@@ -976,7 +976,7 @@ pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
         return;
     }
     let t = Tokens::get();
-    let colours = Tokens::themed(crate::theme::is_dark(), mode);
+    let colours = Tokens::themed(solidcraft_theme::is_dark(), mode);
     ui.horizontal_wrapped(|ui| {
         for (label, icon, fill) in [
             ("prefs.status_selected", "finish", colours.form_primary),
@@ -984,7 +984,7 @@ pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
             ("prefs.status_error", "close", colours.error),
             ("prefs.status_done", "finish", colours.form_success),
         ] {
-            let ink = if crate::theme::contrast_ratio(t.on_accent, fill) >= 4.5 { t.on_accent } else { t.tab_on_fill_dark };
+            let ink = if solidcraft_theme::contrast_ratio(t.on_accent, fill) >= 4.5 { t.on_accent } else { t.tab_on_fill_dark };
             let label = solidcraft_ui_text::tr(label);
             let galley = ui.painter().layout_no_wrap(label.to_owned(), crate::fonts::semibold(t.font_small), ink);
             let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + t.space_24 + t.space_16, t.space_24), Sense::hover());

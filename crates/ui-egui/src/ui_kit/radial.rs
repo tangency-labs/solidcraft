@@ -1,7 +1,7 @@
 //! Analytic rounded annular sectors, following the board's offset-and-round construction.
 use super::Item;
-use crate::theme::Tokens;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2, vec2};
+use solidcraft_theme::Tokens;
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
 pub(crate) const RADIAL_RADIUS: f32 = 150.0;
@@ -91,7 +91,7 @@ fn paint_sector(p: &egui::Painter, center: Pos2, k: usize, fill: Color32, stroke
 
 pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option<usize>) -> Option<Item> {
     let t = Tokens::get();
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     let mut picked = None;
     for (k, item) in items.iter().take(8).enumerate() {
         let enabled = item.enabled && ui.is_enabled();
@@ -117,7 +117,7 @@ pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option
             &painter,
             Rect::from_center_size(at - vec2(0.0, t.space_6), vec2(t.space_24, t.space_24)),
             &item.icon,
-            crate::theme::TabAccent::current_icon_accent(ui.ctx()),
+            solidcraft_theme::TabAccent::current_icon_accent(ui.ctx()),
             1.0,
         );
         let label = solidcraft_ui_text::tr_label(&item.label);
@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn theme_corner_extremes_keep_radial_geometry_finite_and_clicks_in_their_sectors() {
         for radius in [0, 1, 2, 16, 32] {
-            let _theme = crate::theme::scoped_tokens(Tokens { radius_xl: radius, ..Tokens::dark() });
+            let _theme = solidcraft_theme::scoped_tokens(Tokens { radius_xl: radius, ..Tokens::dark() });
             for k in 0..8 {
                 let (outer, inner) = boundaries(k);
                 assert_eq!(outer.len(), inner.len());

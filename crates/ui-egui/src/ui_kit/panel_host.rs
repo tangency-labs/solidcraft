@@ -1,7 +1,7 @@
 //! Bounded universal workspace chrome. Placement and transactions are owned by
 //! panel_runtime; every outer surface here uses the common Container policy.
 use super::{BackingTooltipExt as _, Container, Surface};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 pub(crate) struct HostChrome<'a> {
     pub label: &'a str,
@@ -35,7 +35,7 @@ pub(crate) fn panel_host_surface<R>(
     palette: Option<&Tokens>,
     body: impl FnOnce(&mut egui::Ui, egui::Rect) -> R,
 ) -> R {
-    let _tokens = palette.map(|tokens| crate::theme::scoped_panel_tokens(*tokens));
+    let _tokens = palette.map(|tokens| solidcraft_theme::scoped_panel_tokens(*tokens));
     let container = panel_host_container(ui.ctx(), floating);
     let mut frame = panel_host_frame(ui.ctx(), floating);
     frame.fill = fill;
@@ -240,8 +240,8 @@ pub(crate) fn panel_host_disclosure(
     let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(bounds));
     // Only the two existing glyphs blend. The response, expanded state and
     // allocated body already reflect the committed collapse state this pass.
-    let duration = crate::theme::panel_motion_duration(ui.ctx(), reduced);
-    let expanded = ui.ctx().animate_bool_with_time_and_easing(id.with("disclosure_ink"), !collapsed, duration, crate::theme::panel_motion_ease);
+    let duration = solidcraft_theme::panel_motion_duration(ui.ctx(), reduced);
+    let expanded = ui.ctx().animate_bool_with_time_and_easing(id.with("disclosure_ink"), !collapsed, duration, solidcraft_theme::panel_motion_ease);
     if expanded < 1.0 {
         crate::icons::paint_ink(&painter, icon, "chevron", ink.linear_multiply(1.0 - expanded));
     }

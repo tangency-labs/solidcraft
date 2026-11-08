@@ -6,8 +6,8 @@ use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::command_specs;
 
-use crate::theme::Tokens;
 use crate::{SolveApp, ui_kit};
+use solidcraft_theme::Tokens;
 
 /// How many recent commands are kept.
 const RECENT: usize = 12;

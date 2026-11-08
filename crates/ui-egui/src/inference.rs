@@ -13,8 +13,8 @@ use solidcore_record::Vec2;
 use solidcraft_engine::sketch::{CurveKind, Sketch};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Kind {

@@ -1160,7 +1160,7 @@ mod tests {
     #[test]
     fn semibold_has_distinct_metrics_and_rich_text_preserves_size_and_colour() {
         let h = crate::scenario::Harness::new();
-        let ink = crate::theme::Tokens::get().accent;
+        let ink = solidcraft_theme::Tokens::get().accent;
         let (regular, heavier) = h.ctx.fonts_mut(|f| {
             let regular = f.layout_no_wrap("Chamfer Revolve New Sketch".into(), FontId::proportional(16.0), ink);
             let heavier = f.layout_no_wrap("Chamfer Revolve New Sketch".into(), semibold(16.0), ink);

@@ -280,7 +280,7 @@ pub struct HostMetrics {
 
 impl Default for HostMetrics {
     fn default() -> Self {
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         Self {
             header_height: t.form_header_height,
             content_header_height: 0.0,
@@ -1232,7 +1232,7 @@ fn append_section(
     // that same slot. Collapsing never removes access to individual tabs.
     let (title, tab_strip) = if section.tabs.len() > 1 {
         if let Some(heading) = heading {
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let grip_width = metrics.control_extent.min(t.space_10 + t.space_8).min(heading.size.width);
             let grip_x = if out.direction == Direction::Ltr { heading.origin.x } else { right(heading) - grip_width };
             let tabs_x = if out.direction == Direction::Ltr { grip_x + grip_width } else { heading.origin.x };

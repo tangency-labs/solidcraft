@@ -90,9 +90,9 @@ pub struct HostOptions {
 impl Default for HostOptions {
     fn default() -> Self {
         Self {
-            metrics: HostMetrics { inline_max_height: crate::theme::PANEL_INLINE_MAX_HEIGHT, ..HostMetrics::default() },
+            metrics: HostMetrics { inline_max_height: solidcraft_theme::PANEL_INLINE_MAX_HEIGHT, ..HostMetrics::default() },
             geometry: HostGeometryPolicy::default(),
-            content_header_height: crate::theme::Tokens::get().control_height,
+            content_header_height: solidcraft_theme::Tokens::get().control_height,
         }
     }
 }
@@ -1215,9 +1215,9 @@ impl WorkspacePanelHost {
         {
             let now = ui.input(|input| input.time);
             let started = *self.preview_started.get_or_insert(now);
-            let duration = crate::theme::panel_motion_duration(ui.ctx(), runtime.environment().motion == Motion::Reduced);
+            let duration = solidcraft_theme::panel_motion_duration(ui.ctx(), runtime.environment().motion == Motion::Reduced);
             let progress = if duration <= 0.0 { 1.0 } else { ((now - started) as f32 / duration).clamp(0.0, 1.0) };
-            let opacity = crate::theme::panel_motion_ease(progress);
+            let opacity = solidcraft_theme::panel_motion_ease(progress);
             if let Some(projected) = &preview.projected {
                 for section in &projected.sections {
                     if section.outer != preview.bounds
@@ -2433,7 +2433,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         }
                     }
                 }
-                let t = crate::theme::Tokens::get();
+                let t = solidcraft_theme::Tokens::get();
                 // The title and its controls share the card background. One
                 // kit separator spans the header, rather than per-control tiles.
                 if !section.collapsed && !section.inline {
@@ -2495,7 +2495,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         let has_footer_actions = presentation.actions.iter().any(|action| !section.actions.iter().any(|(id, _)| *id == action.id));
                         let row_height = if has_footer_actions { self.layout.metrics.control_extent.min(footer.size.height) } else { 0.0 };
                         if row_height > 0.0 && egui_rect(footer).intersect(content_ui.clip_rect()).is_positive() {
-                            let inset = crate::theme::Tokens::get().space_4.min(footer.size.width / 2.0);
+                            let inset = solidcraft_theme::Tokens::get().space_4.min(footer.size.width / 2.0);
                             let row = LogicalRect {
                                 origin: Point { x: footer.origin.x + inset, y: footer.origin.y },
                                 size: Size { width: footer.size.width - 2.0 * inset, height: row_height },
@@ -2610,7 +2610,7 @@ fn render_slot(
         return;
     }
     let bounds = egui_rect(bounds);
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let inset = bounds.shrink2(egui::vec2(t.space_4.min(bounds.width().max(0.0) / 2.0), t.space_2.min(bounds.height().max(0.0) / 2.0)));
     let clip = ui.clip_rect().intersect(inset);
     if !clip.is_positive() {
@@ -2744,7 +2744,7 @@ fn scroll_tracks(layout: &HostLayout) -> Vec<(bool, LogicalRect)> {
     if !capacity.is_positive() {
         return Vec::new();
     }
-    let thickness = crate::theme::Tokens::get().space_8.min(capacity.width()).min(capacity.height());
+    let thickness = solidcraft_theme::Tokens::get().space_8.min(capacity.width()).min(capacity.height());
     let horizontal = layout.extent.width > layout.capacity.size.width;
     let vertical = layout.extent.height > layout.capacity.size.height;
     let mut tracks = Vec::new();
@@ -2816,7 +2816,7 @@ impl WorkspacePanelHost {
             egui::ScrollArea::vertical().id_salt(("items", scroll_id)).max_height(ui.available_height()).show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 if let Some(reason) = &self.last_rejection {
-                    ui.colored_label(crate::theme::Tokens::get().form_error, locale.text(rule_key(reason.rule)));
+                    ui.colored_label(solidcraft_theme::Tokens::get().form_error, locale.text(rule_key(reason.rule)));
                 }
                 match &menu {
                     HostMenu::Panel(instance) => {
@@ -2969,7 +2969,7 @@ fn menu_geometry(capacity: LogicalRect, anchor: LogicalRect) -> Option<egui::Rec
     if !capacity.is_positive() || !capacity.is_finite() {
         return None;
     }
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     if capacity.width() <= t.space_6 * 2.0 || capacity.height() <= t.space_6 * 2.0 {
         return None;
     }

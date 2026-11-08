@@ -309,9 +309,9 @@ fn browser_card_shrinks_and_scrolls_without_covering_history() {
 
 #[test]
 fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for mode in [LayoutMode::Floating, LayoutMode::Docked] {
             for tab in ["MODEL", "SKETCH", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER"] {
                 let ctx = crate::fonts::test_context();
@@ -319,7 +319,7 @@ fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
                 app.ui.layout = mode;
                 app.ui.tab = tab.into();
                 app.publish_tab_accent(&ctx);
-                let accent = crate::theme::TabAccent::for_tab(&Tokens::get(), tab);
+                let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), tab);
                 let mut row_rect = Rect::NOTHING;
                 let out = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     let row = Row { selected: true, label: "Selected body", dim: true, color: Some(Tokens::get().error), ..Default::default() };
@@ -335,7 +335,7 @@ fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -667,9 +667,9 @@ fn a_long_body_name_stays_inside_the_card_and_ends_in_an_ellipsis() {
 
 #[test]
 fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for collapsed in [false, true] {
             let ctx = crate::fonts::test_context();
             ctx.global_style_mut(|style| style.animation_time = 0.0);
@@ -694,7 +694,7 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
             draw(&mut app, vec![egui::Event::PointerMoved(at)]);
             let output = draw(&mut app, vec![egui::Event::PointerMoved(at)]);
             assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::PointingHand);
-            let accent = crate::theme::TabAccent::current(&ctx);
+            let accent = solidcraft_theme::TabAccent::current(&ctx);
             let mut hover = None;
             for shape in &output.shapes {
                 crate::test_support::each_shape(&shape.shape, &mut |shape| {
@@ -719,7 +719,7 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 /// #6907: a mesh body's row has its own icon and tooltip, so it can be told from a solid one.

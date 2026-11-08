@@ -1925,7 +1925,7 @@ fn only_one_row_is_lit_while_a_flyout_is_closing() {
     fn lit_rows(h: &Harness, rows: &[Item]) -> Vec<String> {
         fn filled(shape: &egui::Shape, r: egui::Rect, found: &mut bool) {
             match shape {
-                egui::Shape::Rect(rect) => *found |= rect.rect == r && rect.fill == crate::theme::Tokens::get().accent_soft,
+                egui::Shape::Rect(rect) => *found |= rect.rect == r && rect.fill == solidcraft_theme::Tokens::get().accent_soft,
                 egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| filled(s, r, found)),
                 _ => {}
             }

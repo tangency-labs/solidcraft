@@ -1889,6 +1889,7 @@
   "material.editor.preserved_appearance": "Bevart utseende",
   "material.editor.public_reference": "Offentlig referanse",
   "material.editor.reference": "Referanse",
+  "material.editor.remove": "Fjern",
   "material.editor.save_or_discard": "Lagre eller forkast materialutkastet før du tildeler et materiale.",
   "material.editor.saved": "Materialet er lagret. Kroppstildelinger er uendret.",
   "material.editor.scope": "Ved lagring lagres materialet uten at det tildeles kropper. Tomme egenskaper og betingelser forblir ukjente. Tettheten på kortet endrer ikke tildelt tetthet eller masse.",

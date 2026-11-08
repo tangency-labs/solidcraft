@@ -2,9 +2,9 @@
 //! cells leave. Built on the kit's table grid; see `docs/ui-kit.md` for tokens and usage.
 use super::metrics::dimension;
 use super::table::{Column, Table, TableRow, table_custom};
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Response, Ui, vec2};
+use solidcraft_theme::Tokens;
 
 /// Columns past this are ignored: a list of named rows has a handful of cells.
 const MAX_COLUMNS: usize = 16;
