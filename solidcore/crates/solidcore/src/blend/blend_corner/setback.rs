@@ -2039,24 +2039,32 @@ fn springs_on_faces(
     Ok(Springs::Clear)
 }
 
+/// How many times [`springs_refusal`] halves the last cell of its grid of thousandths at
+/// most: a thousandth of a setback of a metre is halved below 1e-9 in 30.
+const REFINE: usize = 30;
+
 /// What a setback that takes a spring curve off its face does, for [`setback_too_long`].
 const SPRING_LEAVES: &str =
     "takes a setback corner's spring curve off its face (it comes within the tolerances of another edge of the face, or is not shown not to)";
 
 /// solidcore#2343 (d): where a spring curve leaves its face at the corner's setbacks
-/// ([`springs_on_faces`]), the refusal naming the largest common scale of them on the grid of
-/// thousandths at which every spring curve stays inside its face. It is found by the growth's
-/// bisection ([`bisect_thousandths`], each trial placing the setback vertices again as the
-/// growth does), between 1 and the least scale at which every setback reaches its edge's
-/// least, where the rails cross; the search assumes a spring curve on its face at a scale
-/// stays on it at every smaller one (the curve shrinks toward the vertex with its setbacks),
-/// as the growth assumes certification monotone: checked on the cases, not proved. One asked
-/// for is refused as [`BlendRefusal::SetbackTooLong`] naming that scale times it; the
-/// rule's, naming those setbacks. None at or above the least: no setback builds. A trial
-/// whose vertices are not placed counts as off its face, so the scale named is at worst
-/// smaller than need be, never one off its face; whether the fill certifies there is the
-/// fill's to say when that setback is asked. `None` where every spring curve stays on its
-/// face, or one is not made (the fill says why).
+/// ([`springs_on_faces`]), the refusal naming the largest common scale of them at which every
+/// spring curve stays inside its face, to the corner's tolerance. The growth's bisection on
+/// the grid of thousandths ([`bisect_thousandths`], each trial placing the setback vertices
+/// again as the growth does) brackets it between 1 and the least scale at which every setback
+/// reaches its edge's least, where the rails cross; the last grid cell is then halved until
+/// it is shorter than the tolerance along every edge ([`REFINE`] halvings at most). Each
+/// search assumes a spring curve on its face at a scale stays on it at every smaller one (the
+/// curve shrinks toward the vertex with its setbacks), as the growth assumes certification
+/// monotone: checked on the cases, not proved. The scale named is always one the check itself
+/// found clear (the bisection's `hi - 1` is an index it was asked about and cleared, or `lo`;
+/// each halving keeps its cleared end), so it is sound even where that assumption fails: it
+/// can only be smaller than need be. One asked for is refused as
+/// [`BlendRefusal::SetbackTooLong`] naming that scale times it; the rule's, naming those
+/// setbacks. None at or above the least: no setback builds. A trial whose vertices are not
+/// placed counts as off its face, which again can only make the scale named smaller; whether
+/// the fill certifies there is the fill's to say when that setback is asked. `None` where
+/// every spring curve stays on its face, or one is not made (the fill says why).
 #[allow(clippy::too_many_arguments)]
 fn springs_refusal<S: SetbackSolvers>(
     k: &Kernel,
@@ -2092,22 +2100,35 @@ fn springs_refusal<S: SetbackSolvers>(
         most: vec![BIG_DOUBLE; base.len()],
         base,
     };
-    let mut leaves = |i: i32| -> Result<bool> {
-        Ok(
-            match growth.place(pseudo, corner, solvers, f64::from(i) / 1000.0)? {
-                Some(_) => {
-                    springs_on_faces(k, target, pseudo, corner, planes, tol)? != Springs::Clear
-                }
-                None => true,
-            },
-        )
+    let longest = growth.base.iter().fold(0.0f64, |m, &s| smax(m, s));
+    let mut leaves_at = |scale: f64| -> Result<bool> {
+        Ok(match growth.place(pseudo, corner, solvers, scale)? {
+            Some(_) => springs_on_faces(k, target, pseudo, corner, planes, tol)? != Springs::Clear,
+            None => true,
+        })
     };
     let lo = (1..1000).find(|&i| f64::from(i) >= 1000.0 * least_scale);
     let fit = match lo {
-        Some(lo) if !leaves(lo)? => Some(bisect_thousandths(lo, 1000, &mut leaves)? - 1),
+        Some(lo) if !leaves_at(f64::from(lo) / 1000.0)? => {
+            // hi - 1: lo, or an index the bisection asked about and found clear
+            let hi = bisect_thousandths(lo, 1000, |i| leaves_at(f64::from(i) / 1000.0))?;
+            let (mut clear, mut off) = (f64::from(hi - 1) / 1000.0, f64::from(hi) / 1000.0);
+            for _ in 0..REFINE {
+                if (off - clear) * longest <= tol {
+                    break;
+                }
+                let mid = 0.5 * (clear + off);
+                if leaves_at(mid)? {
+                    off = mid;
+                } else {
+                    clear = mid;
+                }
+            }
+            Some(clear)
+        }
         _ => None,
     };
-    let Some(fit) = fit.map(|i| f64::from(i) / 1000.0) else {
+    let Some(fit) = fit else {
         return Ok(Some(SetbackRefusal::no_room(
             "Fillet Error: no setback at or above where the rails cross keeps the setback corner's spring curves on their faces",
             Some(0.0),

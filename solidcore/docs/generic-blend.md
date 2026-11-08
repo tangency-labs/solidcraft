@@ -336,7 +336,14 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   the search assumes certification is monotone in scale (every scale above one that certifies
   certifies too). That assumption is checked on a grid of cases, not proved; replacing the budgeted
   search with a proved rule is open work. A setback the user gives explicitly that
-  does not fit or does not certify is refused, naming the size that does. No uncertified fill is ever
+  does not fit or does not certify is refused, naming the size that does. Beside a curved
+  face each spring curve must also stay inside its trimmed face, kept clear of the face's
+  other edges on the control points of both. A setback that takes one off is refused,
+  naming the largest common scale that keeps every one on: found by the same bisection,
+  then halved in its last thousandth down to the corner's tolerance. That search assumes
+  a spring curve on its face stays on it at every smaller setback; this too is checked on
+  cases, not proved. The size it names is always one the check itself found clear, so a
+  failure of the assumption can only make it smaller than need be. No uncertified fill is ever
   returned. At a convex edge meeting concave ones, any setback blend dips under the faces' planes
   regardless of representation [44]; there the spring curve between adjacent convex and concave
   blends is dropped and their trimlines meet.
