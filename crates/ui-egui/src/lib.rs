@@ -319,6 +319,7 @@ pub mod update;
 mod value_step;
 pub(crate) mod view_angles;
 mod view_confirm;
+pub mod view_compass;
 pub mod view_gizmo;
 pub mod view_pick;
 pub mod viewport;
