@@ -1721,7 +1721,7 @@ fn cpu_saved_thin_sheet_uses_its_authored_ior_beer_thickness_and_roundtrips_offl
         let a = (-sigma * 2.0).exp();
         let denominator = 1.0 - f * f * a * a;
         let scene = f + (1.0 - f).powi(2) * (f * a * a + a) / denominator;
-        solidcraft_geom::srgb::encode8(scene / (1.0 + scene))
+        solidcraft_color::srgb::encode8(scene / (1.0 + scene))
     });
     assert_eq!(decoded.get_pixel(0, 0).0, [rgb[0], rgb[1], rgb[2], 255]);
     assert!(Arc::ptr_eq(&before, &s.doc));

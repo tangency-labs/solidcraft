@@ -401,7 +401,7 @@ fn path_plane_click_retains_source_and_previews_then_edits_in_place() {
     let history = h.app.session.undo.len();
     let count = h.app.session.doc.features.len();
     let preview = h.app.session.preview_visible_world(&commands).unwrap();
-    let built = crate::preview::compute(&h.app.session, &commands, crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark())).unwrap();
+    let built = crate::preview::compute(&h.app.session, &commands, crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark())).unwrap();
     assert!(!built.scene.xray.is_empty(), "construction preview must contain visible geometry");
     let plane = preview.after.construct.last().unwrap();
     let solidcraft_engine::doc::construct::ConstructGeom::Plane(pl) = plane.geom else { panic!("plane") };
@@ -593,7 +593,7 @@ fn cylinder_emboss_edit_retains_second_source_and_author_paths_and_all_profiles(
     let preview = h.app.session.preview_world(&commands).unwrap();
     let volume = preview.after.body(&target).unwrap().mesh().measure().volume;
     assert!(volume > preview.before.body(&target).unwrap().mesh().measure().volume + 10.0);
-    let colors = crate::preview::Colors::from_tokens(&crate::theme::Tokens::get());
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
     let built = crate::preview::compute(&h.app.session, &commands, colors).unwrap();
     assert!(built.replaced.contains(&target) && !built.scene.tris.is_empty(), "{:?}", built.replaced);
     let source_first = h.app.session.doc.occurrence_of(source).unwrap().id;
@@ -1425,8 +1425,9 @@ fn fillet_radius_fit_reduces_and_shows_the_applied_radius() {
     d.extra.insert("fit".into(), json!("reduce"));
     let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!(p["fit"], json!("reduce"));
-    let job = crate::preview::compute(&app.session, &[(id.clone(), p.clone())], crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark()))
-        .unwrap();
+    let job =
+        crate::preview::compute(&app.session, &[(id.clone(), p.clone())], crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark()))
+            .unwrap();
     assert_eq!(job.applied, Some((3.0, 3.0)));
     // Applied and edited again, the fillet keeps its fit.
     app.session.execute(&id, &p).unwrap();
@@ -1435,7 +1436,7 @@ fn fillet_radius_fit_reduces_and_shows_the_applied_radius() {
     assert_eq!(e.extra.get("fit"), Some(&json!("reduce")));
     // Its edit preview shows the radius it uses too.
     let cmds = apply_commands(&app, &e).unwrap();
-    let job = crate::preview::compute(&app.session, &cmds, crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark())).unwrap();
+    let job = crate::preview::compute(&app.session, &cmds, crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark())).unwrap();
     assert_eq!(job.applied, Some((3.0, 3.0)));
 }
 

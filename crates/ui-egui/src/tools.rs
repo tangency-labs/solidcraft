@@ -7,9 +7,9 @@ use solidcore_record::Vec2;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::i18n::tr;
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::viewport::{Hit, Proj, pick_for_tool as pick, sketch_point_at};
+use solidcraft_ui_text::tr;
 
 const DRAW_SCOPES: &[Scope] = &[Scope::SketchDraw, Scope::SketchDrag];
 
@@ -1281,7 +1281,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let Some(ss) = st.sketch(sid) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     // Drawn straight onto the view: its side's colours (#4146).
-    let tk = crate::theme::Tokens::view();
+    let tk = solidcraft_theme::Tokens::view();
     let stroke = Stroke::new(1.5, tk.sketch_accent);
     if let Some((hp, snap)) = &t.hover
         && let Some(sp) = to(*hp)
@@ -1296,7 +1296,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
                 crate::tool_cursor::readout_at(painter, proj.rect, sp),
                 egui::Align2::LEFT_TOP,
                 format!("{}, {}", crate::prefs::show_mm(app, hp.x, 1), crate::prefs::show_mm(app, hp.y, 1)),
-                egui::FontId::proportional(crate::theme::Tokens::get().font_small),
+                egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small),
                 tk.text_dim,
             );
             crate::scenario::publish_rect("viewport:readout", readout);
@@ -1355,7 +1355,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
                     m + g,
                     egui::Align2::CENTER_CENTER,
                     if horizontal { "H" } else { "V" },
-                    egui::FontId::proportional(crate::theme::Tokens::get().font_micro),
+                    egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro),
                     tk.sketch_accent,
                 );
             }

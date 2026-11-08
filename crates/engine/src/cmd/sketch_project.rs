@@ -428,8 +428,10 @@ fn add_link_unless_present(
     if skip_present && r.wires.is_empty() && sk.link_geometry_present(&r.geom) {
         return Ok(None);
     }
+    // A mesh body is one face whose name says nothing of the flat patch picked: the link keeps
+    // the point instead (#13464), as an edge of a mesh body keeps no name.
     let name = if let LinkSource::Face { body, at } = &r.source {
-        st.body(body).and_then(|body| {
+        st.body(body).filter(|body| !body.body.is_mesh()).and_then(|body| {
             if let Some(index) = r.face_index {
                 solidcraft_doc::naming::face_names(body).get(index).filter(|name| !name.is_empty()).cloned()
             } else {
@@ -582,7 +584,7 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
 
 /// A model's reference among a command's operands (#6348): an `{edge: [x,y,z], body?}` or a
 /// `{vertex: [x,y,z], body?}`, or an origin axis `{axis: X|Y|Z}`.
-fn model_ref(v: &Value) -> bool {
+pub(crate) fn model_ref(v: &Value) -> bool {
     // Either case, as `source` takes it.
     v.get("edge").is_some() || v.get("vertex").is_some() || v.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "X" | "Y" | "Z"))
 }
@@ -606,7 +608,7 @@ fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Va
 
 /// Most model references one call may project into a sketch: each one is a link and a resolve,
 /// so the count is capped before any of them is projected.
-const MAX_PROJECTED_ENTITIES: usize = 1_000;
+pub(crate) const MAX_PROJECTED_ENTITIES: usize = 1_000;
 
 /// A dimension's entities may be model geometry (#7912): an `{edge: [x,y,z], body?}` or
 /// `{vertex: [x,y,z], body?}` among them is projected into the sketch first, as Project does,

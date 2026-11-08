@@ -11,6 +11,14 @@ workspace = true
 [dependencies]
 solidcore-record = { workspace = true }
 solidcraft-engine = { workspace = true }
+solidcraft-control = { workspace = true }
+solidcraft-control-egui = { workspace = true }
+# The widget registry (handles, rects, counts) the UI kit publishes into.
+solidcraft-ui-registry = { workspace = true }
+solidcraft-color = { workspace = true }
+solidcraft-ui-text = { workspace = true }
+# The token contract every component draws with; the theme system here resolves and sets it.
+solidcraft-theme = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
 solidcraft-gpu = { workspace = true }
@@ -25,10 +33,8 @@ image = { workspace = true, features = ["jpeg", "ico", "gif", "webp", "bmp", "ti
 ttf-parser = { workspace = true }
 # Right-to-left interface text (Hebrew): the Unicode Bidirectional Algorithm puts translated
 # strings in display order, which egui does not do itself (MIT OR Apache-2.0).
-unicode-bidi = "0.3"
 # The system's preferred languages on a first start (MIT OR Apache-2.0, maintained by
 # 1Password): the OS locale on desktop and, with `js`, `navigator.languages` in the browser (#10138).
-sys-locale = { version = "0.3.2", features = ["js"] }
 semver = { workspace = true }
 # Updates: the downloaded package's SHA-256 (against the release's SHA256SUMS.txt), its optional
 # minisign signature (MIT), and the portable .zip's executables.
