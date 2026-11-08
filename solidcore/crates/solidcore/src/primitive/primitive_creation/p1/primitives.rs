@@ -120,7 +120,11 @@ fn with_face_env<T>(
         &mut crate::topology::brep::p8::FaceBuildEnv<'_, '_>,
     ) -> Result<T>,
 ) -> Result<T> {
-    let mut state = crate::topology::brep::p2::ArenaNotifyState::new(b);
+    // (not upstream) the kernel's reused record map, as the stitch's glues reuse it, so a
+    // sweep's many faces do not each make one of every object of the B-rep
+    let (tag, records) = crate::heal::stitch::p1::take_arena_records(k, b);
+    let serial = k.context.issued_brep_serial(b.notify_identity());
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::reusing(records, b, serial);
     let mut env = state.env(None);
     let mut marks = crate::topology::topology_traverser::Marks::default();
     let this_face =
@@ -130,7 +134,9 @@ fn with_face_env<T>(
         marks: &mut marks,
         this_face: &this_face,
     };
-    body(k, b, &mut fenv)
+    let r = body(k, b, &mut fenv);
+    k.arena_notify_records = (tag, state.into_records());
+    r
 }
 
 fn create_face(k: &mut Kernel, b: &mut Brep, surface: Surface, domain: Extent2d) -> Result<()> {
