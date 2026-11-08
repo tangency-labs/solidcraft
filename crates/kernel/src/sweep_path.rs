@@ -594,6 +594,31 @@ mod tests {
         assert_eq!(b.faces(0.01).unwrap().len(), 6);
     }
 
+    /// The twist turns the profile about the path, whichever plane it was drawn on
+    /// (solidcraft#12337): a line along Y swept 40 along X with a quarter turn is the same
+    /// helicoid strip drawn on the XY plane (the path's plane) as on the YZ plane (square to the
+    /// path): its far end stands along Z, and its area is the strip's,
+    /// 40 ∫₀²⁰ √(1 + (kr)²) dr with k = (π/2)/40, which is 875.9.
+    #[test]
+    fn twist_turns_about_the_path_whatever_the_profiles_plane() {
+        let ctl = SweepControl { twist: FRAC_PI_2, ..SweepControl::default() };
+        let path = [crate::PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(40.0, 0.0, 0.0) }];
+        let k = FRAC_PI_2 / 40.0;
+        let strip = |r: f64| 0.5 * r * (1.0 + (k * r).powi(2)).sqrt() + (k * r).asinh() / (2.0 * k);
+        let area = 40.0 * strip(20.0);
+        for (plane, line) in [
+            (Plane::XY, solidcore_record::Seg2::Line { a: Vec2::ZERO, b: Vec2::new(0.0, 20.0) }),
+            (Plane::YZ, solidcore_record::Seg2::Line { a: Vec2::ZERO, b: Vec2::new(20.0, 0.0) }),
+        ] {
+            let sheet = crate::sweep_sheet_with(&plane, &[vec![line]], &path, &ctl).unwrap_or_else(|e| panic!("{plane:?}: {e}"));
+            let mesh = sheet.mesh(&crate::MeshTolerance::chord(0.002)).unwrap();
+            let (zmax, ymax) = mesh.positions.iter().fold((0.0f64, 0.0f64), |(z, y), p| (z.max(p.z), y.max(p.y)));
+            assert!((zmax - 20.0).abs() < 0.05 && (ymax - 20.0).abs() < 0.05, "{plane:?}: y to {ymax}, z to {zmax}");
+            let a = crate::measure(&sheet).unwrap().area;
+            assert!((a - area).abs() < 0.01 * area, "{plane:?}: area {a} vs {area}");
+        }
+    }
+
     /// Parallel keeps the profile as drawn along a curved path: the volume is its area times
     /// the path's rise across the profile's plane.
     #[test]
