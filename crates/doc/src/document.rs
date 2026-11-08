@@ -3005,6 +3005,13 @@ pub struct Feature {
     /// mean that numbering.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub kernel_piece_order: bool,
+    /// This body Pattern reads its stored `body_names` in the order it makes its copies, as builds
+    /// before #12114 read them, instead of by source and copy number. Set on the Patterns of
+    /// several bodies in designs saved before then, whose stored names mean that order. The
+    /// session stores such a Pattern's names again as its copies have them and clears it
+    /// (`Session::pin_body_names`), so later count changes keep each name with its source.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pattern_names_in_order: bool,
     /// Made by inserting a file (STEP, IGES or a mesh file) into the design: the feature built
     /// the component tree its component is the top of, and deleting it removes that tree
     /// ([`Document::remove_component_tree`]). Not set on other imported bodies, such as the
@@ -3060,10 +3067,11 @@ impl Feature {
 
     /// When a body Pattern's bodies change from `old`, move its stored names with their sources:
     /// each source it still copies keeps its copies' names, and a new source's copies get new
-    /// names (#12114).
+    /// names (#12114). Names still read in order (`pattern_names_in_order`) stay as they are, as
+    /// they did before then.
     pub fn keep_pattern_names_with_sources(&mut self, old: &[BodyName]) {
         let FeatureKind::Pattern { bodies, .. } = &self.kind else { return };
-        if old.is_empty() || bodies.as_slice() == old || !self.body_names.len().is_multiple_of(old.len()) {
+        if self.pattern_names_in_order || old.is_empty() || bodies.as_slice() == old || !self.body_names.len().is_multiple_of(old.len()) {
             return;
         }
         let per = self.body_names.len() / old.len();
@@ -4121,6 +4129,7 @@ impl Document {
             participants: Vec::new(),
             shell_piece_order: false,
             kernel_piece_order: false,
+            pattern_names_in_order: false,
             inserted: false,
             link_faces: Vec::new(),
             touching: Touching::Separate,

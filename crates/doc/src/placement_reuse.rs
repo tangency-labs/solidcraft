@@ -216,6 +216,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         touching,
         shell_piece_order,
         kernel_piece_order,
+        pattern_names_in_order,
         inserted,
         link_faces,
         kind,
@@ -233,6 +234,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         && *touching == b.touching
         && *shell_piece_order == b.shell_piece_order
         && *kernel_piece_order == b.kernel_piece_order
+        && *pattern_names_in_order == b.pattern_names_in_order
         && *inserted == b.inserted
         && *link_faces == b.link_faces
         && match (kind, &b.kind) {

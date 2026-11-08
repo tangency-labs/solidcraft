@@ -1415,8 +1415,10 @@ impl Session {
             );
             // A pattern of several bodies stores its names source by source, so after its count
             // changes they are stored again as the copies have them now (#12114). Filled in
-            // slot by slot, a name of the old count would stay in a later source's place.
-            if f.pins_every_body_name() && made.len() != f.body_names.len() {
+            // slot by slot, a name of the old count would stay in a later source's place. One
+            // saved before then reads its names in order; stored as its copies have them, they
+            // mean the same copies read source by source.
+            if f.pins_every_body_name() && (f.pattern_names_in_order || made.len() != f.body_names.len()) {
                 pins.push((f.id, made.iter().map(|n| n.to_string()).collect()));
                 continue;
             }
@@ -1446,6 +1448,8 @@ impl Session {
         for (id, names) in pins {
             if let Some(f) = doc.feature_mut(id) {
                 f.body_names = names;
+                // Stored as the copies have them now: read source by source from here on (#12114).
+                f.pattern_names_in_order = false;
             }
         }
         doc.reserved_body_names.extend(reserve);

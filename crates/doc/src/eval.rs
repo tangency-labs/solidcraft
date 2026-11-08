@@ -2954,9 +2954,10 @@ fn new_name(state: &mut ModelState, f: &Feature, k: usize) -> String {
 /// (`Session::pin_body_names`), so the stored names split evenly into the copies each source had
 /// when they were stored. When the count changes, a copy keeps the name stored for its own source
 /// and number, and a new copy has none (#12114). Names that don't split evenly (stored before
-/// every copy was named) are read in the order the copies are made.
-fn pattern_name_slot(stored: usize, sources: usize, copies: usize, s: usize, k: usize) -> Option<usize> {
-    if sources > 1 && stored > 0 && stored.is_multiple_of(sources) {
+/// every copy was named), and names of a design saved before then (`in_order`, see
+/// `Feature::pattern_names_in_order`), are read in the order the copies are made.
+fn pattern_name_slot(stored: usize, sources: usize, copies: usize, s: usize, k: usize, in_order: bool) -> Option<usize> {
+    if !in_order && sources > 1 && stored > 0 && stored.is_multiple_of(sources) {
         let per = stored / sources;
         return (k < per).then(|| s.saturating_mul(per).saturating_add(k));
     }
@@ -7883,7 +7884,7 @@ fn eval_feature(
                         None => *m,
                     };
                     let copy = moved_copy(&mb, kernel::transform_matrix(&mb.body, local)?, k + 1);
-                    let slot = pattern_name_slot(f.body_names.len(), bodies.len(), mats.len(), s, k);
+                    let slot = pattern_name_slot(f.body_names.len(), bodies.len(), mats.len(), s, k, f.pattern_names_in_order);
                     let name = pattern_copy_name(st, f, slot, &mb.name);
                     copy_sheet(st, &mb.name, &name, &local);
                     let mut body = ModelBody::traced_new(name, copy, f.id);
