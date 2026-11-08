@@ -937,6 +937,21 @@ border settings safely fall back to legacy styling. The optional field requires 
 version change. There is no general border editor in Preferences; theme file import/export
 and the existing preference/control workflow own this extension.
 
+Optional `borders.glass` adds a glass finish (`crate::glass`). It accepts `sheen` (a hex
+colour, required), `sheen_height` (finite 0–128 points, required) and `bubbles` (`"round"`,
+`"square"`, or `false`/absent for none). Every see-through surface (a fill whose alpha is
+below 255, as the theme's **Opacity** option makes floating panels, windows and popups) gets
+the sheen along its top, fading out over `sheen_height`, and faint slanted streaks of light
+that line up across the whole window, all under its contents, through the container's backing
+slot that blur also uses. Opaque surfaces stay flat. Push buttons get a glossy top half.
+Bubbles replace the flat hover and pressed fills of ribbon, title bar and navigation bar
+buttons: `round` puts an orb round the icon with a highlight over it; `square` puts a tile
+over the whole button, and joins the caption buttons into one strip. The finish adds no
+layout space, input targets or opacity of its own; without `borders.glass` every surface
+paints exactly as before. The sheen's alpha also sets how bright the streaks are; Preferences ›
+Appearance › **Gloss** (`glass_gloss`) replaces that alpha with the user's own, and **Theme's
+own** gives the theme's back.
+
 ## Theme icon and tab colours
 
 Theme files optionally supply `icon_palette` SVG roles and semantic ramps. The

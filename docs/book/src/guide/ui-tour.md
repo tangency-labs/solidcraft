@@ -262,7 +262,9 @@ themes and any themes you have imported. A choice applies at once. Under the the
 Green Phosphor, Amber Phosphor, Blueprint, One Dark, Tokyo Night, Solarized Light, Nord, High
 Contrast, Graphite, Nosferatu, Catppuccin Mocha, Okibi and Akari (dark and light, from the
 [Okibi design system](https://kaievns.github.io/okibi-akiri-design-system-spec/)), Clay and
-Clay Dark (warm ivory paper and warm charcoal, with a terracotta accent and rounded corners), and
+Clay Dark (warm ivory paper and warm charcoal, with a terracotta accent and rounded corners),
+Frutiger Aero (sky blue and aqua glass that shows the model through its panels, with glossy
+buttons), and
 1-bit and 1-bit Dark (pure black and white with square corners: black on white, or white on
 black, with selections drawn inverted).
 
@@ -490,6 +492,13 @@ same six palettes as the former separate cards, including their icon colours.
 Saved selections and settings profiles using the former `-soft` and `-hard` ids
 select the corresponding family and contrast. Selecting a family again restores its
 last contrast; Reset returns it to Standard.
+
+**Frutiger Aero** is an original light theme of sky blue and aqua glass with grass-green
+sketching. Its panels show the model through them (**70% Opacity**, adjustable from 50–100%,
+with a light **12 px Blur**), each with a gloss along its top and faint streaks of light across
+it. Buttons sit on glossy tiles, and the window's Minimize, Maximize and Close join into one
+glass strip. Its **Tab colours** option is on: each ribbon tab tints the panels and the 3D view
+in its own colour, fading over 240 ms.
 
 **Onyx** is an original dark stone-grey theme with quiet surface layers, fine etched edges
 and a restrained blue-grey accent. Its defaults pair **80% Opacity** (adjustable from 60–100%) with a broad **60 px Blur**:

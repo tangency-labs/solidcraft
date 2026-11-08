@@ -70,6 +70,7 @@ pub mod fonts;
 pub mod frame;
 pub mod frame_rate;
 pub mod gizmo;
+pub mod glass;
 pub mod gpu;
 pub mod help;
 mod history_folds;

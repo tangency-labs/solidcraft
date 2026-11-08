@@ -405,6 +405,12 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let frame = Container::new(ui.ctx(), Surface::ApplicationBar).edge_frame(t.app_bar);
     Container::new(ui.ctx(), Surface::ApplicationBar).show_edge(ui, app_bar.exact_size(APP_BAR_HEIGHT).show_separator_line(false), frame, |ui| {
         let r = ui.max_rect();
+        // A glass theme's title bar catches the light too: its sheen and streaks, behind the bar's
+        // contents.
+        if let Some(glass) = t.borders.glass {
+            ui.painter().extend(glass.sheen_mesh(r, 0u8).map(egui::Shape::from));
+            ui.painter().extend(glass.streaks_mesh(ui.ctx().content_rect(), r).map(egui::Shape::from));
+        }
         // The bar is the window's title bar: its empty space moves the window.
         if app.custom_titlebar || app.integrated_titlebar {
             crate::titlebar::drag_area(ui, r);
@@ -438,10 +444,14 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Compatibility for scenarios that used the former Home tab.
         crate::scenario::publish_target_as("tab:home", "titlebar:home", home);
         crate::scenario::publish_rect("appbar:home", home);
-        if idle && (home_response.hovered() || home_response.has_focus()) {
+        let bubble = t.bubble(ui.painter(), home.shrink(3.0), t.accent, crate::glass::Bubble::of(&home_response, idle, false));
+        if bubble.is_none() && idle && (home_response.hovered() || home_response.has_focus()) {
             ui.painter().rect_filled(home.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
         }
         icons::paint_app_bar(ui.painter(), home.shrink(7.0), "home", if idle { 1.0 } else { 0.35 });
+        if let Some(bubble) = bubble {
+            bubble.finish(ui.painter());
+        }
         if home_response.backing_on_hover_text(home_tip).clicked() && idle {
             app.home.show(app.session.revision);
         }
@@ -477,10 +487,14 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, tip));
             crate::scenario::publish_target(&format!("appbar:{icon}"), br);
             crate::scenario::publish_target(&format!("titlebar:{icon}"), br);
-            if enabled && (resp.hovered() || resp.has_focus()) {
+            let bubble = t.bubble(ui.painter(), br.shrink(3.0), t.accent, crate::glass::Bubble::of(&resp, enabled, false));
+            if bubble.is_none() && enabled && (resp.hovered() || resp.has_focus()) {
                 ui.painter().rect_filled(br.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
             }
             icons::paint_app_bar(ui.painter(), Rect::from_center_size(br.center(), vec2(18.0, 18.0)), icon, if enabled { 1.0 } else { 0.35 });
+            if let Some(bubble) = bubble {
+                bubble.finish(ui.painter());
+            }
             let clicked = resp.backing_on_hover_text(tip).clicked();
             enabled && clicked
         };
@@ -599,10 +613,14 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Settings sits immediately left of Help (also Ctrl+,).
         let gear = Rect::from_center_size(pos2(report.left() - 52.0, r.center().y), vec2(32.0, 32.0));
         let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click());
-        if gresp.hovered() || gresp.has_focus() {
+        let bubble = t.bubble(ui.painter(), gear.shrink(3.0), t.accent, crate::glass::Bubble::of(&gresp, true, false));
+        if bubble.is_none() && (gresp.hovered() || gresp.has_focus()) {
             ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
         }
         icons::paint_app_bar(ui.painter(), gear.shrink(7.0), "settings", 1.0);
+        if let Some(bubble) = bubble {
+            bubble.finish(ui.painter());
+        }
         crate::scenario::publish_rect("titlebar:preferences", gear);
         if crate::agent_chat::app_bar_button_shown(app) {
             assistant_button(app, ui, Rect::from_center_size(pos2(report.left() - 86.0 - search_shift, r.center().y), vec2(32.0, 32.0)));
@@ -1978,12 +1996,28 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 // Cancel, Finish Edit) never show pressed; a tool pinned into their group does.
                 let exit =
                     finish && matches!(selected.id, "sketch.finish" | "sketch.finish_auto_constrain" | "sketch.cancel" | "component.finish_edit");
-                let neutral = if !exit
+                let on = !exit
                     && (resp.is_pointer_button_down_on()
                         || (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
                         || family_open
-                        || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip))
-                {
+                        || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip));
+                let icon = if selected.id == "sketch.finish" { "finish" } else { info.icon };
+                let side = if finish { 30.0 } else { 26.0 };
+                let icon_rect =
+                    Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
+                // A glass theme's bubble in place of the flat face: a tile over the whole button
+                // (icon, label, a family's drop-down), nearly touching its neighbours, or an orb
+                // round the icon.
+                let bubble_rect = if t.tiles() {
+                    whole.expand2(vec2(BUTTON_GAP * 0.5 - 0.5, 0.0))
+                } else {
+                    Rect::from_center_size(icon_rect.center(), egui::Vec2::splat((side + 12.0).min(whole.width() - 2.0)))
+                };
+                let bubble =
+                    if persistent { None } else { t.bubble(&painter, bubble_rect, t.accent, crate::glass::Bubble::of(&resp, info.enabled, on)) };
+                let neutral = if bubble.is_some() {
+                    egui::Shape::Noop
+                } else if on {
                     egui::Shape::Rect(egui::epaint::RectShape::new(
                         whole,
                         t.radius_sm,
@@ -2009,11 +2043,10 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 {
                     reveal_tooltip(app, ui, whole, command, egui::RectAlign::BOTTOM_START);
                 }
-                let icon = if selected.id == "sketch.finish" { "finish" } else { info.icon };
-                let side = if finish { 30.0 } else { 26.0 };
-                let icon_rect =
-                    Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
                 icons::paint_icon(&painter, icon_rect, icon, if info.enabled { 1.0 } else { 0.35 });
+                if let Some(bubble) = bubble {
+                    bubble.finish(&painter);
+                }
                 let tr_label = app.tr_label(info.label).to_string();
                 if !persistent {
                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled() && info.enabled, &tr_label));
@@ -2472,10 +2505,14 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
         let label = app.tr_label(info.label).to_string();
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, &label));
         crate::scenario::publish_target(&format!("appbar:quick:{}", c.id), br);
-        if enabled && (resp.hovered() || resp.has_focus()) {
+        let bubble = t.bubble(ui.painter(), br.shrink(3.0), t.accent, crate::glass::Bubble::of(&resp, enabled, false));
+        if bubble.is_none() && enabled && (resp.hovered() || resp.has_focus()) {
             ui.painter().rect_filled(br.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
         }
         icons::paint_on(ui.painter(), Rect::from_center_size(br.center(), vec2(20.0, 20.0)), info.icon, Some(true), if enabled { 1.0 } else { 0.35 });
+        if let Some(bubble) = bubble {
+            bubble.finish(ui.painter());
+        }
         if resp.drag_started() {
             egui::DragAndDrop::set_payload(ui.ctx(), QuickAccessDrag(c.id.to_string()));
         }
