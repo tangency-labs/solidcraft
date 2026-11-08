@@ -1,0 +1,35 @@
+{
+  "area": "solids",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-cone-zero-height-refused",
+  "expected": {
+    "method": "the base and the top coincide: no solid, a clean refusal naming the height",
+    "outcome": "refused",
+    "refusal": "height must not be zero",
+    "source": "analytic",
+    "sources": [],
+    "what": "a cone of height 0 has no volume: refused"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 1 (solid.cone): the cone's height must not be zero",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 1 (solid.cone): the cone's height must not be zero",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a cone of height 0 has no volume: refused",
+  "why_not": [
+    "no kernel operation ran before the failure: step 1 (solid.cone): the cone's height must not be zero"
+  ]
+}

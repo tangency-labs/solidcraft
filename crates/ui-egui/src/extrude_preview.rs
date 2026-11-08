@@ -401,7 +401,7 @@ mod tests {
         let original = harness.app.session.doc.clone();
         let undo = harness.app.session.undo.len();
         let mut preview = StraightPreview::default();
-        let colors = Colors::from_tokens(&crate::theme::Tokens::get());
+        let colors = Colors::from_tokens(&solidcraft_theme::Tokens::get());
         let mut pointer = None;
         for distance in [2.0_f64, -2., 3.] {
             if let Kind::Extrude { distance: value, operation, auto_op, .. } = &mut harness.app.dialog.as_mut().unwrap().kind {
@@ -481,7 +481,7 @@ mod tests {
             }
             let commands = crate::dialogs::apply_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
             let mut preview = StraightPreview::default();
-            let built = preview.compute(&harness.app, &commands, Colors::from_tokens(&crate::theme::Tokens::get())).unwrap().unwrap();
+            let built = preview.compute(&harness.app, &commands, Colors::from_tokens(&solidcraft_theme::Tokens::get())).unwrap().unwrap();
             assert_eq!(upright_lines(&built.scene), corners, "{shape}");
             if shape == "solid.cylinder" {
                 // Each wall vertex's normal points away from the axis.
@@ -524,7 +524,8 @@ mod tests {
         let (_, arrow) = crate::canvas::anchor(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
         assert!((arrow.unwrap() - normal).len() < 1e-8);
         let commands = crate::dialogs::apply_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
-        let scene = StraightPreview::default().compute(&harness.app, &commands, Colors::from_tokens(&crate::theme::Tokens::get())).unwrap().unwrap();
+        let scene =
+            StraightPreview::default().compute(&harness.app, &commands, Colors::from_tokens(&solidcraft_theme::Tokens::get())).unwrap().unwrap();
         let bounds = scene.bounds;
         assert!((bounds.max.x - (base_bounds.max.x + normal.x * 2.0)).abs() < 1e-5, "{bounds:?}");
     }
@@ -539,7 +540,7 @@ mod tests {
         h.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];
         h.app.start("solid.extrude");
         let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-        let colors = Colors::from_tokens(&crate::theme::Tokens::get());
+        let colors = Colors::from_tokens(&solidcraft_theme::Tokens::get());
         let mut preview = StraightPreview::default();
         assert!(preview.compute(&h.app, &commands, colors).unwrap().is_ok());
         h.app.run("occurrence.move", json!({"occurrence":made["occurrence"],"translate":[20,0,0]})).unwrap();
@@ -564,7 +565,7 @@ mod tests {
             *distance = "0 mm".into();
         }
         let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-        let colors = Colors::from_tokens(&crate::theme::Tokens::get());
+        let colors = Colors::from_tokens(&solidcraft_theme::Tokens::get());
         let Some(Err(error)) = StraightPreview::default().compute(&h.app, &commands, colors) else { panic!("no immediate error") };
         let engine = h.app.session.preview(&commands).unwrap_err().to_string();
         assert_eq!(error, engine, "the same error as the extrusion's own");
@@ -588,7 +589,8 @@ mod tests {
             *auto_op = false;
         }
         let commands = crate::dialogs::apply_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
-        let scene = StraightPreview::default().compute(&harness.app, &commands, Colors::from_tokens(&crate::theme::Tokens::get())).unwrap().unwrap();
+        let scene =
+            StraightPreview::default().compute(&harness.app, &commands, Colors::from_tokens(&solidcraft_theme::Tokens::get())).unwrap().unwrap();
         assert!((mesh_volume(&scene.scene) - 168.).abs() < 1e-5);
         harness.app.dialog = None;
         harness.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -598,6 +600,6 @@ mod tests {
         harness.app.session.selection = vec![Sel::Profile { sketch: feature, index: 0 }];
         harness.app.start("solid.extrude");
         let commands = crate::dialogs::apply_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
-        assert!(StraightPreview::default().compute(&harness.app, &commands, Colors::from_tokens(&crate::theme::Tokens::get())).is_none());
+        assert!(StraightPreview::default().compute(&harness.app, &commands, Colors::from_tokens(&solidcraft_theme::Tokens::get())).is_none());
     }
 }

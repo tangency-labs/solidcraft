@@ -1889,6 +1889,7 @@
   "material.editor.preserved_appearance": "Megőrzött megjelenés",
   "material.editor.public_reference": "Nyilvános hivatkozás",
   "material.editor.reference": "Hivatkozás",
+  "material.editor.remove": "Eltávolítás",
   "material.editor.save_or_discard": "Anyag hozzárendelése előtt mentse vagy vesse el az anyagvázlatot.",
   "material.editor.saved": "Az anyag mentve. A testekhez rendelt anyagok nem változtak.",
   "material.editor.scope": "A Mentés az anyagot a testekhez való hozzárendelés nélkül tárolja. Az üres tulajdonságok és feltételek ismeretlenek maradnak. A kártyán szereplő sűrűség nem változtatja meg a hozzárendelt sűrűséget vagy a tömeget.",

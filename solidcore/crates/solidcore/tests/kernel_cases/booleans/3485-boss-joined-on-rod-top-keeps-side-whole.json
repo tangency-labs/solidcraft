@@ -1,0 +1,154 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "3485-boss-joined-on-rod-top-keeps-side-whole",
+  "expected": {
+    "body_count": 1,
+    "faces": 5,
+    "method": "rod r=7, h=48.2 plus boss r=2.7 standing 2 mm above the top: V = pi*(7^2*48.2 + 2.7^2*2). Faces: rod bottom, rod side, rod top ring, boss side, boss top = 5 (the rod's side has no seam at the boss's foot)",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3485",
+      "tangency-labs/solidcraft#3062"
+    ],
+    "volume_mm3": 7465.618,
+    "what": "a boss joined on a rod's top face (the join runs the boss on into the rod); the rod's side must stay one face, not seamed at the boss's foot"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 6,
+      "faces": 5,
+      "vertices": 4
+    }
+  },
+  "records": "3485-boss-joined-on-rod-top-keeps-side-whole.bodies.json.gz",
+  "result": [
+    {
+      "body": "Rod",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2461.7520033658243,
+      "body_count": 1,
+      "edges": 6,
+      "faces": 5,
+      "vertices": 4,
+      "volume_mm3": 7465.6179504633665
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3485",
+    "tangency-labs/solidcraft#3062"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a boss joined on a rod's top face (the join runs the boss on into the rod); the rod's side must stay one face, not seamed at the boss's foot",
+  "why_not": []
+}

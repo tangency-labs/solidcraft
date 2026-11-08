@@ -1,0 +1,6 @@
+{
+  "unit": "geom.tools",
+  "cases": [
+    {"name": "fuzz01975_file_has_6_edges_case_says", "origin": "fuzz-out/n2000/geom.tools/fuzz01975.json (crash: rust: killed by signal 6 (memory allocation of 6039797760 bytes failed))", "cpp": "harness: file has 6 edges, case says 4294967296", "rust": "harness: file has 6 edges, case says 4294967296", "inputs": {"copy_curve": false, "edge": 0, "file": {"$upstream_file": "Mouse.smb"}, "n_edges": 4294967296, "op": "coincident", "start": 6, "swap": false, "tol": 1e-06}}
+  ]
+}

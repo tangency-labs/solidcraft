@@ -11,8 +11,8 @@ use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, vec2};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::Ring;
 
-use crate::theme::Tokens;
 use crate::viewport::{Proj, projected_polygon};
+use solidcraft_theme::Tokens;
 
 /// A part of the triad.
 #[derive(Clone, Copy, Debug, PartialEq)]

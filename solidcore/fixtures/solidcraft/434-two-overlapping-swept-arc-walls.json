@@ -1,0 +1,236 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcore/issues/434",
+ "pr": "https://github.com/tangency-labs/solidcore/pull/1069 (carries tangency-labs/smlib 1b6f5fa)",
+ "test": "SolidCraft tests/kernel-cases/sweeps/844-join-two-overlapping-swept-arc-walls (solidcraft#844)",
+ "summary": "Two walls 12 thick and 60 tall swept along half circles, wall A r 44..56 over 0..180 degrees, wall B r 52..64 over 90..270, overlapping over a quarter turn and sharing the planes z = 0 and z = 60, are joined. Wall A's frame started with its z in the path's plane (a start tangent along +y), so its flat top came out 2.8e-5 off its plane against a 1e-5 zone tolerance, and the join gave a body whose faces ran far outside it (one swept face continued 240 mm up); with flat tops the join merged the tops onto one B-spline continued past the domain where its radial lines run back over the sector. The profile is given relative to the path start (upstream 1.0.0 moves the profile's reference point there; the fork's SMLIB_SWEEP_FOLLOW keeps the profile where it lies), so the walls straddle the arcs as in the SolidCraft case. V = V_A + V_B - overlap, V_A = 60*(pi/2)*(56^2 - 44^2), V_B = 60*(pi/2)*(64^2 - 52^2), overlap = 60*(pi/4)*(56^2 - 52^2) = 223932.72. The walls' radial faces are the sweep's approximation of the arcs, so the measured volume is expected within 1 mm^3.",
+ "cases": [
+  {
+   "name": "two_overlapping_swept_arc_walls_joined",
+   "note": "wall A over 0..180 degrees, wall B over 90..270: one lump, the two tops and the two bottoms joined by the merge",
+   "fixes": [
+    "sweep_frame_on_planar_path_normal",
+    "cover_refuses_folded_continuation"
+   ],
+   "steps": [
+    {
+     "op": "sweep",
+     "id": "wall_a",
+     "plane": "xz",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0,
+         0
+        ],
+        [
+         6,
+         0
+        ],
+        [
+         6,
+         60
+        ],
+        [
+         -6,
+         60
+        ],
+        [
+         -6,
+         0
+        ]
+       ]
+      }
+     ],
+     "path": {
+      "kind": "arc",
+      "center": [
+       0,
+       0
+      ],
+      "radius": 50,
+      "start_deg": 0,
+      "end_deg": 180
+     }
+    },
+    {
+     "op": "sweep",
+     "id": "wall_b",
+     "plane": "yz",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0,
+         0
+        ],
+        [
+         6,
+         0
+        ],
+        [
+         6,
+         60
+        ],
+        [
+         -6,
+         60
+        ],
+        [
+         -6,
+         0
+        ]
+       ]
+      }
+     ],
+     "path": {
+      "kind": "arc",
+      "center": [
+       0,
+       0
+      ],
+      "radius": 58,
+      "start_deg": 90,
+      "end_deg": 270
+     }
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "wall_a",
+     "b": "wall_b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 223932.7168,
+     "tol": 1,
+     "formula": "V_A + V_B - overlap = 60*(pi/2)*(56^2 - 44^2) + 60*(pi/2)*(64^2 - 52^2) - 60*(pi/4)*(56^2 - 52^2)"
+    }
+   }
+  },
+  {
+   "name": "two_overlapping_swept_arc_walls_outside_the_arcs",
+   "note": "the same walls with the arcs tangent to their inner faces (the profile 0..12 outward from the path start), so a swept top continued past its domain runs back through the sector's centre: without the fold rule the join keeps a face built on that continuation and runs 240 mm out of the body",
+   "fixes": [
+    "sweep_frame_on_planar_path_normal",
+    "cover_refuses_folded_continuation"
+   ],
+   "steps": [
+    {
+     "op": "sweep",
+     "id": "wall_a",
+     "plane": "xz",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0,
+         0
+        ],
+        [
+         12,
+         0
+        ],
+        [
+         12,
+         60
+        ],
+        [
+         0,
+         60
+        ]
+       ]
+      }
+     ],
+     "path": {
+      "kind": "arc",
+      "center": [
+       0,
+       0
+      ],
+      "radius": 50,
+      "start_deg": 0,
+      "end_deg": 180
+     }
+    },
+    {
+     "op": "sweep",
+     "id": "wall_b",
+     "plane": "yz",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0,
+         0
+        ],
+        [
+         12,
+         0
+        ],
+        [
+         12,
+         60
+        ],
+        [
+         0,
+         60
+        ]
+       ]
+      }
+     ],
+     "path": {
+      "kind": "arc",
+      "center": [
+       0,
+       0
+      ],
+      "radius": 58,
+      "start_deg": 90,
+      "end_deg": 270
+     }
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "wall_a",
+     "b": "wall_b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 248814.1382,
+     "tol": 1,
+     "formula": "V_A + V_B - overlap = 60*(pi/2)*(62^2 - 50^2) + 60*(pi/2)*(70^2 - 58^2) - 60*(pi/4)*(62^2 - 58^2)"
+    }
+   }
+  }
+ ]
+}

@@ -10,13 +10,13 @@ pub(crate) struct Fixture {
 }
 
 fn item(id: &str, kind: StatusKind, label: &str, setting: String, has_key: bool) -> StatusItem {
-    StatusItem { id: id.into(), kind, name: crate::i18n::tr(label).into(), setting, has_key, editable: false }
+    StatusItem { id: id.into(), kind, name: solidcraft_ui_text::tr(label).into(), setting, has_key, editable: false }
 }
 
 fn specimen(id: &str, readout: bool) -> crate::ui_kit::Details {
     use crate::ui_kit::{DetailFinding, DetailKey, DetailSetting, DetailValue, Details};
-    let t = crate::theme::Tokens::get();
-    let tr = |id| crate::i18n::tr(id).to_owned();
+    let t = solidcraft_theme::Tokens::get();
+    let tr = |id| solidcraft_ui_text::tr(id).to_owned();
     let mut description = Details { caption: Some(tr("ui.details_fixture_caption")), ..Default::default() };
     description.key = t
         .analysis
@@ -27,7 +27,7 @@ fn specimen(id: &str, readout: bool) -> crate::ui_kit::Details {
         .map(|(index, (colour, label))| DetailKey {
             numeric: true,
             pattern_colour: None,
-            colour: crate::theme::srgb(colour),
+            colour: solidcraft_theme::srgb(colour),
             pattern: index == 2,
             label: label.into(),
             value: String::new(),
@@ -73,7 +73,7 @@ fn specimen(id: &str, readout: bool) -> crate::ui_kit::Details {
 /// Presets are bounded, named specimens rather than arbitrary user-provided widget state.
 pub(crate) fn control(app: &mut crate::SolveApp, params: &Value) -> Result<Value, String> {
     let preset = params.get("preset").and_then(Value::as_str).ok_or("missing `preset`")?;
-    let zebra = || item("zebra", StatusKind::Mode, "Zebra", crate::i18n::format("ui.viewport_status_stripes", &[("count", "12")]), false);
+    let zebra = || item("zebra", StatusKind::Mode, "Zebra", solidcraft_ui_text::format("ui.viewport_status_stripes", &[("count", "12")]), false);
     let section = || item("section", StatusKind::Mode, "Section", "Z 20 mm".into(), false);
     let result = || item("radius", StatusKind::Result, "ui.viewport_status_minimum_radius", "0.8 mm".into(), false);
     let attention = || {
@@ -81,7 +81,7 @@ pub(crate) fn control(app: &mut crate::SolveApp, params: &Value) -> Result<Value
             "interference",
             StatusKind::Attention,
             "cmd.inspect_interference",
-            crate::i18n::format("ui.viewport_status_pairs", &[("count", "3")]),
+            solidcraft_ui_text::format("ui.viewport_status_pairs", &[("count", "3")]),
             false,
         )
     };

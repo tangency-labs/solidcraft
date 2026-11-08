@@ -1,0 +1,2180 @@
+{
+ "cases": [
+  {
+   "name": "solve_pivot_singular_2x2",
+   "inputs": {
+    "op": "solve_pivot",
+    "a": {
+     "n": 1,
+     "m": 1,
+     "mtp": "full",
+     "bw": 1,
+     "rows": [
+      [
+       1.0,
+       1.0
+      ],
+      [
+       2.0,
+       2.0
+      ]
+     ]
+    },
+    "b": [
+     4.0,
+     6.0
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix systems)"
+  },
+  {
+   "name": "solve_pivot_2x2",
+   "inputs": {
+    "op": "solve_pivot",
+    "a": {
+     "n": 1,
+     "m": 1,
+     "mtp": "full",
+     "bw": 1,
+     "rows": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       2.0,
+       2.0
+      ]
+     ]
+    },
+    "b": [
+     4.0,
+     6.0
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix systems)"
+  },
+  {
+   "name": "solve_pivot_3x3",
+   "inputs": {
+    "op": "solve_pivot",
+    "a": {
+     "n": 2,
+     "m": 2,
+     "mtp": "full",
+     "bw": 2,
+     "rows": [
+      [
+       1.0,
+       1.0,
+       2.0
+      ],
+      [
+       2.0,
+       4.0,
+       -3.0
+      ],
+      [
+       3.0,
+       6.0,
+       -5.0
+      ]
+     ]
+    },
+    "b": [
+     9.0,
+     1.0,
+     0.0
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix systems)"
+  },
+  {
+   "name": "lu_pivot_3x3",
+   "inputs": {
+    "op": "lu",
+    "a": {
+     "n": 2,
+     "m": 2,
+     "mtp": "full",
+     "bw": 2,
+     "rows": [
+      [
+       1.0,
+       1.0,
+       2.0
+      ],
+      [
+       2.0,
+       4.0,
+       -3.0
+      ],
+      [
+       3.0,
+       6.0,
+       -5.0
+      ]
+     ]
+    },
+    "pivot": true
+   },
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix systems)"
+  },
+  {
+   "name": "lu_3x3",
+   "inputs": {
+    "op": "lu",
+    "a": {
+     "n": 2,
+     "m": 2,
+     "mtp": "full",
+     "bw": 2,
+     "rows": [
+      [
+       1.0,
+       1.0,
+       2.0
+      ],
+      [
+       2.0,
+       4.0,
+       -3.0
+      ],
+      [
+       3.0,
+       6.0,
+       -5.0
+      ]
+     ]
+    },
+    "pivot": false
+   },
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix systems)"
+  },
+  {
+   "name": "lu_singular_2x2",
+   "inputs": {
+    "op": "lu",
+    "a": {
+     "n": 1,
+     "m": 1,
+     "mtp": "full",
+     "bw": 1,
+     "rows": [
+      [
+       1.0,
+       1.0
+      ],
+      [
+       2.0,
+       2.0
+      ]
+     ]
+    },
+    "pivot": false
+   },
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix systems)"
+  },
+  {
+   "name": "inverse_3x3",
+   "inputs": {
+    "op": "inverse",
+    "a": {
+     "n": 2,
+     "m": 2,
+     "mtp": "full",
+     "bw": 2,
+     "rows": [
+      [
+       1.0,
+       1.0,
+       2.0
+      ],
+      [
+       2.0,
+       4.0,
+       -3.0
+      ],
+      [
+       3.0,
+       6.0,
+       -5.0
+      ]
+     ]
+    },
+    "lud": false,
+    "b": null
+   },
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix systems)"
+  },
+  {
+   "name": "inverse_2x2_into_existing",
+   "inputs": {
+    "op": "inverse",
+    "a": {
+     "n": 1,
+     "m": 1,
+     "mtp": "full",
+     "bw": 1,
+     "rows": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       2.0,
+       2.0
+      ]
+     ]
+    },
+    "lud": false,
+    "b": {
+     "n": 2,
+     "m": 2,
+     "mtp": "full",
+     "bw": 2,
+     "rows": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ]
+    }
+   },
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix systems)"
+  },
+  {
+   "name": "inverse_into_too_small",
+   "inputs": {
+    "op": "inverse",
+    "a": {
+     "n": 2,
+     "m": 2,
+     "mtp": "full",
+     "bw": 2,
+     "rows": [
+      [
+       1.0,
+       1.0,
+       2.0
+      ],
+      [
+       2.0,
+       4.0,
+       -3.0
+      ],
+      [
+       3.0,
+       6.0,
+       -5.0
+      ]
+     ]
+    },
+    "lud": false,
+    "b": {
+     "n": 1,
+     "m": 2,
+     "mtp": "full",
+     "bw": 1,
+     "rows": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ]
+    }
+   },
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix systems)"
+  },
+  {
+   "name": "right_for_back_3x3",
+   "inputs": {
+    "op": "right_for_back",
+    "a": {
+     "n": 2,
+     "m": 2,
+     "mtp": "full",
+     "bw": 2,
+     "rows": [
+      [
+       1.0,
+       1.0,
+       2.0
+      ],
+      [
+       2.0,
+       4.0,
+       -3.0
+      ],
+      [
+       3.0,
+       6.0,
+       -5.0
+      ]
+     ]
+    },
+    "decompose": true,
+    "y": [
+     9.0,
+     1.0,
+     0.0
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix systems)"
+  },
+  {
+   "name": "lstsq_line_fit",
+   "inputs": {
+    "op": "lstsq",
+    "a": {
+     "n": 3,
+     "m": 1,
+     "mtp": "full",
+     "bw": 3,
+     "rows": [
+      [
+       1.0,
+       0.0
+      ],
+      [
+       1.0,
+       1.0
+      ],
+      [
+       1.0,
+       2.0
+      ],
+      [
+       1.0,
+       3.0
+      ]
+     ]
+    },
+    "rhs": [
+     1.0,
+     3.1,
+     4.9,
+     7.2
+    ]
+   }
+  },
+  {
+   "name": "lstsq_square_rejected",
+   "inputs": {
+    "op": "lstsq",
+    "a": {
+     "n": 1,
+     "m": 1,
+     "mtp": "full",
+     "bw": 1,
+     "rows": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       2.0,
+       2.0
+      ]
+     ]
+    },
+    "rhs": [
+     4.0,
+     6.0
+    ]
+   }
+  },
+  {
+   "name": "banded_tridiagonal_lu",
+   "inputs": {
+    "op": "lu",
+    "a": {
+     "n": 3,
+     "m": 3,
+     "mtp": "banded",
+     "bw": 3,
+     "rows": [
+      [
+       0.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       0.0
+      ]
+     ]
+    },
+    "pivot": false
+   }
+  },
+  {
+   "name": "banded_tridiagonal_for_back_pts",
+   "inputs": {
+    "op": "for_back_pts",
+    "a": {
+     "n": 3,
+     "m": 3,
+     "mtp": "banded",
+     "bw": 3,
+     "rows": [
+      [
+       0.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       0.0
+      ]
+     ]
+    },
+    "decompose": true,
+    "rhs": [
+     [
+      1.0,
+      2.0,
+      3.0
+     ],
+     [
+      0.0,
+      1.0,
+      0.0
+     ],
+     [
+      2.0,
+      -1.0,
+      1.0
+     ],
+     [
+      5.0,
+      5.0,
+      5.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "banded_tridiagonal_for_back_cpts_planar",
+   "inputs": {
+    "op": "for_back_cpts",
+    "a": {
+     "n": 3,
+     "m": 3,
+     "mtp": "banded",
+     "bw": 3,
+     "rows": [
+      [
+       0.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       0.0
+      ]
+     ]
+    },
+    "decompose": true,
+    "rhs": [
+     [
+      1.0,
+      2.0,
+      1.7976931348623157e+308,
+      1.0
+     ],
+     [
+      0.0,
+      1.0,
+      1.7976931348623157e+308,
+      2.0
+     ],
+     [
+      2.0,
+      -1.0,
+      1.7976931348623157e+308,
+      1.0
+     ],
+     [
+      5.0,
+      5.0,
+      1.7976931348623157e+308,
+      0.5
+     ]
+    ]
+   }
+  },
+  {
+   "name": "banded_tridiagonal_inverse",
+   "inputs": {
+    "op": "inverse",
+    "a": {
+     "n": 3,
+     "m": 3,
+     "mtp": "banded",
+     "bw": 3,
+     "rows": [
+      [
+       0.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       0.0
+      ]
+     ]
+    },
+    "lud": false,
+    "b": null
+   }
+  },
+  {
+   "name": "banded_transpose_in_place",
+   "inputs": {
+    "op": "transpose",
+    "a": {
+     "n": 3,
+     "m": 3,
+     "mtp": "banded",
+     "bw": 3,
+     "rows": [
+      [
+       0.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       0.0
+      ]
+     ]
+    },
+    "in_place": true,
+    "b": null
+   }
+  },
+  {
+   "name": "banded_mul_pts",
+   "inputs": {
+    "op": "mul_pts",
+    "a": {
+     "n": 3,
+     "m": 3,
+     "mtp": "banded",
+     "bw": 3,
+     "rows": [
+      [
+       0.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       0.0
+      ]
+     ]
+    },
+    "pts": [
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      1.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ],
+     [
+      1.0,
+      1.0,
+      1.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "multiply_ll_ur",
+   "inputs": {
+    "op": "multiply",
+    "a": {
+     "n": 2,
+     "m": 2,
+     "mtp": "lower_left",
+     "bw": 2,
+     "rows": [
+      [
+       2.0,
+       9.0,
+       9.0
+      ],
+      [
+       1.0,
+       3.0,
+       9.0
+      ],
+      [
+       4.0,
+       5.0,
+       6.0
+      ]
+     ]
+    },
+    "b": {
+     "n": 2,
+     "m": 2,
+     "mtp": "upper_right",
+     "bw": 2,
+     "rows": [
+      [
+       1.0,
+       2.0,
+       3.0
+      ],
+      [
+       9.0,
+       4.0,
+       5.0
+      ],
+      [
+       9.0,
+       9.0,
+       6.0
+      ]
+     ]
+    },
+    "c": null
+   }
+  },
+  {
+   "name": "multiply_ll_ll",
+   "inputs": {
+    "op": "multiply",
+    "a": {
+     "n": 2,
+     "m": 2,
+     "mtp": "lower_left",
+     "bw": 2,
+     "rows": [
+      [
+       2.0,
+       9.0,
+       9.0
+      ],
+      [
+       1.0,
+       3.0,
+       9.0
+      ],
+      [
+       4.0,
+       5.0,
+       6.0
+      ]
+     ]
+    },
+    "b": {
+     "n": 2,
+     "m": 2,
+     "mtp": "lower_left",
+     "bw": 2,
+     "rows": [
+      [
+       2.0,
+       9.0,
+       9.0
+      ],
+      [
+       1.0,
+       3.0,
+       9.0
+      ],
+      [
+       4.0,
+       5.0,
+       6.0
+      ]
+     ]
+    },
+    "c": null
+   }
+  },
+  {
+   "name": "multiply_ur_ur",
+   "inputs": {
+    "op": "multiply",
+    "a": {
+     "n": 2,
+     "m": 2,
+     "mtp": "upper_right",
+     "bw": 2,
+     "rows": [
+      [
+       1.0,
+       2.0,
+       3.0
+      ],
+      [
+       9.0,
+       4.0,
+       5.0
+      ],
+      [
+       9.0,
+       9.0,
+       6.0
+      ]
+     ]
+    },
+    "b": {
+     "n": 2,
+     "m": 2,
+     "mtp": "upper_right",
+     "bw": 2,
+     "rows": [
+      [
+       1.0,
+       2.0,
+       3.0
+      ],
+      [
+       9.0,
+       4.0,
+       5.0
+      ],
+      [
+       9.0,
+       9.0,
+       6.0
+      ]
+     ]
+    },
+    "c": null
+   }
+  },
+  {
+   "name": "multiply_banded_rejected",
+   "inputs": {
+    "op": "multiply",
+    "a": {
+     "n": 3,
+     "m": 3,
+     "mtp": "banded",
+     "bw": 3,
+     "rows": [
+      [
+       0.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       0.0
+      ]
+     ]
+    },
+    "b": {
+     "n": 3,
+     "m": 3,
+     "mtp": "banded",
+     "bw": 3,
+     "rows": [
+      [
+       0.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       1.0
+      ],
+      [
+       1.0,
+       4.0,
+       0.0
+      ]
+     ]
+    },
+    "c": null
+   }
+  },
+  {
+   "name": "multiply_nonconformable",
+   "inputs": {
+    "op": "multiply",
+    "a": {
+     "n": 2,
+     "m": 2,
+     "mtp": "full",
+     "bw": 2,
+     "rows": [
+      [
+       1.0,
+       1.0,
+       2.0
+      ],
+      [
+       2.0,
+       4.0,
+       -3.0
+      ],
+      [
+       3.0,
+       6.0,
+       -5.0
+      ]
+     ]
+    },
+    "b": {
+     "n": 1,
+     "m": 1,
+     "mtp": "full",
+     "bw": 1,
+     "rows": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       2.0,
+       2.0
+      ]
+     ]
+    },
+    "c": null
+   }
+  },
+  {
+   "name": "transpose_ll_in_place",
+   "inputs": {
+    "op": "transpose",
+    "a": {
+     "n": 2,
+     "m": 2,
+     "mtp": "lower_left",
+     "bw": 2,
+     "rows": [
+      [
+       2.0,
+       9.0,
+       9.0
+      ],
+      [
+       1.0,
+       3.0,
+       9.0
+      ],
+      [
+       4.0,
+       5.0,
+       6.0
+      ]
+     ]
+    },
+    "in_place": true,
+    "b": null
+   }
+  },
+  {
+   "name": "transpose_full_3x2",
+   "inputs": {
+    "op": "transpose",
+    "a": {
+     "n": 1,
+     "m": 2,
+     "mtp": "full",
+     "bw": 1,
+     "rows": [
+      [
+       1.0,
+       2.0,
+       3.0
+      ],
+      [
+       4.0,
+       5.0,
+       6.0
+      ]
+     ]
+    },
+    "in_place": false,
+    "b": null
+   }
+  },
+  {
+   "name": "transpose_full_in_place_3x2",
+   "inputs": {
+    "op": "transpose",
+    "a": {
+     "n": 1,
+     "m": 2,
+     "mtp": "full",
+     "bw": 1,
+     "rows": [
+      [
+       1.0,
+       2.0,
+       3.0
+      ],
+      [
+       4.0,
+       5.0,
+       6.0
+      ]
+     ]
+    },
+    "in_place": true,
+    "b": null
+   }
+  },
+  {
+   "name": "mul_cpts_ur",
+   "inputs": {
+    "op": "mul_cpts",
+    "a": {
+     "n": 2,
+     "m": 2,
+     "mtp": "upper_right",
+     "bw": 2,
+     "rows": [
+      [
+       1.0,
+       2.0,
+       3.0
+      ],
+      [
+       9.0,
+       4.0,
+       5.0
+      ],
+      [
+       9.0,
+       9.0,
+       6.0
+      ]
+     ]
+    },
+    "pts": [
+     [
+      1.0,
+      2.0,
+      3.0,
+      1.0
+     ],
+     [
+      0.0,
+      1.0,
+      1.7976931348623157e+308,
+      2.0
+     ],
+     [
+      1.0,
+      1.0,
+      1.0,
+      -1.7976931348623157e+308
+     ]
+    ]
+   }
+  },
+  {
+   "name": "check_mem_null",
+   "inputs": {
+    "op": "check_mem",
+    "existing": null,
+    "n": 3,
+    "m": 2,
+    "mtp": "full",
+    "bw": 3
+   }
+  },
+  {
+   "name": "check_mem_banded_bw1",
+   "inputs": {
+    "op": "check_mem",
+    "existing": null,
+    "n": 3,
+    "m": 3,
+    "mtp": "banded",
+    "bw": 1
+   }
+  },
+  {
+   "name": "check_mem_too_small",
+   "inputs": {
+    "op": "check_mem",
+    "existing": {
+     "n": 1,
+     "m": 1,
+     "mtp": "full",
+     "bw": 1,
+     "rows": [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0
+      ]
+     ]
+    },
+    "n": 2,
+    "m": 1,
+    "mtp": "full",
+    "bw": 2
+   }
+  },
+  {
+   "name": "check_mem_bw0_is_null",
+   "inputs": {
+    "op": "check_mem",
+    "existing": {
+     "n": 1,
+     "m": 1,
+     "mtp": "full",
+     "bw": 0,
+     "rows": [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0
+      ]
+     ]
+    },
+    "n": 2,
+    "m": 2,
+    "mtp": "lower_left",
+    "bw": 2
+   }
+  },
+  {
+   "name": "check_mem_redefine",
+   "inputs": {
+    "op": "check_mem",
+    "existing": {
+     "n": 3,
+     "m": 3,
+     "mtp": "full",
+     "bw": 3,
+     "rows": [
+      [
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     ]
+    },
+    "n": 2,
+    "m": 1,
+    "mtp": "upper_right",
+    "bw": 5
+   }
+  },
+  {
+   "name": "quadratic_two_roots",
+   "inputs": {
+    "op": "quadratic",
+    "a": 1.0,
+    "b": -3.0,
+    "c": 2.0
+   }
+  },
+  {
+   "name": "quadratic_double_root",
+   "inputs": {
+    "op": "quadratic",
+    "a": 1.0,
+    "b": 2.0,
+    "c": 1.0
+   }
+  },
+  {
+   "name": "quadratic_a_b_zero",
+   "inputs": {
+    "op": "quadratic",
+    "a": 0.0,
+    "b": 0.0,
+    "c": 1.0
+   }
+  },
+  {
+   "name": "quadratic_a_c_zero",
+   "inputs": {
+    "op": "quadratic",
+    "a": 0.0,
+    "b": 1.0,
+    "c": 0.0
+   }
+  },
+  {
+   "name": "quadratic_b_c_zero",
+   "inputs": {
+    "op": "quadratic",
+    "a": 1.0,
+    "b": 0.0,
+    "c": 0.0
+   }
+  },
+  {
+   "name": "quadratic_linear",
+   "inputs": {
+    "op": "quadratic",
+    "a": 0.0,
+    "b": 2.0,
+    "c": -4.0
+   }
+  },
+  {
+   "name": "quadratic_b_zero_two",
+   "inputs": {
+    "op": "quadratic",
+    "a": 1.0,
+    "b": 0.0,
+    "c": -4.0
+   }
+  },
+  {
+   "name": "quadratic_b_zero_none",
+   "inputs": {
+    "op": "quadratic",
+    "a": 1.0,
+    "b": 0.0,
+    "c": 4.0
+   }
+  },
+  {
+   "name": "quadratic_c_zero",
+   "inputs": {
+    "op": "quadratic",
+    "a": 1.0,
+    "b": -5.0,
+    "c": 0.0
+   }
+  },
+  {
+   "name": "quadratic_c_zero_swapped",
+   "inputs": {
+    "op": "quadratic",
+    "a": -1.0,
+    "b": 5.0,
+    "c": 0.0
+   }
+  },
+  {
+   "name": "quadratic_tiny_a",
+   "inputs": {
+    "op": "quadratic",
+    "a": 1e-13,
+    "b": 1.0,
+    "c": 1.0
+   }
+  },
+  {
+   "name": "quadratic_no_roots",
+   "inputs": {
+    "op": "quadratic",
+    "a": 1.0,
+    "b": 1.0,
+    "c": 1.0
+   }
+  },
+  {
+   "name": "quadratic_near_double",
+   "inputs": {
+    "op": "quadratic",
+    "a": 1.0,
+    "b": -2.0,
+    "c": 0.999999999
+   }
+  },
+  {
+   "name": "quadratic_cancellation",
+   "inputs": {
+    "op": "quadratic",
+    "a": 2.0,
+    "b": -100000000.0,
+    "c": 1.0
+   }
+  },
+  {
+   "name": "pascal_0",
+   "inputs": {
+    "op": "pascal",
+    "row": 0
+   }
+  },
+  {
+   "name": "pascal_1",
+   "inputs": {
+    "op": "pascal",
+    "row": 1
+   }
+  },
+  {
+   "name": "pascal_2",
+   "inputs": {
+    "op": "pascal",
+    "row": 2
+   }
+  },
+  {
+   "name": "pascal_10",
+   "inputs": {
+    "op": "pascal",
+    "row": 10
+   }
+  },
+  {
+   "name": "pascal_33",
+   "inputs": {
+    "op": "pascal",
+    "row": 33
+   }
+  },
+  {
+   "name": "pascal_66",
+   "inputs": {
+    "op": "pascal",
+    "row": 66
+   }
+  },
+  {
+   "name": "float_op_mul_overflow",
+   "inputs": {
+    "op": "float_op",
+    "x": 1.7976931348623157e+308,
+    "y": 2.0,
+    "flag": 3
+   }
+  },
+  {
+   "name": "float_op_mul_underflow",
+   "inputs": {
+    "op": "float_op",
+    "x": 1e-200,
+    "y": 1e-200,
+    "flag": 3
+   }
+  },
+  {
+   "name": "float_op_mul_opposite",
+   "inputs": {
+    "op": "float_op",
+    "x": 1e+200,
+    "y": 1e-200,
+    "flag": 3
+   }
+  },
+  {
+   "name": "float_op_div_by_zero",
+   "inputs": {
+    "op": "float_op",
+    "x": 1.0,
+    "y": 0.0,
+    "flag": 4
+   }
+  },
+  {
+   "name": "float_op_zero_by_zero",
+   "inputs": {
+    "op": "float_op",
+    "x": 0.0,
+    "y": 0.0,
+    "flag": 4
+   }
+  },
+  {
+   "name": "float_op_div_overflow",
+   "inputs": {
+    "op": "float_op",
+    "x": 1.7976931348623157e+308,
+    "y": 0.5,
+    "flag": 4
+   }
+  },
+  {
+   "name": "float_op_div_underflow",
+   "inputs": {
+    "op": "float_op",
+    "x": 2.2250738585072014e-308,
+    "y": 2.0,
+    "flag": 4
+   }
+  },
+  {
+   "name": "float_op_add_overflow",
+   "inputs": {
+    "op": "float_op",
+    "x": 1.7976931348623157e+308,
+    "y": 1.7976931348623157e+308,
+    "flag": 1
+   }
+  },
+  {
+   "name": "float_op_add_opposite",
+   "inputs": {
+    "op": "float_op",
+    "x": 1.7976931348623157e+308,
+    "y": -1.7976931348623157e+308,
+    "flag": 1
+   }
+  },
+  {
+   "name": "float_op_sub_overflow",
+   "inputs": {
+    "op": "float_op",
+    "x": 1.7976931348623157e+308,
+    "y": -1.7976931348623157e+308,
+    "flag": 2
+   }
+  },
+  {
+   "name": "float_op_sub_same_sign",
+   "inputs": {
+    "op": "float_op",
+    "x": -1.7976931348623157e+308,
+    "y": -1.0,
+    "flag": 2
+   }
+  },
+  {
+   "name": "point_ops_rational_3d",
+   "inputs": {
+    "op": "point_ops",
+    "pa": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "pb": [
+     -1.0,
+     0.5,
+     2.0
+    ],
+    "pc": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "pd": [
+     2.0,
+     2.0,
+     0.5
+    ],
+    "alpha": 0.5,
+    "beta": -2.0,
+    "gamma": 3.0,
+    "delta": 0.25,
+    "i1": 3,
+    "i2": -7,
+    "a": [
+     2.0,
+     4.0,
+     6.0,
+     2.0
+    ],
+    "b": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "c": [
+     2.0,
+     4.0,
+     6.0,
+     2.0
+    ],
+    "d": [
+     0.0,
+     1.0,
+     2.0,
+     0.5
+    ],
+    "w": 2.0,
+    "mat": [
+     1.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     0.0,
+     -1.0,
+     0.0,
+     0.0,
+     1.0,
+     3.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "point_ops_nonrational_planar",
+   "inputs": {
+    "op": "point_ops",
+    "pa": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "pb": [
+     -1.0,
+     0.5,
+     2.0
+    ],
+    "pc": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "pd": [
+     2.0,
+     2.0,
+     0.5
+    ],
+    "alpha": 0.5,
+    "beta": -2.0,
+    "gamma": 3.0,
+    "delta": 0.25,
+    "i1": 3,
+    "i2": -7,
+    "a": [
+     1.0,
+     2.0,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "b": [
+     3.0,
+     -1.0,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "c": [
+     1.0,
+     2.0,
+     0.0,
+     -1.7976931348623157e+308
+    ],
+    "d": [
+     0.0,
+     0.0,
+     1.7976931348623157e+308,
+     1.0
+    ],
+    "w": -1.7976931348623157e+308,
+    "mat": [
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "point_ops_mixed_markers",
+   "inputs": {
+    "op": "point_ops",
+    "pa": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "pb": [
+     -1.0,
+     0.5,
+     2.0
+    ],
+    "pc": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "pd": [
+     2.0,
+     2.0,
+     0.5
+    ],
+    "alpha": 0.5,
+    "beta": -2.0,
+    "gamma": 3.0,
+    "delta": 0.25,
+    "i1": 3,
+    "i2": -7,
+    "a": [
+     1.0,
+     2.0,
+     3.0,
+     -1.7976931348623157e+308
+    ],
+    "b": [
+     3.0,
+     -1.0,
+     1.7976931348623157e+308,
+     2.0
+    ],
+    "c": [
+     1.0,
+     2.0,
+     1.7976931348623157e+308,
+     0.0
+    ],
+    "d": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "w": 0.0,
+    "mat": [
+     1.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     0.0,
+     -1.0,
+     0.0,
+     0.0,
+     1.0,
+     3.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "srf_eval_bilinear",
+   "inputs": {
+    "op": "srf_eval",
+    "net": [
+     [
+      [
+       0.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.0,
+       1.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.0,
+       0.0,
+       1.0,
+       -1.7976931348623157e+308
+      ]
+     ]
+    ],
+    "n": 1,
+    "m": 1,
+    "u": 0.25,
+    "v": 0.75
+   }
+  },
+  {
+   "name": "srf_eval_outside_domain",
+   "inputs": {
+    "op": "srf_eval",
+    "net": [
+     [
+      [
+       0.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.0,
+       1.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.0,
+       0.0,
+       1.0,
+       -1.7976931348623157e+308
+      ]
+     ]
+    ],
+    "n": 1,
+    "m": 1,
+    "u": -0.5,
+    "v": 1.5
+   }
+  },
+  {
+   "name": "srf_derivs_rational_full",
+   "inputs": {
+    "op": "srf_derivs",
+    "net": [
+     [
+      [
+       1.0,
+       0.0,
+       0.0,
+       1.0
+      ],
+      [
+       0.0,
+       1.0,
+       0.0,
+       0.5
+      ],
+      [
+       0.0,
+       0.0,
+       0.5,
+       0.25
+      ]
+     ],
+     [
+      [
+       0.5,
+       0.5,
+       0.0,
+       0.2
+      ],
+      [
+       0.0,
+       0.2,
+       0.0,
+       0.1
+      ],
+      [
+       0.1,
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     [
+      [
+       0.0,
+       0.0,
+       0.3,
+       0.1
+      ],
+      [
+       0.1,
+       0.1,
+       0.1,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0,
+       0.05
+      ]
+     ]
+    ],
+    "p": 2,
+    "q": 2,
+    "u": 0.3,
+    "v": 0.6,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2
+   }
+  },
+  {
+   "name": "srf_derivs_rational_upper_half",
+   "inputs": {
+    "op": "srf_derivs",
+    "net": [
+     [
+      [
+       1.0,
+       0.0,
+       0.0,
+       1.0
+      ],
+      [
+       0.0,
+       1.0,
+       0.0,
+       0.5
+      ],
+      [
+       0.0,
+       0.0,
+       0.5,
+       0.25
+      ]
+     ],
+     [
+      [
+       0.5,
+       0.5,
+       0.0,
+       0.2
+      ],
+      [
+       0.0,
+       0.2,
+       0.0,
+       0.1
+      ],
+      [
+       0.1,
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     [
+      [
+       0.0,
+       0.0,
+       0.3,
+       0.1
+      ],
+      [
+       0.1,
+       0.1,
+       0.1,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0,
+       0.05
+      ]
+     ]
+    ],
+    "p": 2,
+    "q": 2,
+    "u": 0.3,
+    "v": 0.6,
+    "mfl": true,
+    "udr": 2,
+    "vdr": 2
+   }
+  },
+  {
+   "name": "srf_derivs_nonrational_upper_half",
+   "inputs": {
+    "op": "srf_derivs",
+    "net": [
+     [
+      [
+       1.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.0,
+       1.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.0,
+       0.0,
+       0.5,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       0.5,
+       0.5,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.0,
+       0.2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.1,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       0.0,
+       0.0,
+       0.3,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.1,
+       0.1,
+       0.1,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ]
+    ],
+    "p": 2,
+    "q": 2,
+    "u": 0.7,
+    "v": 0.1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3
+   }
+  },
+  {
+   "name": "srf_derivs_too_many_derivs",
+   "inputs": {
+    "op": "srf_derivs",
+    "net": [
+     [
+      [
+       1.0,
+       0.0,
+       0.0,
+       1.0
+      ],
+      [
+       0.0,
+       1.0,
+       0.0,
+       0.5
+      ],
+      [
+       0.0,
+       0.0,
+       0.5,
+       0.25
+      ]
+     ],
+     [
+      [
+       0.5,
+       0.5,
+       0.0,
+       0.2
+      ],
+      [
+       0.0,
+       0.2,
+       0.0,
+       0.1
+      ],
+      [
+       0.1,
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     [
+      [
+       0.0,
+       0.0,
+       0.3,
+       0.1
+      ],
+      [
+       0.1,
+       0.1,
+       0.1,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0,
+       0.05
+      ]
+     ]
+    ],
+    "p": 2,
+    "q": 2,
+    "u": 0.3,
+    "v": 0.6,
+    "mfl": false,
+    "udr": 5,
+    "vdr": 1
+   }
+  },
+  {
+   "name": "realloc_1d_grow_real",
+   "inputs": {
+    "op": "realloc1d",
+    "kind": "real",
+    "items": [
+     [
+      1.0
+     ],
+     [
+      2.0
+     ],
+     [
+      3.0
+     ]
+    ],
+    "n": 2,
+    "m": 5
+   }
+  },
+  {
+   "name": "realloc_1d_shrink_cpt",
+   "inputs": {
+    "op": "realloc1d",
+    "kind": "cpt",
+    "items": [
+     [
+      1.0,
+      2.0,
+      3.0,
+      1.0
+     ],
+     [
+      4.0,
+      5.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      7.0,
+      8.0,
+      9.0,
+      2.0
+     ]
+    ],
+    "n": 2,
+    "m": 1
+   }
+  },
+  {
+   "name": "realloc_1d_flag",
+   "inputs": {
+    "op": "realloc1d",
+    "kind": "flag",
+    "items": [
+     [
+      1.0
+     ],
+     [
+      0.0
+     ],
+     [
+      -1.0
+     ]
+    ],
+    "n": 2,
+    "m": 2
+   }
+  },
+  {
+   "name": "realloc_2d_real",
+   "inputs": {
+    "op": "realloc2d",
+    "kind": "real",
+    "items": [
+     [
+      [
+       1.0
+      ],
+      [
+       2.0
+      ]
+     ],
+     [
+      [
+       3.0
+      ],
+      [
+       4.0
+      ]
+     ],
+     [
+      [
+       5.0
+      ],
+      [
+       6.0
+      ]
+     ]
+    ],
+    "n": 2,
+    "m": 1,
+    "k": 1,
+    "l": 3
+   }
+  }
+ ]
+}

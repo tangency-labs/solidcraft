@@ -1,0 +1,6 @@
+{
+  "unit": "nlib.srf_basic",
+  "cases": [
+    {"name": "fuzz00830_alloc_size_arrays", "origin": "fuzz-out/n2000/nlib.srf_basic/fuzz00830.json (enomem: rust: srf_basic::size_arrays sized from a 2^31/2^32 argument, outcome depended on the machine memory)", "issue": "#505", "cpp": "harness: ffi rejected: bad index/count 4294967296", "rust": "harness: record too short (1 values)", "inputs": {"idx": [4294967296, 1, 3, 1, 19, 3], "kind": "size_arrays", "op": "modify", "sur": {"sms": {"$upstream_file": "Surface.sms"}}}}
+  ]
+}

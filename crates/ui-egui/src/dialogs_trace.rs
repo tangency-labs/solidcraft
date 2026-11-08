@@ -12,8 +12,8 @@ use solidcraft_engine::{Sel, Session};
 use super::{Hover, body_of, capital, movable, num, pt, sel_items, snap_of};
 use crate::dialogs::{combo, form_row};
 use crate::selection::SelInput;
-use crate::theme::Tokens;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug)]
 pub struct TraceForm {
@@ -127,10 +127,10 @@ pub(crate) fn stop_text(v: &Value) -> Option<String> {
     // The values come from the engine: a missing key is an empty name, never a panic.
     let name = |m: &serde_json::Map<String, Value>, key: &str| m.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
     if let Some(l) = v["stopped_by_loop"].as_object() {
-        return Some(crate::i18n::format("trace.stopped_by_loop", &[("sample", &at), ("joint", &name(l, "joint"))]));
+        return Some(solidcraft_ui_text::format("trace.stopped_by_loop", &[("sample", &at), ("joint", &name(l, "joint"))]));
     }
     let c = v["stopped_by_contact"].as_object()?;
-    Some(crate::i18n::format("trace.stopped_by_contact", &[("sample", &at), ("a", &name(c, "a")), ("b", &name(c, "b"))]))
+    Some(solidcraft_ui_text::format("trace.stopped_by_contact", &[("sample", &at), ("a", &name(c, "a")), ("b", &name(c, "b"))]))
 }
 
 /// The dialog's rows; true when Enter was pressed in a value.
@@ -191,9 +191,9 @@ pub fn rows(app: &mut crate::SolveApp, ui: &mut egui::Ui, f: &mut TraceForm, inp
         let (text, tone) = match r {
             Ok(v) => match stop_text(v) {
                 Some(why) => (why, crate::ui_kit::StatusTone::Warning),
-                None => (crate::i18n::format("trace.points", &[("count", &v["samples"].to_string())]), crate::ui_kit::StatusTone::Dim),
+                None => (solidcraft_ui_text::format("trace.points", &[("count", &v["samples"].to_string())]), crate::ui_kit::StatusTone::Dim),
             },
-            Err(e) => (crate::i18n::tr_label(e).to_string(), crate::ui_kit::StatusTone::Dim),
+            Err(e) => (solidcraft_ui_text::tr_label(e).to_string(), crate::ui_kit::StatusTone::Dim),
         };
         crate::ui_kit::status_line(ui, &text, tone);
     }
@@ -235,15 +235,15 @@ mod shared_status_baseline_tests {
         }
         assert_eq!(
             stop_text(&json!({"stopped_at":3,"stopped_by_loop":{"joint":"Hinge"},"stopped_by_contact":{"a":"A","b":"B"}})),
-            Some(crate::i18n::format("trace.stopped_by_loop", &[("sample", "3"), ("joint", "Hinge")]))
+            Some(solidcraft_ui_text::format("trace.stopped_by_loop", &[("sample", "3"), ("joint", "Hinge")]))
         );
         assert_eq!(
             stop_text(&json!({"stopped_at":4,"stopped_by_contact":{"a":"A","b":"B"}})),
-            Some(crate::i18n::format("trace.stopped_by_contact", &[("sample", "4"), ("a", "A"), ("b", "B")]))
+            Some(solidcraft_ui_text::format("trace.stopped_by_contact", &[("sample", "4"), ("a", "A"), ("b", "B")]))
         );
         assert_eq!(
             stop_text(&json!({"stopped_at":0,"stopped_by_contact":{"a":1,"b":null}})),
-            Some(crate::i18n::format("trace.stopped_by_contact", &[("sample", "0"), ("a", ""), ("b", "")]))
+            Some(solidcraft_ui_text::format("trace.stopped_by_contact", &[("sample", "0"), ("a", ""), ("b", "")]))
         );
     }
 }

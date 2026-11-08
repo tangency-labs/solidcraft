@@ -1,5 +1,5 @@
 //! Contracts and result types for the drawing commands in `cmd/sketch.rs`: a line, a point, the
-//! circles and the arcs (#12953), the rectangles and the polygons (#13196).
+//! circles and the arcs (#12953), the rectangles and the polygons (#13196), and the two slots.
 
 use std::borrow::Cow;
 
@@ -532,6 +532,93 @@ pub struct ArcCenterPointParams {
     pub connect: Option<bool>,
 }
 
+/// A slot's `width`, as `slot_c2c` and `slot_overall` read it: a number above 1e-9 and below 1e9.
+/// A value that is missing, not a number or too small is the handler's one message.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SlotWidth(pub f64);
+
+impl<'de> Deserialize<'de> for SlotWidth {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_f64()
+            .and_then(params::finite)
+            .filter(|w| *w > 1e-9)
+            .map(SlotWidth)
+            .ok_or_else(|| D::Error::custom(whole("`width` must be positive")))
+    }
+}
+
+impl JsonSchema for SlotWidth {
+    fn schema_name() -> Cow<'static, str> {
+        "SlotWidth".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The slot's width in mm: the distance between its two straight sides, and the diameter of its round ends. Positive.",
+            "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1e9
+        })
+    }
+}
+
+/// Marks `p0`, `p1` and `width` required in a slot's schema. The types hold them as optional
+/// (`#[schemars(required)]` doesn't do this for a key with `serde(default)`), so that a call
+/// that leaves one out reaches the handler, which refuses it with its own message.
+fn slot_required(schema: &mut Schema) {
+    schema.insert("required".into(), json!(["p0", "p1", "width"]));
+}
+
+/// Draw a slot from the centres of its two round ends and its width.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = slot_required)]
+pub struct SlotCenterToCenterParams {
+    /// The sketch to draw in: its feature id or name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+    /// The centre of one round end, as [x, y] or {x, y} in mm. An expression, a point's id or a
+    /// snap is not taken.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PlainPoint")]
+    pub p0: Option<PlainPoint>,
+    /// The centre of the other round end. Not the same point as `p0`.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PlainPoint")]
+    pub p1: Option<PlainPoint>,
+    /// The width of the slot, in mm.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "SlotWidth")]
+    pub width: Option<SlotWidth>,
+    /// Make a new point that lands exactly on an existing point (the origin too) coincident with
+    /// it. Default: true.
+    #[serde(default)]
+    pub connect: Option<bool>,
+}
+
+/// Draw a slot from the two ends of its whole length and its width.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = slot_required)]
+pub struct SlotOverallParams {
+    /// The sketch to draw in: its feature id or name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+    /// The outer end of one round end, on the slot's axis, as [x, y] or {x, y} in mm. An
+    /// expression, a point's id or a snap is not taken.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PlainPoint")]
+    pub p0: Option<PlainPoint>,
+    /// The outer end of the other round end. The distance from `p0` must be more than `width`.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PlainPoint")]
+    pub p1: Option<PlainPoint>,
+    /// The width of the slot, in mm.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "SlotWidth")]
+    pub width: Option<SlotWidth>,
+    /// Make a new point that lands exactly on an existing point (the origin too) coincident with
+    /// it. Default: true.
+    #[serde(default)]
+    pub connect: Option<bool>,
+}
+
 /// What a command added to its sketch: the ids that the sketch has now and did not before.
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub struct Created {
@@ -548,7 +635,7 @@ pub struct Created {
     pub wires: Vec<String>,
 }
 
-/// What a drawing command returns for a line, a circle or an arc.
+/// What a drawing command returns for a line, a circle, an arc or a slot.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct DrawResult {
     /// The ids of the curves drawn, in order.

@@ -1,0 +1,59 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/4006",
+ "test": "none: geometry is the issue's",
+ "summary": "A quadrilateral revolved 270 degrees about an oblique axis 0.33 mm from one corner, one edge perpendicular to the axis to within 7e-12 rad. In SolidCraft the result changed with the first solid's operation (join or new); the kernel operation is the same revolve.",
+ "cases": [
+  {
+   "name": "revolve_quad_oblique_axis_near_corner_270",
+   "note": "A quadrilateral revolved 270 degrees about an oblique axis passing 0.33 mm from one corner; one edge is perpendicular to the axis to within 7e-12 rad. Every vertex is on one side of the axis (distances 0.332, 0.641, 20.071, 19.764 mm), so Pappus applies. Area: lateral faces by Pappus per edge (three cones and one plane) plus two caps: 5801.97451127. Faces: 6 geometric faces (3 cones, 1 plane from the edge perpendicular to the axis, 2 caps); a kernel may split at a seam. In SolidCraft the result changed with the operation of the first solid (join or new); the kernel operation is the same revolve.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -14.39,
+         5.057
+        ],
+        [
+         0.0,
+         30.588
+        ],
+        [
+         -16.927429336,
+         40.128782114
+        ],
+        [
+         -31.216953316,
+         14.776048498
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      -12.692956797,
+      7.33130118,
+      0.0
+     ],
+     "axis_dir": [
+      0.500154471229,
+      0.865936201408,
+      0.0
+     ],
+     "angle_deg": 270.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 27251.205508083,
+     "tol": 0.273,
+     "formula": "Pappus, from the typed coordinates: area 567.477947281, centroid 10.190502456 from the axis, volume = area x distance x 3 pi/2 = 27251.2055081."
+    }
+   }
+  }
+ ]
+}

@@ -303,12 +303,12 @@ fn insert_design_reads_the_saved_design_while_the_window_draws() {
     assert!(h.app.file_load.busy(), "Insert Design reads the design off the window thread");
     until(&mut h, &|app| app.file_load.features().is_some_and(|(done, total)| done >= 2 && total == 3));
     assert!(h.app.file_load.busy(), "Insert Design is still reading the plate");
-    assert!(h.widget(crate::i18n::tr("file_load.inserting")).is_some(), "the overlay says a file is going in");
+    assert!(h.widget(solidcraft_ui_text::tr("file_load.inserting")).is_some(), "the overlay says a file is going in");
     assert!(h.widget("plate.solidcraft…").is_some(), "and names the design being read");
     assert_eq!(h.app.file_load.features(), Some((2, 3)), "and the plate's rebuild progress, held before its third feature");
     assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design), "the design waits");
     // Cancel on the overlay keeps the design as it was.
-    let [x, y] = h.widget(crate::i18n::tr("ui.cancel")).expect("the overlay's Cancel");
+    let [x, y] = h.widget(solidcraft_ui_text::tr("ui.cancel")).expect("the overlay's Cancel");
     let at = pos2(x as f32, y as f32);
     let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Default::default() };
     for event in [Event::PointerMoved(at), button(true), button(false)] {
@@ -323,7 +323,7 @@ fn insert_design_reads_the_saved_design_while_the_window_draws() {
     // Run through, it brings the plate in as a linked component and says so.
     insert(&mut h);
     until(&mut h, &|app| app.file_load.idle());
-    assert!(h.widget(crate::i18n::tr("file_load.inserting")).is_none(), "the overlay goes once it is done");
+    assert!(h.widget(solidcraft_ui_text::tr("file_load.inserting")).is_none(), "the overlay goes once it is done");
     assert_eq!(links(&mut h.app), 1, "the plate is a linked component");
     near(&mut h.app, 1000.0 + plate);
     assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some("Inserted plate"));
@@ -367,7 +367,7 @@ fn reloading_a_point_cloud_runs_off_the_window_thread() {
     let design = h.app.session.doc.clone();
     let (started, release) = hold(&mut h);
     // Frame by frame: a scenario step would wait for the file operation it starts.
-    let [x, y] = h.widget(crate::i18n::tr("ui.point_cloud_reload")).expect("the card offers a reload");
+    let [x, y] = h.widget(solidcraft_ui_text::tr("ui.point_cloud_reload")).expect("the card offers a reload");
     let at = pos2(x as f32, y as f32);
     let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Default::default() };
     for event in [Event::PointerMoved(at), button(true), button(false)] {
