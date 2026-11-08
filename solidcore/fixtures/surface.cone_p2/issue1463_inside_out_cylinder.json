@@ -1,0 +1,1564 @@
+{
+ "cases": [
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_360_pz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 22.0,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_360_pz_sw0_i0",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 22.0,
+      "swap": false,
+      "inside": false
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_360_pz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 22.0,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_360_pz_sw1_i0",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 22.0,
+      "swap": true,
+      "inside": false
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_360_mz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 22.0,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_360_mz_sw0_i0",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 22.0,
+      "swap": false,
+      "inside": false
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_360_mz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 22.0,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_360_mz_sw1_i0",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 22.0,
+      "swap": true,
+      "inside": false
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_180_pz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 22.0,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_180_pz_sw0_i0",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 22.0,
+      "swap": false,
+      "inside": false
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_180_pz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 22.0,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_180_pz_sw1_i0",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 22.0,
+      "swap": true,
+      "inside": false
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_180_mz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 22.0,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_180_mz_sw0_i0",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 22.0,
+      "swap": false,
+      "inside": false
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_180_mz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 22.0,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_0_180_mz_sw1_i0",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 22.0,
+      "swap": true,
+      "inside": false
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_30_300_pz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 30.0,
+      "end": 300.0,
+      "height": 22.0,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_30_300_pz_sw0_i0",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 30.0,
+      "end": 300.0,
+      "height": 22.0,
+      "swap": false,
+      "inside": false
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_30_300_pz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 30.0,
+      "end": 300.0,
+      "height": 22.0,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_30_300_pz_sw1_i0",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 30.0,
+      "end": 300.0,
+      "height": 22.0,
+      "swap": true,
+      "inside": false
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_30_300_mz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 30.0,
+      "end": 300.0,
+      "height": 22.0,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_30_300_mz_sw0_i0",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 30.0,
+      "end": 300.0,
+      "height": 22.0,
+      "swap": false,
+      "inside": false
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_30_300_mz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 30.0,
+      "end": 300.0,
+      "height": 22.0,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1_30_300_mz_sw1_i0",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8.0,
+      "start": 30.0,
+      "end": 300.0,
+      "height": 22.0,
+      "swap": true,
+      "inside": false
+     },
+     "origin": [
+      1.5,
+      -2.0,
+      3.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1em3_0_360_pz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 0.008,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 0.022,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      0.0015,
+      -0.002,
+      0.003
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1em3_0_360_pz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 0.008,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 0.022,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      0.0015,
+      -0.002,
+      0.003
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1em3_0_360_mz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 0.008,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 0.022,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      0.0015,
+      -0.002,
+      0.003
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1em3_0_360_mz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 0.008,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 0.022,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      0.0015,
+      -0.002,
+      0.003
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1em3_0_180_pz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 0.008,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 0.022,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      0.0015,
+      -0.002,
+      0.003
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1em3_0_180_pz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 0.008,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 0.022,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      0.0015,
+      -0.002,
+      0.003
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1em3_0_180_mz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 0.008,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 0.022,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      0.0015,
+      -0.002,
+      0.003
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1em3_0_180_mz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 0.008,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 0.022,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      0.0015,
+      -0.002,
+      0.003
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1e3_0_360_pz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8000.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 22000.0,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      1500.0,
+      -2000.0,
+      3000.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1e3_0_360_pz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8000.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 22000.0,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      1500.0,
+      -2000.0,
+      3000.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1e3_0_360_mz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8000.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 22000.0,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      1500.0,
+      -2000.0,
+      3000.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1e3_0_360_mz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8000.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 22000.0,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      1500.0,
+      -2000.0,
+      3000.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1e3_0_180_pz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8000.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 22000.0,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      1500.0,
+      -2000.0,
+      3000.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1e3_0_180_pz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8000.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 22000.0,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      1500.0,
+      -2000.0,
+      3000.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1e3_0_180_mz_sw0_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8000.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 22000.0,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      1500.0,
+      -2000.0,
+      3000.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "issue1463_cyl_r8h22_s1e3_0_180_mz_sw1_i1",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmCylinder::IsNurbSurfaceCylinder (inside-out NURB)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 8000.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 22000.0,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      1500.0,
+      -2000.0,
+      3000.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize_cylinder",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  }
+ ]
+}

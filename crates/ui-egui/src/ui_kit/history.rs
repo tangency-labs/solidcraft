@@ -1,10 +1,8 @@
 //! Shared history chips, dense name rows, drop bars and rollback markers.
+use crate::icons;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{
-    icons,
-    theme::{TabAccent, Tokens},
-};
 use egui::{Painter, Rect, Stroke, pos2, vec2};
+use solidcraft_theme::{TabAccent, Tokens};
 
 /// Browser and named history rows use the same density.
 pub(crate) const TREE_ROW_HEIGHT: f32 = 26.0;
@@ -87,7 +85,7 @@ fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
     } else {
         "MODEL"
     };
-    crate::theme::icon_accent_for_tab(tab)
+    solidcraft_theme::icon_accent_for_tab(tab)
 }
 
 impl HistoryChip<'_> {
@@ -225,7 +223,7 @@ impl HistoryTransport {
     }
 
     pub(crate) fn label(self, playing: bool) -> &'static str {
-        crate::i18n::tr(match self {
+        solidcraft_ui_text::tr(match self {
             Self::First => "ui.history_first",
             Self::Back => "ui.history_back",
             Self::Play if playing => "cmd.timeline_stop",
@@ -239,7 +237,7 @@ impl HistoryTransport {
     pub fn show(self, ui: &mut egui::Ui, rect: Rect, playing: bool) -> egui::Response {
         let t = Tokens::get();
         let response = ui.interact(rect, ui.scope_id().with(("history_transport", self.id())), egui::Sense::click());
-        crate::scenario::publish_target(&format!("history:{}", self.id()), rect);
+        solidcraft_ui_registry::publish_target(&format!("history:{}", self.id()), rect);
         if response.hovered() {
             ui.painter().rect_filled(rect, t.radius_sm, t.hover);
         }
@@ -351,7 +349,7 @@ pub(crate) fn history_seam(ui: &mut egui::Ui, card: Rect, names: bool) -> Histor
     let id = ui.scope_id().with("history_seam");
     let edge = ui.interact(seam.edge, id.with("edge"), egui::Sense::CLICK | egui::Sense::DRAG);
     let button = ui.interact(seam.pill, id, egui::Sense::click_and_drag());
-    let label = crate::i18n::tr(if names { "ui.collapse" } else { "ui.expand" });
+    let label = solidcraft_ui_text::tr(if names { "ui.collapse" } else { "ui.expand" });
     button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     if button.clicked() {
         button.request_focus();
@@ -396,12 +394,12 @@ pub(crate) fn history_seam(ui: &mut egui::Ui, card: Rect, names: bool) -> Histor
         crate::ui_kit::Container::show_tooltip(response.id, tip, |ui| {
             let t = Tokens::get();
             ui.label(egui::RichText::new(label).font(crate::fonts::semibold(t.font_body)).color(t.text));
-            ui.label(egui::RichText::new(crate::i18n::tr("ui.history_edge_hint")).size(t.font_small).color(t.text_dim));
+            ui.label(egui::RichText::new(solidcraft_ui_text::tr("ui.history_edge_hint")).size(t.font_small).color(t.text_dim));
         });
     }
-    crate::scenario::publish_handle("history:names", seam.pill.center());
-    crate::scenario::publish_rect("history:seam", seam.edge);
-    crate::scenario::publish_rect("history:handle", seam.pill);
+    solidcraft_ui_registry::publish_handle("history:names", seam.pill.center());
+    solidcraft_ui_registry::publish_rect("history:seam", seam.edge);
+    solidcraft_ui_registry::publish_rect("history:handle", seam.pill);
     // egui's click response includes Enter and Space for a focused button.
     HistorySeamResponse {
         toggle: button.clicked() || edge.double_clicked(),
@@ -418,9 +416,9 @@ mod tests {
 
     #[test]
     fn seam_geometry_and_paint_states_follow_tokens_in_both_themes() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             for names in [false, true] {
                 let card = Rect::from_min_size(pos2(20.0, 30.0), vec2(history_width(names), 280.0));
                 let seam = HistorySeam::new(card);
@@ -464,7 +462,7 @@ mod tests {
                 }
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     struct SeamHarness {
@@ -577,9 +575,9 @@ mod tests {
 
     #[test]
     fn chip_selection_error_and_rollback_use_tokens_in_both_themes() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let t = Tokens::get();
             let accent = TabAccent::for_tab(&t, "SURFACE");
             for style in [HistoryStyle::Icons, HistoryStyle::Names] {
@@ -632,14 +630,14 @@ mod tests {
                 }
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]
     fn chips_have_no_connector_shapes_in_either_theme_or_width() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let t = Tokens::get();
             for style in [HistoryStyle::Bottom, HistoryStyle::Icons, HistoryStyle::Names] {
                 let ctx = crate::fonts::test_context();
@@ -678,7 +676,7 @@ mod tests {
                 assert_eq!(connections, 0, "dark={dark}");
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]
@@ -699,9 +697,9 @@ mod tests {
             assert_eq!(lines[0].1, Stroke::new(t.space_2, accent.color));
             assert_eq!(lines[0].0, if vertical { [rect.left_center(), rect.right_center()] } else { [rect.center_top(), rect.center_bottom()] });
         }
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let t = Tokens::get();
             let accent = TabAccent::for_tab(&t, "SURFACE");
             // Both vertical widths retain the 12 pt marker row; the bottom strip rotates it.
@@ -749,6 +747,6 @@ mod tests {
                 assert!(!out.shapes.iter().any(|s| matches!(s.shape, egui::Shape::Path(_))), "no arrowheads");
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 }

@@ -14,9 +14,9 @@ use solidcraft_engine::doc::expr::{Kind as ValueKind, definition};
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::tools::Tool;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 /// What an untyped construction line Length box shows: the line stays infinite.
 const INFINITE: &str = "\u{221e}";

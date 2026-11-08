@@ -25,7 +25,7 @@ and any font preference.
 ## Type scale and metrics
 
 Text sizes come from `theme::Tokens`, with identical values in the light and dark
-palettes in `assets/styles/ui/palettes.rs`. The compact scale runs from
+palettes in `crates/theme/src/palettes.rs`. The compact scale runs from
 `font_badge` (9.5 pt) through `font_heading` (14 pt). Special roles preserve the
 existing designs: `font_triad` (8), `font_compass` (13.5), `font_subtitle` (15),
 `font_intro` (16), `font_article_heading` (17), `font_title` (22), and

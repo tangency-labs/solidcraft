@@ -126,7 +126,7 @@ impl Product {
                 .collect(),
             Self::Assistant => vec![RuntimeAction {
                 id: ControlId("new-chat".into()),
-                label: crate::i18n::tr("ui.agent_chat_new").into(),
+                label: solidcraft_ui_text::tr("ui.agent_chat_new").into(),
                 enabled: true,
                 disabled_reason: None,
                 pressed: None,
@@ -139,7 +139,7 @@ impl Product {
             .into_iter()
             .map(|(id, key, pressed)| RuntimeAction {
                 id: ControlId(id.into()),
-                label: crate::i18n::tr(key).into(),
+                label: solidcraft_ui_text::tr(key).into(),
                 enabled: true,
                 disabled_reason: None,
                 pressed: Some(pressed),
@@ -151,7 +151,7 @@ impl Product {
     }
     fn empty_presentation(self) -> PanelPresentation {
         PanelPresentation {
-            title: crate::i18n::tr(self.title_key()).into(),
+            title: solidcraft_ui_text::tr(self.title_key()).into(),
             icon: "list".into(),
             status: None,
             attention: false,
@@ -391,7 +391,7 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
 
 fn registry(app: &crate::SolveApp) -> PanelResult<PanelRegistry> {
     let mut registry = PanelRegistry::default();
-    let tokens = crate::theme::Tokens::get();
+    let tokens = solidcraft_theme::Tokens::get();
     // The existing strip has a 28-point chip and six-point inset on each side;
     // the shared content slot adds its own symmetric two-point inset.
     let bottom_height = tokens.form_header_height.max(tokens.space_24 + tokens.space_4 + 2.0 * tokens.space_6 + 2.0 * tokens.space_2);
@@ -412,7 +412,7 @@ fn registry(app: &crate::SolveApp) -> PanelResult<PanelRegistry> {
             icon: "list".into(),
             allowed_zones,
             default_zone: if history { Zone::Bottom } else { Zone::Left },
-            min_size: Size { width: 240.0, height: if assistant { 120.0 } else { crate::theme::Tokens::get().control_height } },
+            min_size: Size { width: 240.0, height: if assistant { 120.0 } else { solidcraft_theme::Tokens::get().control_height } },
             default_size: Size { width: crate::prefs::DEFAULT_BROWSER_WIDTH, height: if history { bottom_height } else { 320.0 } },
             max_size: Size { width: MAX_LOGICAL, height: MAX_LOGICAL },
             edge_rule: if assistant { EdgeRule::PinOuter } else { EdgeRule::None },
@@ -560,7 +560,7 @@ impl PanelController for ProductionController {
         }) {
             Availability::Available
         } else {
-            Availability::Unavailable { reason: crate::i18n::tr("ui.panel_host.rule.availability").into() }
+            Availability::Unavailable { reason: solidcraft_ui_text::tr("ui.panel_host.rule.availability").into() }
         }
     }
     fn update(&mut self, _owner: &ContentOwner, _services: &mut ContentServices<'_>) -> PanelResult<()> {
@@ -578,7 +578,7 @@ impl PanelController for ProductionController {
         let snapshot = self.state.0.try_borrow().map_err(|_| error(Rule::Lifecycle, "content measurement is borrowed"))?;
         Ok(Arc::new(ProductionMetrics {
             extent: snapshot.panels.iter().find(|panel| panel.product == self.product).and_then(|panel| panel.extent),
-            inset: crate::theme::Tokens::get().space_2 * 2.0,
+            inset: solidcraft_theme::Tokens::get().space_2 * 2.0,
             policy: spec.side_height_policy,
         }))
     }

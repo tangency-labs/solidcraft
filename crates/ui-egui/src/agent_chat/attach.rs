@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::backend::{self, PromptPart};
-use crate::i18n::format as trf;
+use solidcraft_ui_text::format as trf;
 
 /// A refusal in the app's language: the file's name, then why.
 fn refused(key: &str, name: &str, args: &[(&str, &str)]) -> String {
@@ -508,6 +508,7 @@ mod tests {
 
     #[test]
     fn bad_files_are_refused_with_a_reason() {
+        crate::i18n::install();
         let d = dir("bad");
         let fake = d.join("fake.png");
         std::fs::write(&fake, b"not a picture at all").unwrap();
@@ -533,15 +534,16 @@ mod tests {
     /// Review of #1744: the refusals were English whatever the app's language.
     #[test]
     fn refusals_speak_the_apps_language() {
+        crate::i18n::install();
         let d = dir("lang");
         let binary = d.join("bin.json");
         std::fs::write(&binary, [0xff, 0xfe, 0x00, 0x80]).unwrap();
         {
-            let _ja = crate::i18n::scope("ja");
+            let _ja = solidcraft_ui_text::scope("ja");
             assert!(read(&binary).unwrap_err().contains("UTF-8 のテキストではありません"));
         }
         {
-            let _zh = crate::i18n::scope("zh");
+            let _zh = solidcraft_ui_text::scope("zh");
             assert!(read(&binary).unwrap_err().contains("不是 UTF-8 文本"));
         }
         assert!(read(&binary).unwrap_err().contains("not UTF-8 text"), "English again outside the scope");
@@ -552,6 +554,7 @@ mod tests {
     /// sent as PNG; SVG goes as its source text; HEIC says why not.
     #[test]
     fn each_picture_format_goes_the_way_the_agent_reads_it() {
+        crate::i18n::install();
         let d = dir("formats");
         let img = image::RgbaImage::from_pixel(30, 20, image::Rgba([20, 120, 220, 255]));
         for (file, format, mime) in [
@@ -617,6 +620,7 @@ mod tests {
     /// its size and its place) instead of refused; the agent reads it with its own tools.
     #[test]
     fn other_files_go_by_reference() {
+        crate::i18n::install();
         let d = dir("reference");
         let zip = d.join("fixtures.zip");
         std::fs::write(&zip, vec![0u8; 3000]).unwrap();

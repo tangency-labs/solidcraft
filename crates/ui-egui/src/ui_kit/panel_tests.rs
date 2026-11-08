@@ -1,8 +1,9 @@
 use crate::ui_kit::test_support::*;
 use crate::ui_kit::*;
 
-use crate::{scenario, theme::Tokens};
+use crate::scenario;
 use egui::Ui;
+use solidcraft_theme::Tokens;
 
 #[test]
 fn closed_backing_window_noop_does_not_block_real_host_menu_but_visible_returning_window_does() {
@@ -56,7 +57,7 @@ fn closed_backing_window_noop_does_not_block_real_host_menu_but_visible_returnin
                 observed.0 = ui.ctx().read_response(source.id).unwrap().clicked();
                 let id = egui::Id::unique("returning_backing_feature");
                 let container = Container::new(ui.ctx(), Surface::Feature);
-                let backing = Panel::feature_frame(ui.ctx(), crate::shell::LayoutMode::Floating, crate::frame::Side::Left);
+                let backing = Panel::feature_frame(ui.ctx(), crate::ui_kit::LayoutMode::Floating, crate::frame::Side::Left);
                 let stock = container
                     .window("Returning independent feature")
                     .id(id)
@@ -273,7 +274,7 @@ fn actual_feature_and_system_windows_publish_visible_paint_but_popups_and_modals
                     Container::begin_host_windows(ui.ctx());
                     let id = egui::Id::unique("actual_feature_ledger_producer");
                     let container = Container::new(ui.ctx(), Surface::Feature);
-                    let frame = Panel::feature_frame(ui.ctx(), crate::shell::LayoutMode::Floating, crate::frame::Side::Left);
+                    let frame = Panel::feature_frame(ui.ctx(), crate::ui_kit::LayoutMode::Floating, crate::frame::Side::Left);
                     let stock = container
                         .window("Persistent feature")
                         .id(id)
@@ -384,7 +385,7 @@ fn universal_chrome_controls_have_real_accessible_widgets_and_stable_ids_at_both
                     };
                     assert_eq!(node.role(), expected_role, "the actual widget role follows its typed target: {control:?}");
                     if matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { .. })) {
-                        assert_eq!(control.accessible_name, crate::i18n::tr("ui.panel_host.menu"));
+                        assert_eq!(control.accessible_name, solidcraft_ui_text::tr("ui.panel_host.menu"));
                     }
                 }
             }
@@ -490,11 +491,11 @@ fn panel_disclosure_blends_only_ink_and_reduced_motion_finishes_immediately() {
 fn universal_kit_chrome_uses_one_container_and_preserves_parent_clipping_and_focus_semantics() {
     use crate::ui_kit::panel_host::{HostChrome, panel_host_control, panel_host_sash, panel_host_surface};
     let mut t = Tokens::get();
-    let bevel = crate::theme::Bevel { width: 1.0, highlight: t.form_ink, light: t.control_border, shadow: t.form_dim, dark_shadow: t.border };
+    let bevel = solidcraft_theme::Bevel { width: 1.0, highlight: t.form_ink, light: t.control_border, shadow: t.form_dim, dark_shadow: t.border };
     t.borders.primary = Some(egui::Stroke::new(1.0, t.border));
     t.borders.bevel = Some(bevel);
-    t.borders.primary_inset = Some(crate::theme::InsetBorder { stroke: egui::Stroke::new(0.75, t.form_error), gap: 3.0 });
-    let _tokens = crate::theme::scoped_tokens(t);
+    t.borders.primary_inset = Some(solidcraft_theme::InsetBorder { stroke: egui::Stroke::new(0.75, t.form_error), gap: 3.0 });
+    let _tokens = solidcraft_theme::scoped_tokens(t);
     let ctx = crate::fonts::test_context();
     ctx.enable_accesskit();
     let bounds = egui::Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(160.0, 120.0));
@@ -588,12 +589,12 @@ fn universal_kit_chrome_uses_one_container_and_preserves_parent_clipping_and_foc
 
 #[test]
 fn universal_surface_uses_adaptive_workspace_fill_and_rounding_with_safe_content_clip() {
-    use crate::shell::LayoutMode;
+    use crate::ui_kit::LayoutMode;
     let bounds = egui::Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(320.0, 180.0));
     for dark in [false, true] {
         let mut tokens = if dark { Tokens::dark() } else { Tokens::light() };
         tokens.panel = tokens.panel.gamma_multiply(0.8);
-        let _tokens = crate::theme::scoped_tokens(tokens);
+        let _tokens = solidcraft_theme::scoped_tokens(tokens);
         for layout in [LayoutMode::Floating, LayoutMode::Docked] {
             for free_card in [false, true] {
                 let ctx = crate::fonts::test_context();
@@ -806,7 +807,7 @@ fn universal_drag_badge_keeps_display_order_on_one_line_and_clamps_without_alloc
     let t = Tokens::get();
     let domain = egui::Rect::from_min_max(egui::pos2(20.0, 30.0), egui::pos2(440.0, 330.0));
     let logical = "אחד שניים שלושה ארבעה חמישה שישה שבעה שמונה תשעה עשרה אחרון";
-    let hebrew = crate::bidi::visual(logical).into_owned();
+    let hebrew = solidcraft_ui_text::bidi::visual(logical).into_owned();
     assert_ne!(hebrew, logical, "exercise an already display-ordered eleven-word Hebrew title");
     let narrow = egui::Rect::from_min_size(domain.min, egui::vec2(180.0, 600.0));
     for (scale, rtl) in [(1.0, false), (2.0, true)] {
@@ -954,7 +955,7 @@ fn universal_inline_specimen_uses_one_total_row_with_real_content_and_shared_con
     let section = frame.layout.sections.first().unwrap();
     assert!(section.inline && !section.collapsed);
     assert_eq!(section.header, section.outer);
-    assert!(section.outer.size.height <= crate::theme::PANEL_INLINE_MAX_HEIGHT);
+    assert!(section.outer.size.height <= solidcraft_theme::PANEL_INLINE_MAX_HEIGHT);
     assert!(section.body.is_none() && section.footer.is_none());
     assert!(!frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::HeaderAction { .. }))));
     let runtime = h.app.panel_runtime().unwrap();
@@ -962,8 +963,8 @@ fn universal_inline_specimen_uses_one_total_row_with_real_content_and_shared_con
     assert!(runtime.layout().registry().get(&instance.kind).unwrap().header_actions.is_empty(), "the inline log declares no custom or debug actions");
     assert!(frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { .. }))));
     assert!(frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Collapse { .. }))));
-    assert!(h.widget(crate::i18n::tr("ui.panel_fixture.inline")).is_some());
-    assert!(h.widget(crate::i18n::tr("ui.panel_fixture.caption")).is_none());
+    assert!(h.widget(solidcraft_ui_text::tr("ui.panel_fixture.inline")).is_some());
+    assert!(h.widget(solidcraft_ui_text::tr("ui.panel_fixture.caption")).is_none());
 }
 
 #[test]
@@ -1036,7 +1037,7 @@ fn host_marker(painter: &egui::Painter, frame: egui::Frame, content: egui::Rect,
 fn blur_host_fixture(host: BlurHost, mode: u8, position: egui::Pos2, transform: egui::emath::TSTransform) -> (egui::FullOutput, String) {
     let ctx = crate::fonts::test_context();
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
-    let container = Container::for_layout(crate::shell::LayoutMode::Floating, Surface::Feature);
+    let container = Container::for_layout(crate::ui_kit::LayoutMode::Floating, Surface::Feature);
     let frame = container
         .frame(&ctx, egui::Color32::from_rgba_unmultiplied(40, 80, 100, 180), crate::frame::Side::Left)
         .stroke(egui::Stroke::new(2.5, egui::Color32::WHITE))
@@ -1137,7 +1138,7 @@ fn blur_stock_hosts_zero_has_identical_shapes_noops_geometry_and_ids() {
 fn blur_stock_window_open_flag_preserves_closed_close_and_reopen_behavior() {
     fn record(mode: u8, omit_markers: bool) -> Vec<(Vec<String>, String)> {
         let ctx = crate::fonts::test_context();
-        let container = Container::for_layout(crate::shell::LayoutMode::Floating, Surface::Feature);
+        let container = Container::for_layout(crate::ui_kit::LayoutMode::Floating, Surface::Feature);
         let frame = container.frame(&ctx, Tokens::get().dialog_body, crate::frame::Side::Left);
         let id = egui::Id::unique("open flag fixture");
         let mut recorded = Vec::new();
@@ -1289,7 +1290,7 @@ fn blur_stock_hosts_late_scaled_layers_and_moved_windows_keep_final_geometry() {
 fn blur_stock_frame_marker_uses_final_joined_corner_radii() {
     let ctx = crate::fonts::test_context();
     let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-        let host = Container::for_layout(crate::shell::LayoutMode::Docked, Surface::Feature).joined(DockEdges::default());
+        let host = Container::for_layout(crate::ui_kit::LayoutMode::Docked, Surface::Feature).joined(DockEdges::default());
         let frame = host.frame(ui.ctx(), Tokens::get().dialog_body, crate::frame::Side::Left);
         let bounds = ui.available_rect_before_wrap();
         host.show_frame_background(ui, frame, bounds, Some(host_marker), |ui| {
@@ -1373,9 +1374,9 @@ fn heading_weight_field_surfaces_and_disclosures_follow_tokens_in_both_themes() 
             _ => {}
         }
     }
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let ctx = crate::fonts::test_context();
         ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
         let mut value = "3 mm".to_string();
@@ -1398,12 +1399,12 @@ fn heading_weight_field_surfaces_and_disclosures_follow_tokens_in_both_themes() 
         assert_eq!(section, 1, "semibold small caps are letter spaced and painted once");
         assert!(fields > 0, "the actual text editor has a token field fill and one pixel border");
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn panel_keeps_actions_and_body_geometry_in_both_layouts() {
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let ctx = crate::fonts::test_context();
         let vp = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
         for _ in 0..3 {
@@ -1411,7 +1412,7 @@ fn panel_keeps_actions_and_body_geometry_in_both_layouts() {
             crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(vp), ..Default::default() }, |_| {
                 let side = crate::frame::Side::Right;
                 let frame = Panel::feature_frame(&ctx, layout, side);
-                let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
+                let anchor = egui::pos2(vp.right() - crate::ui_kit::SHELL_GAP, vp.top());
                 let panel = Panel::new("Fillet", egui::Id::unique("gallery_feature"), anchor, vp, side, frame);
                 panel.window(&ctx).show(&ctx, |ui| {
                     panel.feature(
@@ -1467,8 +1468,8 @@ fn feature_frame_with(
     crate::test_support::frame(ctx, egui::RawInput { screen_rect: Some(vp), events, focused: true, ..Default::default() }, |_| {
         placement.publish(ctx);
         let side = crate::frame::Side::Right;
-        let frame = Panel::feature_frame(ctx, crate::shell::LayoutMode::Floating, side);
-        let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
+        let frame = Panel::feature_frame(ctx, crate::ui_kit::LayoutMode::Floating, side);
+        let anchor = egui::pos2(vp.right() - crate::ui_kit::SHELL_GAP, vp.top());
         let panel = Panel::new("Fillet", egui::Id::unique("top_actions"), anchor, vp, side, frame);
         panel.window(ctx).show(ctx, |ui| {
             let heading = FeatureOptions {
@@ -1556,14 +1557,14 @@ fn top_placement_shows_the_compute_status_in_the_title_row() {
         output = Some(crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(vp), ..Default::default() }, |_| {
             DialogButtons::Top.publish(&ctx);
             let side = crate::frame::Side::Right;
-            let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
+            let anchor = egui::pos2(vp.right() - crate::ui_kit::SHELL_GAP, vp.top());
             let panel = Panel::new(
                 "Fillet",
                 egui::Id::unique("top_status"),
                 anchor,
                 vp,
                 side,
-                Panel::feature_frame(&ctx, crate::shell::LayoutMode::Floating, side),
+                Panel::feature_frame(&ctx, crate::ui_kit::LayoutMode::Floating, side),
             );
             panel.window(&ctx).show(&ctx, |ui| {
                 let heading = FeatureOptions {
@@ -1599,14 +1600,14 @@ fn bottom_placement_puts_the_busy_spinner_in_the_footer_row() {
         crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(vp), ..Default::default() }, |_| {
             DialogButtons::Bottom.publish(&ctx);
             let side = crate::frame::Side::Right;
-            let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
+            let anchor = egui::pos2(vp.right() - crate::ui_kit::SHELL_GAP, vp.top());
             let panel = Panel::new(
                 "Fillet",
                 egui::Id::unique("bottom_status"),
                 anchor,
                 vp,
                 side,
-                Panel::feature_frame(&ctx, crate::shell::LayoutMode::Floating, side),
+                Panel::feature_frame(&ctx, crate::ui_kit::LayoutMode::Floating, side),
             );
             panel.window(&ctx).show(&ctx, |ui| {
                 let heading = FeatureOptions {
@@ -1652,7 +1653,7 @@ fn top_placement_keeps_a_managers_fold_beside_the_actions() {
 
 #[test]
 fn palette_scrolls_short_views_and_retains_its_status_and_action_handles() {
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         for height in [125.0, 480.0] {
             let ctx = crate::fonts::test_context();
             let vp = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, height));
@@ -1660,11 +1661,11 @@ fn palette_scrolls_short_views_and_retains_its_status_and_action_handles() {
                 scenario::clear_handles();
                 crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(vp), ..Default::default() }, |_| {
                     let frame = Panel::palette_frame(&ctx, layout);
-                    let bottom = vp.bottom() - crate::shell::SHELL_GAP;
+                    let bottom = vp.bottom() - crate::ui_kit::SHELL_GAP;
                     let panel = Panel::new(
                         "Options",
                         egui::Id::unique("gallery_palette"),
-                        egui::pos2(vp.right() - crate::shell::SHELL_GAP, 0.0),
+                        egui::pos2(vp.right() - crate::ui_kit::SHELL_GAP, 0.0),
                         vp,
                         crate::frame::Side::Right,
                         frame,
@@ -1709,7 +1710,7 @@ fn palette_scrolls_short_views_and_retains_its_status_and_action_handles() {
 
 #[test]
 fn wide_tables_remain_bounded_with_pinned_actions_on_small_viewports() {
-    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         for width in [240.0, 640.0, 1200.0] {
             let ctx = crate::fonts::test_context();
             let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 360.0));
@@ -1753,9 +1754,9 @@ fn wide_tables_remain_bounded_with_pinned_actions_on_small_viewports() {
 
 #[test]
 fn window_is_one_and_a_half_cards_wide_with_its_actions_in_both_themes() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let ctx = crate::fonts::test_context();
         let t = Tokens::get();
         let mut action = Action::None;
@@ -1790,7 +1791,7 @@ fn window_is_one_and_a_half_cards_wide_with_its_actions_in_both_themes() {
         assert!(footer.contains_rect(ok) && footer.contains_rect(cancel));
         assert!(scenario::handle_at("dialog:Keep").is_some() && scenario::handle_at("dialog:close").is_some());
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -1825,9 +1826,9 @@ fn escape_closes_a_window_unless_it_keeps_the_card_open() {
 
 #[test]
 fn window_pages_have_shared_metrics_callbacks_and_a_pinned_left_footer_action() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let ctx = crate::fonts::test_context();
         let mut selected = usize::MAX;
         let mut drawn = 0;
@@ -1913,7 +1914,7 @@ fn window_pages_have_shared_metrics_callbacks_and_a_pinned_left_footer_action() 
         }
         assert_eq!((selected, drawn), (0, 1), "click dispatches the declared page");
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -1970,9 +1971,9 @@ fn page_window_is_as_opaque_as_every_other_window_in_both_themes() {
         }
         fill.expect("the window frame is painted at the window's rect")
     }
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let t = Tokens::get();
         assert_eq!(t.dialog_body.a(), 255, "{dark}: the window token itself is opaque");
         let plain = window_fill(false);
@@ -1981,7 +1982,7 @@ fn page_window_is_as_opaque_as_every_other_window_in_both_themes() {
         assert_eq!(page.a(), 255, "{dark}: the Preferences page window lets nothing show through");
         assert_eq!(page, plain, "{dark}: the page window has the same fill as every other window");
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -2083,7 +2084,7 @@ fn save_prompt_frames_dont_save_and_clicking_it_discards_for_close_and_quit() {
                 .any(|(_, node)| { node.label() == Some("Don't Save") && node.role() == egui::accesskit::Role::Button }),
             "discard remains an accessible button"
         );
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         let mut framed = false;
         for shape in &output.shapes {
             crate::test_support::each_shape(&shape.shape, &mut |s| {
@@ -2111,9 +2112,9 @@ fn save_prompt_frames_dont_save_and_clicking_it_discards_for_close_and_quit() {
 
 #[test]
 fn destructive_confirm_paints_error_primary_with_readable_on_colour_in_both_themes() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let ctx = crate::fonts::test_context();
         let mut output = None;
         for _ in 0..3 {
@@ -2145,8 +2146,8 @@ fn destructive_confirm_paints_error_primary_with_readable_on_colour_in_both_them
             });
         }
         assert!(painted_fill, "{dark}: primary must use form_error");
-        let ink = if crate::theme::contrast_ratio(t.on_accent, t.form_error) >= 4.5 { t.on_accent } else { t.tab_on_fill_dark };
-        assert!(crate::theme::contrast_ratio(ink, t.form_error) >= 4.5);
+        let ink = if solidcraft_theme::contrast_ratio(t.on_accent, t.form_error) >= 4.5 { t.on_accent } else { t.tab_on_fill_dark };
+        assert!(solidcraft_theme::contrast_ratio(ink, t.form_error) >= 4.5);
         let mut painted_ink = false;
         for shape in &shapes {
             crate::test_support::each_shape(&shape.shape, &mut |s| {
@@ -2156,14 +2157,14 @@ fn destructive_confirm_paints_error_primary_with_readable_on_colour_in_both_them
         }
         assert!(painted_ink, "{dark}: destructive primary text must use readable on-colour");
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn preferences_preserves_every_page_and_footer_in_both_themes() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let mut h = crate::scenario::Harness::new();
         h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
         h.app.home.open = false;
@@ -2220,7 +2221,7 @@ fn preferences_preserves_every_page_and_footer_in_both_themes() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -2254,11 +2255,11 @@ fn window_footer_is_optional_and_can_contain_only_a_left_action() {
 
 #[test]
 fn universal_containers_follow_one_layout_without_changing_transient_surfaces() {
-    use crate::{frame::Side, shell::LayoutMode};
+    use crate::{frame::Side, ui_kit::LayoutMode};
     let ctx = crate::fonts::test_context();
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let t = Tokens::get();
         for surface in [Surface::Panel, Surface::Feature, Surface::Palette, Surface::Chrome] {
             LayoutMode::Floating.publish(&ctx);
@@ -2294,7 +2295,7 @@ fn universal_containers_follow_one_layout_without_changing_transient_surfaces() 
             assert_eq!(floating, docked, "{surface:?}: anchored/modal/canvas content never becomes a workspace dock");
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -2369,7 +2370,7 @@ fn window_body_buttons_stay_visible_after_the_page_grows_from_nothing() {
 #[test]
 fn adjoining_compact_frames_share_one_stroke_and_only_exposed_corners_round() {
     use crate::ui_kit::DockEdges;
-    use crate::{frame::Side, shell::LayoutMode};
+    use crate::{frame::Side, ui_kit::LayoutMode};
     let ctx = crate::fonts::test_context();
     LayoutMode::Docked.publish(&ctx);
     let t = Tokens::get();
@@ -2391,7 +2392,7 @@ fn adjoining_compact_frames_share_one_stroke_and_only_exposed_corners_round() {
 #[test]
 fn compact_tool_sheet_corners_follow_its_right_edge_contact() {
     let ctx = crate::fonts::test_context();
-    crate::shell::LayoutMode::Docked.publish(&ctx);
+    crate::ui_kit::LayoutMode::Docked.publish(&ctx);
     let t = Tokens::get();
     let container = Container::new(&ctx, Surface::Feature);
     let frame = container.frame(&ctx, t.dialog_body, crate::frame::Side::Right);
@@ -2401,14 +2402,14 @@ fn compact_tool_sheet_corners_follow_its_right_edge_contact() {
 
 #[test]
 fn theme_shape_changes_preserve_panel_geometry_and_dock_contacts() {
-    use crate::{frame::Side, shell::LayoutMode};
+    use crate::{frame::Side, ui_kit::LayoutMode};
     let ctx = crate::fonts::test_context();
     let mut results = Vec::new();
     for name in ["solidcraft-95", "blueprint", "cupertino"] {
         let t = crate::theme_files::resolve(crate::theme_files::find(name, &[]).unwrap());
-        let _theme = crate::theme::scoped_tokens(t);
+        let _theme = solidcraft_theme::scoped_tokens(t);
         for surface in [Surface::Panel, Surface::Feature, Surface::Window, Surface::Popup, Surface::Navigation, Surface::Toast] {
-            crate::theme::apply(&ctx);
+            solidcraft_theme::apply(&ctx);
             let floating = Container::for_layout(LayoutMode::Floating, surface).frame(&ctx, t.panel, Side::Left);
             let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(240.0, 180.0));
             results.push((name, surface, floating.corner_radius, floating.outer_rect(bounds), t));
@@ -2431,8 +2432,8 @@ fn theme_shape_changes_preserve_panel_geometry_and_dock_contacts() {
 
 #[test]
 fn border_hierarchy_reaches_hosts_sections_controls_and_inset_without_new_targets() {
-    use crate::theme::{Borders, InsetBorder};
     use egui::{Color32, Stroke};
+    use solidcraft_theme::{Borders, InsetBorder};
     for dark in [false, true] {
         let mut t = if dark { Tokens::dark() } else { Tokens::light() };
         t.borders = Borders {
@@ -2445,11 +2446,11 @@ fn border_hierarchy_reaches_hosts_sections_controls_and_inset_without_new_target
             control: Some(Stroke::new(1.5, Color32::BLUE)),
             primary_inset: Some(InsetBorder { stroke: Stroke::new(0.75, Color32::YELLOW), gap: 3.0 }),
         };
-        let _restore = crate::theme::scoped_tokens(t);
+        let _restore = solidcraft_theme::scoped_tokens(t);
         let ctx = crate::fonts::test_context();
         let mut value = "12 mm".to_string();
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-            let container = Container::for_layout(crate::shell::LayoutMode::Floating, Surface::Panel);
+            let container = Container::for_layout(crate::ui_kit::LayoutMode::Floating, Surface::Panel);
             let frame = container.frame(ui.ctx(), t.panel, crate::frame::Side::Left).inner_margin(12);
             let bounds = ui.max_rect();
             container.show_frame(ui, frame, bounds, |ui| {
@@ -2488,7 +2489,7 @@ fn border_hierarchy_reaches_hosts_sections_controls_and_inset_without_new_target
             });
         }
         assert!(found.into_iter().all(|v| v), "missing role: {found:?}");
-        for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for surface in [
                 Surface::Panel,
                 Surface::Chrome,
@@ -2511,11 +2512,11 @@ fn border_hierarchy_reaches_hosts_sections_controls_and_inset_without_new_target
 fn inset_border_skips_tiny_or_invalid_surfaces_and_keeps_dock_contacts_square() {
     let mut t = Tokens::dark();
     t.borders.primary = Some(egui::Stroke::new(4.0, egui::Color32::WHITE));
-    t.borders.primary_inset = Some(crate::theme::InsetBorder { stroke: egui::Stroke::new(4.0, egui::Color32::YELLOW), gap: 12.0 });
-    let _restore = crate::theme::scoped_tokens(t);
+    t.borders.primary_inset = Some(solidcraft_theme::InsetBorder { stroke: egui::Stroke::new(4.0, egui::Color32::YELLOW), gap: 12.0 });
+    let _restore = solidcraft_theme::scoped_tokens(t);
     let ctx = crate::fonts::test_context();
     let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-        let frame = Container::for_layout(crate::shell::LayoutMode::Docked, Surface::Panel).joined(DockEdges::ALL).frame(
+        let frame = Container::for_layout(crate::ui_kit::LayoutMode::Docked, Surface::Panel).joined(DockEdges::ALL).frame(
             &ctx,
             t.panel,
             crate::frame::Side::Left,
@@ -2539,8 +2540,8 @@ fn inset_border_skips_tiny_or_invalid_surfaces_and_keeps_dock_contacts_square() 
 fn menu_companion_is_visible_in_frame_padding_and_bounded_by_its_surface() {
     let mut t = Tokens::dark();
     t.borders.primary = Some(egui::Stroke::new(2.0, egui::Color32::WHITE));
-    t.borders.primary_inset = Some(crate::theme::InsetBorder { stroke: egui::Stroke::new(0.75, egui::Color32::YELLOW), gap: 3.0 });
-    let _restore = crate::theme::scoped_tokens(t);
+    t.borders.primary_inset = Some(solidcraft_theme::InsetBorder { stroke: egui::Stroke::new(0.75, egui::Color32::YELLOW), gap: 3.0 });
+    let _restore = solidcraft_theme::scoped_tokens(t);
     let ctx = crate::fonts::test_context();
     let mut surface = egui::Rect::NOTHING;
     let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
@@ -2573,11 +2574,16 @@ fn menu_companion_is_visible_in_frame_padding_and_bounded_by_its_surface() {
 fn bevel_lighting_reverses_for_fields_and_pressed_buttons_without_changing_geometry() {
     use egui::{Color32, Pos2, Rect};
     let mut t = Tokens::light();
-    let bevel =
-        crate::theme::Bevel { width: 1.0, highlight: Color32::WHITE, light: Color32::LIGHT_GRAY, shadow: Color32::GRAY, dark_shadow: Color32::BLACK };
+    let bevel = solidcraft_theme::Bevel {
+        width: 1.0,
+        highlight: Color32::WHITE,
+        light: Color32::LIGHT_GRAY,
+        shadow: Color32::GRAY,
+        dark_shadow: Color32::BLACK,
+    };
     t.borders.bevel = Some(bevel);
     t.control_radius = 0;
-    let _restore = crate::theme::scoped_tokens(t);
+    let _restore = solidcraft_theme::scoped_tokens(t);
     let ctx = crate::fonts::test_context();
     let mut button_rect = Rect::NOTHING;
     let mut field_rect = Rect::NOTHING;
@@ -2689,7 +2695,7 @@ fn host_surface_fallback_paints_readable_plain_labels_without_changing_body_layo
             if fallback {
                 authored.text = authored.panel;
             }
-            let _authored = crate::theme::scoped_panel_tokens(authored);
+            let _authored = solidcraft_theme::scoped_panel_tokens(authored);
             let style = crate::panel_runtime::HostSurfaceStyle::capture(&ctx, false, Some(0.0), None);
             let appearance = style.appearance(PanelSurface::Translucent, floating);
             let failed = matches!(appearance.contrast, ContrastOutcome::RetainReadableFallback { .. });
