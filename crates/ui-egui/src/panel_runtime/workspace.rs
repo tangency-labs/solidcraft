@@ -801,8 +801,8 @@ impl WorkspacePanelHost {
             resolve_frame_layout(runtime, frame.layout.render_domain, frame.layout.capacity, &frame.layout.chrome_obstacles, &self.options)?;
         let scope = runtime_scope(runtime);
         let window = runtime.environment().window.clone();
-        let locale = crate::i18n::Locale::for_language(crate::i18n::language());
-        let _resolved_labels = crate::i18n::resolved_labels();
+        let locale = solidcraft_ui_text::Locale::for_language(solidcraft_ui_text::language());
+        let _resolved_labels = solidcraft_ui_text::resolved_labels();
         let mut metadata = BTreeMap::new();
         let mut owners = BTreeMap::new();
         let mut header_icons = BTreeMap::new();
@@ -1640,7 +1640,7 @@ impl WorkspacePanelHost {
         for (horizontal, bounds) in scroll_tracks(&frame.layout) {
             let target = HostControlTarget::Scroll { horizontal };
             let id = scoped_id(scope, window, None, &target);
-            let label = crate::i18n::tr(if horizontal { "ui.panel_host.scroll_horizontal" } else { "ui.panel_host.scroll_vertical" });
+            let label = solidcraft_ui_text::tr(if horizontal { "ui.panel_host.scroll_horizontal" } else { "ui.panel_host.scroll_vertical" });
             let (visible, total, offset) = if horizontal {
                 (frame.layout.capacity.size.width, frame.layout.extent.width, frame.layout.allocation_environment.scroll.x)
             } else {
@@ -1663,7 +1663,7 @@ impl WorkspacePanelHost {
         _commands: &mut Vec<HostCommand>,
         pointer_events: &mut Vec<(egui::Id, HostPointerEvent)>,
         allow_actions: bool,
-        _locale: crate::i18n::Locale,
+        _locale: solidcraft_ui_text::Locale,
     ) {
         for control in &frame.controls {
             let HostControlTarget::Pointer(target @ HostPointerTarget::Sash { first, .. }) = &control.target else {
@@ -1985,7 +1985,7 @@ fn chrome_label(
     target: &HostPointerTarget,
     fallback: &str,
     metadata: &BTreeMap<InstanceId, PanelPresentation>,
-    locale: crate::i18n::Locale,
+    locale: solidcraft_ui_text::Locale,
 ) -> String {
     match target {
         HostPointerTarget::Menu { .. } => locale.text("ui.panel_host.menu").to_owned(),
@@ -2785,7 +2785,7 @@ impl WorkspacePanelHost {
         frame: &mut HostFrame,
         commands: &mut Vec<HostCommand>,
         allow_actions: bool,
-        locale: crate::i18n::Locale,
+        locale: solidcraft_ui_text::Locale,
     ) {
         let (Some(menu), Some(anchor)) = (self.menu.clone(), self.menu_anchor) else {
             return;
@@ -3022,7 +3022,7 @@ fn menu_instance(
     instance: &InstanceId,
     clip: egui::Rect,
     allow_actions: bool,
-    locale: crate::i18n::Locale,
+    locale: solidcraft_ui_text::Locale,
 ) {
     let label = metadata.get(instance).map_or_else(|| locale.text("ui.panel_host.tab").to_owned(), |value| value.title.clone());
     ui.label(&label);
@@ -3069,7 +3069,7 @@ fn shared_label(
     instance: &InstanceId,
     runtime: &PanelRuntime,
     metadata: &BTreeMap<InstanceId, PanelPresentation>,
-    locale: crate::i18n::Locale,
+    locale: solidcraft_ui_text::Locale,
 ) -> String {
     if *action == HostSharedAction::Collapse && runtime.layout().layout().containing(instance).is_ok_and(|section| section.collapsed) {
         return locale.text("ui.panel_host.expand").to_owned();

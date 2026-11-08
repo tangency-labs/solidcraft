@@ -100,8 +100,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut Ui) {
 }
 
 fn panel_system(app: &mut SolveApp, ui: &mut Ui) {
-    ui_kit::checkbox(ui, crate::i18n::tr("prefs.shared_panel_layout"), &mut app.preferences.shared_panel_layout)
-        .backing_on_hover_text(crate::i18n::tr("prefs.shared_panel_layout_help"));
+    ui_kit::checkbox(ui, solidcraft_ui_text::tr("prefs.shared_panel_layout"), &mut app.preferences.shared_panel_layout)
+        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.shared_panel_layout_help"));
 }
 
 fn workspace_selector(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView) {
@@ -118,7 +118,7 @@ fn workspace_selector(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesV
     let title = app.tr("ui.panel_layout.layout_workspace").to_owned();
     ui_kit::settings_form(ui, 0.0, |ui| {
         ui_kit::sized_row(ui, &title, t.control_height, |ui| {
-            crate::prefs_search::note_choices(ui, &options);
+            crate::ui_kit::settings_search::note_choices(ui, &options);
             ui.horizontal(|ui| {
                 let reset_label = app.tr("ui.panel_layout.reset_short");
                 let reset_width = ui_kit::ContentWidth::name(ui, reset_label) + t.space_24 + t.space_16;
@@ -167,7 +167,7 @@ fn workspace_selector(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesV
                 });
                 let response = reset_button(ui, reset_label, !view.default_matches);
                 let workspace = labels.get(current).map(String::as_str).unwrap_or_default();
-                let hint = crate::i18n::format("ui.panel_layout.reset_hint", &[("workspace", workspace)]);
+                let hint = solidcraft_ui_text::format("ui.panel_layout.reset_hint", &[("workspace", workspace)]);
                 response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, response.enabled(), &hint));
                 crate::scenario::publish_target("prefs:panel_layout:reset", response.rect);
                 reset = response.backing_on_hover_text(hint).clicked();
@@ -246,8 +246,8 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
                     Tile::Save => app.tr("ui.panel_layout.save_as_tile"),
                 })
                 .collect();
-            crate::prefs_search::note_choices(ui, &names);
-            crate::prefs_search::note_choices(
+            crate::ui_kit::settings_search::note_choices(ui, &names);
+            crate::ui_kit::settings_search::note_choices(
                 ui,
                 &[app.tr("ui.panel_layout.save"), app.tr("ui.panel_layout.replace"), app.tr("ui.panel_layout.reset")],
             );
@@ -412,7 +412,7 @@ fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesVie
     let kind = if matches!(item, Tile::Saved(entry) if entry.user) { app.tr("ui.panel_layout.your_layout") } else { "" };
     let hint = if custom {
         let source = state.source_name.as_deref().unwrap_or(app.tr("ui.panel_layout.current"));
-        crate::i18n::format("ui.panel_layout.custom_hint", &[("name", source)])
+        solidcraft_ui_text::format("ui.panel_layout.custom_hint", &[("name", source)])
     } else {
         name.to_owned()
     };
@@ -471,13 +471,13 @@ fn tile_menu(app: &SolveApp, ui: &mut Ui, state: &mut State, tile: &Response, en
         },
     );
     if popup.inner.is_some() {
-        crate::prefs_search::note_key_sink(ui.ctx());
+        crate::ui_kit::settings_search::note_key_sink(ui.ctx());
     }
 }
 
 fn open_save(ctx: &egui::Context, state: &mut State, tile: &Response, view: &LayoutPreferencesView) {
     let name = (1..=2 * commands::MAX_USER_PRESETS + 1)
-        .map(|n| crate::i18n::format("ui.panel_layout.suggested_name", &[("n", &n.to_string())]))
+        .map(|n| solidcraft_ui_text::format("ui.panel_layout.suggested_name", &[("n", &n.to_string())]))
         .find(|name| {
             !view.entries.iter().any(|entry| commands::preset_names_equal(&entry.name, name))
                 && !view.builtin_names.iter().any(|builtin| commands::preset_names_equal(builtin, name))
@@ -542,8 +542,8 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
                 ui_kit::settings_form(ui, 0.0, |ui| {
                     ui.set_width(width);
                     ui.spacing_mut().item_spacing = vec2(t.space_8, t.space_8);
-                    crate::prefs_search::push_force(ui);
-                    crate::prefs_search::note_key_sink(ui.ctx());
+                    crate::ui_kit::settings_search::push_force(ui);
+                    crate::ui_kit::settings_search::note_key_sink(ui.ctx());
                     match &mut popup.kind {
                         PopoverKind::Save { name, chosen } => {
                             let users: Vec<_> = view.entries.iter().filter(|entry| entry.user).collect();
@@ -596,7 +596,7 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
                             }
                         }
                         PopoverKind::Replace { name } => {
-                            let question = crate::i18n::format("ui.panel_layout.confirm_replace", &[("name", name)]);
+                            let question = solidcraft_ui_text::format("ui.panel_layout.confirm_replace", &[("name", name)]);
                             ui.label(egui::RichText::new(question).size(t.font_label).color(t.form_ink));
                             ui.horizontal_wrapped(|ui| {
                                 let cancel = ui_kit::button(ui, app.tr("ui.panel_layout.cancel"), ui_kit::Button::Ghost);
@@ -616,7 +616,7 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
                         }
                     }
                     trap_focus(ui, &focus_ids);
-                    crate::prefs_search::pop_force(ui);
+                    crate::ui_kit::settings_search::pop_force(ui);
                 })
             })
         });
@@ -672,7 +672,7 @@ fn save_field(
         let (enter, response) = ui_kit::text_field_reserving(ui, name, "", t.space_24 * 2.0);
         ids.push(response.id);
         response.widget_info(|| {
-            let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), crate::i18n::tr("ui.panel_layout.save_as"));
+            let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), solidcraft_ui_text::tr("ui.panel_layout.save_as"));
             info.current_text_value = Some(name.clone());
             info
         });
@@ -785,7 +785,7 @@ fn run(app: &mut SolveApp, command: &str, params: serde_json::Value, applied: Op
                     .find(|workspace| workspace.id == view.selected_workspace)
                     .map(|workspace| app.tr(&workspace.title_key))
                     .unwrap_or_default();
-                app.set_status(crate::i18n::format("ui.panel_layout.applied", &[("name", name), ("workspace", workspace)]), false);
+                app.set_status(solidcraft_ui_text::format("ui.panel_layout.applied", &[("name", name), ("workspace", workspace)]), false);
             }
             true
         }

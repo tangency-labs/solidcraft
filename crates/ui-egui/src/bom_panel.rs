@@ -115,7 +115,7 @@ fn cell<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) 
 
 /// The label of one of [`BOM_KEYS`].
 fn field_label(key: &str) -> &str {
-    metadata::key(key).map_or(key, |k| crate::i18n::tr(k.label))
+    metadata::key(key).map_or(key, |k| solidcraft_ui_text::tr(k.label))
 }
 
 /// Apply the picked row's fields to each of its definitions (one undo step each).
@@ -146,8 +146,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let bom = d.rows(app);
     let rows: Vec<Value> = bom["rows"].as_array().cloned().unwrap_or_default();
     let (mut export, mut apply_row) = (None, None);
-    let closed =
-        crate::ui_kit::Window::new(egui::Id::unique("sc_bom"), "bom", crate::i18n::tr_label("Bill of Materials")).cards(3.0).show_body(ctx, |ui| {
+    let closed = crate::ui_kit::Window::new(egui::Id::unique("sc_bom"), "bom", solidcraft_ui_text::tr_label("Bill of Materials"))
+        .cards(3.0)
+        .show_body(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let was = (d.top, d.by_definition, d.group_children);
                 let mut levels = usize::from(d.top);
@@ -166,7 +167,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 d.by_definition = grouping == 1;
                 ui.separator();
-                crate::ui_kit::checkbox(ui, crate::i18n::tr("bom.group_children"), &mut d.group_children);
+                crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("bom.group_children"), &mut d.group_children);
                 if was != (d.top, d.by_definition, d.group_children) {
                     d.picked = None;
                 }

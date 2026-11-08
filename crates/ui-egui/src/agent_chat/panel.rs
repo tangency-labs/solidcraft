@@ -260,7 +260,7 @@ pub(crate) fn left_inset(app: &SolveApp, available: Rect) -> f32 {
         && app.preferences.agent_chat_side == "left"
     {
         let width = if app.preferences.agent_chat_minimized { STRIP } else { app.preferences.agent_chat_width.clamp(MIN_WIDTH, MAX_WIDTH) };
-        (width + crate::shell::SHELL_GAP).min(available.width().max(0.0))
+        (width + crate::ui_kit::SHELL_GAP).min(available.width().max(0.0))
     } else {
         0.0
     }
@@ -276,9 +276,9 @@ pub(crate) fn tool_space(app: &SolveApp, mut available: Rect) -> Rect {
         && let Some(chat) = app.agent_chat.panel_rect.filter(|r| r.is_finite() && r.is_positive())
     {
         if app.preferences.agent_chat_side == "left" {
-            available.min.x = crate::shell::within(chat.right() + crate::shell::SHELL_GAP, available.left(), available.right());
+            available.min.x = crate::ui_kit::within(chat.right() + crate::ui_kit::SHELL_GAP, available.left(), available.right());
         } else {
-            available.max.x = crate::shell::within(chat.left() - crate::shell::SHELL_GAP, available.left(), available.right());
+            available.max.x = crate::ui_kit::within(chat.left() - crate::ui_kit::SHELL_GAP, available.left(), available.right());
         }
     }
     available
@@ -287,7 +287,7 @@ pub(crate) fn tool_space(app: &SolveApp, mut available: Rect) -> Rect {
 /// The same outer rectangle is used for the floating sheet and its docking preview.
 fn floating_bounds(app: &SolveApp, available: Rect, left: bool) -> Rect {
     let t = Tokens::get();
-    let gap = crate::shell::SHELL_GAP;
+    let gap = crate::ui_kit::SHELL_GAP;
     let mut bounds = available.shrink(gap);
     // The ribbon already supplies the top gap shared by browser and history cards.
     bounds.min.y = available.top();
@@ -1772,7 +1772,7 @@ fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &
         .frame(ui_kit::Menu::frame())
         .open_memory(if opened { Some(egui::SetOpenCommand::Bool(true)) } else { None })
         .show(|ui| {
-            ui_kit::Menu::show(ui, crate::context_menu::LIST_W, |ui| {
+            ui_kit::Menu::show(ui, crate::ui_kit::LIST_W, |ui| {
                 let item = ui_kit::MenuItem::new("copy_message", tr("ui.agent_chat_copy_message"), "copy");
                 let row = item.show(ui);
                 crate::scenario::publish_handle(&format!("agent_chat:copy_menu:{n}"), row.rect.center());

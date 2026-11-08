@@ -148,8 +148,9 @@ use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{BrowserEntry, Document, FeatureKind};
 
-use crate::context_menu::{Item, Target};
+use crate::context_menu::Target;
 use crate::theme::Tokens;
+use crate::ui_kit::Item;
 
 use crate::SolveApp;
 
@@ -1392,11 +1393,11 @@ fn browser_collapsed_rail(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::ui_kit::disclosure(ui.painter(), disclosure.center(), false, t.text_dim);
     crate::scenario::publish_handle("left-browser-toggle", disclosure.center());
     crate::scenario::publish_target("browser:header", disclosure);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), crate::i18n::tr("ui.browser_title")));
-    if response.backing_on_hover_text(crate::i18n::tr("ui.browser_expand")).clicked() {
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr("ui.browser_title")));
+    if response.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_expand")).clicked() {
         app.preferences.timeline_left_browser_collapsed = false;
     }
-    let galley = ui.painter().layout_no_wrap(crate::i18n::tr("ui.browser_title").to_owned(), crate::fonts::semibold(t.font_body), t.text);
+    let galley = ui.painter().layout_no_wrap(solidcraft_ui_text::tr("ui.browser_title").to_owned(), crate::fonts::semibold(t.font_body), t.text);
     let title = Rect::from_min_max(rect.min + vec2(0.0, title_top), rect.max);
     ui.painter().add(
         egui::epaint::TextShape::new(title.center() - galley.size() / 2.0, galley, t.text)
@@ -1483,7 +1484,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     if collapsible && (response.hovered() || response.has_focus()) {
         crate::ui_kit::panel_header_hover(ui.painter(), rect);
     }
-    let title = crate::i18n::tr("ui.browser_title").to_string();
+    let title = solidcraft_ui_text::tr("ui.browser_title").to_string();
     let kind = if collapsible { egui::Role::Button } else { egui::Role::Label };
     response.widget_info(|| egui::WidgetInfo::labeled(kind, true, &title));
     let galley = ui.painter().layout_no_wrap(title, crate::fonts::semibold(t.font_heading), t.text);
@@ -1495,11 +1496,11 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     }
     let bodies = app.session.model.state().bodies.len();
     let key = if bodies == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" };
-    let count = crate::i18n::format(key, &[("count", &bodies.to_string())]);
+    let count = solidcraft_ui_text::format(key, &[("count", &bodies.to_string())]);
     let galley = ui.painter().layout_no_wrap(count, FontId::proportional(t.font_body), t.text_dim);
     ui.painter().galley(pos2(right - galley.size().x, rect.center().y - galley.size().y / 2.0), galley, t.text_dim);
     if collapsible {
-        let tip = crate::i18n::tr(if collapsed { "ui.browser_expand" } else { "ui.browser_collapse" });
+        let tip = solidcraft_ui_text::tr(if collapsed { "ui.browser_expand" } else { "ui.browser_collapse" });
         if response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(tip).clicked() {
             if stacked {
                 app.preferences.timeline_left_browser_collapsed = !app.preferences.timeline_left_browser_collapsed;
@@ -2467,7 +2468,7 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
             }
         }
         if r.double && locked {
-            app.set_status(crate::i18n::tr("browser.canvas_locked"), true);
+            app.set_status(solidcraft_ui_text::tr("browser.canvas_locked"), true);
         } else if r.double {
             app.tree.canvas_panel = Some(CanvasPanel::new(app, id, false));
         }
@@ -2491,7 +2492,7 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let visible = canvas.is_some_and(|c| c.visible);
     // A locked canvas (#12310) is not moved, calibrated or deleted until it is unlocked.
     let locked = canvas.is_some_and(|c| c.locked);
-    let why = locked.then(|| crate::i18n::tr("browser.canvas_locked").to_string());
+    let why = locked.then(|| solidcraft_ui_text::tr("browser.canvas_locked").to_string());
     vec![
         Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })).off_because(why.clone()),
         Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })).off_because(why.clone()),
@@ -2631,7 +2632,11 @@ impl Entry {
             row_key: format!("b:{world}"),
             patterns: None,
             // A part the modelling kernel refuses says so (Repair Part is in its menu).
-            label: if b.body.smlib_refused().is_some() { crate::i18n::format("browser.needs_repair", &[("name", &b.name)]) } else { b.name.clone() },
+            label: if b.body.smlib_refused().is_some() {
+                solidcraft_ui_text::format("browser.needs_repair", &[("name", &b.name)])
+            } else {
+                b.name.clone()
+            },
             icon,
             tip: Some(tip),
             visible: app.body_visible(&world),
@@ -2657,9 +2662,9 @@ impl Entry {
             thing: Thing::Sketch(f.id),
             patterns: crate::sketch_pattern_tree::has_patterns(app, f.id).then(|| format!("s:{}/patterns", f.id)),
             label: if lost {
-                crate::i18n::format("browser.sketch_attachment_lost", &[("name", &crate::i18n::tr_name(&f.name))])
+                solidcraft_ui_text::format("browser.sketch_attachment_lost", &[("name", &crate::i18n::tr_name(&f.name))])
             } else if active {
-                crate::i18n::format("browser.sketch_editing", &[("name", &crate::i18n::tr_name(&f.name))])
+                solidcraft_ui_text::format("browser.sketch_editing", &[("name", &crate::i18n::tr_name(&f.name))])
             } else {
                 f.name.clone()
             },
@@ -3023,7 +3028,8 @@ fn folder_level(
         } else {
             &group.label
         };
-        let count = if render && !gopen { crate::i18n::format("render.tree_more", &[("count", &group.count.to_string())]) } else { String::new() };
+        let count =
+            if render && !gopen { solidcraft_ui_text::format("render.tree_more", &[("count", &group.count.to_string())]) } else { String::new() };
         let r = draw_row(
             ui,
             ui.scope_id().with(gkey),

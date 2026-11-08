@@ -10,6 +10,7 @@ mod palettes;
 
 use egui::{Color32, Stroke};
 use serde::{Deserialize, Serialize};
+use solidcraft_color::AnalysisColors;
 
 /// Shared paint-only panel timing. State, geometry and focus commit immediately.
 pub(crate) fn panel_motion_duration(ctx: &egui::Context, reduced: bool) -> f32 {
@@ -31,7 +32,7 @@ thread_local! {
     /// must not change one another's palette while a frame or icon texture is being built.
     static DARK: Cell<bool> = const { Cell::new(true) };
     /// The colour vision mode, per thread. Each app
-    /// sets it from its own preferences at the start of every frame (`SolveApp::logic`), on the
+    /// sets it from its own preferences at the start of every frame (in its frame logic), on the
     /// thread that draws it. Tests run many apps side by side on their own threads in one process:
     /// with one global, a test in a mode changed the colours under another one
     /// (`hover_stays_off_during_spin_and_animated_views` failed that way). No worker thread reads
@@ -165,7 +166,7 @@ impl Surfaces {
 fn oklab_blend(from: Color32, to: Color32, fraction: f32) -> Color32 {
     let lab = |color: Color32| {
         let [r, g, b, a] = color.to_srgba_unmultiplied();
-        let decode = solidcraft_engine::geom::srgb::decode8;
+        let decode = solidcraft_color::srgb::decode8;
         let (r, g, b) = (decode(r), decode(g), decode(b));
         let l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b).cbrt();
         let m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b).cbrt();
@@ -591,7 +592,11 @@ pub(crate) fn scoped_tokens(tokens: Tokens) -> impl Drop {
 }
 
 /// Temporarily bind a panel's paint palette without publishing a theme change.
-pub(crate) fn scoped_panel_tokens(tokens: Tokens) -> impl Drop {
+///
+/// `Tokens::get_in` returns these tokens first until the returned guard drops, which restores
+/// the previous override. A host uses it to draw any component in another palette or accent
+/// (for example another workspace's) without editing the component.
+pub fn scoped_panel_tokens(tokens: Tokens) -> impl Drop {
     struct Restore {
         previous: Option<Tokens>,
         // The override belongs to this UI thread, so its guard must not move to another one.
@@ -628,7 +633,7 @@ pub(crate) fn icon_accent_for_tab(tab: &str) -> Option<&'static str> {
 /// WCAG contrast of two opaque sRGB colours.
 pub(crate) fn contrast_ratio(a: Color32, b: Color32) -> f64 {
     let luminance = |c: Color32| {
-        let linear = solidcraft_engine::geom::srgb::decode8;
+        let linear = solidcraft_color::srgb::decode8;
         0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
     };
     let (a, b) = (luminance(a), luminance(b));
@@ -676,7 +681,7 @@ pub(crate) fn panel_surface_fill(fill: Color32, tokens: &Tokens, requested: f32)
 }
 
 fn panel_luminance(color: Color32) -> f64 {
-    let decode = solidcraft_engine::geom::srgb::decode8;
+    let decode = solidcraft_color::srgb::decode8;
     0.2126 * decode(color.r()) + 0.7152 * decode(color.g()) + 0.0722 * decode(color.b())
 }
 
@@ -706,7 +711,7 @@ pub(crate) fn panel_surface_readable(fill: Color32, tokens: &Tokens) -> bool {
 /// then round outward to cover framebuffer quantization. This intentionally
 /// overestimates uncertainty instead of promising threshold contrast falsely.
 pub(crate) fn panel_composite_bounds(source: Color32, background: Color32) -> (Color32, Color32) {
-    use solidcraft_engine::geom::srgb::{decode, encode};
+    use solidcraft_color::srgb::{decode, encode};
     if source.a() == 255 {
         // Flat opaque integer colours survive the shader's <0.5-byte dither and
         // final nearest-byte conversion unchanged on either framebuffer format.
@@ -802,11 +807,13 @@ impl TabAccent {
         ctx.data(|d| d.get_temp::<Option<&'static str>>(egui::Id::unique("sc_tab_icon_accent"))).flatten()
     }
 
-    pub fn publish(app: &crate::SolveApp, ctx: &egui::Context) {
+    /// Publish the accent of `tab` for this frame. `sketch_open` is whether a sketch is being
+    /// edited, `tool_active` whether a tool or dialog is open; both only steer focus painting.
+    pub fn publish(tab: &str, sketch_open: bool, tool_active: bool, ctx: &egui::Context) {
         let now = ctx.input(|i| i.time);
         let (published, accent, fading, style_surfaces) = ctx.data_mut(|data| {
             let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE));
-            let (published, accent, fading) = state.publish(&app.ui.tab, now);
+            let (published, accent, fading) = state.publish(tab, now);
             let style_surfaces = published.tab_surfaces || state.styled_surfaces;
             state.styled_surfaces = published.tab_surfaces;
             (published, accent, fading, style_surfaces)
@@ -829,9 +836,9 @@ impl TabAccent {
         }
         ctx.data_mut(|d| {
             d.insert_temp(egui::Id::unique("sc_tab_accent"), accent);
-            d.insert_temp(egui::Id::unique("sc_tab_icon_accent"), icon_accent_for_tab(&app.ui.tab));
-            d.insert_temp(egui::Id::unique("sc_sketch_open"), app.session.active_sketch.is_some());
-            d.insert_temp(egui::Id::unique("sc_tool_accent"), app.tool.is_some() || app.dialog.is_some());
+            d.insert_temp(egui::Id::unique("sc_tab_icon_accent"), icon_accent_for_tab(tab));
+            d.insert_temp(egui::Id::unique("sc_sketch_open"), sketch_open);
+            d.insert_temp(egui::Id::unique("sc_tool_accent"), tool_active);
         });
     }
 
@@ -1009,10 +1016,6 @@ pub fn srgb(c: [f32; 3]) -> Color32 {
     let byte = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
     Color32::from_rgb(byte(c[0]), byte(c[1]), byte(c[2]))
 }
-
-/// Surface analysis colours, straight sRGB 0..1 as the shader takes them (exact, so they read
-/// the same as when they were literals in the WGSL). The light theme's are the headless default.
-pub use solidcraft_engine::render::AnalysisColors;
 
 /// Colours for native viewport markers and the agent pointer. Command artwork uses the SVG palette.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1714,11 +1717,6 @@ impl Tokens {
     }
 }
 
-/// How a physical material looks (the default appearance follows the material).
-pub fn material_color(name: &str) -> Option<Color32> {
-    solidcraft_engine::doc::material_color(name).map(|[r, g, b]| Color32::from_rgb(r, g, b))
-}
-
 /// Switch themes (the visuals follow on the next [`apply`]).
 pub fn set_dark(dark: bool) {
     DARK.set(dark);
@@ -1985,15 +1983,13 @@ mod tests {
     #[test]
     fn tabs_publish_requests_repaints_only_during_fade_and_zero_is_instant() {
         use crate::theme_files::OptionValue;
-        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         let ctx = crate::fonts::test_context();
         let mut state = tabs_state("dark", BTreeMap::new());
         state.publish("MODEL", 0.0);
         ctx.data_mut(|d| d.insert_temp(egui::Id::unique(TAB_STATE), state));
-        app.ui.tab = "SKETCH".into();
         let frame = |time| {
             let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
-                TabAccent::publish(&app, ui.ctx());
+                TabAccent::publish("SKETCH", false, false, ui.ctx());
                 crate::gpu::paint_background(ui.painter(), ui.max_rect(), &Tokens::get());
             });
             let colors: Vec<_> = out
@@ -2202,7 +2198,7 @@ mod tests {
         themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
         let mut failures = Vec::new();
         for (name, tokens) in themes {
-            for tab in crate::workspace::TABS.iter().copied().chain(["SKETCH", "MESH", "FORM", "SHEET METAL", "RENDER"]) {
+            for tab in super::TAB_NAMES.iter().copied() {
                 let accent = super::TabAccent::for_tab(&tokens, tab);
                 let ratio = super::contrast_ratio(accent.ink, accent.soft);
                 if ratio < 4.5 {
@@ -2236,20 +2232,16 @@ mod tests {
 
     #[test]
     fn tab_accent_context_is_per_app_and_does_not_change_widget_visuals() {
-        let mut harness = crate::scenario::Harness::new();
-        let app = &mut harness.app;
         let first = crate::fonts::test_context();
         let second = crate::fonts::test_context();
         let before = first.style_of(egui::Theme::Dark).visuals.clone();
-        app.ui.tab = "SURFACE".into();
-        super::TabAccent::publish(app, &first);
+        super::TabAccent::publish("SURFACE", false, false, &first);
         assert_eq!(super::TabAccent::current(&first).color, super::Tokens::get().surface_fill);
         assert_eq!(super::TabAccent::current(&second).color, super::Tokens::get().accent);
         assert_eq!(super::TabAccent::current_icon_accent(&first), Some("surface"));
         assert_eq!(super::TabAccent::current_icon_accent(&second), None);
         assert_eq!(first.style_of(egui::Theme::Dark).visuals, before, "dialog OK, checkboxes and status styles must not inherit the tab");
-        app.ui.tab = "MODEL".into();
-        super::TabAccent::publish(app, &first);
+        super::TabAccent::publish("MODEL", false, false, &first);
         assert_eq!(super::TabAccent::current(&first).soft, super::Tokens::get().accent_soft);
         assert_eq!(super::TabAccent::current_icon_accent(&first), None);
     }
@@ -2259,7 +2251,6 @@ mod tests {
         use crate::theme_files::{OptionValue, ThemeFile};
         for base in ["dark", "light"] {
             let ctx = crate::fonts::test_context();
-            let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
             let file = crate::theme_files::tab_fixture(base);
             set_dark(file.base.is_dark());
             set_vision(ColorVision::Off);
@@ -2274,19 +2265,19 @@ mod tests {
                 });
                 set_custom(custom)
             };
-            let publish = |app: &crate::SolveApp, time| {
-                ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| TabAccent::publish(app, ui.ctx())).textures_delta.clear();
+            let publish = |tab: &str, time| {
+                ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| TabAccent::publish(tab, false, false, ui.ctx()))
+                    .textures_delta
+                    .clear();
             };
             prepare(&file, Some(true));
             apply(&ctx);
             let before = ctx.global_style().visuals.clone();
             let base_custom = CUSTOM.get();
-            app.ui.tab = "MODEL".into();
-            publish(&app, 0.0);
+            publish("MODEL", 0.0);
             assert_eq!(ctx.global_style().visuals, before);
-            app.ui.tab = "SKETCH".into();
-            publish(&app, 1.0);
-            publish(&app, 1.12);
+            publish("SKETCH", 1.0);
+            publish("SKETCH", 1.12);
             let panel = Tokens::get().panel;
             assert_ne!(panel, before.panel_fill, "exercise an actual animated panel fill");
             let mut animated = before.clone();
@@ -2295,24 +2286,24 @@ mod tests {
             assert_eq!(ctx.global_style().visuals, animated, "all non-surface widget/selection/status visuals stay unchanged");
             // Repair either owned fill independently, even when the panel already matches.
             ctx.global_style_mut(|style| style.visuals.window_fill = before.window_fill);
-            publish(&app, 1.12);
+            publish("SKETCH", 1.12);
             assert_eq!(ctx.global_style().visuals, animated);
 
             assert!(!prepare(&file, Some(false)), "toggling surfaces does not change the base Custom tokens");
             assert_eq!(CUSTOM.get(), base_custom);
             // Deliberately omit apply(): a full restyle would conceal stale animated fills.
-            publish(&app, 1.13);
+            publish("SKETCH", 1.13);
             assert_eq!(ctx.global_style().visuals, before, "turning surfaces off must restore both base fills");
 
             assert!(!prepare(&file, Some(true)));
-            publish(&app, 2.0);
+            publish("SKETCH", 2.0);
             assert_ne!(ctx.global_style().visuals.panel_fill, before.panel_fill);
             let mut plain = file.clone();
             plain.tabs.clear();
             plain.options.clear();
             assert!(!prepare(&plain, None), "a no-option theme can retain the exact same base tokens");
             assert_eq!(CUSTOM.get(), base_custom);
-            publish(&app, 2.1);
+            publish("SKETCH", 2.1);
             assert_eq!(ctx.global_style().visuals, before, "restoring a no-option theme must release the surface fills");
         }
     }

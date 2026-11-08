@@ -584,7 +584,7 @@ fn act(app: &mut SolveApp, id: &str, params: Value, done: &'static str) {
 /// General's saved profiles and row actions. All mutations still use settings.profile.*.
 pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get();
-    let count = crate::i18n::format("prefs.reports_saved", &[("n", &app.settings_profiles.list.len().to_string())]);
+    let count = solidcraft_ui_text::format("prefs.reports_saved", &[("n", &app.settings_profiles.list.len().to_string())]);
     ui_kit::settings_section_count(ui, "profiles", app.tr("ui.profiles"), Some(&count), |ui| {
         let names = app.settings_profiles.names();
         ui.scope(|ui| {
@@ -664,7 +664,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Searching for "profiles" must keep this entry on the results page; without a hit here the
         // whole section was dropped and the name field could not be reached with a query active.
         let entry = [app.tr("prefs.general.profile_name"), app.tr("prefs.general.save_new"), app.tr("prefs.general.import")];
-        if crate::prefs_search::visible(ui, &entry) {
+        if crate::ui_kit::settings_search::visible(ui, &entry) {
             ui.horizontal_wrapped(|ui| {
                 let mut draft = std::mem::take(&mut app.settings_profiles.draft);
                 let enter = ui_kit::named_control(ui, app.tr("prefs.general.profile_name"), |ui| {
@@ -734,7 +734,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 crate::scenario::publish_rect(&format!("prefs:profiles:{key}:row"), row.response.rect);
             }
         });
-        let locale = crate::i18n::Locale::for_language(&app.preferences.language);
+        let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
         match &app.settings_profiles.message {
             Some(Outcome::Done(id)) => {
                 ui_kit::text(ui, locale.text(id), ui_kit::Text::Note("profile_message"));
@@ -759,7 +759,7 @@ pub(crate) fn rename_popup(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let Some(mut rename) = app.settings_profiles.rename.take() else { return };
-    crate::prefs_search::note_key_sink(ctx);
+    crate::ui_kit::settings_search::note_key_sink(ctx);
     let mut done = None;
     let popup = ui_kit::Container::new(ctx, ui_kit::Surface::Popup)
         .area(egui::Id::unique("sc_profile_rename"))
@@ -843,9 +843,9 @@ pub(crate) fn sidebar(ui: &mut egui::Ui, app: &mut SolveApp) {
 pub(crate) fn tag(ui: &mut egui::Ui) {
     let response = ui_kit::settings_chip(
         ui,
-        crate::i18n::tr("prefs.structure.in_profile"),
+        solidcraft_ui_text::tr("prefs.structure.in_profile"),
         ui_kit::SettingsChip { icon: Some("settings_profile"), compact: true, ..Default::default() },
     )
-    .backing_on_hover_text(crate::i18n::tr("prefs.structure.profile_hover"));
+    .backing_on_hover_text(solidcraft_ui_text::tr("prefs.structure.profile_hover"));
     crate::scenario::publish_target("prefs:in_profile", response.rect);
 }
