@@ -1,5 +1,4 @@
 use super::*;
-use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb3, Mesh};
 use solidcraft_render::{Camera, ProductMesh, StandardView, surface::OpaqueSurface};
 
@@ -175,6 +174,1402 @@ fn gpu_exact_dielectric_matches_f64_fresnel() {
 }
 
 #[test]
+fn gpu_sheet_grazing_and_zero_thickness_match_physical_path_limits() {
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let source = format!(
+        "{SHADER}\n@compute @workgroup_size(1) fn sheet_limit_reference() {{
+            var t=triangle(0u);t.parameters.w=u.up.w;t.optics=vec4<f32>(u.right.xyz,t.optics.w);
+            let weights=sheet(t,dielectric(u.up.x,u.up.y,u.up.z));
+            accumulation[0]=vec4<f32>(weights.reflection,1.0);
+            accumulation[1]=vec4<f32>(weights.transmission,1.0);
+        }}"
+    );
+    let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(source.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&context.layout)],
+        immediate_size: 0,
+    });
+    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("sheet_limit_reference"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    let mut task = Task::new(context.clone(), glass_slab(true), request(2), JobOptions::default(), CancelToken::default()).unwrap();
+    for (ni, nt) in [(1.0, 1.0), (1.0, 1.5)] {
+        for thickness in [0.0, 0.7] {
+            for cosine in [0.0, 0.0001, 0.6, 1.0] {
+                for sigma in [Vec3::ZERO, Vec3::new(0.5, 1.0, 0.0)] {
+                    let mut params = vec![0; 48];
+                    scene::vector(&mut params, sigma, 0.0);
+                    scene::vector(&mut params, Vec3::new(cosine, ni, nt), thickness as f32);
+                    params.resize(PARAMETER_BYTES, 0);
+                    context.queue.write_buffer(&task.uniform, 0, &params);
+                    context.queue.write_buffer(&task.failures, 0, &[0; FAILURE_BYTES as usize]);
+                    let mut encoder = context.device.create_command_encoder(&Default::default());
+                    {
+                        let mut pass = encoder.begin_compute_pass(&Default::default());
+                        pass.set_pipeline(&pipeline);
+                        pass.set_bind_group(0, &task.bind, &[]);
+                        pass.dispatch_workgroups(1, 1, 1);
+                    }
+                    context.queue.submit([encoder.finish()]);
+                    task.sample = 1;
+                    if ni == nt && thickness > 0.0 && cosine == 0.0 {
+                        let error = task.read_linear().unwrap_err();
+                        assert_eq!(error.code, ErrorCode::InvalidScene);
+                        assert!(error.message.contains("grazing optical path"), "{error}");
+                        continue;
+                    }
+                    let pixels = task.read_linear().unwrap();
+                    let optics = solidcraft_render::transmission::Transmission::new(sigma, Some(thickness)).unwrap();
+                    let (reflection, transmission) = solidcraft_render::transmission::slab(optics, thickness, cosine, ni, nt).unwrap();
+                    for (pixel, expected) in pixels.iter().take(2).zip([reflection, transmission]) {
+                        for (actual, expected) in pixel.iter().zip([expected.x, expected.y, expected.z]) {
+                            assert!(
+                                (f64::from(*actual) - expected).abs() < 3e-5,
+                                "{ni}->{nt}, thickness={thickness}, cosine={cosine}: {pixel:?} != {expected}"
+                            );
+                        }
+                    }
+                    if ni == nt && thickness == 0.0 {
+                        assert_eq!(pixels[0], [0.0, 0.0, 0.0, 1.0]);
+                        assert_eq!(pixels[1], [1.0; 4], "no absorption path exists even with nonzero authored sigma");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn optional_glass_gpu_film_dispersion_and_visible_normals_match_the_f64_oracle() {
+    use solidcraft_render::glass_model::{Dispersion, GlassModel, ThinFilm};
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let source = format!(
+        "{SHADER}\n@compute @workgroup_size(1) fn glass_model_reference() {{
+        var t=triangle(0u);t.glass=u.lighting;
+        let f=glass_film(u.up.x,u.up.y,u.up.z,t.glass.w,t.glass.z,u.up.w);
+        accumulation[0]=vec4<f32>(f,glass_ior(u.up.z,t.glass.y,u.up.w),1.0);
+        var rng=u.sampling.x;
+        let event=glass_interface(t,-unit(u.back.xyz),vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,0.0,1.0),u.up.y,u.up.z,u.up.w,true,0u,1u,&rng);
+        accumulation[1]=vec4<f32>(event.direction+vec3<f32>(2.0),select(0.0,1.0,event.valid));
+        accumulation[2]=vec4<f32>(event.weight,select(0.0,1.0,event.transmitted));
+        let bent=vec3<f32>(0.6,0.0,0.8);
+        let normal=glass_macro_normal(vec3<f32>(0.0,0.0,-1.0),bent,vec3<f32>(0.0,0.0,1.0),1.0,1.5);
+        accumulation[3]=vec4<f32>(normal,1.0);
+    }}"
+    );
+    let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(source.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&context.layout)],
+        immediate_size: 0,
+    });
+    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("glass_model_reference"),
+        // HG-only jobs use this specialization with no active model or photons.
+        compilation_options: wgpu::PipelineCompilationOptions { constants: &[("GLASS_DELTA_LIGHTS", 1.0)], ..Default::default() },
+        cache: None,
+    });
+    let mut task = Task::new(context.clone(), glass_slab(true), request(2), JobOptions::default(), CancelToken::default()).unwrap();
+    let random = |state: &mut u32| {
+        *state = state.wrapping_mul(747796405).wrapping_add(2891336453);
+        let word = ((*state >> ((*state >> 28) + 4)) ^ *state).wrapping_mul(277803737);
+        f64::from((((word >> 22) ^ word) >> 8) as f32 * (1.0 / 16777216.0))
+    };
+    for model in [
+        GlassModel::default(),
+        GlassModel { roughness: 0.35, ..Default::default() },
+        GlassModel { roughness: 0.35, thin_film: Some(ThinFilm { ior: 1.38, thickness_nm: 380.0 }), ..Default::default() },
+        GlassModel { dispersion: Some(Dispersion { abbe_number: 25.0 }), ..Default::default() },
+    ] {
+        for (ni, nt) in [(1.0, 1.5), (1.5, 1.0), (1.5, 1.5)] {
+            for cosine in [0.35_f64, 1.0] {
+                for wavelength in [460.0, 550.0, 610.0] {
+                    let view = Vec3::new(f64::from(((1.0 - cosine * cosine).sqrt()) as f32), 0.0, f64::from(cosine as f32));
+                    let mut params = vec![0; PARAMETER_BYTES];
+                    params[16..20].copy_from_slice(&71_u32.to_le_bytes());
+                    let mut vector = Vec::new();
+                    scene::vector(&mut vector, Vec3::new(cosine, ni, nt), wavelength as f32);
+                    scene::vector(&mut vector, view, 0.0);
+                    scene::vector(
+                        &mut vector,
+                        Vec3::new(model.roughness, model.dispersion.map_or(0.0, |d| d.abbe_number), model.thin_film.map_or(0.0, |f| f.thickness_nm)),
+                        model.thin_film.map_or(0.0, |f| f.ior) as f32,
+                    );
+                    params[64..112].copy_from_slice(&vector);
+                    context.queue.write_buffer(&task.uniform, 0, &params);
+                    let mut encoder = context.device.create_command_encoder(&Default::default());
+                    {
+                        let mut pass = encoder.begin_compute_pass(&Default::default());
+                        pass.set_pipeline(&pipeline);
+                        pass.set_bind_group(0, &task.bind, &[]);
+                        pass.dispatch_workgroups(1, 1, 1);
+                    }
+                    context.queue.submit([encoder.finish()]);
+                    task.sample = 1;
+                    let pixels = task.read_linear().unwrap();
+                    assert_eq!(pixels[3], [0.6, 0.0, 0.8, 1.0], "HG-only lighting retains a valid bent shading normal");
+                    let bare = model.fresnel(f64::from(cosine as f32), ni, nt, wavelength).unwrap();
+                    for (actual, expected) in pixels[0].iter().zip([bare.s, bare.p, model.ior(nt, wavelength).unwrap()]) {
+                        assert!(
+                            (f64::from(*actual) - expected).abs() < 5e-4,
+                            "model={model:?}, {ni}->{nt}, cosine={cosine}, wavelength={wavelength}: {pixels:?} != {expected}"
+                        );
+                    }
+                    let rough = model.roughness > 0.0 && !(ni == nt && model.thin_film.is_none_or(|f| f.thickness_nm == 0.0 || f.ior == ni));
+                    let mut state = 71_u32;
+                    let uniforms = if rough { [random(&mut state), random(&mut state), random(&mut state)] } else { [0.5, 0.5, random(&mut state)] };
+                    let expected = model.sample(-view, Vec3::Z, ni, nt, wavelength, uniforms).unwrap();
+                    if let Some(expected) = expected {
+                        assert_eq!(pixels[1][3], 1.0, "{model:?}: {pixels:?}");
+                        for (actual, expected) in
+                            pixels[1].iter().zip([expected.direction.x + 2.0, expected.direction.y + 2.0, expected.direction.z + 2.0])
+                        {
+                            assert!((f64::from(*actual) - expected).abs() < 8e-4, "sampled direction differs: {model:?}: {pixels:?} != {expected}");
+                        }
+                        assert!(
+                            (f64::from(pixels[2][0]) - expected.weight).abs() < 8e-4,
+                            "sample weight differs: {model:?}: {pixels:?} != {expected:?}"
+                        );
+                        assert_eq!(pixels[2][3] != 0.0, expected.crosses);
+                    } else {
+                        assert_eq!(pixels[1][3], 0.0, "a rejected f64 visible-facet sample must not be retried: {model:?}: {pixels:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn rough_glass_fixture(thin: bool, roughness: f64, absorption: Vec3, scattering: f64) -> ProductScene {
+    let mut scene = glass_slab(thin);
+    let mut transmission = solidcraft_render::transmission::Transmission::new(absorption, thin.then_some(0.7))
+        .unwrap()
+        .with_shadow_transmission(false)
+        .with_model(solidcraft_render::glass_model::GlassModel { roughness, ..Default::default() })
+        .unwrap();
+    if scattering > 0.0 {
+        transmission = transmission
+            .with_subsurface(solidcraft_render::transmission::subsurface::Subsurface { scattering_per_mm: scattering, anisotropy: 0.3 })
+            .unwrap();
+    }
+    scene.meshes[0].transmission = Some(transmission);
+    scene
+}
+
+fn rough_glass_pixel(context: Arc<Context>, scene: ProductScene, options: JobOptions) -> [f32; 4] {
+    let mut image = request(1);
+    image.camera.fov = 0.000001;
+    let expected_bytes = 16 * if options.adaptive.is_some() { 3 } else { 1 } + glass_tile_bytes(&scene, &image);
+    let mut task = Task::new(context, scene, image, options, CancelToken::default()).unwrap();
+    assert_eq!(task.accumulation.size(), expected_bytes, "optical scratch must be appended after exactly the historical film planes");
+    for _ in 0..options.samples {
+        task.complete_sample().unwrap();
+    }
+    task.read_linear().unwrap()[0]
+}
+
+#[test]
+fn optical_hard_light_specialization_ignores_identity_models_and_refuses_nonfinite_f32_ggx_peaks() {
+    assert!((1..=(1 << 24)).contains(&MAX_GPU_PATH_TRIANGLES), "captured parent references must remain exact f32 integers");
+    let identity = rough_glass_fixture(false, 0.0, Vec3::ZERO, 0.0);
+    assert!(!needs_glass_lighting(&identity));
+    assert_eq!(glass_tile_bytes(&identity, &request(1024)), 0);
+    let rough = rough_glass_fixture(false, 0.4, Vec3::ZERO, 0.0);
+    assert_eq!(glass_tile_bytes(&rough, &request(1)), 128);
+    assert_eq!(glass_tile_bytes(&rough, &request(128)), 128 * u64::from(dispatch::MAX_PATHS));
+    assert_eq!(glass_tile_bytes(&rough, &request(1024)), 128 * u64::from(dispatch::MAX_PATHS));
+    assert!(needs_glass_lighting(&rough_glass_fixture(false, 0.4, Vec3::ZERO, 0.0)));
+    assert!(needs_glass_lighting(&rough_glass_fixture(false, 0.0, Vec3::ZERO, 0.5)));
+    let representable = rough_glass_fixture(false, 1e-9, Vec3::ZERO, 0.0);
+    assert!(scene::flatten(&representable, Vec3::ZERO, &CancelToken::default()).is_ok());
+    for roughness in [1e-10, 3e-10] {
+        let overflow = rough_glass_fixture(false, roughness, Vec3::ZERO, 0.0);
+        let failure = scene::flatten(&overflow, Vec3::ZERO, &CancelToken::default()).err().unwrap();
+        assert!(failure.message.contains("roughness"), "{failure}");
+    }
+    let mut thin = rough_glass_fixture(true, 0.4, Vec3::ZERO, 0.0);
+    assert!(scene::flatten(&thin, Vec3::ZERO, &CancelToken::default()).is_ok());
+    thin.meshes[0].transmission = thin.meshes[0].transmission.map(|material| material.with_shadow_transmission(true));
+    assert!(
+        scene::flatten(&thin, Vec3::ZERO, &CancelToken::default()).is_err(),
+        "a straight shadow cannot stand in for independent rough interfaces"
+    );
+}
+
+#[test]
+fn rough_glass_hard_direction_point_spot_and_contained_transmission_match_analytic_projected_bsdf() {
+    use solidcraft_render::job::{DirectionalLightOptions, DirectionalLights, PunctualLightOptions, PunctualLights, SpotConeOptions, StudioLighting};
+    let Some(executor) = executor() else { return };
+    let roughness = 0.5_f64;
+    // At normal incidence D=1/(pi*roughness^4), G=1 and F=.04.
+    let reflection = 0.04 / (4.0 * std::f64::consts::PI * roughness.powi(4));
+    let directional = StudioLighting {
+        directional_lights: DirectionalLights::new(&[DirectionalLightOptions { direction: [0.0, 0.0, 1.0], color: [1.0; 3], intensity: 1.0 }])
+            .unwrap(),
+        ..Default::default()
+    };
+    for thin in [false, true] {
+        for source in 0..3 {
+            let cone = (source == 2).then_some(SpotConeOptions {
+                emitted_axis: [0.0, 0.0, -1.0],
+                inner_half_angle_radians: 0.1,
+                outer_half_angle_radians: 0.4,
+            });
+            let lighting = if source == 0 {
+                directional
+            } else {
+                StudioLighting {
+                    punctual_lights: PunctualLights::new(&[PunctualLightOptions {
+                        position_mm: [0.0, 0.0, 4.0],
+                        color: [1.0; 3],
+                        intensity: 1.0,
+                        reference_distance_mm: 1.0,
+                        minimum_distance_mm: 0.001,
+                        cone,
+                    }])
+                    .unwrap(),
+                    ..Default::default()
+                }
+            };
+            let options = JobOptions { samples: 1, max_depth: 1, lighting: Some(lighting), ..Default::default() };
+            let mut scene = rough_glass_fixture(thin, roughness, Vec3::ZERO, 0.0);
+            if source == 0 {
+                Arc::make_mut(&mut scene.meshes[0].mesh).normals.fill(Vec3::new(0.6, 0.0, 0.8));
+            }
+            let actual = rough_glass_pixel(executor.context.clone(), scene, options);
+            let expected = reflection / if source == 0 { 1.0 } else { 3.5_f64.powi(2) };
+            for value in actual.into_iter().take(3) {
+                assert!((f64::from(value) - expected).abs() < expected * 0.0002, "thin={thin}, source={source}: {actual:?} != {expected}");
+            }
+            assert_eq!(actual[3], 1.0);
+        }
+    }
+    // The point lies inside the slab, half a millimetre past its rough entry.
+    // Walter's normal-incidence BTDF*cos is (1-F)*ni^2*D/(nt-ni)^2.
+    let transmission = 0.96 / (0.5_f64.powi(2) * std::f64::consts::PI * roughness.powi(4));
+    let lighting = StudioLighting {
+        punctual_lights: PunctualLights::new(&[PunctualLightOptions {
+            position_mm: [0.0; 3],
+            color: [1.0; 3],
+            intensity: 1.0,
+            reference_distance_mm: 1.0,
+            minimum_distance_mm: 0.001,
+            cone: None,
+        }])
+        .unwrap(),
+        ..Default::default()
+    };
+    for scattering in [0.0, 0.6] {
+        let actual = rough_glass_pixel(
+            executor.context.clone(),
+            rough_glass_fixture(false, roughness, Vec3::new(0.2, 0.4, 0.8), scattering),
+            JobOptions { samples: 1, max_depth: 1, lighting: Some(lighting), ..Default::default() },
+        );
+        for (value, absorption) in actual.into_iter().take(3).zip([0.2, 0.4, 0.8]) {
+            let expected = transmission * 4.0 * (-0.5_f64 * (absorption + scattering)).exp();
+            assert!((f64::from(value) - expected).abs() < expected * 0.0003, "contained BTDF/Beer/HG {actual:?} != {expected}");
+        }
+    }
+    let inactive = rough_glass_pixel(
+        executor.context.clone(),
+        rough_glass_fixture(false, 0.0, Vec3::ZERO, 0.0),
+        JobOptions { samples: 1, max_depth: 1, lighting: Some(directional), ..Default::default() },
+    );
+    assert_eq!(inactive, [0.0, 0.0, 0.0, 1.0], "smooth delta glass has no continuous hard-light lobe");
+    for thin in [false, true] {
+        let render = |zero_source: bool| {
+            let directional_lights = if zero_source {
+                DirectionalLights::new(&[DirectionalLightOptions { direction: [0.0, 0.0, 1.0], color: [1.0; 3], intensity: 0.0 }]).unwrap()
+            } else {
+                DirectionalLights::default()
+            };
+            rough_glass_pixel(
+                executor.context.clone(),
+                rough_glass_fixture(thin, 0.5, Vec3::new(0.2, 0.4, 0.8), 0.0),
+                JobOptions {
+                    samples: 32,
+                    max_depth: 16,
+                    lighting: Some(StudioLighting { directional_lights, environment: [1.0; 3], ..Default::default() }),
+                    ..Default::default()
+                },
+            )
+        };
+        let plain = render(false);
+        assert!(plain[0] > 0.0);
+        assert_eq!(plain, render(true), "offering zero-power NEE vertices must not advance the BSDF transport RNG: thin={thin}");
+    }
+    let mut image = request(1);
+    image.camera.target = Vec3::new(0.17, 0.07, 0.0);
+    image.camera.distance = 0.01;
+    image.camera.fov = 0.000001;
+    let options = JobOptions {
+        samples: 512,
+        max_depth: 1,
+        seed: 43,
+        nested_media: true,
+        lighting: Some(StudioLighting {
+            punctual_lights: PunctualLights::new(&[PunctualLightOptions {
+                position_mm: [0.17, 0.07, 0.25],
+                color: [1.0; 3],
+                intensity: 1.0,
+                reference_distance_mm: 1.0,
+                minimum_distance_mm: 0.001,
+                cone: None,
+            }])
+            .unwrap(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut expected = 0.0;
+    let phase = 0.91 / (4.0 * std::f64::consts::PI * 1.69_f64.powf(1.5));
+    for ordinal in 0..options.samples {
+        let mut state = ordinal.wrapping_mul(0x9e3779b9) ^ options.seed;
+        let mut random = || {
+            state = state.wrapping_mul(747796405).wrapping_add(2891336453);
+            let word = ((state >> ((state >> 28) + 4)) ^ state).wrapping_mul(277803737);
+            f64::from((((word >> 22) ^ word) >> 8) as f32 * (1.0 / 16777216.0))
+        };
+        let _ = (random(), random()); // Independent primary AA dimensions.
+        let travel = -(1.0 - random()).ln() / 2.0;
+        if travel < 0.51 {
+            let distance = 0.24 + travel;
+            expected += phase * (-2.0 * distance).exp() / distance.powi(2) / f64::from(options.samples);
+        }
+    }
+    let mut task =
+        Task::new(executor.context.clone(), rough_glass_fixture(false, 0.0, Vec3::ZERO, 2.0), image, options, CancelToken::default()).unwrap();
+    for _ in 0..options.samples {
+        task.complete_sample().unwrap();
+    }
+    let actual = task.read_linear().unwrap()[0];
+    for value in actual.into_iter().take(3) {
+        assert!(
+            (f64::from(value) - expected).abs() < expected * 0.0003,
+            "primary selected HG must connect to its contained delta emitter: {actual:?} != {expected}"
+        );
+    }
+}
+
+#[test]
+fn rough_optical_two_phase_tiles_preserve_adaptive_strata_and_converged_film() {
+    use solidcraft_render::job::{DirectionalLightOptions, DirectionalLights, StudioLighting, adaptive::AdaptiveSampling};
+    let Some(executor) = executor() else { return };
+    let lighting = StudioLighting {
+        directional_lights: DirectionalLights::new(&[DirectionalLightOptions { direction: [0.0, 0.0, 1.0], color: [1.0; 3], intensity: 1.0 }])
+            .unwrap(),
+        ..Default::default()
+    };
+    let options = JobOptions {
+        samples: 32,
+        max_depth: 1,
+        seed: 1948,
+        transmission_samples: 4,
+        adaptive: Some(AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() }),
+        lighting: Some(lighting),
+        ..Default::default()
+    };
+    let mut image = request(17);
+    image.height = 19;
+    image.camera.fov = 0.000001;
+    let scene = rough_glass_fixture(false, 0.5, Vec3::ZERO, 0.0);
+    let pixels = u64::from(image.width) * u64::from(image.height);
+    let scratch = glass_tile_bytes(&scene, &image);
+    let mut task = Task::new(executor.context, scene, image, options, CancelToken::default()).unwrap();
+    assert_eq!(task.accumulation.size(), pixels * 48 + scratch);
+    let mut offset_seen = false;
+    while task.sample < 32 {
+        task.dispatch().unwrap();
+        offset_seen |= task.offset > 0;
+    }
+    assert!(offset_seen, "the physical control must exercise a nonzero tile offset");
+    let converged = task.read_linear().unwrap();
+    loop {
+        if matches!(task.step(4096).unwrap(), TaskPoll::Complete(_)) {
+            break;
+        }
+    }
+    let actual = task.read_linear().unwrap();
+    assert_eq!(actual, converged, "later maximum-budget iterations must skip both optical phases without touching converged film");
+    let expected = 0.04 / (4.0 * std::f64::consts::PI * 0.5_f64.powi(4));
+    for (pixel, value) in actual.iter().enumerate() {
+        assert_eq!(value[3], 1.0, "coverage at pixel{pixel}");
+        for channel in &value[..3] {
+            assert!(
+                (f64::from(*channel) - expected).abs() < expected * 0.0002,
+                "pilot/stratum film normalization at pixel{pixel}: {value:?} != {expected}"
+            );
+        }
+    }
+    let report = task.sampling_report().unwrap();
+    assert_eq!(report.pilot_samples_per_pixel, 16);
+    assert_eq!((report.minimum_production_samples, report.maximum_production_samples), (16, 16));
+    assert_eq!(report.production_samples, pixels * 16);
+    assert_eq!(report.transmission_strata, 4);
+    assert_eq!(report.primary_path_evaluations, pixels * (16 + 16 * 4));
+    assert_eq!(report.pixels_at_cap, 0);
+}
+
+fn rough_shadow_overlap_scene(shadow_transmission: bool) -> ProductScene {
+    let floor = ProductMesh {
+        name: "original unit-Lambert floor".into(),
+        mesh: Arc::new(Mesh {
+            positions: vec![Vec3::new(-10.0, -10.0, 0.0), Vec3::new(10.0, -10.0, 0.0), Vec3::new(10.0, 10.0, 0.0), Vec3::new(-10.0, 10.0, 0.0)],
+            normals: vec![Vec3::Z; 4],
+            triangles: vec![[0, 1, 2], [0, 2, 3]],
+            tri_face: vec![0, 0],
+            ..Default::default()
+        }),
+        color: [255; 3],
+        opacity: 1.0,
+        surface: Some(OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 0.0, 1.0, 1.0).unwrap()),
+        transmission: None,
+        faces: Vec::new(),
+    };
+    let mut glass = glass_slab(false).meshes.remove(0);
+    glass.name = "original off-axis rough closed box".into();
+    for point in &mut Arc::make_mut(&mut glass.mesh).positions {
+        *point = Vec3::new(2.0 + point.x * 0.1, point.y * 0.1, 1.0 + point.z * 1.4);
+    }
+    glass.transmission = Some(
+        solidcraft_render::transmission::Transmission::new(Vec3::ZERO, None)
+            .unwrap()
+            .with_shadow_transmission(shadow_transmission)
+            .with_model(solidcraft_render::glass_model::GlassModel { roughness: 0.5, ..Default::default() })
+            .unwrap(),
+    );
+    let bounds = floor.mesh.bounds().union(&glass.mesh.bounds());
+    ProductScene { meshes: vec![floor, glass], bounds }
+}
+
+#[test]
+fn rough_closed_shadow_approximation_replaces_only_the_transmitted_hard_source_family() {
+    use solidcraft_render::job::{PunctualLightOptions, PunctualLights, StudioLighting};
+    let Some(executor) = executor() else { return };
+    let lighting = StudioLighting {
+        punctual_lights: PunctualLights::new(&[PunctualLightOptions {
+            position_mm: [2.0, 0.0, 1.0],
+            color: [1.0; 3],
+            intensity: 1.0,
+            reference_distance_mm: 1.0,
+            minimum_distance_mm: 0.001,
+            cone: None,
+        }])
+        .unwrap(),
+        ..Default::default()
+    };
+    let render = |shadow, depth| {
+        let options = JobOptions { samples: 512, seed: 1948, max_depth: depth, lighting: Some(lighting), ..Default::default() };
+        let mut image = request(1);
+        image.camera.fov = 0.000001;
+        let mut task = Task::new(executor.context.clone(), rough_shadow_overlap_scene(shadow), image, options, CancelToken::default()).unwrap();
+        for _ in 0..options.samples {
+            task.complete_sample().unwrap();
+        }
+        task.read_linear().unwrap()[0]
+    };
+    // The floor-to-point vector is (2,0,1), d=sqrt5, n_floor.l=1/sqrt5.
+    // Its first glass crossing is x=1,z=.5, with incident cosine2/sqrt5.
+    // Independent s/p Fresnel equations, then the existing straight-connection
+    // inside-emitter radiance conversion1/nt^2; no production Fresnel helper.
+    let cosine = 2.0 / 5.0_f64.sqrt();
+    let transmitted_cosine = (1.0 - (1.0 - cosine * cosine) / 1.5_f64.powi(2)).sqrt();
+    let rs = (cosine - 1.5 * transmitted_cosine) / (cosine + 1.5 * transmitted_cosine);
+    let rp = (1.5 * cosine - transmitted_cosine) / (1.5 * cosine + transmitted_cosine);
+    let reflection = 0.5 * (rs * rs + rp * rp);
+    let expected = (1.0 - reflection) / (2.25 * std::f64::consts::PI * 5.0 * 5.0_f64.sqrt());
+    let one = render(true, 1);
+    let two = render(true, 2);
+    for actual in [one, two] {
+        assert_eq!(actual[3], 1.0);
+        for channel in &actual[..3] {
+            assert!((f64::from(*channel) - expected).abs() < expected * 0.0002, "{actual:?} != {expected}");
+        }
+    }
+    assert_eq!(one, two, "another opaque->rough transmitted NEE must not duplicate the enabled straight approximation");
+    let blocked = render(false, 1);
+    assert_eq!(blocked, [0.0, 0.0, 0.0, 1.0]);
+    let physical = render(false, 2);
+    assert!(
+        physical[..3].iter().all(|v| v.is_finite() && *v > 0.0),
+        "a sampled rough hit must receive the contained hard point when its opaque straight connection is blocked: {physical:?}"
+    );
+    // The positive physical control above proves that this fixed stream really
+    // reaches the rough box; increasing SPP is not a substitute for this check.
+}
+
+#[test]
+fn reflection_only_closed_nee_packet_keeps_its_actual_inside_medium_beer() {
+    use solidcraft_render::job::{PunctualLightOptions, PunctualLights, StudioLighting};
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let lighting = StudioLighting {
+        punctual_lights: PunctualLights::new(&[PunctualLightOptions {
+            position_mm: [0.13, -0.07, 0.0],
+            color: [1.0; 3],
+            intensity: 1.0,
+            reference_distance_mm: 1.0,
+            minimum_distance_mm: 0.001,
+            cone: None,
+        }])
+        .unwrap(),
+        ..Default::default()
+    };
+    let options = JobOptions { samples: 1, max_depth: 1, lighting: Some(lighting), ..Default::default() };
+    let mut scene = rough_glass_fixture(false, 0.5, Vec3::new(0.2, 0.4, 0.8), 0.0);
+    let optics = scene.meshes[0].transmission.unwrap();
+    scene.meshes[0].transmission = Some(optics.with_shadow_transmission(true));
+    let mut task = Task::new(context.clone(), scene, request(1), options, CancelToken::default()).unwrap();
+    let source=format!("{SHADER}\n@compute @workgroup_size(1) fn closed_reflection_medium_reference() {{
+        if u.sampling.z==0u {{return;}}
+        let hit=trace_precise(vec3<f32>(0.13,-0.07,-2.0),vec3<f32>(0.0),vec3<f32>(0.0,0.0,1.0),false,0xffffffffu,0.0,false);
+        var payload:array<vec4<u32>,6>;var count=0u;var selection_rng=81u;
+        glass_offer_light(&payload,&count,&selection_rng,PrecisePoint(vec3<f32>(0.13,-0.07,-0.5),vec3<f32>(0.0)),vec3<f32>(0.0,0.0,-1.0),vec3<f32>(1.0),1.5,1.0,hit.triangle,4u,glass_vacuum());
+        accumulation[0]=vec4<f32>(glass_resolve_light(&payload,count,0.0),1.0);
+    }}");
+    let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(source.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&context.layout)],
+        immediate_size: 0,
+    });
+    let constants = [("GLASS_DELTA_LIGHTS", 1.0)];
+    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("closed_reflection_medium_reference"),
+        compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
+        cache: None,
+    });
+    context.queue.write_buffer(&task.uniform, 0, &[0; PARAMETER_BYTES]);
+    warm_up(&context.device, &context.queue, &pipeline, &task.bind, &context.healthy).unwrap();
+    context.queue.write_buffer(&task.uniform, 0, &task.parameters(1).unwrap());
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &task.bind, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+    context.queue.submit([encoder.finish()]);
+    task.sample = 1;
+    let actual = task.read_linear().unwrap()[0];
+    let response = 0.04 / (4.0 * std::f64::consts::PI * 0.5_f64.powi(4));
+    for (value, absorption) in actual.into_iter().take(3).zip([0.2, 0.4, 0.8]) {
+        let expected = response * 4.0 * (-0.5_f64 * absorption).exp();
+        assert!(
+            (f64::from(value) - expected).abs() < expected * 0.0003,
+            "inside reflection requires its actual medium, not sheet/vacuum metadata: {actual:?} != {expected}"
+        );
+    }
+    assert_eq!(actual[3], 1.0);
+}
+
+#[test]
+fn rough_closed_and_virtual_sheet_photon_partition_keeps_primary_caustics_and_avoids_double_counting() {
+    use solidcraft_render::job::{CausticOptions, DirectionalLightOptions, DirectionalLights, StudioLighting};
+    let Some(executor) = executor() else { return };
+    if executor.context.device.limits().max_storage_buffers_per_shader_stage < 7 {
+        return;
+    }
+    let lighting = StudioLighting {
+        directional_lights: DirectionalLights::new(&[DirectionalLightOptions { direction: [0.0, 0.0, -1.0], color: [1.0; 3], intensity: 1.0 }])
+            .unwrap(),
+        ..Default::default()
+    };
+    for thin in [false, true] {
+        let render = |map: bool, depth: u32| {
+            rough_glass_pixel(
+                executor.context.clone(),
+                rough_glass_fixture(thin, 0.45, Vec3::ZERO, 0.0),
+                JobOptions {
+                    samples: 32,
+                    max_depth: depth,
+                    lighting: Some(lighting),
+                    caustics: map.then_some(CausticOptions { photons: 8192, radius_mm: 2.0, max_depth: 8, seed: 81 }),
+                    ..Default::default()
+                },
+            )
+        };
+        let one = render(false, 1);
+        let two = render(false, 2);
+        assert_eq!(one, [0.0, 0.0, 0.0, 1.0], "the first interface cannot connect directly to an exterior backlight");
+        assert!(two[0] > 0.0 && two[0].is_finite(), "map-off virtual/closed exit must receive a hard backlight: thin={thin}, {two:?}");
+        // Hold one immutable photon map fixed across both camera depths. Two
+        // independent parallel prepasses can sum a cell's atomic-linked records
+        // in different orders and differ by an ULP, unrelated to path partition.
+        let mapped_options = JobOptions {
+            samples: 32,
+            seed: 1948,
+            max_depth: 2,
+            lighting: Some(lighting),
+            caustics: Some(CausticOptions { photons: 8192, radius_mm: 2.0, max_depth: 8, seed: 81 }),
+            ..Default::default()
+        };
+        let mut image = request(1);
+        image.camera.fov = 0.000001;
+        let mut mapped =
+            Task::new(executor.context.clone(), rough_glass_fixture(thin, 0.45, Vec3::ZERO, 0.0), image, mapped_options, CancelToken::default())
+                .unwrap();
+        mapped.options.max_depth = 1;
+        for _ in 0..mapped_options.samples {
+            mapped.complete_sample().unwrap();
+        }
+        let mapped_one = mapped.read_linear().unwrap()[0];
+        assert!(mapped.photons.as_ref().unwrap().ready());
+        mapped.sample = 0;
+        mapped.lane = 0;
+        mapped.offset = 0;
+        mapped.options.max_depth = 2;
+        for _ in 0..mapped_options.samples {
+            mapped.complete_sample().unwrap();
+        }
+        let mapped_two = mapped.read_linear().unwrap()[0];
+        assert!(
+            mapped_one[0] > 0.0 && mapped_one[0].is_finite(),
+            "primary rough gather must retain transmitted caustics: thin={thin}, {mapped_one:?}"
+        );
+        assert_eq!(mapped_one, mapped_two, "a sampled continuous prefix cannot add the same photon-estimated suffix twice: thin={thin}");
+        let maximum_depth = render(false, 16);
+        assert!(
+            maximum_depth[..3].iter().all(|value| value.is_finite() && *value > 0.0),
+            "all admitted sheet/interface events fit the fixed request cap: {maximum_depth:?}"
+        );
+        for pixel in [two, mapped_one, mapped_two, maximum_depth] {
+            for channel in 1..3 {
+                assert!(
+                    (pixel[channel] - pixel[0]).abs() <= pixel[0].abs() * 1e-5 + 1e-7,
+                    "non-spectral white caustics must remain achromatic: {pixel:?}"
+                );
+            }
+        }
+    }
+    let volume = |map: bool| {
+        let options = JobOptions {
+            samples: 64,
+            max_depth: 1,
+            nested_media: true,
+            lighting: Some(lighting),
+            caustics: map.then_some(CausticOptions { photons: 8192, radius_mm: 0.6, max_depth: 8, seed: 81 }),
+            ..Default::default()
+        };
+        let mut image = request(1);
+        image.camera.distance = 0.01;
+        image.camera.fov = 0.000001;
+        let mut task =
+            Task::new(executor.context.clone(), rough_glass_fixture(false, 0.0, Vec3::ZERO, 2.0), image, options, CancelToken::default()).unwrap();
+        for _ in 0..options.samples {
+            task.complete_sample().unwrap();
+        }
+        task.read_linear().unwrap()[0]
+    };
+    assert_eq!(volume(false), [0.0, 0.0, 0.0, 1.0], "the hard source lies beyond a genuinely refracting closed boundary");
+    let mapped = volume(true);
+    assert!(
+        mapped[0] > 0.0 && mapped[..3].iter().all(|value| value.is_finite()),
+        "primary selected-HG must gather refracted volume caustics: {mapped:?}"
+    );
+}
+
+#[test]
+fn rough_volume_photon_kernels_and_hg_delta_connection_match_independent_measures() {
+    use solidcraft_render::job::{CausticOptions, PunctualLightOptions, PunctualLights, StudioLighting};
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    if context.device.limits().max_storage_buffers_per_shader_stage < 7 {
+        return;
+    }
+    let scene = rough_glass_fixture(false, 0.5, Vec3::new(0.2, 0.4, 0.8), 0.6);
+    let options = JobOptions {
+        max_depth: 16,
+        lighting: Some(StudioLighting {
+            punctual_lights: PunctualLights::new(&[PunctualLightOptions {
+                position_mm: [0.0, 0.0, 0.25],
+                color: [1.0; 3],
+                intensity: 1.0,
+                reference_distance_mm: 1.0,
+                minimum_distance_mm: 0.001,
+                cone: None,
+            }])
+            .unwrap(),
+            ..Default::default()
+        }),
+        caustics: Some(CausticOptions { photons: 4, radius_mm: 1.0, ..Default::default() }),
+        ..Default::default()
+    };
+    let mut task = Task::new(context.clone(), scene, request(5), options, CancelToken::default()).unwrap();
+    assert_eq!(task.photons.as_ref().unwrap().progress().done, 0, "selected optical pipeline warm-up cannot advance photon work");
+    task.sample = 1;
+    assert!(task.read_linear().unwrap().iter().all(|pixel| *pixel == [0.0; 4]), "actual-binding optical warm-up must leave film untouched");
+    task.sample = 0;
+    let resources = task.photons.as_ref().unwrap();
+    let source = format!(
+        "{}\n@compute @workgroup_size(1) fn optical_density_reference() {{
+        if u.sampling.z==0u {{return;}}
+        let hit=trace_precise(vec3<f32>(0.1,0.0,2.0),vec3<f32>(0.0),vec3<f32>(0.0,0.0,-1.0),false,0xffffffffu,0.0,false);
+        var t=triangle(hit.triangle);t.glass=vec4<f32>(0.5,0.0,0.0,0.0);
+        let medium=Medium(t.optics.w,1.5,vec3<f32>(0.2,0.4,0.8),vec2<f32>(0.6,0.3));
+        accumulation[0]=vec4<f32>(photon_gather_glass(t,vec3<f32>(0.0,0.0,0.5),vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,0.0,-1.0),1.0,1.5,0.0,0),1.0);
+        accumulation[1]=vec4<f32>(photon_gather_volume(vec3<f32>(0.0),vec3<f32>(0.0,0.0,-1.0),medium),1.0);
+        var sum=vec3<f32>(0.0);
+        for(var trial=0u;trial<4096u;trial+=1u) {{
+            var reservoir:PhotonReservoir;reservoir.rng=trial^0x5b3d17u;
+            photon_offer(&reservoir,PrecisePoint(vec3<f32>(0.0),vec3<f32>(0.0)),vec3<f32>(0.0,0.0,1.0),vec3<f32>(1.0,0.0,0.0),vec3<f32>(0.0),0u,1u,0);
+            photon_offer(&reservoir,PrecisePoint(vec3<f32>(0.0),vec3<f32>(0.0)),vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,1.0,0.0),vec3<f32>(0.0),0u,2u,0);
+            photon_offer(&reservoir,PrecisePoint(vec3<f32>(0.0),vec3<f32>(0.0)),vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0),0u,3u,0);
+            sum+=reservoir.flux*f32(reservoir.visits);
+        }}
+        accumulation[3]=vec4<f32>(sum/4096.0,1.0);
+        var narrow=t;narrow.glass.x=0.001;
+        accumulation[4]=vec4<f32>(glass_evaluate_cosine(narrow.glass,vec3<f32>(0.0,0.0,-1.0),unit(vec3<f32>(0.0002,0.0,1.0)),vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,0.0,1.0),1.0,1.5,0.0),1.0);
+        for(var case_index=0u;case_index<18u;case_index+=1u) {{
+            let vertices=max(1u,case_index-min(case_index,1u));
+            let trials=select(4096u,1u,case_index<3u);var total=vec3<f32>(0.0);
+            for(var trial=0u;trial<trials;trial+=1u) {{
+                var pending:array<vec4<u32>,6>;var pending_count=0u;var pending_rng=trial^(vertices*0x45d9f3bu)^0x6ef372d1u;
+                if case_index==0u {{glass_offer_light(&pending,&pending_count,&pending_rng,PrecisePoint(vec3<f32>(0.0),vec3<f32>(0.0)),vec3<f32>(0.0,0.0,-1.0),vec3<f32>(1.0),1.5,1.5,0xffffffffu,1u,medium);}}
+                else {{
+                    for(var vertex=0u;vertex<vertices;vertex+=1u) {{
+                        let value=f32(vertex+1u);var prefix=vec3<f32>(value,value*value,select(0.0,1.0,(vertex&1u)==0u));
+                        if case_index==1u {{prefix=vec3<f32>(1.0);}}
+                        glass_offer_light(&pending,&pending_count,&pending_rng,PrecisePoint(vec3<f32>(0.0,0.0,0.5),vec3<f32>(0.0)),vec3<f32>(0.0,0.0,-1.0),prefix,1.0,1.5,hit.triangle,0u,glass_vacuum());
+                    }}
+                }}
+                total+=glass_resolve_light(&pending,pending_count,0.0);
+            }}
+            var output_index=select(2u,5u,case_index==1u);if case_index>=2u {{output_index=case_index+4u;}}
+            accumulation[output_index]=vec4<f32>(total/f32(trials),1.0);
+        }}
+    }}
+    @compute @workgroup_size(1) fn optical_event_limit_reference() {{
+        if u.sampling.z==0u {{return;}}
+        var pending:array<vec4<u32>,6>;var pending_count=u.sampling.y;var pending_rng=0u;
+        glass_offer_light(&pending,&pending_count,&pending_rng,PrecisePoint(vec3<f32>(0.0),vec3<f32>(0.0)),vec3<f32>(0.0,0.0,-1.0),vec3<f32>(1.0),1.0,1.5,0u,0u,glass_vacuum());
+    }}
+    @compute @workgroup_size(1) fn optical_precision_reference() {{
+        if u.sampling.z==0u {{return;}}
+        var response=vec3<f32>(0.0);
+        if u.image.z==0u {{
+            response=glass_evaluate_cosine(vec4<f32>(1e-9,0.0,0.0,0.0),vec3<f32>(0.0,0.0,-1.0),vec3<f32>(0.0,0.0,-1.0),vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,0.0,1.0),1.0,bitcast<f32>(0x3f800001u),0.0);
+        }} else {{response=vec3<f32>(glass_response_product(1e30,1e30));}}
+        accumulation[0]=vec4<f32>(response,1.0);
+    }}",
+        photons::shader_source().unwrap()
+    );
+    let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(source.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&resources.layout)],
+        immediate_size: 0,
+    });
+    let constants = [("GLASS_DELTA_LIGHTS", 1.0)];
+    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("optical_density_reference"),
+        compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
+        cache: None,
+    });
+    warm_up(&context.device, &context.queue, &pipeline, &task.bind, &context.healthy).unwrap();
+    // Every triangle belongs to the same closed body. Use triangle0 only as a
+    // body identifier; the receiver's actual outward normal is explicitly +Z.
+    let heads = 8_usize;
+    let mut words = vec![0_u32; 16 + heads + 4 * 16];
+    words[0] = 4;
+    words[1] = heads as u32;
+    words[2] = 1.0_f32.to_bits();
+    words[6..9].fill((-10.0_f32).to_bits());
+    words[16..16 + heads].fill(u32::MAX);
+    let pi = std::f32::consts::PI;
+    for (index, (position, incoming, flux, kind, receiver, side)) in [
+        ([0.0_f32, 0.0, 0.59], [0.0, 0.0, 1.0], [pi, 2.0 * pi, 3.0 * pi], 2, 0, 0),
+        ([0.0, 0.0, -0.1], [0.0, 0.0, -1.0], [pi, 2.0 * pi, 3.0 * pi], 3, 1.0_f32.to_bits(), 0),
+        ([0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [1e6; 3], 3, 2.0_f32.to_bits(), 0),
+        ([0.0, 0.0, 0.5], [0.0, 0.0, 1.0], [1e6; 3], 2, 0, 1),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let cell = position.map(|value| (value + 10.0).floor() as u32);
+        let hash = (cell[0].wrapping_mul(73856093) ^ cell[1].wrapping_mul(19349663) ^ cell[2].wrapping_mul(83492791)) as usize & (heads - 1);
+        let record = 16 + heads + index * 16;
+        for (at, vector) in [(0, position), (4, incoming), (8, flux), (12, [0.0, 0.0, 1.0])] {
+            for (axis, value) in vector.into_iter().enumerate() {
+                words[record + at + axis] = value.to_bits();
+            }
+        }
+        words[record + 3] = words[16 + hash];
+        words[16 + hash] = index as u32;
+        words[record + 7] = receiver;
+        words[record + 11] = kind;
+        words[record + 15] = side | 4; // Punctual source0, plus the virtual-side bits.
+    }
+    let bytes: Vec<_> = words.into_iter().flat_map(u32::to_le_bytes).collect();
+    context.queue.write_buffer(&resources.buffer, 0, &bytes);
+    context.queue.write_buffer(&task.uniform, 0, &task.parameters(1).unwrap());
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &task.bind, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+    context.queue.submit([encoder.finish()]);
+    task.sample = 1;
+    let actual = task.read_linear().unwrap();
+    let reflection = 0.04 / (4.0 * std::f64::consts::PI * 0.5_f64.powi(4));
+    let transmitted = 0.96 / (0.25 * std::f64::consts::PI * 0.5_f64.powi(4));
+    let phase = |cosine: f64| 0.91 / (4.0 * std::f64::consts::PI * (1.09 - 0.6 * cosine).powf(1.5));
+    let outgoing = Vec3::new(0.0002, 0.0, 1.0).normalized().unwrap();
+    let narrow = solidcraft_render::glass_model::GlassModel { roughness: 0.001, ..Default::default() }
+        .evaluate(-Vec3::Z, outgoing, Vec3::Z, 1.0, 1.5, 550.0)
+        .unwrap()
+        .value
+        * outgoing.z;
+    for (channel, absorption) in [0.2, 0.4, 0.8].into_iter().enumerate() {
+        let scalar = (channel + 1) as f64;
+        for (pixel, expected) in
+            [reflection * scalar, phase(1.0) * 1.25 * scalar, phase(-1.0) * 16.0 * (-0.25_f64 * (absorption + 0.6)).exp()].into_iter().enumerate()
+        {
+            assert!(
+                (f64::from(actual[pixel][channel]) - expected).abs() < expected * 0.0002,
+                "kernel{pixel}/channel{channel}: {actual:?} != {expected}"
+            );
+        }
+        assert!((actual[3][channel] - 1.0).abs() < 0.06, "one-record reservoir must preserve every eligible visit in expectation: {actual:?}");
+        assert!(
+            (f64::from(actual[4][channel]) - narrow).abs() < narrow * 0.0003,
+            "representable facet sine must survive an f32 rounded-one cosine: {actual:?} != {narrow}"
+        );
+        let seam = transmitted * 16.0 * (-0.25_f64 * (absorption + 0.6)).exp();
+        assert!(
+            (f64::from(actual[5][channel]) - seam).abs() < seam * 0.0003,
+            "an exact coplanar sibling at the producing seam cannot block the connection: {actual:?} != {seam}"
+        );
+    }
+    for vertices in 1_usize..=16 {
+        let count = vertices as f64;
+        let sum = [count * (count + 1.0) / 2.0, count * (count + 1.0) * (2.0 * count + 1.0) / 6.0, vertices.div_ceil(2) as f64];
+        let observed = actual[5 + vertices];
+        for (channel, total) in sum.into_iter().enumerate() {
+            let expected = f64::from(actual[5][channel]) * total;
+            assert!(
+                (f64::from(observed[channel]) - expected).abs() < expected * 0.06,
+                "one camera light request must estimate the complete K={vertices} colored vertex sum: {observed:?} vs {expected}"
+            );
+        }
+    }
+    assert_eq!(actual[6], actual[5], "K=1 retains the exact deterministic direct contribution");
+    // A finite-radius packet outside a source's omission sphere must not leak
+    // into a receiver inside that sphere. Source metadata remains one packed word.
+    let minimum_offset = PARAMETER_BYTES - PUNCTUAL_PARAMETER_BYTES as usize - 16 + 28;
+    context.queue.write_buffer(&task.uniform, minimum_offset as u64, &0.3_f32.to_le_bytes());
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &task.bind, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+    context.queue.submit([encoder.finish()]);
+    let omitted = task.read_linear().unwrap();
+    assert!(omitted[..3].iter().all(|pixel| *pixel == [0.0, 0.0, 0.0, 1.0]), "receiver-side point-source minimum is physical: {omitted:?}");
+    let overflow = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("optical_event_limit_reference"),
+        compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
+        cache: None,
+    });
+    context.queue.write_buffer(&task.uniform, 0, &[0; PARAMETER_BYTES]);
+    warm_up(&context.device, &context.queue, &overflow, &task.bind, &context.healthy).unwrap();
+    context.queue.write_buffer(&task.uniform, 0, &task.parameters(1).unwrap());
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&overflow);
+        pass.set_bind_group(0, &task.bind, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+    context.queue.submit([encoder.finish()]);
+    let failure = task.read_linear().unwrap_err();
+    assert_eq!(failure.code, ErrorCode::InvalidScene);
+    assert!(failure.message.contains("light-event"));
+    let precision = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("optical_precision_reference"),
+        compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
+        cache: None,
+    });
+    context.queue.write_buffer(&task.uniform, 0, &[0; PARAMETER_BYTES]);
+    warm_up(&context.device, &context.queue, &precision, &task.bind, &context.healthy).unwrap();
+    for case in 0_u32..2 {
+        context.queue.write_buffer(&task.failures, 0, &[0; FAILURE_BYTES as usize]);
+        let mut parameters = task.parameters(1).unwrap();
+        parameters[8..12].copy_from_slice(&case.to_le_bytes());
+        context.queue.write_buffer(&task.uniform, 0, &parameters);
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&precision);
+            pass.set_bind_group(0, &task.bind, &[]);
+            pass.dispatch_workgroups(1, 1, 1);
+        }
+        context.queue.submit([encoder.finish()]);
+        let failure = task.read_linear().unwrap_err();
+        assert_eq!(failure.code, ErrorCode::InvalidScene);
+        assert!(
+            failure.message.contains("optical response"),
+            "near-matched narrow BTDF and response times valid source must refuse arithmetic overflow, case{case}: {failure}"
+        );
+    }
+}
+
+#[test]
+fn photon_density_kernel_counts_hash_collisions_once_and_respects_receiver_support() {
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    if context.device.limits().max_storage_buffers_per_shader_stage < 7 {
+        return;
+    }
+    let mut scene = glass_slab(true);
+    let material = OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 0.0, 0.5, 1.0).unwrap();
+    scene.meshes[0].transmission = None;
+    scene.meshes[0].surface = Some(material);
+    let mut other = scene.meshes[0].clone();
+    other.name = "other density receiver".into();
+    for p in &mut Arc::make_mut(&mut other.mesh).positions {
+        p.z += 0.02;
+    }
+    scene.meshes.push(other);
+    scene.bounds = scene.bounds.union(&scene.meshes[1].mesh.bounds());
+    let upload = scene::flatten(&scene, Vec3::ZERO, &CancelToken::default()).unwrap();
+    let word = |index: usize| u32::from_le_bytes(upload.geometry[index * 4..index * 4 + 4].try_into().unwrap());
+    let material_base = (word(2) & scene::MATERIAL_OFFSET_MASK) as usize;
+    let receiver = |body: f32| {
+        (0..word(0) as usize).find(|i| f32::from_bits(word(material_base + word(4 + i * 4 + 3) as usize * 20 + 11)) == body).unwrap() as u32
+    };
+    let first = receiver(1.0);
+    let second = receiver(2.0);
+    let options = JobOptions {
+        caustics: Some(solidcraft_render::job::CausticOptions { photons: 4, radius_mm: 1.0, ..Default::default() }),
+        ..Default::default()
+    };
+    let mut task = Task::new(context.clone(), scene, request(2), options, CancelToken::default()).unwrap();
+    assert_eq!(task.photons.as_ref().unwrap().progress().done, 0, "setup warm-up cannot consume admitted photon work");
+    task.sample = 1;
+    assert!(task.read_linear().unwrap().iter().all(|pixel| *pixel == [0.0; 4]), "actual-binding zero-work warm-up cannot write camera film");
+    task.sample = 0;
+    let resources = task.photons.as_ref().unwrap();
+    let cancelled = CancelToken::default();
+    cancelled.cancel();
+    assert_eq!(resources.warm_up_actual(context, &task.uniform, &task.bind, &cancelled).unwrap_err().code, ErrorCode::Cancelled);
+    let source = format!(
+        "{}\n@compute @workgroup_size(1) fn density_reference() {{
+        let t=triangle(u32(u.eye.w));
+        accumulation[0]=vec4<f32>(photon_gather(t,u.eye.xyz,vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,0.0,1.0)),1.0);
+    }}",
+        photons::shader_source().unwrap()
+    );
+    let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(source.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&resources.layout)],
+        immediate_size: 0,
+    });
+    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("density_reference"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    let heads = 8_usize;
+    let mut words = vec![0_u32; 16 + heads + 4 * 16];
+    words[0] = 4;
+    words[1] = heads as u32;
+    words[2] = 1.0_f32.to_bits();
+    words[6] = (-10.0_f32).to_bits();
+    words[7] = (-10.0_f32).to_bits();
+    words[8] = 0.5_f32.to_bits();
+    words[16..16 + heads].fill(u32::MAX);
+    let pi = std::f32::consts::PI;
+    let fixtures = [
+        ([0.0_f32, 0.0, 0.5], [pi, 2.0 * pi, 3.0 * pi], [0.0, 0.0, 1.0], first),
+        ([0.1, 0.0, 0.52], [1000.0; 3], [0.0, 0.0, 1.0], second), // Different body.
+        ([0.1, 0.1, 0.7], [1000.0; 3], [0.0, 0.0, 1.0], first),   // Outside plane band.
+        ([0.2, 0.0, 0.5], [1000.0; 3], [0.0, 0.0, -1.0], first),  // Opposite normal.
+    ];
+    for (index, (point, flux, normal, body)) in fixtures.into_iter().enumerate() {
+        let cell = [((point[0] + 10.0).floor()) as i32, ((point[1] + 10.0).floor()) as i32, (point[2] - 0.5).floor() as i32];
+        let hash = ((cell[0] as u32).wrapping_mul(73856093) ^ (cell[1] as u32).wrapping_mul(19349663) ^ (cell[2] as u32).wrapping_mul(83492791))
+            as usize
+            & (heads - 1);
+        let record = 16 + heads + index * 16;
+        for (at, vector) in [(0, point), (4, [0.0, 0.0, 1.0]), (8, flux), (12, normal)] {
+            for (axis, value) in vector.into_iter().enumerate() {
+                words[record + at + axis] = value.to_bits();
+            }
+        }
+        words[record + 3] = words[16 + hash];
+        words[16 + hash] = index as u32;
+        words[record + 7] = body;
+        words[record + 11] = 1;
+    }
+    let bytes: Vec<_> = words.into_iter().flat_map(u32::to_le_bytes).collect();
+    context.queue.write_buffer(&resources.buffer, 0, &bytes);
+    let mut params = vec![0; 32];
+    scene::vector(&mut params, Vec3::new(0.0, 0.0, 0.5), first as f32);
+    params.resize(PARAMETER_BYTES, 0);
+    context.queue.write_buffer(&task.uniform, 0, &params);
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &task.bind, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+    context.queue.submit([encoder.finish()]);
+    task.sample = 1;
+    let actual = task.read_linear().unwrap()[0];
+    // The one eligible packet has flux [pi,2pi,3pi], Lambert f=1/pi,
+    // and the disk kernel is1/pi. Hash collisions must not multiply it.
+    for (actual, expected) in actual.into_iter().zip([1.0 / pi, 2.0 / pi, 3.0 / pi, 1.0]) {
+        assert!((actual - expected).abs() < 2e-5, "density kernel {actual} != {expected}");
+    }
+}
+
+fn photon_receiver_fixture(scattering: f64) -> ProductScene {
+    let mut source = glass_slab(false);
+    source.meshes[0].surface = Some(OpaqueSurface::new(Vec3::ZERO, 0.0, 0.1, 1.0).unwrap());
+    let optics = clear_glass();
+    source.meshes[0].transmission = Some(if scattering > 0.0 {
+        optics.with_subsurface(solidcraft_render::transmission::subsurface::Subsurface { scattering_per_mm: scattering, anisotropy: 0.0 }).unwrap()
+    } else {
+        optics
+    });
+    let floor = Mesh {
+        positions: vec![Vec3::new(-8.0, -8.0, -1.0), Vec3::new(8.0, -8.0, -1.0), Vec3::new(8.0, 8.0, -1.0), Vec3::new(-8.0, 8.0, -1.0)],
+        normals: vec![Vec3::Z; 4],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        tri_face: vec![0, 0],
+        ..Default::default()
+    };
+    source.bounds = source.bounds.union(&floor.bounds());
+    source.meshes.push(ProductMesh {
+        name: "photon Lambert receiver".into(),
+        mesh: Arc::new(floor),
+        color: [255; 3],
+        opacity: 1.0,
+        surface: Some(OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 0.0, 0.5, 1.0).unwrap()),
+        transmission: None,
+        faces: Vec::new(),
+    });
+    source
+}
+
+fn photon_map_probe(task: &mut Task, position: Vec3) -> [f32; 4] {
+    let maximum = task.photons.as_ref().unwrap().maximum_quanta();
+    for _ in 0..maximum {
+        if task.photons.as_ref().unwrap().ready() {
+            break;
+        }
+        task.dispatch().unwrap();
+    }
+    assert!(task.photons.as_ref().unwrap().ready(), "bounded photon prepass must finish");
+    let context = &task.context;
+    let resources = task.photons.as_ref().unwrap();
+    let source=format!("{}\n@compute @workgroup_size(1) fn photon_map_reference() {{
+        var receiver=triangle(0u);for(var i=0u;i<geometry[0];i+=1u) {{let candidate=triangle(i);if candidate.optics.w==2.0 {{receiver=candidate;break;}}}}
+        accumulation[0]=vec4<f32>(photon_gather(receiver,u.eye.xyz,vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,0.0,1.0)),1.0);
+    }}",photons::shader_source().unwrap());
+    let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(source.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&resources.layout)],
+        immediate_size: 0,
+    });
+    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("photon_map_reference"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    // Receiver-side source-minimum clipping needs the actual authored sources,
+    // even though this numerical entry replaces only the probe's eye position.
+    let mut params = task.parameters(1).unwrap();
+    let mut eye = Vec::new();
+    scene::vector(&mut eye, position, 0.0);
+    params[32..48].copy_from_slice(&eye);
+    context.queue.write_buffer(&task.uniform, 0, &params);
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &task.bind, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+    context.queue.submit([encoder.finish()]);
+    task.sample = 1;
+    task.read_linear().unwrap()[0]
+}
+
+#[test]
+fn delta_source_photon_power_matches_directional_and_point_disk_integrals() {
+    use solidcraft_render::job::{
+        CausticOptions, DirectionalLightOptions, DirectionalLights, PunctualLightOptions, PunctualLights, SpotConeOptions, StudioLighting,
+    };
+    let Some(executor) = executor() else { return };
+    if executor.context.device.limits().max_storage_buffers_per_shader_stage < 7 {
+        return;
+    }
+    let point = PunctualLightOptions {
+        position_mm: [0.0, 0.0, 4.0],
+        color: [1.0; 3],
+        intensity: 25.0,
+        reference_distance_mm: 1.0,
+        minimum_distance_mm: 0.001,
+        cone: None,
+    };
+    let directional = StudioLighting {
+        sun: None,
+        environment: [0.0; 3],
+        directional_lights: DirectionalLights::new(&[DirectionalLightOptions { direction: [0.0, 0.0, 1.0], color: [1.0; 3], intensity: 1.0 }])
+            .unwrap(),
+        ..Default::default()
+    };
+    let spot = PunctualLightOptions {
+        cone: Some(SpotConeOptions {
+            emitted_axis: [0.0, 0.0, -1.0],
+            inner_half_angle_radians: 40_f64.to_radians(),
+            outer_half_angle_radians: 60_f64.to_radians(),
+        }),
+        ..point
+    };
+    let radius = 3.0_f64;
+    let point_integral = 2.0 * 25.0 / (radius * radius) * (1.0 - 5.0 / (25.0 + radius * radius).sqrt()) / std::f64::consts::PI;
+    for (lighting, expected) in [
+        (directional, 1.0 / std::f64::consts::PI),
+        (
+            StudioLighting { sun: None, environment: [0.0; 3], punctual_lights: PunctualLights::new(&[point]).unwrap(), ..Default::default() },
+            point_integral,
+        ),
+        (
+            StudioLighting { sun: None, environment: [0.0; 3], punctual_lights: PunctualLights::new(&[spot]).unwrap(), ..Default::default() },
+            point_integral,
+        ),
+    ] {
+        let options = JobOptions {
+            lighting: Some(lighting),
+            caustics: Some(CausticOptions { photons: 16384, radius_mm: radius, max_depth: 4, seed: 81 }),
+            ..Default::default()
+        };
+        let mut task = Task::new(executor.context.clone(), photon_receiver_fixture(0.0), request(1), options, CancelToken::default()).unwrap();
+        let actual = photon_map_probe(&mut task, Vec3::new(0.0, 0.0, -1.0));
+        for value in actual.into_iter().take(3) {
+            assert!((f64::from(value) - expected).abs() < expected * 0.12, "delta source photon power {actual:?} != disk integral {expected}");
+        }
+    }
+}
+
+#[test]
+fn photon_subsurface_flight_precedes_a_closer_analytic_emitter() {
+    use solidcraft_render::job::{AreaLight, AreaLights, CausticOptions, PunctualLightOptions, PunctualLights, SpotConeOptions, StudioLighting};
+    let Some(executor) = executor() else { return };
+    if executor.context.device.limits().max_storage_buffers_per_shader_stage < 7 {
+        return;
+    }
+    let lighting = StudioLighting {
+        sun: None,
+        environment: [0.0; 3],
+        punctual_lights: PunctualLights::new(&[PunctualLightOptions {
+            position_mm: [0.0, 0.0, 2.0],
+            color: [1.0; 3],
+            intensity: 1.0,
+            reference_distance_mm: 1.0,
+            minimum_distance_mm: 0.001,
+            cone: Some(SpotConeOptions {
+                emitted_axis: [0.0, 0.0, -1.0],
+                inner_half_angle_radians: 3_f64.to_radians(),
+                outer_half_angle_radians: 6_f64.to_radians(),
+            }),
+        }])
+        .unwrap(),
+        area_lights: AreaLights::new(&[AreaLight { center: [0.0; 3], u: [0.25, 0.0, 0.0], v: [0.0, 0.25, 0.0], radiance: [0.0; 3] }]).unwrap(),
+        ..Default::default()
+    };
+    let options = JobOptions {
+        lighting: Some(lighting),
+        caustics: Some(CausticOptions { photons: 16384, radius_mm: 0.3, max_depth: 16, seed: 81 }),
+        ..Default::default()
+    };
+    let probe = |scattering| {
+        let mut task = Task::new(executor.context.clone(), photon_receiver_fixture(scattering), request(1), options, CancelToken::default()).unwrap();
+        photon_map_probe(&mut task, Vec3::new(1.0, 0.0, -1.0))
+    };
+    assert_eq!(probe(0.0), [0.0, 0.0, 0.0, 1.0], "every unscattered narrow-cone photon meets the analytic blocker");
+    let scattered = probe(2.0);
+    assert!(
+        scattered[0] > 1e-5 && scattered.iter().all(|v| v.is_finite()),
+        "a free flight before that blocker must retain the off-axis scattering path: {scattered:?}"
+    );
+}
+
+#[test]
+fn contained_punctual_connections_apply_physical_beer_and_hg_survival_without_an_ior_jump() {
+    use solidcraft_render::job::{PunctualLightOptions, PunctualLights, StudioLighting};
+    let Some(executor) = executor() else { return };
+    let sigma = Vec3::new(0.2, 0.4, 0.0);
+    for scattering in [0.0, 0.4] {
+        let mut source = photon_receiver_fixture(scattering);
+        source.meshes[0].surface = Some(OpaqueSurface::new(Vec3::ZERO, 0.0, 0.1, 1.5).unwrap());
+        let mut optics = solidcraft_render::transmission::Transmission::new(sigma, None).unwrap();
+        if scattering > 0.0 {
+            optics = optics
+                .with_subsurface(solidcraft_render::transmission::subsurface::Subsurface { scattering_per_mm: scattering, anisotropy: 0.0 })
+                .unwrap();
+        }
+        source.meshes[0].transmission = Some(optics);
+        for p in &mut Arc::make_mut(&mut source.meshes[1].mesh).positions {
+            p.z = -0.25;
+        }
+        source.bounds = source.meshes[0].mesh.bounds();
+        let lighting = StudioLighting {
+            sun: None,
+            environment: [0.0; 3],
+            punctual_lights: PunctualLights::new(&[PunctualLightOptions {
+                position_mm: [0.5, 0.0, 0.0],
+                color: [1.0; 3],
+                intensity: 0.0625,
+                reference_distance_mm: 1.0,
+                minimum_distance_mm: 0.001,
+                cone: None,
+            }])
+            .unwrap(),
+            ..Default::default()
+        };
+        let samples = if scattering > 0.0 { 2048 } else { 1 };
+        let options = JobOptions { nested_media: true, samples, max_depth: 1, lighting: Some(lighting), ..Default::default() };
+        let mut image = request(1);
+        image.camera.target = Vec3::new(0.0, 0.0, -0.25);
+        image.camera.distance = 0.5;
+        image.camera.fov = 0.00001;
+        let mut task = Task::new(executor.context.clone(), source, image, options, CancelToken::default()).unwrap();
+        while task.sample < samples {
+            task.complete_sample().unwrap();
+        }
+        let actual = task.read_linear().unwrap()[0];
+        // The source is0.5mm off the eye→receiver segment, avoiding an ideal
+        // point singularity on the camera ray. All endpoints remain inside IOR1.5
+        // and no eta conversion applies. An HG collision now has hard-source NEE
+        // at maxdepth1, so include its independent one-dimensional expectation.
+        // The zero-collision atom has mass exp(-sigma_s*0.5); collision distance
+        // has density sigma_s*exp(-sigma_s*s), for0<s<0.5. Integrate both first
+        // and second moments to set the Monte Carlo tolerance from real variance.
+        for (value, absorption) in actual.into_iter().take(3).zip([sigma.x, sigma.y, sigma.z]) {
+            let receiver_distance = (0.5_f64.powi(2) + 0.25_f64.powi(2)).sqrt();
+            let endpoint = 0.0625 * 0.25 / (std::f64::consts::PI * receiver_distance.powi(3))
+                * (-absorption * 0.5 - (absorption + scattering) * receiver_distance).exp();
+            let mass = (-scattering * 0.5).exp();
+            let mut first = mass * endpoint;
+            let mut second = mass * endpoint * endpoint;
+            let intervals = 1024_u32;
+            let step = 0.5 / f64::from(intervals);
+            for index in 0..=intervals {
+                let distance = f64::from(index) * step;
+                let light_distance = (0.5_f64.powi(2) + (0.25 - distance).powi(2)).sqrt();
+                let weight = 0.0625 / (4.0 * std::f64::consts::PI * light_distance.powi(2))
+                    * (-absorption * distance - (absorption + scattering) * light_distance).exp();
+                let density = scattering * (-scattering * distance).exp();
+                let quadrature = if index == 0 || index == intervals {
+                    1.0
+                } else if index.is_multiple_of(2) {
+                    2.0
+                } else {
+                    4.0
+                };
+                first += step / 3.0 * quadrature * density * weight;
+                second += step / 3.0 * quadrature * density * weight * weight;
+            }
+            let standard_error = ((second - first * first).max(0.0) / f64::from(samples)).sqrt();
+            let tolerance = 6.0 * standard_error + 2e-5;
+            assert!(
+                (f64::from(value) - first).abs() < tolerance,
+                "contained Beer/HG={scattering}: {actual:?} != {first}, standard error{standard_error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn gpu_embedded_receiver_keeps_the_legacy_straight_shadow_scale() {
+    use solidcraft_render::{
+        glass_model::GlassModel,
+        job::{PunctualLightOptions, PunctualLights, StudioLighting},
+    };
+    let Some(executor) = executor() else { return };
+    for (model, ior_scale) in [(None, 1.0), (Some(GlassModel::default()), 1.0), (Some(GlassModel { roughness: 0.35, ..Default::default() }), 2.25)] {
+        let mut source = photon_receiver_fixture(0.0);
+        source.meshes[0].surface = Some(OpaqueSurface::new(Vec3::ZERO, 0.0, 0.1, 1.5).unwrap());
+        let mut optics = solidcraft_render::transmission::Transmission::new(Vec3::ZERO, None).unwrap().with_shadow_transmission(true);
+        if let Some(model) = model {
+            optics = optics.with_model(model).unwrap();
+        }
+        source.meshes[0].transmission = Some(optics);
+        for p in &mut Arc::make_mut(&mut source.meshes[1].mesh).positions {
+            p.z = -0.25;
+        }
+        source.bounds = source.meshes[0].mesh.bounds();
+        let lighting = StudioLighting {
+            punctual_lights: PunctualLights::new(&[PunctualLightOptions {
+                position_mm: [0.0, 0.0, 0.75],
+                color: [1.0; 3],
+                intensity: 1.0,
+                reference_distance_mm: 1.0,
+                minimum_distance_mm: 0.001,
+                cone: None,
+            }])
+            .unwrap(),
+            ..Default::default()
+        };
+        let options = JobOptions { nested_media: true, samples: 1, max_depth: 1, lighting: Some(lighting), ..Default::default() };
+        let mut image = request(1);
+        image.camera.target = Vec3::new(0.0, 0.0, -0.25);
+        image.camera.distance = 0.5;
+        image.camera.fov = 0.00001;
+        let mut task = Task::new(executor.context.clone(), source, image, options, CancelToken::default()).unwrap();
+        task.complete_sample().unwrap();
+        let actual = task.read_linear().unwrap()[0];
+        assert_eq!(actual[3], 1.0);
+        // The inside eye sees a unit Lambert receiver. The point is 1 mm away
+        // along the normal, across one IOR-1.5 interface with power T = 0.96.
+        let expected = 0.96 * ior_scale / std::f64::consts::PI;
+        for value in &actual[..3] {
+            assert!((f64::from(*value) - expected).abs() < 2e-5, "model={model:?}: {actual:?} vs {expected}");
+        }
+    }
+}
+
+#[test]
 fn gpu_nonabsorbing_glass_sphere_white_furnace_conserves_radiance() {
     let Some(executor) = executor() else { return };
     let mut scene = sphere(OpaqueSurface::new(Vec3::ZERO, 0.0, 0.1, 1.5).unwrap());
@@ -321,7 +1716,7 @@ fn gpu_thin_lens_focus_and_defocus_match_geometric_oracle() {
             let focal =
                 eye + (right * ux + up * uy) * (camera.half_height() * lens.focus_distance_mm / camera.distance) - back * lens.focus_distance_mm;
             for (radial, azimuth) in [(0.0_f64, 0.0_f64), (0.25, 0.125), (0.75, 0.625), (0.999, 0.999)] {
-                let mut params = task.parameters(1);
+                let mut params = task.parameters(1).unwrap();
                 params.truncate(96);
                 scene::vector(&mut params, Vec3::new(ux, uy, radial), azimuth as f32);
                 context.queue.write_buffer(&task.uniform, 0, &params);
@@ -547,6 +1942,9 @@ fn shader_validates_without_a_device() {
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
         assert_eq!(module.entry_points.iter().find(|entry| entry.name == "main").unwrap().workgroup_size, [PATH_WORKGROUP_SIZE, 1, 1]);
     }
+    let source = photons::shader_source().unwrap();
+    let caustic = naga::front::wgsl::parse_str(&source).unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&caustic).unwrap();
 }
 
 /// #6705: native compilers inline every call. With 33 inlined BVH walks in `main` (three path
@@ -580,7 +1978,7 @@ fn main_inlines_few_bvh_walks() {
             .into_iter()
             .map(|handle| {
                 let callee = &module.functions[handle];
-                let walk = matches!(callee.name.as_deref(), Some("trace_precise_within" | "trace_ordered_within"));
+                let walk = matches!(callee.name.as_deref(), Some("trace_precise_within" | "trace_ordered_within" | "origin_boundary"));
                 usize::from(walk) + walks(module, callee)
             })
             .sum()
@@ -589,6 +1987,34 @@ fn main_inlines_few_bvh_walks() {
     let main = module.entry_points.iter().find(|entry| entry.name == "main").unwrap();
     let inlined = walks(&module, &main.function);
     assert!(inlined <= 5, "`main` inlines {inlined} BVH walks");
+}
+
+#[test]
+fn geometry_materialization_lane_keeps_positive_zero_at_the_shader_offset() {
+    let Some(executor) = executor() else { return };
+    let module = naga::front::wgsl::parse_str(SHADER).unwrap();
+    let params = module.types.iter().find(|(_, ty)| ty.name.as_deref() == Some("Params")).unwrap().1;
+    let naga::TypeInner::Struct { members, .. } = &params.inner else { panic!("Params must be a struct") };
+    let offset = members.iter().find(|member| member.name.as_deref() == Some("studio_weights")).unwrap().offset as usize + 12;
+    let mut task = Task::new(
+        executor.context,
+        ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY },
+        request(1),
+        JobOptions::default(),
+        CancelToken::default(),
+    )
+    .unwrap();
+    for weights in [None, Some([0.0; 3]), Some([1.0, 0.5, 0.25])] {
+        task.request.studio_weights = weights;
+        for sample in [0, 1, 4095] {
+            task.sample = sample;
+            let bytes = task.parameters(1).unwrap();
+            assert_eq!(&bytes[offset..offset + 4], &0u32.to_le_bytes(), "reserved arithmetic lane must remain positive zero");
+        }
+    }
+    task.request.studio_weights = None;
+    task.options.lighting = Some(solidcraft_render::job::StudioLighting { environment: [0.75; 3], ..Default::default() });
+    assert_eq!(&task.parameters(1).unwrap()[offset..offset + 4], &0u32.to_le_bytes());
 }
 
 #[test]
@@ -1370,11 +2796,17 @@ fn gpu_studio_area_mis_matches_independent_quadrature_and_distance_visibility() 
                 samples: 4096,
                 max_depth: depth,
                 seed: 37,
-                lighting: Some(StudioLighting { sun: None, environment: [0.0; 3], area_lights: AreaLights::new(&[light]).unwrap() }),
+                lighting: Some(StudioLighting {
+                    punctual_lights: Default::default(),
+                    directional_lights: Default::default(),
+                    sun: None,
+                    environment: [0.0; 3],
+                    area_lights: AreaLights::new(&[light]).unwrap(),
+                }),
                 ..Default::default()
             };
             let mut task = Task::new(executor.context.clone(), scene, image, options, CancelToken::default()).unwrap();
-            assert_eq!(task.parameters(1).len(), PARAMETER_BYTES);
+            assert_eq!(task.parameters(1).unwrap().len(), PARAMETER_BYTES);
             for _ in 0..options.samples {
                 task.complete_sample().unwrap();
             }
@@ -1421,7 +2853,13 @@ fn gpu_emitter_inside_glass_applies_final_segment_absorption() {
     let options = JobOptions {
         samples: 16,
         max_depth: 2,
-        lighting: Some(StudioLighting { sun: None, environment: [0.0; 3], area_lights: AreaLights::new(&[light]).unwrap() }),
+        lighting: Some(StudioLighting {
+            punctual_lights: Default::default(),
+            directional_lights: Default::default(),
+            sun: None,
+            environment: [0.0; 3],
+            area_lights: AreaLights::new(&[light]).unwrap(),
+        }),
         ..Default::default()
     };
     let mut image = request(2);
@@ -1555,7 +2993,7 @@ fn gpu_environment_orientation_rotation_intensity_and_pdf_match_cpu() {
             let local = Vec3::new(theta.sin() * phi.cos(), theta.sin() * phi.sin(), theta.cos());
             let direction =
                 Vec3::new(rotation.cos() * local.x - rotation.sin() * local.y, rotation.sin() * local.x + rotation.cos() * local.y, local.z);
-            let mut params = task.parameters(1);
+            let mut params = task.parameters(1).unwrap();
             for (out, value) in params[48..60].as_chunks_mut::<4>().0.iter_mut().zip([direction.x, direction.y, direction.z]) {
                 out.copy_from_slice(&(value as f32).to_le_bytes());
             }
@@ -1729,7 +3167,13 @@ fn gpu_shadow_mis_does_not_double_direct_energy_through_index_matched_glass() {
             samples: 4096,
             max_depth: depth,
             seed: 37,
-            lighting: Some(StudioLighting { sun: None, environment: [0.0; 3], area_lights: AreaLights::new(&[light]).unwrap() }),
+            lighting: Some(StudioLighting {
+                punctual_lights: Default::default(),
+                directional_lights: Default::default(),
+                sun: None,
+                environment: [0.0; 3],
+                area_lights: AreaLights::new(&[light]).unwrap(),
+            }),
             ..Default::default()
         };
         let mut image = request(1);
@@ -1792,7 +3236,13 @@ fn gpu_absorbing_two_sheet_mis_matches_f64_quadrature() {
             samples: 4096,
             max_depth: depth,
             seed: 37,
-            lighting: Some(StudioLighting { sun: None, environment: [0.0; 3], area_lights: AreaLights::new(&[light]).unwrap() }),
+            lighting: Some(StudioLighting {
+                punctual_lights: Default::default(),
+                directional_lights: Default::default(),
+                sun: None,
+                environment: [0.0; 3],
+                area_lights: AreaLights::new(&[light]).unwrap(),
+            }),
             ..Default::default()
         };
         let mut image = request(1);
@@ -1962,7 +3412,7 @@ fn opaque_scene_specialization_preserves_body_face_and_volume_media() {
                 assert_ne!(
                     scene_pipeline_variant(opaque, maps, false),
                     scene_pipeline_variant(opaque, maps, true),
-                    "single and nested medium stacks require distinct programs"
+                    "disjoint and nested options retain separate scene cache entries"
                 );
             }
         }
@@ -2092,7 +3542,13 @@ fn gpu_finite_emitter_inside_solid_retains_entry_radiance_eta() {
             samples: 4096,
             max_depth: depth,
             seed: 37,
-            lighting: Some(StudioLighting { sun: None, environment: [0.0; 3], area_lights: AreaLights::new(&[light]).unwrap() }),
+            lighting: Some(StudioLighting {
+                punctual_lights: Default::default(),
+                directional_lights: Default::default(),
+                sun: None,
+                environment: [0.0; 3],
+                area_lights: AreaLights::new(&[light]).unwrap(),
+            }),
             ..Default::default()
         };
         let mut image = request(1);
@@ -2113,10 +3569,12 @@ fn path_device_limits_require_six_storage_buffers_without_changing_raster_defaul
     let mut supported = wgpu::Limits::downlevel_defaults();
     assert_eq!(supported.max_storage_buffers_per_shader_stage, 4);
     assert!(device_limits(supported.clone()).is_err());
+    supported.max_storage_buffers_per_shader_stage = 6;
+    assert_eq!(device_limits(supported.clone()).unwrap().max_storage_buffers_per_shader_stage, 6);
     supported.max_storage_buffers_per_shader_stage = 8;
     let requested = device_limits(supported.clone()).unwrap();
     let mut expected = wgpu::Limits::downlevel_defaults().using_resolution(supported);
-    expected.max_storage_buffers_per_shader_stage = 6;
+    expected.max_storage_buffers_per_shader_stage = 7;
     assert_eq!(requested, expected);
 }
 
@@ -2778,6 +4236,95 @@ fn gpu_rib_total_internal_reflection_retains_origin_residual() {
     }
 }
 #[test]
+fn gpu_split_products_reconstruct_exact_products_and_near_determinants() {
+    use wgpu::util::DeviceExt;
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let unit = 0x3f800000u32;
+    let c = unit | (13_264_529 - (1 << 23));
+    let d = unit | (2351 * 4513 - (1 << 23));
+    let mut cases =
+        vec![[0x40000000, unit, c, d], [c, d, 0x40000000, unit], [unit, 0x40000000, 0x40000000, unit], [unit + 1, unit + 1, unit, unit + 2]];
+    let mut state = 0x11c731u32;
+    let mut next = || {
+        state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+        state
+    };
+    while cases.len() < 4096 {
+        let a = f32::from_bits(((110 + next() % 41) << 23) | (next() & 0x7fffff));
+        let b = f32::from_bits(((110 + next() % 41) << 23) | (next() & 0x7fffff));
+        let c = f32::from_bits(((110 + next() % 41) << 23) | (next() & 0x7fffff));
+        let d = (f64::from(a) * f64::from(b) / f64::from(c)) as f32;
+        cases.push([a.to_bits(), b.to_bits(), c.to_bits(), d.to_bits()]);
+    }
+    for [a, b, c, d] in cases.clone() {
+        cases.push([a ^ 0x80000000, b, c ^ 0x80000000, d]);
+    }
+    assert_eq!(cases.len(), 8192);
+    let mut bytes = Vec::with_capacity(4 + cases.len() * 16);
+    bytes.extend((cases.len() as u32).to_le_bytes());
+    for case in &cases {
+        for word in case {
+            bytes.extend(word.to_le_bytes());
+        }
+    }
+    let input = context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("split determinant inputs"),
+        contents: &bytes,
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("split determinant oracle"),
+        source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+    });
+    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: None,
+        module: &shader,
+        entry_point: Some("split_predicate_reference"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    let mut task = Task::new(context.clone(), glass_slab(false), request(128), JobOptions::default(), CancelToken::default()).unwrap();
+    context.queue.write_buffer(&task.uniform, 0, &task.parameters(0).unwrap());
+    let bind = context.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("split determinant oracle"),
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: task.uniform.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: input.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: task.accumulation.as_entire_binding() },
+        ],
+    });
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.dispatch_workgroups((cases.len() as u32).div_ceil(32), 1, 1);
+    }
+    context.queue.submit([encoder.finish()]);
+    task.sample = 1;
+    let values = task.read_linear().unwrap();
+    let word = |low: f32, high: f32| low as u32 | ((high as u32) << 16);
+    let value = |bits| f64::from(f32::from_bits(bits));
+    let normalized = |bits| value((bits & 0x807fffff) | 0x3f800000);
+    for (index, ([a, b, c, d], output)) in cases.iter().zip(values.as_chunks::<2>().0).enumerate() {
+        let product = value(word(output[0][0], output[0][1]));
+        let error = value(word(output[0][2], output[0][3]));
+        assert_eq!(product + error, normalized(*a) * normalized(*b), "exact split product index={index}");
+        let expected = (value(*a) * value(*b) - value(*c) * value(*d)) as f32;
+        for got in [word(output[1][0], output[1][1]), word(output[1][2], output[1][3])] {
+            if expected == 0.0 {
+                assert_eq!(f32::from_bits(got), 0.0, "zero determinant index={index}");
+            } else {
+                assert_eq!(got, expected.to_bits(), "split determinant index={index}, operands={a:08x}/{b:08x}/{c:08x}/{d:08x}");
+            }
+        }
+    }
+}
+
+#[test]
 fn gpu_integer_binary32_add_sub_matches_hardware_bits() {
     use wgpu::util::DeviceExt;
     let Some(executor) = executor() else { return };
@@ -3409,11 +4956,20 @@ fn gpu_mapped_wood_preserves_index_matched_sheet_and_solid_transport() {
     // exact identity. The mean map reflectance .5 receives three fixed lights.
     let expected = 0.5 * (3.0 * 0.8 + 1.0 * 0.6 + 1.5 * 0.8) / std::f64::consts::PI;
     for mapped in [false, true] {
-        for thin in [true, false] {
+        for (thin, active_optics) in [(true, false), (false, false), (true, true)] {
+            if active_optics && !mapped {
+                continue;
+            }
             let mut glass = glass_slab(thin).meshes.remove(0);
             glass.name = "index matched glazing".into();
             for position in &mut Arc::make_mut(&mut glass.mesh).positions {
                 position.z += 1.0;
+                if active_optics {
+                    // A vertex anchor lies outside the board. The actual hit
+                    // stays over it after the barycentric displacement is added.
+                    position.x *= 4.0;
+                    position.y *= 4.0;
+                }
             }
             glass.surface = Some(OpaqueSurface::new(Vec3::ZERO, 0., 1., 1.).unwrap());
             glass.transmission =
@@ -3421,6 +4977,17 @@ fn gpu_mapped_wood_preserves_index_matched_sheet_and_solid_transport() {
             let mut scene = ProductScene { bounds: board.mesh.bounds().union(&glass.mesh.bounds()), meshes: vec![board.clone(), glass] };
             if !mapped {
                 scene.meshes[0].surface = Some(OpaqueSurface::new(Vec3::new(0.5, 0.5, 0.5), 0., 1., 1.).unwrap());
+            }
+            if active_optics {
+                // A separate rough body selects the split optical producer
+                // without changing the index-matched sheet's identity oracle.
+                let mut rough = rough_glass_fixture(false, 0.35, Vec3::ZERO, 0.0).meshes.remove(0);
+                rough.name = "offscreen rough glazing".into();
+                for position in &mut Arc::make_mut(&mut rough.mesh).positions {
+                    position.x += 100.0;
+                }
+                scene.bounds = scene.bounds.union(&rough.mesh.bounds());
+                scene.meshes.push(rough);
             }
             let mut image = request(16);
             image.textures = mapped.then(|| resources.clone());
@@ -3434,11 +5001,20 @@ fn gpu_mapped_wood_preserves_index_matched_sheet_and_solid_transport() {
             .unwrap();
             assert!(!task.opaque_scene);
             assert_eq!(task.has_textures, mapped);
-            task.complete_sample().unwrap_or_else(|error| panic!("thin={thin},mapped={mapped}: {error:?}"));
-            for (pixel, value) in task.read_linear().unwrap_or_else(|error| panic!("thin={thin},mapped={mapped}: {error:?}")).iter().enumerate() {
-                assert_eq!(value[3], 1.0, "thin={thin},mapped={mapped},pixel={pixel}");
+            assert_eq!(task.optical_resolve.is_some(), active_optics);
+            task.complete_sample().unwrap_or_else(|error| panic!("thin={thin}, mapped={mapped}, active optics={active_optics}: {error:?}"));
+            for (pixel, value) in task
+                .read_linear()
+                .unwrap_or_else(|error| panic!("thin={thin}, mapped={mapped}, active optics={active_optics}: {error:?}"))
+                .iter()
+                .enumerate()
+            {
+                assert_eq!(value[3], 1.0, "thin={thin}, mapped={mapped}, active optics={active_optics},pixel={pixel}");
                 for actual in value.iter().take(3) {
-                    assert!((f64::from(*actual) - expected).abs() < 2e-5, "thin={thin},mapped={mapped},pixel={pixel}: {value:?} vs {expected}");
+                    assert!(
+                        (f64::from(*actual) - expected).abs() < 2e-5,
+                        "thin={thin}, mapped={mapped}, active optics={active_optics},pixel={pixel}: {value:?} vs {expected}"
+                    );
                 }
             }
         }
@@ -3705,7 +5281,13 @@ fn complete_linear_fixture(context: Arc<Context>, options: JobOptions) -> (Vec<u
     // Use the public environment-lighting contract, not the test-only numerical
     // furnace path. Primary misses remain transparent black in the linear master.
     let options = JobOptions {
-        lighting: Some(solidcraft_render::job::StudioLighting { environment: [8.0; 3], sun: None, area_lights: Default::default() }),
+        lighting: Some(solidcraft_render::job::StudioLighting {
+            punctual_lights: Default::default(),
+            directional_lights: Default::default(),
+            environment: [8.0; 3],
+            sun: None,
+            area_lights: Default::default(),
+        }),
         ..options
     };
     let mut task = Task::new(context, sphere(white()), request(16), options, CancelToken::default()).unwrap();
@@ -4013,6 +5595,58 @@ fn actual_first_gpu_quantum_is_small_and_cancellation_retains_no_completed_image
 }
 
 #[test]
+fn production_path_workgroup_matches_the_host_dispatch_contract() {
+    let module = naga::front::wgsl::parse_str(SHADER).unwrap_or_else(|error| panic!("{}", error.emit_to_string(SHADER)));
+    let main = module.entry_points.iter().find(|entry| entry.name == "main").unwrap();
+    assert_eq!(main.workgroup_size, [PATH_WORKGROUP_SIZE, 1, 1]);
+}
+
+#[test]
+fn actual_gpu_dispatch_visits_workgroup_tails_and_only_the_current_tile() {
+    let Some(executor) = executor() else { return };
+    for width in [1, 31, 32, 33, 63, 64, 65, 129] {
+        let image = ImageRequest { width, height: 1, ..request(1) };
+        let mut task = Task::new(
+            executor.context.clone(),
+            ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY },
+            image,
+            JobOptions { samples: 2, ..Default::default() },
+            CancelToken::default(),
+        )
+        .unwrap();
+        // The numerical furnace produces an exact nonzero value even on a miss. A skipped
+        // invocation therefore cannot masquerade as a valid zero/background pixel.
+        task.environment = 1.0;
+        task.studio = 0.0;
+        task.complete_sample().unwrap();
+        assert_eq!(task.sample, 1);
+        assert_eq!(task.offset, 0);
+        assert_eq!(
+            task.read_linear().unwrap(),
+            vec![[1.0, 1.0, 1.0, 0.0]; width as usize],
+            "every first-pass pixel, including a partial workgroup, must be written: width={width}"
+        );
+        if width == 129 {
+            for prefix in [64, 128, 129] {
+                task.dispatch_budget = dispatch::Budget::default();
+                task.dispatch().unwrap();
+                let actual = task.read_linear().unwrap();
+                if prefix < width {
+                    assert_eq!((task.sample, task.offset), (1, prefix));
+                    for (index, pixel) in actual.iter().enumerate() {
+                        let value = if index < prefix as usize { 2.0 } else { 1.0 };
+                        assert_eq!(*pixel, [value, value, value, 0.0], "dispatch may update only its own tile: prefix={prefix}, pixel={index}");
+                    }
+                } else {
+                    assert_eq!((task.sample, task.offset), (2, 0));
+                    assert_eq!(actual, vec![[1.0, 1.0, 1.0, 0.0]; width as usize]);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn real_device_loss_retires_the_executor_and_the_sessions_cached_availability() {
     use solidcraft_engine::Session;
     let Some(executor) = executor() else { return };
@@ -4033,4 +5667,1257 @@ fn real_device_loss_retires_the_executor_and_the_sessions_cached_availability() 
     assert_eq!(host.admit(&scene, &request(1), JobOptions::default()).unwrap_err().code, ErrorCode::HostUnavailable);
     let backend = session.render_backend();
     assert!(backend.executors.iter().any(|d| d.id.as_str() == "gpu-path" && matches!(d.availability, Availability::Unavailable { .. })));
+}
+
+#[test]
+fn fixed_gpu_previews_match_complete_prefixes_with_finishing_and_final_exr() {
+    let Some(executor) = executor() else { return };
+    let scene = sphere_grid(white(), 8, 16);
+    let request = request(8);
+    let options = JobOptions {
+        samples: 4,
+        max_depth: 3,
+        seed: 47,
+        transmission_samples: 2,
+        linear_exr: true,
+        finishing: solidcraft_render::job::finishing::Finishing {
+            rgb_gain: [1.2, 0.9, 1.1],
+            contrast: 1.1,
+            bloom: Some(solidcraft_render::job::bloom::Bloom { strength: 0.25, threshold: 0.1, radius: 1 }),
+            photographic: solidcraft_render::job::photographic::Photographic { grain: 0.01, seed: 17, ..Default::default() },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let admitted = executor.admit(&scene, &request, options).unwrap();
+    let slot_bytes = u64::from(request.width) * u64::from(request.height) * 8 + 65_536 + 1024;
+    assert_eq!(admitted.encoded_limit + 1024, slot_bytes, "GPU encoder and shared preview slots use the same bound");
+    let host = ImageHost::with_executor(Arc::new(Executor { context: executor.context.clone() })).unwrap();
+    assert_eq!(host.admit(&scene, &request, options).unwrap().estimated_total_bytes, admitted.estimated_total_bytes + 2 * slot_bytes + 1024);
+    let mut task = Task::new(executor.context.clone(), scene.clone(), request.clone(), options, CancelToken::default()).unwrap();
+    task.preview_enabled = true;
+    let mut previews = Vec::new();
+    let mut final_png = None;
+    for _ in 0..10_000 {
+        let poll = task.step(4096).unwrap();
+        if let Some(preview) = task.take_preview() {
+            assert!(matches!(poll, TaskPoll::Pending(_)));
+            assert!(task.exr.is_none(), "provisional output must not create a raw master");
+            previews.push(preview);
+        }
+        if let TaskPoll::Complete(png) = poll {
+            final_png = Some(png);
+            break;
+        }
+    }
+    assert_eq!(previews.iter().map(|p| p.samples_per_pixel).collect::<Vec<_>>(), [1, 2, 3]);
+    for preview in previews {
+        let mut prefix = Task::new(
+            executor.context.clone(),
+            scene.clone(),
+            request.clone(),
+            JobOptions { samples: preview.samples_per_pixel, ..options },
+            CancelToken::default(),
+        )
+        .unwrap();
+        let mut expected = None;
+        for _ in 0..10_000 {
+            if let TaskPoll::Complete(png) = prefix.step(4096).unwrap() {
+                expected = Some(png);
+                break;
+            }
+        }
+        assert_eq!(Some(preview.png), expected, "provisional effects must match the same complete sample prefix");
+    }
+    assert!(final_png.is_some());
+    let master = task.take_linear_exr().unwrap();
+    let mut reference = Task::new(executor.context.clone(), scene, request, options, CancelToken::default()).unwrap();
+    let mut reference_png = None;
+    for _ in 0..10_000 {
+        if let TaskPoll::Complete(png) = reference.step(4096).unwrap() {
+            reference_png = Some(png);
+            break;
+        }
+    }
+    assert_eq!(final_png, reference_png, "publishing previews cannot change final presentation");
+    assert_eq!(Some(master), reference.take_linear_exr(), "provisional effects cannot alter the raw master");
+}
+
+#[test]
+fn adaptive_gpu_checkpoint_target_includes_pilots_without_disabling_final_rendering() {
+    let Some(executor) = executor() else { return };
+    let options = JobOptions {
+        samples: 16,
+        adaptive: Some(solidcraft_render::job::adaptive::AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() }),
+        ..Default::default()
+    };
+    assert_eq!(executor.preview_samples(options), Some(32));
+    assert!(executor.preview_unavailable_reason(options).is_none());
+    let host = ImageHost::with_executor(Arc::new(executor)).unwrap();
+    let job = host
+        .submit_with_options(
+            solidcraft_render::job::JobId { session: 9023, serial: 1, generation: 1 },
+            57,
+            ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY },
+            request(2),
+            options,
+        )
+        .unwrap();
+    assert!(job.status().unwrap().preview_unavailable_reason.is_none());
+    let status = job.wait_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
+    assert!(job.preview().unwrap().is_none());
+    assert!(job.frame().unwrap().is_some());
+}
+
+#[test]
+fn gpu_ui_box_coat_and_color_map_keep_every_raw_sample_finite() {
+    use image::ImageEncoder;
+    use serde_json::json;
+    use solidcraft_render::{
+        clear_coat::ClearCoat,
+        job::textures::{PlanarFrame, RuntimeTextures, TextureBinding, TextureMap},
+        surface::srgb8_to_linear,
+        texture_input::MapRole,
+    };
+    let Some(executor) = executor() else { return };
+    let mut session = solidcraft_engine::Session::default();
+    session.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+    let captured = solidcraft_engine::product_scene::extract(&session).unwrap();
+    assert_eq!(captured.meshes.len(), 1);
+    let mut encoded_map = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut encoded_map).write_image(&[80, 160, 220, 255], 1, 1, image::ExtendedColorType::Rgba8).unwrap();
+    let color_map = TextureMap::new(encoded_map, MapRole::BaseColor).unwrap();
+    // Retain the exact camera and request from the UI failure. This exercises
+    // the production `main` entry point, not only the BRDF reference kernels.
+    let camera = Camera {
+        target: Vec3::new(10.525041892255036, 11.6661345783332, -1.3589073139218368),
+        yaw: -std::f64::consts::FRAC_PI_4,
+        pitch: 0.6154797086703874,
+        roll: 0.0,
+        distance: 61.06594959585294,
+        fov: 0.0,
+        up: solidcraft_render::UpAxis::Z,
+    };
+    let options: JobOptions = serde_json::from_value(json!({
+        "samples":4,"max_depth":3,"seed":7,"exposure_ev":0.5,"tone_map":"aces_fitted",
+        "lens":{"aperture_radius_mm":0.0,"focus_distance_mm":100.0},
+        "lighting":{"environment":[0.75,0.75,0.75],"sun":null,"area_lights":[]}
+    }))
+    .unwrap();
+    for (coated, mapped) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut source = captured.clone();
+        if coated {
+            let coat = ClearCoat::new(1.0, 0.12, 1.5).unwrap();
+            let body = &mut source.meshes[0];
+            let coat_surface = |color: [u8; 3], surface: Option<OpaqueSurface>| {
+                let [r, g, b] = color.map(srgb8_to_linear);
+                surface.unwrap_or_else(|| OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 0.5, 1.5).unwrap()).with_clear_coat(coat)
+            };
+            body.surface = Some(coat_surface(body.color, body.surface));
+            for face in &mut body.faces {
+                face.surface = Some(coat_surface(face.color, face.surface));
+            }
+        }
+        let textures = mapped.then(|| {
+            Arc::new(
+                RuntimeTextures::new(vec![TextureBinding {
+                    body_index: 0,
+                    body_name: source.meshes[0].name.clone(),
+                    frame: PlanarFrame { origin: [0.0; 3], u: [10.0, 0.0, 0.0], v: [0.0, 10.0, 0.0] },
+                    normal_strength: 1.0,
+                    base_color: Some(color_map.clone()),
+                    normal: None,
+                    roughness: None,
+                    metallic: None,
+                    base_color_mode: Default::default(),
+                    flip_v: false,
+                }])
+                .unwrap(),
+            )
+        });
+        let input = ImageRequest { camera, background: [236, 240, 245], textures, ..request(16) };
+        let mut task = Task::new(executor.context.clone(), source, input, options, CancelToken::default()).unwrap();
+        for sample in 1..=options.samples {
+            task.complete_sample().unwrap();
+            let pixels = task.read_linear().unwrap_or_else(|error| panic!("coat={coated}, map={mapped}, sample={sample}: {error}"));
+            assert_eq!(pixels.len(), 256);
+            assert!(pixels.iter().flatten().all(|value| value.is_finite() && *value >= 0.0));
+            assert!(pixels.iter().all(|pixel| pixel[3] <= 1.0));
+            assert!(pixels.iter().any(|pixel| pixel[3] > 0.0 && pixel[..3].iter().any(|value| *value > 0.0)), "the fixture must shade the box");
+            // A diagnostic fingerprint for comparing the same test with and
+            // without shader instrumentation; not a cross-device golden.
+            let fingerprint = pixels
+                .iter()
+                .flatten()
+                .flat_map(|value| value.to_bits().to_le_bytes())
+                .fold(0xcbf29ce484222325_u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3));
+            eprintln!("UI box raw float fingerprint coat={coated} map={mapped} sample={sample}: {fingerprint:016x}");
+        }
+        let mut completed = None;
+        for _ in 0..10_000 {
+            if let TaskPoll::Complete(png) = task.step(4096).unwrap() {
+                completed = Some(png);
+                break;
+            }
+        }
+        let image = image::load_from_memory(&completed.expect("bounded GPU box render must produce its final PNG")).unwrap().to_rgba8();
+        assert_eq!(image.dimensions(), (16, 16));
+        assert!(image.pixels().any(|pixel| pixel.0 != image.get_pixel(0, 0).0));
+    }
+}
+
+fn directional_receiver() -> ProductScene {
+    let mesh = Mesh {
+        positions: vec![Vec3::new(-10.0, -10.0, 0.0), Vec3::new(10.0, -10.0, 0.0), Vec3::new(10.0, 10.0, 0.0), Vec3::new(-10.0, 10.0, 0.0)],
+        normals: vec![Vec3::Z; 4],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        tri_face: vec![0, 0],
+        ..Default::default()
+    };
+    ProductScene {
+        meshes: vec![ProductMesh {
+            name: "directional receiver".into(),
+            mesh: Arc::new(mesh),
+            color: [255; 3],
+            opacity: 1.0,
+            surface: Some(white()),
+            transmission: None,
+            faces: Vec::new(),
+        }],
+        bounds: Aabb3::EMPTY,
+    }
+}
+
+#[test]
+fn gpu_hard_directional_rgb_sum_matches_f64_brdf_without_emitter_mis_or_sample_count_bias() {
+    use solidcraft_render::job::{DirectionalLightOptions, DirectionalLights, StudioLighting};
+    let Some(executor) = executor() else { return };
+    let sources = [
+        DirectionalLightOptions { direction: [0.0, 0.0, 2.0], color: [1.0, 0.0, 0.0], intensity: 2.0 },
+        DirectionalLightOptions { direction: [3.0, 0.0, 4.0], color: [0.0, 1.0, 0.0], intensity: 3.0 },
+        DirectionalLightOptions { direction: [0.0, -4.0, 3.0], color: [0.0, 0.0, 1.0], intensity: 4.0 },
+    ];
+    let mut expected = Vec3::ZERO;
+    for light in sources {
+        let [x, y, z] = light.direction;
+        let l = Vec3::new(x, y, z).normalized().unwrap();
+        let [r, g, b] = light.color;
+        let response = white().brdf(Vec3::Z, Vec3::Z, l).unwrap();
+        expected += Vec3::new(response.x * r, response.y * g, response.z * b) * (light.intensity * l.z);
+    }
+    for depth in [1, 2] {
+        for samples in [1, 4] {
+            let options = JobOptions {
+                samples,
+                max_depth: depth,
+                seed: 43,
+                lighting: Some(StudioLighting { directional_lights: DirectionalLights::new(&sources).unwrap(), ..Default::default() }),
+                ..Default::default()
+            };
+            let mut task = Task::new(executor.context.clone(), directional_receiver(), request(1), options, CancelToken::default()).unwrap();
+            while task.sample < samples {
+                task.complete_sample().unwrap();
+            }
+            let actual = task.read_linear().unwrap()[0];
+            for (a, b) in actual.iter().zip([expected.x, expected.y, expected.z]) {
+                assert!((f64::from(*a) - b).abs() < 2e-6, "depth{depth} samples{samples}: {actual:?} vs {expected:?}");
+            }
+            assert_eq!(actual[3], 1.0);
+        }
+    }
+}
+
+#[test]
+fn gpu_hard_directionals_preserve_zero_source_and_default_streams_and_cancel_without_publication() {
+    use solidcraft_render::job::{DirectionalLightOptions, DirectionalLights, LightingPreset, StudioLighting};
+    let Some(executor) = executor() else { return };
+    let render = |lighting| {
+        let options = JobOptions { samples: 4, max_depth: 3, seed: 71, lighting, ..Default::default() };
+        let mut task = Task::new(executor.context.clone(), directional_receiver(), request(4), options, CancelToken::default()).unwrap();
+        while task.sample < 4 {
+            task.complete_sample().unwrap();
+        }
+        task.read_linear().unwrap()
+    };
+    let black = render(Some(StudioLighting::default()));
+    let zero = DirectionalLightOptions { direction: [1.0, 0.0, 1.0], color: [1.0; 3], intensity: 0.0 };
+    assert_eq!(black, render(Some(StudioLighting { directional_lights: DirectionalLights::new(&[zero; 8]).unwrap(), ..Default::default() })));
+    let defaults = LightingPreset::Neutral.directional_lights();
+    assert_eq!(
+        render(None),
+        render(Some(StudioLighting { directional_lights: DirectionalLights::new(&defaults).unwrap(), ..Default::default() })),
+        "materializing the implicit three hard sources preserves their stream and values"
+    );
+    let token = CancelToken::default();
+    let options = JobOptions {
+        lighting: Some(StudioLighting { directional_lights: DirectionalLights::new(&[zero; 8]).unwrap(), ..Default::default() }),
+        ..Default::default()
+    };
+    let mut task = Task::new(executor.context.clone(), directional_receiver(), request(4), options, token.clone()).unwrap();
+    token.cancel();
+    assert_eq!(task.step(1).err().unwrap().code, ErrorCode::Cancelled);
+    assert!(std::mem::size_of::<Task>() <= 65_536, "inline sources must fit the unchanged fixed task reserve");
+}
+
+#[test]
+fn gpu_hard_directional_uniform_layout_and_admission_keep_the_positive_zero_abi() {
+    use solidcraft_render::job::{DirectionalLightOptions, DirectionalLights, StudioLighting};
+    let Some(executor) = executor() else { return };
+    shader_validates_without_a_device();
+    main_inlines_few_bvh_walks();
+    let module = naga::front::wgsl::parse_str(SHADER).unwrap();
+    let params = module.types.iter().find(|(_, t)| t.name.as_deref() == Some("Params")).unwrap().1;
+    let naga::TypeInner::Struct { members, .. } = &params.inner else { panic!("Params") };
+    let offset = members.iter().find(|m| m.name.as_deref() == Some("directional_lights")).unwrap().offset as usize;
+    let barrier = members.iter().find(|m| m.name.as_deref() == Some("studio_weights")).unwrap().offset as usize + 12;
+    assert_eq!(barrier, PARAMETER_BYTES - 4);
+    let mut lights = [DirectionalLightOptions { direction: [0.0, 0.0, 2.0], color: [0.25, 0.5, 1.0], intensity: 2.0 }; 8];
+    lights[7].direction = [f64::MIN_POSITIVE, 0.0, 0.0];
+    let options = JobOptions {
+        lighting: Some(StudioLighting { directional_lights: DirectionalLights::new(&lights).unwrap(), ..Default::default() }),
+        ..Default::default()
+    };
+    let task = Task::new(executor.context.clone(), directional_receiver(), request(1), options, CancelToken::default()).unwrap();
+    let bytes = task.parameters(1).unwrap();
+    let f = |i| f32::from_le_bytes(bytes[i..i + 4].try_into().unwrap());
+    assert_eq!([f(offset), f(offset + 4), f(offset + 8), f(offset + 12)], [0.0, 0.0, 1.0, 2.0]);
+    assert_eq!([f(offset + 16), f(offset + 20), f(offset + 24), f(offset + 28)], [0.25, 0.5, 1.0, 0.0]);
+    assert_eq!([f(offset + 7 * 32), f(offset + 7 * 32 + 4), f(offset + 7 * 32 + 8)], [1.0, 0.0, 0.0]);
+    assert_eq!(&bytes[barrier..], &0u32.to_le_bytes());
+    assert_eq!(DIRECTIONAL_PARAMETER_BYTES, 256);
+    let admitted = admission(&directional_receiver(), &request(1), options).unwrap();
+    assert!(admitted.preparation_bytes >= 1_048_576 + 2 * DIRECTIONAL_PARAMETER_BYTES);
+    assert_eq!(
+        serde_json::to_value(admitted).unwrap(),
+        serde_json::to_value(admission(&directional_receiver(), &request(1), JobOptions::default()).unwrap()).unwrap(),
+        "fixed uniform billing is independent of list contents"
+    );
+}
+
+#[test]
+fn gpu_hard_directional_visibility_obeys_opaque_blockers_and_external_beer_attenuation() {
+    use solidcraft_render::job::{DirectionalLightOptions, DirectionalLights, StudioLighting, volume::HomogeneousVolume};
+    let Some(executor) = executor() else { return };
+    let light = DirectionalLightOptions { direction: [0.0, 0.0, 1.0], color: [1.0, 0.5, 0.25], intensity: 2.0 };
+    for (blocker, medium) in [(false, false), (true, false), (false, true)] {
+        let mut scene = directional_receiver();
+        if blocker {
+            let mut plane = scene.meshes[0].clone();
+            plane.name = "shadow blocker".into();
+            for p in &mut Arc::make_mut(&mut plane.mesh).positions {
+                p.z = 1.0;
+            }
+            scene.meshes.push(plane);
+        }
+        let options = JobOptions {
+            samples: 4,
+            max_depth: 1,
+            lighting: Some(StudioLighting { directional_lights: DirectionalLights::new(&[light]).unwrap(), ..Default::default() }),
+            volume: medium.then_some(HomogeneousVolume {
+                min_mm: [-100.0, -100.0, 0.2],
+                max_mm: [100.0, 100.0, 0.8],
+                extinction_per_mm: 0.5,
+                scattering_albedo: [0.0; 3],
+                anisotropy: 0.0,
+            }),
+            ..Default::default()
+        };
+        let mut image = request(1);
+        image.camera.distance = 0.1;
+        image.camera.fov = 0.001;
+        let mut task = Task::new(executor.context.clone(), scene, image, options, CancelToken::default()).unwrap();
+        while task.sample < options.samples {
+            task.complete_sample().unwrap();
+        }
+        let actual = task.read_linear().unwrap()[0];
+        let visibility = if blocker {
+            0.0
+        } else if medium {
+            (-0.3_f64).exp()
+        } else {
+            1.0
+        };
+        for (a, scale) in actual.iter().zip([1.0, 0.5, 0.25]) {
+            let expected = 2.0 * scale * visibility / std::f64::consts::PI;
+            assert!((f64::from(*a) - expected).abs() < 2e-6, "blocker{blocker} volume{medium}: {actual:?} vs{expected}");
+        }
+    }
+}
+
+fn punctual_options(sources: &[solidcraft_render::job::PunctualLightOptions], samples: u32, depth: u32) -> JobOptions {
+    use solidcraft_render::job::{PunctualLights, StudioLighting};
+    JobOptions {
+        samples,
+        max_depth: depth,
+        seed: 43,
+        lighting: Some(StudioLighting { punctual_lights: PunctualLights::new(sources).unwrap(), ..Default::default() }),
+        ..Default::default()
+    }
+}
+fn punctual_point() -> solidcraft_render::job::PunctualLightOptions {
+    solidcraft_render::job::PunctualLightOptions {
+        position_mm: [0.0, 0.0, 4.0],
+        color: [0.25, 0.5, 1.0],
+        intensity: 2.0,
+        reference_distance_mm: 4.0,
+        minimum_distance_mm: 0.001,
+        cone: None,
+    }
+}
+// Independent scalar law; does not call the CPU/GPU punctual sampling helpers.
+fn punctual_oracle(source: solidcraft_render::job::PunctualLightOptions, position: Vec3) -> (Vec3, Vec3) {
+    let [x, y, z] = source.position_mm;
+    let delta = Vec3::new(x, y, z) - position;
+    let distance = delta.len();
+    let direction = delta / distance;
+    let weight = source.cone.map_or(1.0, |cone| {
+        let [x, y, z] = cone.emitted_axis;
+        let axis = Vec3::new(x, y, z).normalized().unwrap();
+        let t = ((axis.dot(-direction) - cone.outer_half_angle_radians.cos())
+            / (cone.inner_half_angle_radians.cos() - cone.outer_half_angle_radians.cos()))
+        .clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    });
+    let [r, g, b] = source.color;
+    (direction, Vec3::new(r, g, b) * (source.intensity * (source.reference_distance_mm / distance).powi(2) * weight))
+}
+fn punctual_primary_point(camera: Camera, ordinal: u32, seed: u32) -> Vec3 {
+    let mut state = ordinal.wrapping_mul(0x9e3779b9) ^ seed;
+    let mut random = || {
+        state = state.wrapping_mul(747796405).wrapping_add(2891336453);
+        let word = ((state >> ((state >> 28) + 4)) ^ state).wrapping_mul(277803737);
+        f64::from((((word >> 22) ^ word) >> 8) as f32 * (1.0 / 16777216.0))
+    };
+    let x = random() * 2.0 - 1.0;
+    let y = 1.0 - random() * 2.0;
+    let (right, up, back) = camera.basis();
+    let origin = camera.target + back * (camera.distance * 4.0) + (right * x + up * y) * camera.half_height();
+    origin - back * (origin.z / back.z)
+}
+#[test]
+fn gpu_point_and_spot_real_primary_rays_match_inverse_square_rgb_cone_and_endpoint_depth() {
+    use solidcraft_render::job::SpotConeOptions;
+    let Some(executor) = executor() else { return };
+    for cone in [None, Some(SpotConeOptions { emitted_axis: [0.0, 0.0, -1.0], inner_half_angle_radians: 0.2, outer_half_angle_radians: 0.9 })] {
+        let source = solidcraft_render::job::PunctualLightOptions { cone, ..punctual_point() };
+        for depth in [1, 2] {
+            let options = punctual_options(&[source], 16, depth);
+            let image = request(1);
+            let mut task = Task::new(executor.context.clone(), directional_receiver(), image.clone(), options, CancelToken::default()).unwrap();
+            let mut expected = Vec3::ZERO;
+            for ordinal in 0..16 {
+                let position = punctual_primary_point(image.camera, ordinal, options.seed);
+                let (direction, incident) = punctual_oracle(source, position);
+                let brdf = white().brdf(Vec3::Z, image.camera.back(), direction).unwrap();
+                expected += Vec3::new(brdf.x * incident.x, brdf.y * incident.y, brdf.z * incident.z) * direction.z;
+                task.complete_sample().unwrap();
+                let actual = task.read_linear().unwrap()[0];
+                for (a, b) in actual.iter().zip([expected.x, expected.y, expected.z].map(|v| v / f64::from(ordinal + 1))) {
+                    assert!((f64::from(*a) - b).abs() < 3e-6, "ordinal{ordinal} depth{depth} cone{cone:?}: {actual:?} vs {expected:?}");
+                }
+                assert_eq!(actual[3], 1.0);
+            }
+            assert_eq!(task.punctual_diagnostics(), Some(Default::default()));
+        }
+    }
+}
+#[test]
+fn gpu_punctual_uniform_high_low_precision_and_admission_are_exact_and_keep_barrier_last() {
+    use solidcraft_render::job::PunctualLightOptions;
+    shader_validates_without_a_device();
+    main_inlines_few_bvh_walks();
+    let light = PunctualLightOptions { position_mm: [1e9 - 0.01, -1e9 + 0.02, 0.003], ..punctual_point() };
+    let packed = punctual_parameters(&light, Vec3::ZERO);
+    for (axis, expected) in light.position_mm.into_iter().enumerate() {
+        let actual = f64::from(packed[0][axis]) + f64::from(packed[1][axis]);
+        assert!((actual - expected).abs() < 1e-6, "axis{axis}: {actual} vs {expected}");
+    }
+    assert_eq!(packed[0][0], 1e9_f32);
+    assert!(packed[1][0] < -0.009 && packed[1][0] > -0.011);
+    let module = naga::front::wgsl::parse_str(SHADER).unwrap();
+    let params = module.types.iter().find(|(_, t)| t.name.as_deref() == Some("Params")).unwrap().1;
+    let naga::TypeInner::Struct { members, span } = &params.inner else { panic!("Params") };
+    assert_eq!(*span as usize, PARAMETER_BYTES);
+    let offset = members.iter().find(|m| m.name.as_deref() == Some("punctual_lights")).unwrap().offset;
+    let barrier = members.iter().find(|m| m.name.as_deref() == Some("studio_weights")).unwrap().offset + 12;
+    assert_eq!(offset as usize, PARAMETER_BYTES - PUNCTUAL_PARAMETER_BYTES as usize - 16);
+    assert_eq!(barrier as usize, PARAMETER_BYTES - 4);
+    assert_eq!(FAILURE_BYTES, 32 + PUNCTUAL_COUNTER_BYTES);
+    let a = admission(&directional_receiver(), &request(1), JobOptions::default()).unwrap();
+    let b = admission(&directional_receiver(), &request(1), punctual_options(&[light; 8], 1, 1)).unwrap();
+    assert_eq!(serde_json::to_value(a).unwrap(), serde_json::to_value(b).unwrap());
+    assert!(a.preparation_bytes >= 1_048_576 + 2 * (DIRECTIONAL_PARAMETER_BYTES + PUNCTUAL_PARAMETER_BYTES + PUNCTUAL_COUNTER_BYTES));
+    assert_eq!(punctual_options(&[light; 8], 1, 1).retained_bytes().unwrap(), std::mem::size_of::<JobOptions>() as u64);
+    assert!(std::mem::size_of::<Task>() <= 65_536);
+}
+#[test]
+fn gpu_punctual_delta_sources_preserve_zero_default_stream_and_cancel_without_publication() {
+    use solidcraft_render::job::{DirectionalLights, LightingPreset, StudioLighting};
+    let Some(executor) = executor() else { return };
+    let render = |options| {
+        let mut task = Task::new(executor.context.clone(), directional_receiver(), request(4), options, CancelToken::default()).unwrap();
+        for _ in 0..4 {
+            task.complete_sample().unwrap();
+        }
+        task.read_linear().unwrap()
+    };
+    let zero = solidcraft_render::job::PunctualLightOptions { intensity: 0.0, ..punctual_point() };
+    let old = JobOptions { samples: 4, max_depth: 3, seed: 71, ..Default::default() };
+    let mut explicit = punctual_options(&[zero; 8], 4, 3);
+    explicit.seed = old.seed;
+    let lighting = explicit.lighting.as_mut().unwrap();
+    lighting.directional_lights = DirectionalLights::new(&LightingPreset::Neutral.directional_lights()).unwrap();
+    assert_eq!(render(old), render(explicit), "zero point/spot sources consume no random values and preserve implicit-three lighting");
+    assert_eq!(
+        render(JobOptions { lighting: Some(StudioLighting::default()), ..old }),
+        render(JobOptions { lighting: punctual_options(&[zero; 8], 4, 3).lighting, ..old })
+    );
+    // Existing stochastic families draw exactly the same continuation stream
+    // when a zero-strength delta family is appended after them.
+    let mut mixed = old;
+    mixed.lighting = Some(StudioLighting {
+        sun: Some(solidcraft_render::job::Sun { direction: [0.0, 0.0, 1.0], angular_radius_rad: 0.2, radiance: [2.0; 3] }),
+        directional_lights: DirectionalLights::new(&LightingPreset::Neutral.directional_lights()).unwrap(),
+        environment: [0.2; 3],
+        area_lights: solidcraft_render::job::AreaLights::new(&[solidcraft_render::job::AreaLight {
+            center: [1.0, 0.0, 4.0],
+            u: [1.0, 0.0, 0.0],
+            v: [0.0, -1.0, 0.0],
+            radiance: [1.0, 2.0, 3.0],
+        }])
+        .unwrap(),
+        ..Default::default()
+    });
+    let mut with_zero = mixed;
+    with_zero.lighting.as_mut().unwrap().punctual_lights = solidcraft_render::job::PunctualLights::new(&[zero; 8]).unwrap();
+    assert_eq!(render(mixed), render(with_zero));
+    let cancel = CancelToken::default();
+    let mut task = Task::new(executor.context.clone(), directional_receiver(), request(4), explicit, cancel.clone()).unwrap();
+    cancel.cancel();
+    assert_eq!(task.step(1).err().unwrap().code, ErrorCode::Cancelled);
+    assert!(task.take_preview().is_none() && task.take_linear_exr().is_none());
+}
+#[test]
+fn gpu_punctual_finite_shadow_blocks_only_before_the_source_and_preserves_physical_falloff() {
+    let Some(executor) = executor() else { return };
+    let light = solidcraft_render::job::PunctualLightOptions { position_mm: [4.0, 0.0, 4.0], ..punctual_point() };
+    for blocker_z in [None, Some(2.0), Some(4.0), Some(6.0)] {
+        let mut scene = directional_receiver();
+        if let Some(z) = blocker_z {
+            let mut blocker = scene.meshes[0].clone();
+            blocker.name = "finite shadow panel".into();
+            let mesh = Arc::make_mut(&mut blocker.mesh);
+            mesh.positions = vec![Vec3::new(z - 0.5, -1.0, z), Vec3::new(z + 0.5, -1.0, z), Vec3::new(z + 0.5, 1.0, z), Vec3::new(z - 0.5, 1.0, z)];
+            scene.meshes.push(blocker);
+        }
+        let options = punctual_options(&[light], 4, 1);
+        let mut image = request(1);
+        image.camera.distance = 0.1;
+        let mut task = Task::new(executor.context.clone(), scene, image.clone(), options, CancelToken::default()).unwrap();
+        let mut expected = Vec3::ZERO;
+        for ordinal in 0..4 {
+            let p = punctual_primary_point(image.camera, ordinal, options.seed);
+            let (l, incident) = punctual_oracle(light, p);
+            let brdf = white().brdf(Vec3::Z, image.camera.back(), l).unwrap();
+            if blocker_z != Some(2.0) {
+                expected += Vec3::new(brdf.x * incident.x, brdf.y * incident.y, brdf.z * incident.z) * l.z;
+            }
+            task.complete_sample().unwrap();
+        }
+        let actual = task.read_linear().unwrap()[0];
+        for (a, b) in actual.iter().zip([expected.x, expected.y, expected.z].map(|v| v / 4.0)) {
+            assert!((f64::from(*a) - b).abs() < 3e-6, "blocker {blocker_z:?}: {actual:?} vs {expected:?}");
+        }
+    }
+}
+
+#[test]
+fn gpu_punctual_samples_match_independent_cone_boundaries_midpoint_high_low_and_counter_carry() {
+    use solidcraft_render::job::SpotConeOptions;
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    // A test-only entry calls the production sampler at an independently given
+    // physical point; it does not launch a camera ray or copy the sampler math.
+    let source = format!(
+        "{SHADER}\n@compute @workgroup_size(1) fn punctual_reference() {{ let value=punctual_sample(u.punctual_lights[0],PrecisePoint(u.eye.xyz,u.right.xyz)); accumulation[0]=vec4<f32>(value.radiance,1.0); }}"
+    );
+    let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(source.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&context.layout)],
+        immediate_size: 0,
+    });
+    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("punctual_reference"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    let run = |light, point: Vec3, carry| {
+        let mut task =
+            Task::new(context.clone(), directional_receiver(), request(1), punctual_options(&[light], 1, 1), CancelToken::default()).unwrap();
+        let mut params = task.parameters(1).unwrap();
+        let hi = Vec3::new(f64::from(point.x as f32), f64::from(point.y as f32), f64::from(point.z as f32));
+        let mut positions = Vec::new();
+        scene::vector(&mut positions, hi, 0.0);
+        scene::vector(&mut positions, point - hi, 0.0);
+        params[32..64].copy_from_slice(&positions);
+        context.queue.write_buffer(&task.uniform, 0, &params);
+        if carry {
+            let mut bytes = [0; FAILURE_BYTES as usize];
+            bytes[8 * 4..9 * 4].copy_from_slice(&u32::MAX.to_le_bytes());
+            context.queue.write_buffer(&task.failures, 0, &bytes);
+        }
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &task.bind, &[]);
+            pass.dispatch_workgroups(1, 1, 1);
+        }
+        context.queue.submit([encoder.finish()]);
+        task.sample = 1;
+        (task.read_linear().unwrap()[0], task.punctual_diagnostics().unwrap())
+    };
+    let cone = SpotConeOptions { emitted_axis: [0.0, 0.0, -3.0], inner_half_angle_radians: 0.2, outer_half_angle_radians: 0.8 };
+    let light = solidcraft_render::job::PunctualLightOptions { cone: Some(cone), ..punctual_point() };
+    let midpoint = ((cone.inner_half_angle_radians.cos() + cone.outer_half_angle_radians.cos()) * 0.5).acos();
+    for angle in [0.0, cone.inner_half_angle_radians, midpoint, cone.outer_half_angle_radians, 1.0] {
+        let point = Vec3::new(4.0 * angle.sin(), 0.0, 4.0 - 4.0 * angle.cos());
+        let actual = run(light, point, false);
+        let expected = punctual_oracle(light, point).1;
+        for (a, b) in actual.0.iter().zip([expected.x, expected.y, expected.z]) {
+            assert!((f64::from(*a) - b).abs() < 2e-6, "angle{angle}: {:?} vs {expected:?}", actual.0);
+        }
+        assert!(actual.1.is_empty());
+    }
+    let far = solidcraft_render::job::PunctualLightOptions { position_mm: [1e9 - 0.01, 0.0, 0.0], reference_distance_mm: 0.01, ..punctual_point() };
+    let point = Vec3::new(1e9 - 0.02, 0.0, 0.0);
+    let actual = run(far, point, false);
+    let expected = punctual_oracle(far, point).1;
+    for (a, b) in actual.0.iter().zip([expected.x, expected.y, expected.z]) {
+        assert!((f64::from(*a) - b).abs() < 2e-6, "nearby large-world points {:?} vs {expected:?}", actual.0);
+    }
+    assert!(actual.1.is_empty());
+    let near = solidcraft_render::job::PunctualLightOptions { position_mm: [0.0; 3], intensity: 0.0, ..punctual_point() };
+    let actual = run(near, Vec3::ZERO, true);
+    assert_eq!(actual.0, [0.0, 0.0, 0.0, 1.0]);
+    assert_eq!(actual.1.near_source, 1_u64 << 32, "near-source counting precedes zero-intensity omission and carries into the high word");
+    let excessive = solidcraft_render::job::PunctualLightOptions {
+        position_mm: [0.0, 0.0, 0.002],
+        reference_distance_mm: 1e6,
+        intensity: 64.0,
+        ..punctual_point()
+    };
+    let actual = run(excessive, Vec3::ZERO, false);
+    assert_eq!(actual.0, [0.0, 0.0, 0.0, 1.0]);
+    assert_eq!(actual.1.radiance_limit, 1);
+    assert_eq!(actual.1.near_source, 0);
+}
+#[test]
+fn gpu_punctual_shadow_offset_crossing_is_reported_without_reversing_or_infinite_connection() {
+    let Some(executor) = executor() else { return };
+    let light = solidcraft_render::job::PunctualLightOptions { position_mm: [0.0, 0.0, 0.01], ..punctual_point() };
+    let mut image = request(1);
+    image.camera.distance = 0.001;
+    // Keep the original tiny orthographic pixel footprint. Move only its axial
+    // framing target so the actual GPU primary origin is before the receiver:
+    // target.z + 4*distance = 1.004, beyond the explicit0.1 primary minimum.
+    // The former origin0.004 was clipped before any shadow connection existed.
+    image.camera.target.z = 1.0;
+    assert_eq!(image.camera.fov, 0.0);
+    assert_eq!(image.camera.target.z + 4.0 * image.camera.distance, 1.004);
+    let mut control =
+        Task::new(executor.context.clone(), directional_receiver(), image.clone(), punctual_options(&[], 1, 1), CancelToken::default()).unwrap();
+    control.epsilon = 0.1;
+    assert!(image.camera.target.z + 4.0 * image.camera.distance > f64::from(control.epsilon));
+    control.complete_sample().unwrap();
+    assert_eq!(control.read_linear().unwrap()[0], [0.0, 0.0, 0.0, 1.0], "the actual primary sees opaque geometry without any light source");
+    assert!(control.punctual_diagnostics().is_none(), "an authored empty punctual-light family has no diagnostic counters");
+    drop(control);
+    let mut task =
+        Task::new(executor.context.clone(), directional_receiver(), image, punctual_options(&[light], 4, 1), CancelToken::default()).unwrap();
+    task.epsilon = 0.1;
+    for _ in 0..4 {
+        task.complete_sample().unwrap();
+    }
+    assert_eq!(task.read_linear().unwrap()[0], [0.0, 0.0, 0.0, 1.0]);
+    let counts = task.punctual_diagnostics().unwrap();
+    assert_eq!(counts.shadow_offset_crossed, 4);
+    assert_eq!(counts.near_source, 0);
+    assert_eq!(counts.radiance_limit, 0);
+}
+#[test]
+fn gpu_point_delta_visibility_keeps_glass_and_external_beer_without_competing_mis_bias() {
+    let Some(executor) = executor() else { return };
+    let light = solidcraft_render::job::PunctualLightOptions { position_mm: [4.0, 0.0, 4.0], ..punctual_point() };
+    for glass in [false, true] {
+        let mut scene = directional_receiver();
+        let optics = solidcraft_render::transmission::Transmission::new(Vec3::new(0.1, 0.2, 0.3), Some(0.7)).unwrap().with_shadow_transmission(true);
+        if glass {
+            let mut panel = scene.meshes[0].clone();
+            panel.name = "point connection glass".into();
+            Arc::make_mut(&mut panel.mesh).positions =
+                vec![Vec3::new(1.0, -2.0, 2.0), Vec3::new(3.0, -2.0, 2.0), Vec3::new(3.0, 2.0, 2.0), Vec3::new(1.0, 2.0, 2.0)];
+            panel.surface = Some(OpaqueSurface::new(Vec3::ZERO, 0.0, 0.1, 1.5).unwrap());
+            panel.transmission = Some(optics);
+            scene.meshes.push(panel);
+        }
+        let mut options = punctual_options(&[light], 4, 1);
+        if !glass {
+            options.volume = Some(solidcraft_render::job::volume::HomogeneousVolume {
+                min_mm: [-10.0, -10.0, 1.0],
+                max_mm: [10.0, 10.0, 3.0],
+                extinction_per_mm: 0.1,
+                scattering_albedo: [0.0; 3],
+                anisotropy: 0.0,
+            });
+        }
+        let mut image = request(1);
+        image.camera.distance = 0.1;
+        let mut task = Task::new(executor.context.clone(), scene, image.clone(), options, CancelToken::default()).unwrap();
+        assert_eq!(options.seed, 43);
+        assert_eq!(image.camera.fov, 0.0);
+        let primary_fog_length = if let Some(volume) = options.volume {
+            // Top retains a slight f64 tilt. The GPU uses the independently
+            // packed f32 basis, and orthographic primary_ray does not normalize
+            // its -back direction again. Verify those actual upload words.
+            let (right, up, back) = image.camera.basis();
+            let expected_vectors = [
+                back * (4.0 * image.camera.distance),
+                right * image.camera.half_height() * (f64::from(image.width) / f64::from(image.height)),
+                up * image.camera.half_height(),
+                back,
+            ];
+            let params = task.parameters(1).unwrap();
+            let vectors: [[f64; 3]; 4] = std::array::from_fn(|vector| {
+                std::array::from_fn(|axis| {
+                    let at = 32 + vector * 16 + axis * 4;
+                    let packed = f32::from_le_bytes(params[at..at + 4].try_into().unwrap());
+                    let expected = expected_vectors[vector];
+                    assert_eq!(packed.to_bits(), ([expected.x, expected.y, expected.z][axis] as f32).to_bits());
+                    f64::from(packed)
+                })
+            });
+            assert_eq!(&params[44..48], &0.0_f32.to_le_bytes(), "the actual GPU projection is orthographic");
+            let [eye, right, up, back] = vectors;
+            assert_eq!(back[2], f64::from(1.0_f32));
+            assert_eq!(image.camera.target, Vec3::ZERO, "the box and plane use these same camera-relative coordinates");
+            // For |uv|<=1, two products and two additions form each origin
+            // component. 4*EPSILON bounds their gamma4 absolute rounding error
+            // (also conservatively covers fused evaluation); no image tolerance
+            // changes. This includes every jittered pixel, not just its centre.
+            let origin_error: [f64; 3] =
+                std::array::from_fn(|axis| 4.0 * f64::from(f32::EPSILON) * (eye[axis].abs() + right[axis].abs() + up[axis].abs()));
+            let origin_min_z = eye[2] - right[2].abs() - up[2].abs() - origin_error[2];
+            let origin_max_z = eye[2] + right[2].abs() + up[2].abs() + origin_error[2];
+            assert!(
+                origin_min_z > 0.0 && origin_max_z < volume.min_mm[2],
+                "every geometry origin is above the receiver and below the complete fog slab"
+            );
+            assert!(origin_min_z / back[2] > f64::from(task.epsilon), "the original forward interval still reaches the receiver");
+            let farthest_signed_entry = (volume.max_mm[2] - origin_min_z) / back[2];
+            for axis in [0, 1] {
+                let absolute_bound =
+                    eye[axis].abs() + right[axis].abs() + up[axis].abs() + origin_error[axis] + back[axis].abs() * farthest_signed_entry;
+                assert!(
+                    -absolute_bound > volume.min_mm[axis] && absolute_bound < volume.max_mm[axis],
+                    "the full signed chord remains inside the finite box laterally"
+                );
+            }
+            // Origin displacement cancels between the two z-plane endpoints.
+            let chord = (volume.max_mm[2] - volume.min_mm[2]) / back[2];
+            assert_eq!(chord, 2.0);
+            chord
+        } else {
+            0.0
+        };
+        let mut expected = Vec3::ZERO;
+        let mut survivors = [true; 4];
+        for ordinal in 0..4 {
+            let p = punctual_primary_point(image.camera, ordinal, options.seed);
+            let (direction, incident) = punctual_oracle(light, p);
+            let brdf = white().brdf(Vec3::Z, image.camera.back(), direction).unwrap();
+            let visibility = if glass {
+                solidcraft_render::transmission::slab(optics, 0.7, direction.z, 1.0, 1.5).unwrap().1
+            } else {
+                Vec3::new(1.0, 1.0, 1.0) * (-0.1 * 2.0 / direction.z).exp()
+            };
+            if !glass {
+                // Independent scalar PCG law: the first two draws belong to XY;
+                // the third is the primary analog free flight. No renderer RNG
+                // or volume helper defines this survival oracle.
+                let mut state = ordinal.wrapping_mul(0x9e3779b9) ^ options.seed;
+                let mut draws = [0.0_f64; 3];
+                for draw in &mut draws {
+                    state = state.wrapping_mul(747796405).wrapping_add(2891336453);
+                    let word = ((state >> ((state >> 28) + 4)) ^ state).wrapping_mul(277803737);
+                    *draw = f64::from((((word >> 22) ^ word) >> 8) as f32 * (1.0 / 16777216.0));
+                }
+                let travel = -(-draws[2]).ln_1p() / 0.1;
+                let survives = travel >= primary_fog_length;
+                assert_eq!(survives, ordinal < 3, "seed43 supplies three survived flights followed by one absorption");
+                assert!((travel - primary_fog_length).abs() > 1.8, "the independent decision is separated from f32 rounding: {travel}");
+                survivors[ordinal as usize] = survives;
+            }
+            // Finite source visibility keeps its own Beer/slab factor above.
+            // Camera Beer is supplied by analog survival, not another exp factor.
+            if survivors[ordinal as usize] {
+                expected += Vec3::new(brdf.x * incident.x * visibility.x, brdf.y * incident.y * visibility.y, brdf.z * incident.z * visibility.z)
+                    * direction.z;
+            }
+            task.complete_sample().unwrap();
+            let actual = task.read_linear().unwrap()[0];
+            for (a, b) in actual.iter().zip([expected.x, expected.y, expected.z].map(|v| v / f64::from(ordinal + 1))) {
+                assert!((f64::from(*a) - b).abs() < 5e-6, "glass{glass} ordinal{ordinal}: {actual:?} vs prefix sum{expected:?}");
+            }
+            assert_eq!(actual[3], 1.0, "opaque receiver or absorbed foreground fog covers every prefix");
+        }
+        if !glass {
+            assert_eq!(survivors, [true, true, true, false]);
+        }
+    }
+}
+#[test]
+fn gpu_point_spot_complete_previews_match_prefixes_and_preserve_exact_final_png_raw_exr() {
+    use solidcraft_render::job::SpotConeOptions;
+    let Some(executor) = executor() else { return };
+    let sources = [
+        punctual_point(),
+        solidcraft_render::job::PunctualLightOptions {
+            position_mm: [2.0, 0.0, 4.0],
+            cone: Some(SpotConeOptions { emitted_axis: [-2.0, 0.0, -4.0], inner_half_angle_radians: 0.2, outer_half_angle_radians: 0.8 }),
+            ..punctual_point()
+        },
+    ];
+    let options = JobOptions { linear_exr: true, ..punctual_options(&sources, 4, 2) };
+    let render = |samples, previews, units| {
+        let mut task =
+            Task::new(executor.context.clone(), directional_receiver(), request(4), JobOptions { samples, ..options }, CancelToken::default())
+                .unwrap();
+        task.preview_enabled = previews;
+        let mut held = Vec::new();
+        for _ in 0..20_000 {
+            let poll = task.step(units).unwrap();
+            if let Some(preview) = task.take_preview() {
+                assert!(task.exr.is_none());
+                held.push(preview);
+            }
+            if let TaskPoll::Complete(png) = poll {
+                return (held, png, task.take_linear_exr().unwrap(), task.punctual_diagnostics().unwrap());
+            }
+        }
+        panic!("bounded point/spot output did not finish")
+    };
+    let (previews, png, exr, counts) = render(4, true, 1);
+    assert_eq!(previews.iter().map(|p| p.samples_per_pixel).collect::<Vec<_>>(), [1, 2, 3]);
+    assert!(counts.is_empty());
+    for preview in previews {
+        assert_eq!(preview.png, render(preview.samples_per_pixel, false, 4096).1);
+    }
+    let reference = render(4, false, 4096);
+    assert_eq!(png, reference.1);
+    assert_eq!(exr, reference.2);
+    assert_eq!(counts, reference.3);
+}
+
+#[test]
+fn gpu_punctual_volume_connection_matches_independent_hg_and_finite_beer_without_rng_consumption() {
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let source = format!(
+        "{SHADER}\n@compute @workgroup_size(1) fn punctual_volume_reference() {{ var rng=123u; let value=volume_direct(u.eye.xyz,PrecisePoint(u.eye.xyz,vec3<f32>(0.0)),vec3<f32>(0.0,0.0,1.0),0u,&rng); accumulation[0]=vec4<f32>(value,f32(rng)); }}"
+    );
+    let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(source.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&context.layout)],
+        immediate_size: 0,
+    });
+    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("punctual_volume_reference"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    for cone in [
+        None,
+        Some(solidcraft_render::job::SpotConeOptions {
+            emitted_axis: [-1.0, 0.0, -2.0],
+            inner_half_angle_radians: 0.2,
+            outer_half_angle_radians: 0.8,
+        }),
+    ] {
+        let light = solidcraft_render::job::PunctualLightOptions { position_mm: [1.0, 0.0, 4.0], cone, ..punctual_point() };
+        let options = JobOptions {
+            volume: Some(solidcraft_render::job::volume::HomogeneousVolume {
+                min_mm: [-10.0, -10.0, 1.0],
+                max_mm: [10.0, 10.0, 3.0],
+                extinction_per_mm: 0.1,
+                scattering_albedo: [0.8; 3],
+                anisotropy: 0.3,
+            }),
+            ..punctual_options(&[light], 1, 1)
+        };
+        let mut task = Task::new(context.clone(), directional_receiver(), request(1), options, CancelToken::default()).unwrap();
+        let point = Vec3::new(0.0, 0.0, 2.0);
+        let mut params = task.parameters(1).unwrap();
+        let mut position = Vec::new();
+        scene::vector(&mut position, point, 0.0);
+        params[32..48].copy_from_slice(&position);
+        context.queue.write_buffer(&task.uniform, 0, &params);
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &task.bind, &[]);
+            pass.dispatch_workgroups(1, 1, 1);
+        }
+        context.queue.submit([encoder.finish()]);
+        task.sample = 1;
+        let actual = task.read_linear().unwrap()[0];
+        let (l, incident) = punctual_oracle(light, point);
+        let g = 0.3_f64;
+        let denominator = 1.0 + g * g - 2.0 * g * l.z;
+        let phase = (1.0 - g * g) / (4.0 * std::f64::consts::PI * denominator.powf(1.5));
+        let expected = incident * ((-0.1 / l.z).exp() * phase);
+        for (a, b) in actual.iter().zip([expected.x, expected.y, expected.z]) {
+            assert!((f64::from(*a) - b).abs() < 2e-6, "{actual:?} vs {expected:?}");
+        }
+        assert_eq!(actual[3], 123.0, "point and spot delta connections consume no random values");
+        assert!(task.punctual_diagnostics().unwrap().is_empty());
+    }
+}
+#[test]
+fn gpu_adaptive_denoised_point_spot_updates_preserve_every_pilot_production_pass_and_final_bytes() {
+    use solidcraft_render::job::{SpotConeOptions, adaptive::AdaptiveSampling};
+    let Some(executor) = executor() else { return };
+    let light = solidcraft_render::job::PunctualLightOptions {
+        cone: Some(SpotConeOptions { emitted_axis: [0.0, 0.0, -1.0], inner_half_angle_radians: 0.2, outer_half_angle_radians: 0.8 }),
+        ..punctual_point()
+    };
+    for denoise in [false, true] {
+        let options = JobOptions {
+            denoise,
+            linear_exr: true,
+            adaptive: Some(AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() }),
+            ..punctual_options(&[light], 16, 2)
+        };
+        let render = |preview_enabled| {
+            let mut task = Task::new(executor.context.clone(), directional_receiver(), request(1), options, CancelToken::default()).unwrap();
+            task.preview_enabled = preview_enabled;
+            let mut sequences = Vec::new();
+            for _ in 0..30_000 {
+                let poll = task.step(4096).unwrap();
+                if let Some(preview) = task.take_preview() {
+                    sequences.push(preview.samples_per_pixel);
+                    assert!(task.exr.is_none());
+                }
+                if let TaskPoll::Complete(png) = poll {
+                    return (sequences, png, task.take_linear_exr().unwrap(), task.sampling_report().unwrap(), task.punctual_diagnostics().unwrap());
+                }
+            }
+            panic!("bounded adaptive punctual fixture did not finish")
+        };
+        let previewed = render(true);
+        let final_only = render(false);
+        assert_eq!(previewed.0, (1..32).collect::<Vec<_>>());
+        assert!(final_only.0.is_empty());
+        assert_eq!(previewed.1, final_only.1);
+        assert_eq!(previewed.2, final_only.2);
+        assert_eq!(previewed.3, final_only.3);
+        assert_eq!(previewed.4, final_only.4);
+        assert!(previewed.4.is_empty());
+        assert_eq!(previewed.3.primary_path_evaluations, 32);
+    }
+}
+
+#[test]
+fn gpu_punctual_offset_preserves_small_shift_after_large_local_barycentric_displacement() {
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let source = format!(
+        "{SHADER}\n@compute @workgroup_size(1) fn punctual_offset_reference() {{ let original=PrecisePoint(vec3<f32>(1000000.0,0.0,0.0),vec3<f32>(-999999.0,0.0,0.0)); let shifted=punctual_offset(original,vec3<f32>(0.00001,0.0,0.0)); let canonical=punctual_offset(original,vec3<f32>(0.0)); let delta=precise_point_delta(shifted.hi,shifted.lo,canonical.hi,canonical.lo); accumulation[0]=vec4<f32>(delta,1.0); let light=punctual_sample(u.punctual_lights[0],original); accumulation[1]=vec4<f32>(light.radiance,1.0); }}"
+    );
+    let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(source.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&context.layout)],
+        immediate_size: 0,
+    });
+    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("punctual_offset_reference"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    let light = solidcraft_render::job::PunctualLightOptions { position_mm: [1.01, 0.0, 0.0], reference_distance_mm: 0.01, ..punctual_point() };
+    let mut task = Task::new(context.clone(), directional_receiver(), request(2), punctual_options(&[light], 1, 1), CancelToken::default()).unwrap();
+    context.queue.write_buffer(&task.uniform, 0, &task.parameters(1).unwrap());
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &task.bind, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+    context.queue.submit([encoder.finish()]);
+    task.sample = 1;
+    let pixels = task.read_linear().unwrap();
+    assert_eq!(pixels[0], [0.00001, 0.0, 0.0, 1.0]);
+    let expected = punctual_oracle(light, Vec3::new(1.0, 0.0, 0.0)).1;
+    for (actual, expected) in pixels[1].iter().zip([expected.x, expected.y, expected.z]) {
+        assert!((f64::from(*actual) - expected).abs() < 2e-6, "the sampler must canonicalize large local displacement before source subtraction");
+    }
+    assert_eq!(-999999.0_f32 + 0.00001, -999999.0_f32, "the raw local addition would lose the real geometric shift");
+}
+
+#[test]
+fn shared_bvh_node_walk_preserves_original_ordinary_and_compensated_hit_bits() {
+    // Frozen f53 policy, not re-derived from the new implementation. Only its
+    // test-local function name changes; it still calls the byte-identical old
+    // ordered walker for zero low parts. This reference entry inlines three
+    // real walks, rather than compiling the historical seven-walk main.
+    let legacy = r#"fn legacy_precise_policy(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, any_hit: bool, excluded: u32, minimum: f32, inside: bool, limit: f32, blocker: f32) -> Hit {
+    // Dispatch once before traversal. Ordinary rays keep the original lean BVH
+    // loop, without precision-helper branches inside every candidate/node test.
+    if all(o_low==vec3<f32>(0.0)) { return trace_ordered_within(o,d,any_hit,excluded,minimum,inside,limit,blocker); }
+    var hit = Hit(limit, 0xffffffffu, vec3<f32>(0.0));
+    // Project every candidate into the same ray-aligned 2D coordinate system.
+    // Shared edges then use identical products with opposite signs, avoiding the
+    // independently rounded barycentric comparisons of Moller-Trumbore.
+    var kz = 0u;
+    if abs(d.y)>abs(d.x) { kz=1u; }
+    if abs(d.z)>abs(d[kz]) { kz=2u; }
+    let kx=(kz+1u)%3u; let ky=(kx+1u)%3u;
+    let shear=vec3<f32>(d[kx]/d[kz],d[ky]/d[kz],1.0/d[kz]);
+    let order=select(-1.0,1.0,d[kz]>0.0);
+    var best=FAR;
+    // Only candidates near the origin need the integer-defined deltas. The
+    // rounded origin is within a few ULPs of the true anchor plus offset, so
+    // boxes grown by that bound reject conservatively: every point the true
+    // ray reaches at depth t lies in the grown box along the rounded ray at
+    // the same t. A triangle whose bounds are farther from the rounded origin
+    // than the near radius uses ordinary arithmetic from it: that error cannot
+    // reorder such a hit, but it can move the ray across an edge, so decisions
+    // within the error bound of an edge or bound fall back to the exact path.
+    let rounded=o+o_low;
+    let scale=max(max(abs(rounded.x),max(abs(rounded.y),abs(rounded.z))),1.0);
+    let origin_error=scale*(1.0/1048576.0);
+    let pad=u.lighting.x+origin_error;
+    var source: Triangle;
+    if excluded!=0xffffffffu { source=triangle(excluded); }
+    let near_radius=scale*(1.0/256.0);
+    // Children are tested at their parent and visited near-first. The build
+    // bounds tree depth to 30, so at most 31 nodes are pending.
+    var stack: array<u32, 32>;
+    var entry: array<f32, 32>;
+    if nodes[0].first == 0xffffffffu { return hit; }
+    entry[0] = box_entry_padded(nodes[0], rounded, d, hit.distance, pad);
+    if entry[0] < 0.0 { return hit; }
+    stack[0] = 0u;
+    var size = 1u;
+    loop {
+        if size == 0u { break; }
+        size -= 1u;
+        if entry[size] > hit.distance { continue; }
+        let node = nodes[stack[size]];
+        if node.count == 0u {
+            if size + 2u > 32u { break; }
+            let left = box_entry_padded(nodes[node.first], rounded, d, hit.distance, pad);
+            let right = box_entry_padded(nodes[node.first+1u], rounded, d, hit.distance, pad);
+            var near_child = node.first; var near_entry = left;
+            var far_child = node.first+1u; var far_entry = right;
+            if right >= 0.0 && (left < 0.0 || right < left) {
+                near_child = node.first+1u; near_entry = right;
+                far_child = node.first; far_entry = left;
+            }
+            if far_entry >= 0.0 { stack[size] = far_child; entry[size] = far_entry; size += 1u; }
+            if near_entry >= 0.0 { stack[size] = near_child; entry[size] = near_entry; size += 1u; }
+            continue;
+        }
+        for (var i = node.first; i < node.first + node.count; i += 1u) {
+            if i == excluded { continue; }
+            // A straight continuation cannot revisit its producing exact plane.
+            // IDs join only connected, exactly coplanar uploaded f32 triangles
+            // of one body; curved facets and other bodies remain candidates.
+            if excluded!=0xffffffffu && geometry[geometry[3]+i]==geometry[geometry[3]+excluded] { continue; }
+            let t = triangle(i);
+            let lo=min(t.p0.xyz,min(t.p1.xyz,t.p2.xyz));
+            let hi=max(t.p0.xyz,max(t.p1.xyz,t.p2.xyz));
+            let gap=max(lo-rounded,rounded-hi);
+            if any(gap>vec3<f32>(near_radius)) {
+                // The rounded origin is within origin_error of the true one on each
+                // axis. Bound and edge decisions that close to their threshold could
+                // flip, while a nearby neighbour across the edge is tested exactly:
+                // a crossing would fall between them. Such candidates take the exact
+                // path below.
+                if any((rounded<=lo-vec3<f32>(origin_error))&(d<vec3<f32>(0.0))) || any((rounded>=hi+vec3<f32>(origin_error))&(d>vec3<f32>(0.0))) { continue; }
+                if any((d==vec3<f32>(0.0))&((rounded<lo-vec3<f32>(origin_error))|(rounded>hi+vec3<f32>(origin_error)))) { continue; }
+                let qa=t.p0.xyz-rounded; let qb=t.p1.xyz-rounded; let qc=t.p2.xyz-rounded;
+                let fa=vec2<f32>(qa[kx]-shear.x*qa[kz],qa[ky]-shear.y*qa[kz]);
+                let fb=vec2<f32>(qb[kx]-shear.x*qb[kz],qb[ky]-shear.y*qb[kz]);
+                let fc=vec2<f32>(qc[kx]-shear.x*qc[kz],qc[ky]-shear.y*qc[kz]);
+                let far_weights=vec3<f32>(difference_products(fb.x,fc.y,fb.y,fc.x),difference_products(fc.x,fa.y,fc.y,fa.x),difference_products(fa.x,fb.y,fa.y,fb.x));
+                let edge_error=origin_error*vec3<f32>(length(fb-fc),length(fc-fa),length(fa-fb));
+                if all(abs(far_weights)>edge_error) {
+                    if any(far_weights<vec3<f32>(0.0)) && any(far_weights>vec3<f32>(0.0)) { continue; }
+                    let far_det=far_weights.x+far_weights.y+far_weights.z;
+                    let far_bary=far_weights/far_det;
+                    let far_depth=surface_ray_depth(t,far_bary,rounded,kz);
+                    let far_distance=far_depth*shear.z;
+                    let far_key=far_depth*order;
+                    if far_distance > minimum && far_distance < limit && (far_key < best || (far_key == best && tie_preferred(t,d,inside))) {
+                        hit = Hit(far_distance,i,far_bary); best=far_key;
+                        if any_hit || (far_distance < blocker && (t.base.w<=0.0 || t.coat.w<=0.0)) { return hit; }
+                    }
+                    continue;
+                }
+            }
+            if !triangle_ahead_precise(t,o,o_low,d) { continue; }
+            let pa=precise_point_delta(t.p0.xyz,vec3<f32>(0.0),o,o_low);
+            let pb=precise_point_delta(t.p1.xyz,vec3<f32>(0.0),o,o_low);
+            let pc=precise_point_delta(t.p2.xyz,vec3<f32>(0.0),o,o_low);
+            let a=vec2<f32>(pa[kx]-shear.x*pa[kz],pa[ky]-shear.y*pa[kz]);
+            let b=vec2<f32>(pb[kx]-shear.x*pb[kz],pb[ky]-shear.y*pb[kz]);
+            let c=vec2<f32>(pc[kx]-shear.x*pc[kz],pc[ky]-shear.y*pc[kz]);
+            let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
+            if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { continue; }
+            let det=weights.x+weights.y+weights.z;
+            if det==0.0 { continue; }
+            // Retain all three directly evaluated weights: 1-u-v can erase a
+            // small corner clearance when the other two weights sum to one.
+            let bary=weights/det;
+            let depth=surface_ray_depth_precise(t,bary,o,o_low,kz);
+            let distance=depth*shear.z;
+            let key=depth*order;
+            if excluded!=0xffffffffu && repeated_crossing(t,source,d,inside,distance,origin_error) { continue; }
+            if distance > minimum && distance < limit && (key < best || (key == best && tie_preferred(t,d,inside))) {
+                hit = Hit(distance,i,bary); best=key;
+                if any_hit || (distance < blocker && (t.base.w<=0.0 || t.coat.w<=0.0)) { return hit; }
+            }
+        }
+    }
+    return hit;
+}
+"#;
+    let source = [
+        SHADER,
+        "\n",
+        legacy,
+        "\n",
+        r#"
+@compute @workgroup_size(1) fn shared_bvh_policy_reference() {
+    let excluded=select(0xffffffffu,u32(max(u.back.w,0.0)),u.back.w>=0.0);
+    let old=legacy_precise_policy(u.eye.xyz,u.right.xyz,u.up.xyz,u.back.z>0.5,excluded,u.back.x,u.back.y>0.5,u.environment.x,u.environment.y);
+    let combined_hit=trace_precise_within(u.eye.xyz,u.right.xyz,u.up.xyz,u.back.z>0.5,excluded,u.back.x,u.back.y>0.5,u.environment.x,u.environment.y);
+    accumulation[0]=vec4<f32>(select(0.0,1.0,old.triangle==combined_hit.triangle),
+        select(0.0,1.0,bitcast<u32>(old.distance)==bitcast<u32>(combined_hit.distance)),
+        select(0.0,1.0,all(bitcast<vec3<u32>>(old.bary)==bitcast<vec3<u32>>(combined_hit.bary))),1.0);
+    accumulation[1]=vec4<f32>(old.distance,f32(old.triangle),old.bary.xy);
+    accumulation[2]=vec4<f32>(combined_hit.distance,f32(combined_hit.triangle),combined_hit.bary.xy);
+    accumulation[3]=vec4<f32>(old.bary.z,combined_hit.bary.z,0.0,1.0);
+}
+"#,
+    ]
+    .concat();
+    // Check the generated reference before opening a device: a reserved test
+    // identifier must report a parse error rather than silently retire its host.
+    let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
+        .validate(&module)
+        .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let pipeline = checked_creation(&context.device, || {
+        let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shared BVH exact legacy policies"),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[Some(&context.layout)],
+            immediate_size: 0,
+        });
+        Ok(context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&layout),
+            module: &shader,
+            entry_point: Some("shared_bvh_policy_reference"),
+            compilation_options: Default::default(),
+            cache: None,
+        }))
+    })
+    .unwrap();
+    for scene in [directional_receiver(), glass_slab(false)] {
+        let mut task =
+            Task::new(context.clone(), scene, request(2), JobOptions { samples: 1, max_depth: 1, ..Default::default() }, CancelToken::default())
+                .unwrap();
+        let cases = [
+            (Vec3::new(0.125, 0.25, 4.0), Vec3::ZERO, -Vec3::Z, 0.0, false, false, None, 1e30, -1.0),
+            (Vec3::new(0.0, 0.0, 4.0), Vec3::ZERO, -Vec3::Z, 0.0, false, true, None, 1e30, -1.0),
+            (
+                Vec3::new(0.125, 0.25, 4.0),
+                Vec3::new(1e-10, -2e-10, 0.0),
+                Vec3::new(0.01, 0.02, -1.0).normalized().unwrap(),
+                0.0,
+                false,
+                false,
+                None,
+                1e30,
+                1.5,
+            ),
+            (Vec3::new(0.0, 0.125, 0.5), Vec3::new(0.0, 0.0, -1e-8), -Vec3::Z, 0.0, true, false, None, 1e30, -1.0),
+            (Vec3::new(0.0, 0.125, 0.5), Vec3::new(0.0, 0.0, 1e-8), Vec3::Z, 0.0, false, false, None, 1e30, -1.0),
+            (Vec3::new(30.0, 0.125, 4.0), Vec3::new(1e-5, 0.0, 0.0), -Vec3::Z, 0.0, false, true, None, 2.0, 1.0),
+            (Vec3::new(0.25, 0.25, -0.5), Vec3::new(0.0, 0.0, 1e-8), Vec3::Z, 0.0, true, false, Some(0), 1e30, -1.0),
+            (Vec3::new(-11.0, 0.125, 0.0), Vec3::new(1e-8, 0.0, 0.0), Vec3::X, 0.0, false, true, None, 1e30, -1.0),
+        ];
+        for (origin, low, direction, minimum, inside, any_hit, excluded, limit, blocker) in cases {
+            let mut params = task.parameters(1).unwrap();
+            let mut vectors = Vec::new();
+            scene::vector(&mut vectors, origin, 0.0);
+            scene::vector(&mut vectors, low, 0.0);
+            scene::vector(&mut vectors, direction, 0.0);
+            scene::vector(
+                &mut vectors,
+                Vec3::new(minimum, if inside { 1.0 } else { 0.0 }, if any_hit { 1.0 } else { 0.0 }),
+                excluded.map_or(-1.0, |id| id as f32),
+            );
+            params[32..96].copy_from_slice(&vectors);
+            vectors.clear();
+            scene::vector(&mut vectors, Vec3::new(limit, blocker, 0.0), 0.0);
+            params[112..128].copy_from_slice(&vectors);
+            context.queue.write_buffer(&task.uniform, 0, &params);
+            let mut encoder = context.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_pipeline(&pipeline);
+                pass.set_bind_group(0, &task.bind, &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
+            context.queue.submit([encoder.finish()]);
+            task.sample = 1;
+            let pixels = task.read_linear().unwrap();
+            eprintln!(
+                "shared-BVH policy origin={origin:?} low={low:?} direction={direction:?} minimum={minimum} inside={inside} any={any_hit} excluded={excluded:?} limit={limit} blocker={blocker}: old(distance,index,baryXY)={:?} combined={:?} baryZ={:?} exactFlags={:?} hitBits={:?}",
+                pixels[1],
+                pixels[2],
+                pixels[3],
+                pixels[0],
+                [pixels[1].map(f32::to_bits), pixels[2].map(f32::to_bits), pixels[3].map(f32::to_bits)]
+            );
+            assert_eq!(
+                pixels[0], [1.0; 4],
+                "exact triangle/distance/barycentric bits: origin={origin:?} low={low:?} direction={direction:?} inside={inside} any={any_hit} limit={limit} blocker={blocker}"
+            );
+        }
+    }
 }

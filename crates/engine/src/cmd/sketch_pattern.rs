@@ -4,6 +4,7 @@ use solidcraft_sketch::{SketchPattern, SketchPatternKind};
 
 use super::*;
 use crate::cmd::{alignment_param, reversed_param};
+use crate::schema::sketch_modify::PatternResult;
 
 pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
     let cmd = if circular { "sketch.pattern.circular" } else { "sketch.pattern.rectangular" };
@@ -194,13 +195,10 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
         let pattern = sk.patterns.get(index).ok_or_else(|| bad(cmd, "missing sketch pattern"))?;
         let curves: Vec<_> = pattern.instances.iter().flat_map(|i| i.curves.iter().cloned()).collect();
         let constraints: Vec<_> = pattern.instances.iter().flat_map(|i| i.constraints.iter().cloned()).collect();
-        Ok(json!({"pattern":id,"center":center_id,"curves":curves,"constraints":constraints}))
+        Ok((id, center_id, curves, constraints))
     })?;
-    let mut out = out;
-    if let Some(out) = out.as_object_mut() {
-        out.insert("sketch".into(), info);
-    }
-    Ok(out)
+    let (pattern, center, curves, constraints) = out;
+    reply(cmd, PatternResult { pattern, center, curves, constraints, sketch: info, param_warnings: Vec::new() })
 }
 
 fn count(p: &Value, k: &str, cmd: &str) -> Result<usize> {

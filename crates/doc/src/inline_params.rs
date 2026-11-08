@@ -95,9 +95,17 @@ fn with_unit(rhs: &str, units: &str) -> String {
 }
 
 impl Document {
+    /// `name = expression` typed again exactly as an existing user parameter was defined (each
+    /// of several holes made one at a time, or one command per hole, given `ScrewDepth = 5`):
+    /// the same value in the same unit, so it uses that parameter instead of being refused.
+    fn defines_again(&self, d: &Pending) -> bool {
+        self.param(&d.name).is_some_and(|p| !p.model && p.expr.trim() == d.expression.trim() && d.unit.as_ref().is_none_or(|u| *u == p.unit))
+    }
+
     /// Store every value typed as `name = expression`: the user parameter `name` with that
     /// expression (a bare number read as the value would read it, in that unit), and `name`
-    /// where the text was. A name that is taken or reserved is refused, as is a definition where
+    /// where the text was. A name that is taken or reserved is refused (unless it is a user
+    /// parameter defined exactly so, which the text then names), as is a definition where
     /// none can be made: in a parameter's own expression or a configuration cell. All or nothing:
     /// on an error the design is unchanged.
     pub fn define_inline(&mut self) -> Result<Vec<Defined>> {
@@ -182,7 +190,7 @@ impl Document {
             if let Some(problem) = Self::param_name_problem(&d.name) {
                 return Err(DocError::Invalid(problem));
             }
-            if self.name_taken(&d.name) {
+            if self.name_taken(&d.name) && !self.defines_again(d) {
                 return Err(DocError::Invalid(format!(
                     "there is already a parameter `{}`: type `{}` to use it, or change it in Parameters",
                     d.name, d.name
@@ -191,6 +199,10 @@ impl Document {
         }
         let mut out = Vec::with_capacity(found.defs.len());
         for d in found.defs {
+            // Typed again as it was defined, the text just names the parameter already there.
+            if self.defines_again(&d) {
+                continue;
+            }
             // A value of no fixed kind (a joint's) is evaluated without the design's units, so
             // its bare number stays a millimetre length whatever they are (#8865): `w = 5` is
             // what `5` is there.

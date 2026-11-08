@@ -664,6 +664,26 @@ fn a_folder_naming_missing_or_repeated_features_still_opens() {
     assert_eq!(opened.timeline_groups.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["Repeats", "Stale"], "both folders are kept");
 }
 
+/// Timeline folders nested 10 000 deep open at once: each folder's chain of parents is walked
+/// once, not again for every folder inside it (a 588 KB design took over three minutes). A
+/// cycle is still refused.
+#[test]
+fn deeply_nested_timeline_folders_open_and_a_cycle_does_not() {
+    let mut doc = Document::new("nested folders");
+    let n = 10_000u64;
+    doc.timeline_groups = (0..n)
+        .map(|i| TimelineGroup { id: 100 + i, name: "f".into(), parent: (i + 1 < n).then_some(101 + i), features: vec![], joints: vec![] })
+        .collect();
+    let started = std::time::Instant::now();
+    let opened = Document::from_json(&doc.to_json()).expect("the design opens");
+    assert_eq!(opened.timeline_groups.len(), n as usize);
+    assert!(started.elapsed() < std::time::Duration::from_secs(20), "{:?}", started.elapsed());
+    doc.timeline_groups =
+        (0..3).map(|i| TimelineGroup { id: 100 + i, name: "f".into(), parent: Some(100 + (i + 1) % 3), features: vec![], joints: vec![] }).collect();
+    let refused = Document::from_json(&doc.to_json()).unwrap_err().to_string();
+    assert!(refused.contains("cyclic timeline folders"), "{refused}");
+}
+
 /// A marker after the last feature leaves every feature active, as no marker does, so a feature
 /// added then is active too, not added rolled back (#7741: editing the last feature from the
 /// History runs its command with the marker there).
@@ -849,6 +869,86 @@ fn a_join_keeps_blocks_apart_in_one_body() {
     assert_eq!(bodies.len(), 1, "{bodies:?}");
     assert!(rel(bodies[0].1, 2000.0) < 1e-6 && bodies[0].2 == 2, "{bodies:?}");
     assert_eq!(kept, None);
+}
+
+/// A body of two pieces joined apart, split by a plane through both pieces: the split gives the
+/// halves of every piece, not the halves of one of them (#6738).
+#[test]
+fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
+    let mut doc = Document::new("split two pieces");
+    // One sketch, two squares 20 mm across and 30 mm apart.
+    let mut sk = Sketch::new();
+    let mut corners = Vec::new();
+    for x in [0.0, 50.0] {
+        let p: Vec<usize> = [Vec2::new(x, 10.0), Vec2::new(x + 20.0, 10.0), Vec2::new(x + 20.0, 30.0), Vec2::new(x, 30.0)]
+            .iter()
+            .map(|c| sk.add_point(*c, None).unwrap())
+            .collect();
+        for i in 0..4 {
+            sk.add_line_pts(p[i], p[(i + 1) % 4], None).unwrap();
+        }
+        corners.extend(p);
+    }
+    for p in corners {
+        sk.add_constraint(ConstraintKind::Fix { p }, None).unwrap();
+    }
+    let s = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    doc.add_feature(
+        FeatureKind::Extrude {
+            thin: None,
+            sketch: crate::SketchId(s),
+            profiles: ProfileSel::All,
+            extent: Extent {
+                convention: crate::ExtrudeConvention::LegacyPerSide,
+                distance: "10".into(),
+                direction: Direction::Positive,
+                distance2: None,
+                start_offset: None,
+                through_all: false,
+                second_follows_first: false,
+                taper: None,
+                corner: Default::default(),
+                to: None,
+                to_offset: None,
+                from: None,
+                to_body_apart: false,
+            },
+            operation: Operation::NewBody,
+            targets: vec![],
+        },
+        None,
+    )
+    .unwrap();
+    doc.add_feature(
+        FeatureKind::Combine { target: "Body1".into(), tools: vec!["Body2".into()], operation: Operation::Join, keep_tools: false },
+        None,
+    )
+    .unwrap();
+    // A plane through the middle of both squares (the extrusion is 10 mm tall).
+    let split = doc
+        .add_feature(
+            FeatureKind::Split {
+                body: "Body1".into(),
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "5".into() },
+                tool: None,
+                sketch: None,
+                line: None,
+            },
+            None,
+        )
+        .unwrap();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    let error = m.result(split).unwrap().error.clone();
+    assert!(error.is_none(), "the split of a body of two pieces: {error:?}");
+    let bodies: Vec<(String, f64, usize)> =
+        m.state().bodies.iter().map(|b| (b.name.clone(), measure(&b.body).unwrap().volume, b.body.lumps().unwrap().len())).collect();
+    assert_eq!(bodies.len(), 2, "{bodies:?}");
+    for (name, volume, lumps) in &bodies {
+        // Each half holds the half of both squares: two pieces, half the body each.
+        assert!(rel(*volume, 4000.0) < 1e-6, "{name}: {bodies:?}");
+        assert_eq!(*lumps, 2, "{name}: {bodies:?}");
+    }
 }
 
 /// A square ring joined with an arm touching its outer corner along an edge and a hub apart in

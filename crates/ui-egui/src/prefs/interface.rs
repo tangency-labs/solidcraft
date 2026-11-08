@@ -221,13 +221,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.tr("prefs.structure.layout_note"),
             Some(crate::settings_profiles::tag),
         );
+        super::panel_layout::show(app, ui);
         // Retain the section key for existing reveal/open callers.
         ui_kit::settings_section(ui, "layout", app.tr("prefs.layout_page.window"), |ui| {
             ui_kit::settings_pair(
                 ui,
                 |ui| {
                     ui_kit::settings_form(ui, t.form_label_width + t.space_16, |ui| {
-                        ui_kit::row(ui, app.tr("prefs.workspace"), |ui| {
+                        ui_kit::row(ui, app.tr("ui.panel_layout.panel_style"), |ui| {
                             let mut selected = usize::from(app.ui.layout == crate::shell::LayoutMode::Docked);
                             if ui_kit::segmented(
                                 ui,
@@ -297,6 +298,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.tr("prefs.keep_work_on_tab_switch_note"),
                 &mut app.preferences.keep_work_on_tab_switch,
                 "keep_work_on_tab_switch",
+            );
+            layout_check(
+                ui,
+                app.tr("prefs.tab_double_click_renames"),
+                app.tr("prefs.tab_double_click_renames_note"),
+                &mut app.preferences.tab_double_click_renames,
+                "tab_double_click_renames",
             );
         });
         if let Some(rect) = crate::scenario::rect_of(&format!("dialog:section:{}", app.tr("prefs.layout_page.window"))) {
@@ -403,6 +411,22 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.history_play_button,
                     "history_play_button",
                 );
+                // A design's joints as one button in the History, from the second joint (#8884).
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_group_joints"),
+                    app.tr("prefs.history_group_joints_note"),
+                    &mut app.preferences.history_group_joints,
+                    "history_group_joints",
+                );
+                // Folds in the History bar, and a folder for a STEP insert's items (#8885).
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_bar_groups"),
+                    app.tr("prefs.history_bar_groups_note"),
+                    &mut app.preferences.history_bar_groups,
+                    "history_bar_groups",
+                );
                 ui.add_enabled_ui(app.preferences.timeline_left, |ui| {
                     layout_check(
                         ui,
@@ -433,6 +457,25 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.tr("prefs.browser_eye_left_note"),
                     &mut app.preferences.browser_eye_left,
                     "browser_eye_left",
+                );
+                layout_check(
+                    ui,
+                    app.tr("prefs.browser_body_features"),
+                    app.tr("prefs.browser_body_features_note"),
+                    &mut app.preferences.browser_body_features,
+                    "browser_body_features",
+                );
+            });
+            // A folder's icon from its features (#12514), in a row of its own: one more box in the
+            // row above widens it past the page at narrow windows.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_folder_kind_icon"),
+                    app.tr("prefs.history_folder_kind_icon_note"),
+                    &mut app.preferences.history_folder_kind_icon,
+                    "history_folder_kind_icon",
                 );
             });
         });

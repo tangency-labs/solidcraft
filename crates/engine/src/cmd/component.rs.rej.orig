@@ -1,0 +1,19 @@
+@@ -13,14 +13,16 @@
+ use super::CommandSpec;
+ use crate::params::{bad, bool_, str_, string_list, vec3};
+ use crate::schema::component::{
+-    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, MoveFeaturesParams, MoveFeaturesResult, MoveSketchesToPartsParams,
+-    MoveSketchesToPartsResult, OccurrenceAlignParams, OccurrenceAlignResult, ReparentItemsParams, ReparentItemsResult,
++    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, MirrorComponentsParams, MirrorComponentsResult, MoveFeaturesParams,
++    MoveFeaturesResult, MoveSketchesToPartsParams, MoveSketchesToPartsResult, OccurrenceAlignParams, OccurrenceAlignResult, ReparentItemsParams,
++    ReparentItemsResult,
+ };
+ use crate::schema::{TypedContract, output_schema_for};
+ use crate::{Result, Session};
+ 
+ const EDIT_IN_PLACE_CONTRACT: TypedContract<EditInPlaceParams> = TypedContract::new();
+ const FINISH_EDIT_CONTRACT: TypedContract<FinishEditParams> = TypedContract::new();
++const MIRROR_CONTRACT: TypedContract<MirrorComponentsParams> = TypedContract::new();
+ const MOVE_FEATURES_CONTRACT: TypedContract<MoveFeaturesParams> = TypedContract::new();
+ const MOVE_SKETCHES_TO_PARTS_CONTRACT: TypedContract<MoveSketchesToPartsParams> = TypedContract::new();
+ const REPARENT_ITEMS_CONTRACT: TypedContract<ReparentItemsParams> = TypedContract::new();

@@ -371,6 +371,14 @@ impl Document {
                 users.entry(x.as_str()).or_default().push(k.clone());
             }
         }
+        // A feature that reads a parameter itself (a sketch point at `a`) is one of its users
+        // too, named as `parameters.graph` names it (#12293).
+        let reads: Vec<(String, BTreeSet<String>)> = self.features.iter().map(|f| (format!("Feature:{}", f.name), self.feature_reads(f))).collect();
+        for (feature, names) in &reads {
+            for n in names {
+                users.entry(n.as_str()).or_default().push(feature.clone());
+            }
+        }
         let used_by = |n: &str| -> Vec<String> { users.get(n).cloned().unwrap_or_default() };
         let value = |n: &str, k: Kind| {
             vals.get(n).and_then(|v| v.to_kind(k).ok()).map(|x| if k == Kind::Angle { x.to_degrees() } else { x }).map(expr::round_reported)
@@ -1049,21 +1057,32 @@ impl Document {
             let mut names: BTreeSet<String> = f.param_names.iter().filter(|n| !n.is_empty()).cloned().collect();
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
                 names.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
-                names.extend(sketch.patterns.iter().flat_map(|p| p.expressions.values()).flat_map(|e| expr::references(e)));
-                names.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
-                names.extend(sketch.patterns.iter().filter_map(|p| p.count_expression.as_deref()).flat_map(expr::references));
-                names.extend(sketch.text_word_exprs().into_iter().flat_map(|e| crate::text_params::references(e)));
             }
-            // Sheet metal and plastic features rebuild when their rules' parameters change (#4420).
-            if f.kind.is_sheet() {
-                names.extend(self.sheet.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
-            }
-            if f.kind.is_plastic() {
-                names.extend(self.plastic.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
-            }
+            names.extend(self.feature_reads(f));
             out.extend(names.into_iter().map(|n| (format!("Feature:{}", f.name), n)));
         }
         out
+    }
+
+    /// The parameters a feature reads through expressions it holds itself, not through a named
+    /// input or dimension of its own: a sketch's point coordinates, texts, equations and pattern
+    /// expressions, and the rules a sheet metal or plastic feature is built with.
+    fn feature_reads(&self, f: &crate::Feature) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+            names.extend(sketch.patterns.iter().flat_map(|p| p.expressions.values()).flat_map(|e| expr::references(e)));
+            names.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
+            names.extend(sketch.patterns.iter().filter_map(|p| p.count_expression.as_deref()).flat_map(expr::references));
+            names.extend(sketch.text_word_exprs().into_iter().flat_map(|e| crate::text_params::references(e)));
+        }
+        // Sheet metal and plastic features rebuild when their rules' parameters change (#4420).
+        if f.kind.is_sheet() {
+            names.extend(self.sheet.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
+        }
+        if f.kind.is_plastic() {
+            names.extend(self.plastic.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
+        }
+        names
     }
 
     /// Features whose result depends on a parameter (directly or through other parameters).
@@ -1142,6 +1161,76 @@ fn csv_fields(record: &str) -> Result<Vec<String>> {
             }
         })
         .collect()
+}
+
+/// Whether `query` spells the starts of some words of `name`, in order, ignoring case: for
+/// `tooth_outward_flange_diameter`, `toodia`, `toofla`, `outdia` and `toofladia` all match
+/// (#11978). Words may be skipped but not reordered. Underscores, hyphens, spaces and other
+/// separators split `name` into words, and so do camelCase and letter-digit boundaries.
+/// Underscores, hyphens and spaces in `query` are ignored. A query with any other symbol (an
+/// expression such as `width *`) or with no letters or digits never matches here. This only adds
+/// to a plain substring search: callers keep that one too.
+pub fn name_words_match(name: &str, query: &str) -> bool {
+    if query.chars().any(|c| !(c.is_alphanumeric() || matches!(c, '_' | '-' | ' '))) {
+        return false;
+    }
+    let query: Vec<char> = query.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect();
+    let words = name_words(name);
+    // Every query character must come from some word, so a longer query can never match;
+    // this also bounds the work below by the name's length.
+    if query.is_empty() || query.len() > words.iter().map(Vec::len).sum::<usize>() {
+        return false;
+    }
+    // `reached[i]`: the first `i` query characters are spelled by word starts seen so far.
+    let mut reached = vec![false; query.len() + 1];
+    if let Some(first) = reached.first_mut() {
+        *first = true;
+    }
+    for word in &words {
+        // From the highest start down, so each word extends a match at most once.
+        for start in (0..query.len()).rev() {
+            if !reached.get(start).copied().unwrap_or(false) {
+                continue;
+            }
+            let rest = query.get(start..).unwrap_or_default();
+            for (k, _) in word.iter().zip(rest).take_while(|(a, b)| a == b).enumerate() {
+                if let Some(r) = reached.get_mut(start + k + 1) {
+                    *r = true;
+                }
+            }
+        }
+        if reached.last().copied().unwrap_or(false) {
+            return true;
+        }
+    }
+    false
+}
+
+/// The words of a parameter name, in lower case: see [`name_words_match`].
+fn name_words(name: &str) -> Vec<Vec<char>> {
+    let mut words = Vec::new();
+    let mut word: Vec<char> = Vec::new();
+    let mut previous: Option<char> = None;
+    for c in name.chars() {
+        let split = match previous {
+            _ if !c.is_alphanumeric() => true,
+            Some(p) => (p.is_lowercase() && c.is_uppercase()) || p.is_numeric() != c.is_numeric(),
+            None => false,
+        };
+        if split && !word.is_empty() {
+            words.push(std::mem::take(&mut word));
+        }
+        if c.is_alphanumeric() {
+            word.extend(c.to_lowercase());
+            previous = Some(c);
+        } else {
+            previous = None;
+        }
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
 }
 
 /// Parameters whose definitions depend on each other in a loop.
@@ -1227,6 +1316,50 @@ mod design_length_tests {
                 let back = doc.eval(&e, crate::expr::Kind::Length).unwrap();
                 assert!((back - mm).abs() <= 1e-6, "{units} {mm}: {e} reads {back}");
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod name_words_tests {
+    use super::name_words_match;
+
+    #[test]
+    fn the_starts_of_words_in_order_find_a_long_name() {
+        let name = "tooth_outward_flange_diameter";
+        for query in ["too", "dia", "toodia", "toofla", "outdia", "toofladia", "TooDia", "too_dia", "tooth outward", "toothoutwardflangediameter"] {
+            assert!(name_words_match(name, query), "{query}");
+        }
+        // Out of order, from inside a word, more than the words hold, or not a name at all.
+        for query in ["diatoo", "ooth", "toodiax", "toox", "", "_", "-  ", "tooth *", "too.dia"] {
+            assert!(!name_words_match(name, query), "{query}");
+        }
+    }
+
+    #[test]
+    fn camel_case_hyphens_and_digits_split_words() {
+        assert!(name_words_match("boltHoleDepth", "bhd"));
+        assert!(name_words_match("boltHoleDepth", "holedep"));
+        assert!(name_words_match("rib-count-max", "rcm"));
+        assert!(name_words_match("hole2_depth", "h2d"));
+        assert!(name_words_match("Länge_Außen", "läau"));
+        assert!(!name_words_match("boltholedepth", "bhd"));
+    }
+
+    #[test]
+    fn a_later_word_can_take_over_part_of_a_match() {
+        // `ab` must not be taken whole from `abc` when the match needs `a` and then `bd...`.
+        assert!(name_words_match("abc_bd", "abd"));
+        assert!(name_words_match("aa_ab", "aab"));
+    }
+
+    #[test]
+    fn hostile_names_and_queries_never_panic() {
+        let long = "a_".repeat(5_000);
+        assert!(name_words_match(&long, &"a".repeat(5_000)));
+        assert!(!name_words_match(&long, &"a".repeat(5_001)));
+        for (name, query) in [("", "a"), ("\u{0}", "\u{0}"), ("İ", "i"), ("ß", "ss"), ("🙂_x", "x"), ("x", "🙂")] {
+            let _ = name_words_match(name, query);
         }
     }
 }

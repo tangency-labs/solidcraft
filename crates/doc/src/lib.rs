@@ -75,6 +75,7 @@ pub use print_face::PrintFace;
 pub mod project;
 mod project3d;
 pub mod render_aging;
+pub mod render_coat;
 pub mod render_job;
 pub mod render_optics;
 pub mod render_resources;
@@ -102,7 +103,7 @@ pub use eval::{
 pub use eval::{EvalCache, KeptResults};
 pub use expr::Expr;
 pub use names::{BodyName, FeatureId, FeatureName, SketchId, copy_name};
-pub use params::{ParamRow, ParamUser, cycles};
+pub use params::{ParamRow, ParamUser, cycles, name_words_match};
 pub use points::{Dir, FacePick, Position, plain};
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_sketch as sketch;
