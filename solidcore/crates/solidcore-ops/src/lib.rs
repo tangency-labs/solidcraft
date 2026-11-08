@@ -45,6 +45,7 @@ pub mod split;
 pub mod step_assembly;
 pub mod stitch;
 pub mod sweep;
+pub mod tangent;
 pub mod untrim;
 
 pub use blend::{
