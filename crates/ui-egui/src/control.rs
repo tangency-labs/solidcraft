@@ -1533,7 +1533,9 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
 /// `false` frames nothing.
 /// Nothing changes when a field is refused.
 fn camera(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
-    const FIELDS: [&str; 8] = ["target", "yaw", "pitch", "roll", "distance", "fov", "up", "fit"];
+    // `frame` is in every reply once the design has its own orientation (#6455): taken so a reply
+    // replays, but the design's frame stays the camera's.
+    const FIELDS: [&str; 9] = ["target", "yaw", "pitch", "roll", "distance", "fov", "up", "frame", "fit"];
     let o = match p {
         Value::Null => serde_json::Map::new(),
         Value::Object(o) => o.clone(),
@@ -1550,6 +1552,7 @@ fn camera(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
             v[k] = x.clone();
         }
         cam = serde_json::from_value(v).map_err(|e| format!("bad camera: {e}"))?;
+        cam.frame = app.cam.frame;
         // The distance cap is far past any Fit (so every reply replays) and still finite in f32.
         if !cam.is_valid() || cam.distance > 1e15 || cam.pitch.abs() > std::f64::consts::FRAC_PI_2 {
             return Err("the camera must be finite, with a distance up to 1e15 mm and a pitch within ±π/2".into());

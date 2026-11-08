@@ -3259,6 +3259,10 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// The design's own FRONT and TOP (the view cube's Set as, #6455): its views, Home and the
+    /// orbit follow them instead of the up axis preference. None: the preference's.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "valid_view_frame")]
+    pub view_frame: Option<solidcraft_render::ViewFrame>,
     /// What was hidden when the design was saved. A session takes it from here when the design
     /// opens and keeps the live state itself (`browser.visibility`: saved, and undone like any
     /// other change), so a document in a session leaves this empty; the session puts it back when
@@ -3552,6 +3556,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            view_frame: None,
             visibility: Visibility::default(),
         }
     }
@@ -4784,4 +4789,11 @@ pub fn valid_density(d: f64) -> bool {
 /// Density of a built-in physical material (g/cm³).
 pub fn material_density(name: &str) -> Option<f64> {
     MATERIALS.iter().find(|(n, _)| n.eq_ignore_ascii_case(name.trim())).map(|(_, d)| *d)
+}
+
+/// A saved view frame, read only when it is one `ViewFrame::new` makes (two principal axes at
+/// right angles); a hand-edited or damaged one opens as none, the up axis preference's.
+fn valid_view_frame<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Option<solidcraft_render::ViewFrame>, D::Error> {
+    let f: Option<solidcraft_render::ViewFrame> = serde::Deserialize::deserialize(d)?;
+    Ok(f.filter(|f| solidcraft_render::ViewFrame::new(f.front, f.top) == Some(*f)))
 }

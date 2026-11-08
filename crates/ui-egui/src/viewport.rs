@@ -12930,6 +12930,49 @@ mod tests {
         assert!(h.app.viewport.boxsel.is_none());
     }
 
+    /// #6455: right-clicking the view cube offers Set as Front / Top; Set as Front makes the face
+    /// in view the design's FRONT, the camera turns to it, and the cube labels it FRONT.
+    #[test]
+    fn right_clicking_the_view_cube_sets_the_designs_front() {
+        use crate::context_menu::{Target, items, run_item};
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 5}}));
+        h.call("ui.prefs", json!({"navigator_style":"cube"}));
+        h.run(&json!([{"call":"ui.view","params":{"view":"right"}}, {"frames": 40}, {"click":{"handle":"navigation_cube:right"},"button":"right"}, {"frames": 3}])).unwrap();
+        assert!(
+            h.app.viewport.context_menu.is_some() && h.app.menu.target == Target::ViewGizmo,
+            "the cube's own menu, not the viewport's: menu at {:?}",
+            h.app.viewport.context_menu
+        );
+        let menu = items(&h.app, &Target::ViewGizmo);
+        assert_eq!(menu.iter().map(|i| i.label.as_str()).collect::<Vec<_>>()[3..], ["Set as", "Reset Orientation"]);
+        assert!(!menu[4].enabled, "nothing to reset yet");
+        let front = menu[3].children.iter().find(|i| i.label == "Front").cloned().unwrap();
+        run_item(&mut h.app, &front, Pos2::ZERO);
+        h.run(&json!([{"frames": 60}])).unwrap();
+        let f = h.app.session.doc.view_frame.expect("Set as Front gives the design a frame");
+        assert!(f.front.dist(Vec3::X) < 1e-9 && f.top.dist(Vec3::Z) < 1e-9, "{f:?}");
+        assert!(h.app.cam.back().dist(Vec3::X) < 1e-6, "the view is the new front: {:?}", h.app.cam);
+        assert!(crate::scenario::handle_at("navigation_cube:front").is_some(), "the face in view is labelled FRONT");
+        // Undo puts the old orientation back; the camera follows.
+        h.call("engine.execute", json!({"command": "edit.undo", "params": {}}));
+        h.run(&json!([{"frames": 5}])).unwrap();
+        assert_eq!((h.app.session.doc.view_frame, h.app.cam.frame), (None, None));
+    }
+
+    /// #6455: the axis compass has the same menu as the cube (Set as Front / Top).
+    #[test]
+    fn right_clicking_the_axis_compass_opens_the_set_as_menu() {
+        use crate::context_menu::Target;
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"axes"}));
+        h.run(
+            &json!([{"call":"ui.view","params":{"view":"home"}}, {"frames": 10}, {"click":{"handle":"axis_view:z"},"button":"right"}, {"frames": 3}]),
+        )
+        .unwrap();
+        assert!(h.app.viewport.context_menu.is_some() && h.app.menu.target == Target::ViewGizmo, "menu at {:?}", h.app.viewport.context_menu);
+    }
+
     #[test]
     fn construction_point_is_pickable_only_while_visible() {
         let mut s = solidcraft_engine::Session::default();
