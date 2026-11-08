@@ -10,8 +10,8 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use egui::ColorImage;
 use serde_json::{Value, json};
+use solidcraft_control::{cancelled_chat_response, chat_turn_cancelled};
 
-use crate::request::{cancelled_chat_response, chat_turn_cancelled};
 use crate::window::hidden;
 
 /// A frame asked for: its token, the time (ms) from which it may be taken, and the frames drawn

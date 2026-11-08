@@ -36,6 +36,7 @@ solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }
 solidcraft-mcp-server = { path = "crates/mcp-server" }
 solidcraft-control = { path = "crates/control" }
+solidcraft-control-egui = { path = "crates/control-egui" }
 solidcraft-derive = { path = "crates/derive" }
 solidcraft-3dx-client = { path = "crates/threedx-client" }
 # The Rust port of NVIDIA's SMLib (Apache-2.0), the B-rep kernel behind crates/smlib. Pinned;

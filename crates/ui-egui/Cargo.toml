@@ -12,6 +12,7 @@ workspace = true
 solidcore-record = { workspace = true }
 solidcraft-engine = { workspace = true }
 solidcraft-control = { workspace = true }
+solidcraft-control-egui = { workspace = true }
 # The widget registry (handles, rects, counts) the UI kit publishes into.
 solidcraft-ui-registry = { workspace = true }
 solidcraft-color = { workspace = true }

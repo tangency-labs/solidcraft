@@ -4133,11 +4133,19 @@ version = "0.40.0-rc.3"
 name = "solidcraft-control"
 version = "0.40.0-rc.3"
 dependencies = [
- "egui",
  "getrandom 0.3.4",
- "image",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "solidcraft-control-egui"
+version = "0.40.0-rc.3"
+dependencies = [
+ "egui",
+ "image",
+ "serde_json",
+ "solidcraft-control",
 ]
 
 [[package]]
@@ -4407,6 +4415,7 @@ dependencies = [
  "solidcore-record",
  "solidcraft-color",
  "solidcraft-control",
+ "solidcraft-control-egui",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",

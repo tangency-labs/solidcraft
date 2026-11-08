@@ -789,7 +789,7 @@ pub struct SolveApp {
     /// Making SolidCraft available to the AI apps installed here ([`ai_connect`]).
     pub ai_connect: ai_connect::State,
     /// The window's screenshots in flight: control requests' and the issue report's.
-    shots: solidcraft_control::screenshot::Shots,
+    shots: solidcraft_control_egui::screenshot::Shots,
     styled: bool,
     fitted: bool,
     /// A framing to settle once the viewport's layout is known: the camera to frame from, the

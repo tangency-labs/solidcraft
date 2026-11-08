@@ -1369,7 +1369,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             Ok(()) => ok(json!({"custom_titlebar": app.custom_titlebar, "maximized": ctx.input(|i| i.viewport().maximized)})),
             Err(e) => err(e),
         },
-        "ui.resize" => wrap(solidcraft_control::window::resize(ctx, p)),
+        "ui.resize" => wrap(solidcraft_control_egui::window::resize(ctx, p)),
         "ui.screenshot" => match s("path").map(vfs::check) {
             Some(Err(e)) => err(e),
             _ => Outcome::Screenshot { path: s("path").map(str::to_string) },
@@ -1537,7 +1537,7 @@ pub fn save_screenshot(image: &egui::ColorImage, path: Option<&str>) -> Value {
 /// [`vfs`] like every other save: the disk natively, a download or browser storage in the web
 /// app (#7192).
 pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(), String> {
-    let bytes = solidcraft_control::screenshot::encode(image, path)?;
+    let bytes = solidcraft_control_egui::screenshot::encode(image, path)?;
     vfs::write(path, &bytes).map_err(|e| e.to_string())
 }
 
