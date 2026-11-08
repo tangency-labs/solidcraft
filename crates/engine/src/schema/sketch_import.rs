@@ -164,14 +164,31 @@ const INSERT_SVG: &str = "Insert an SVG drawing into a sketch as curves: the act
 
 /// The insert commands need `path` or `text`; the handler says so when both are left out. A
 /// `path` it reads (no `text`) is not blank and under 4096 bytes; `maxLength` counts
-/// characters, so 4095 is as close as the schema gets.
+/// characters, so 4095 is as close as the schema gets. `height` is read only without a `width`
+/// and `scale` only without either, so their shapes apply only then, as [`leave_unread`] has it.
 fn source_required(schema: &mut Schema) {
     let read_path = serde_json::json!({"type": "string", "maxLength": 4095, "pattern": not_blank_pattern()});
     schema.insert("anyOf".into(), serde_json::json!([{"required": ["text"]}, {"required": ["path"], "properties": {"path": read_path}}]));
+    let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) else { return };
+    let mut read_only_without = |key: &str| {
+        let shape = props.get_mut(key).map(Value::take).unwrap_or_default();
+        props.insert(key.into(), serde_json::json!({"description": shape.get("description").cloned().unwrap_or_default()}));
+        shape
+    };
+    let height = read_only_without("height");
+    let scale = read_only_without("scale");
+    schema.insert(
+        "allOf".into(),
+        serde_json::json!([
+            {"anyOf": [{"required": ["width"]}, {"properties": {"height": height}}]},
+            {"anyOf": [{"required": ["width"]}, {"required": ["height"]}, {"properties": {"scale": scale}}]},
+        ]),
+    );
 }
 
+/// `path` is checked by [`source_required`] only when it is read (no `text`).
 fn path_schema(_: &mut SchemaGenerator) -> Schema {
-    json_schema!({"type": "string"})
+    json_schema!({})
 }
 
 /// A drawing's text, as `source_text` reads it: at most 16 MiB, or the handler's refusal.

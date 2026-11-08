@@ -169,6 +169,14 @@ fn the_schemas_take_what_the_handlers_read() {
                 (json!({"text": "x", "wdth": 5}), false),
                 (json!({"path": "x".repeat(4096)}), false),
                 (json!({"text": "x", "path": " "}), true),
+                // Unread keys take anything, as in the handler; read ones keep their shapes.
+                (json!({"text": "x", "path": 5}), true),
+                (json!({"text": "x", "width": 5, "height": -1}), true),
+                (json!({"text": "x", "width": 5, "scale": "y"}), true),
+                (json!({"text": "x", "height": 5, "scale": "y"}), true),
+                (json!({"path": 5}), false),
+                (json!({"text": "x", "height": "x", "scale": 2}), false),
+                (json!({"text": "x", "scale": "y"}), false),
             ],
         );
     }
