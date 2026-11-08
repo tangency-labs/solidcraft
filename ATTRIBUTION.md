@@ -201,7 +201,6 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/platforms/windows/solidcraft.en-us.wxl | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
 | assets/platforms/windows/solidcraft.wxs | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
 | assets/shaders/viewport.wgsl | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
-| assets/styles/ui/palettes.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/gruvbox-dark.json | SolidCraft contributors | original SolidCraft theme file mapping SolidCraft's UI colours to the Gruvbox palette's colour values (Gruvbox by Pavel Pertsev, https://github.com/morhetz/gruvbox, MIT) | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/gruvbox-light.json | SolidCraft contributors | original SolidCraft theme file mapping SolidCraft's UI colours to the Gruvbox palette's colour values (Gruvbox by Pavel Pertsev, https://github.com/morhetz/gruvbox, MIT) | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/solidcraft-95.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |

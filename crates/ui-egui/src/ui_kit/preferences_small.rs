@@ -1,7 +1,7 @@
 //! Shared labelled settings blocks and compact explanatory specimens.
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Align, FontId, Layout, Rect, Sense, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 const SETTINGS_PAGE: &str = "sc_settings_page";
 pub(super) const ROW_HELP: &str = "sc_settings_row_help";

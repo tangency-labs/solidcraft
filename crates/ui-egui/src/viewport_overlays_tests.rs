@@ -185,7 +185,7 @@ fn details_native_value_edits_run_real_commands_without_design_history() {
         h.step(&json!({"click":{"handle":format!("viewport_status:{owner}:setting")}})).unwrap();
         h.frames(3);
         let rect = crate::scenario::rect_of(&format!("details:field:{field}")).unwrap();
-        let at = if field == "stripes" { rect.right_center() - vec2(crate::theme::Tokens::get().space_24, 0.0) } else { rect.center() };
+        let at = if field == "stripes" { rect.right_center() - vec2(solidcraft_theme::Tokens::get().space_24, 0.0) } else { rect.center() };
         h.call("ui.click", json!({"x":at.x,"y":at.y,"double":true}));
         h.step(&json!({"key":"A","ctrl":true})).unwrap();
         h.step(&json!({"text":text})).unwrap();
@@ -370,7 +370,7 @@ fn details_grouped_continuity_key_contains_the_actual_sharp_and_gap_tokens() {
             let effect = h.app.session.status_items().remove(0);
             let details = crate::viewport_details::description(&h.app, &effect);
             let key = &details.key[2];
-            let tokens = crate::theme::Tokens::get();
+            let tokens = solidcraft_theme::Tokens::get();
             assert_eq!(key.value, "12");
             assert_eq!(key.colour, tokens.continuity[2], "actual cube creases use the Sharp scene token");
             assert_eq!(key.pattern_colour, Some(tokens.continuity[3]), "the grouped key also carries the actual Gap scene token");
@@ -462,13 +462,13 @@ fn viewport_status_specimens_clear_and_open_keys_without_engine_changes() {
 #[test]
 fn viewport_status_kinds_keep_shape_outline_and_typography_across_themes() {
     use crate::ui_kit::{StatusItem, StatusKind, StatusPresentation, viewport_status_item};
-    let previous = (crate::theme::is_dark(), crate::theme::vision());
+    let previous = (solidcraft_theme::is_dark(), solidcraft_theme::vision());
     assert_ne!(StatusKind::Mode.icon(), StatusKind::Result.icon());
     assert_ne!(StatusKind::Result.icon(), StatusKind::Attention.icon());
     for dark in [false, true] {
-        for vision in crate::theme::ColorVision::ALL {
-            crate::theme::set_dark(dark);
-            crate::theme::set_vision(vision);
+        for vision in solidcraft_theme::ColorVision::ALL {
+            solidcraft_theme::set_dark(dark);
+            solidcraft_theme::set_vision(vision);
             let t = Tokens::get();
             for (kind, outline) in [(StatusKind::Mode, t.accent), (StatusKind::Result, t.border), (StatusKind::Attention, t.warning)] {
                 let ctx = crate::fonts::test_context();
@@ -493,18 +493,18 @@ fn viewport_status_kinds_keep_shape_outline_and_typography_across_themes() {
             }
         }
     }
-    crate::theme::set_dark(previous.0);
-    crate::theme::set_vision(previous.1);
+    solidcraft_theme::set_dark(previous.0);
+    solidcraft_theme::set_vision(previous.1);
 }
 
 #[test]
 fn viewport_status_every_part_is_centred_within_its_pill_in_every_theme() {
     use crate::ui_kit::{StatusItem, StatusKind, StatusPresentation, viewport_status_item};
-    let previous = (crate::theme::is_dark(), crate::theme::vision());
+    let previous = (solidcraft_theme::is_dark(), solidcraft_theme::vision());
     for dark in [false, true] {
-        for vision in crate::theme::ColorVision::ALL {
-            crate::theme::set_dark(dark);
-            crate::theme::set_vision(vision);
+        for vision in solidcraft_theme::ColorVision::ALL {
+            solidcraft_theme::set_dark(dark);
+            solidcraft_theme::set_vision(vision);
             for kind in [StatusKind::Mode, StatusKind::Result, StatusKind::Attention] {
                 for (name, setting, has_key, editable) in [
                     ("Zebra", "12 stripes", false, false),
@@ -550,8 +550,8 @@ fn viewport_status_every_part_is_centred_within_its_pill_in_every_theme() {
             }
         }
     }
-    crate::theme::set_dark(previous.0);
-    crate::theme::set_vision(previous.1);
+    solidcraft_theme::set_dark(previous.0);
+    solidcraft_theme::set_vision(previous.1);
 }
 
 // These tests inspect shapes without submitting their texture uploads to a renderer.
@@ -585,11 +585,11 @@ fn viewport_status_close_hover_has_a_theme_fill_and_native_space_action_in_every
         found
     }
 
-    let previous = (crate::theme::is_dark(), crate::theme::vision());
+    let previous = (solidcraft_theme::is_dark(), solidcraft_theme::vision());
     for dark in [false, true] {
-        for vision in crate::theme::ColorVision::ALL {
-            crate::theme::set_dark(dark);
-            crate::theme::set_vision(vision);
+        for vision in solidcraft_theme::ColorVision::ALL {
+            solidcraft_theme::set_dark(dark);
+            solidcraft_theme::set_vision(vision);
             let t = Tokens::get();
             let ctx = crate::fonts::test_context();
             let item = StatusItem {
@@ -616,8 +616,8 @@ fn viewport_status_close_hover_has_a_theme_fill_and_native_space_action_in_every
             assert_eq!(keyboard, Some(StatusAction::Clear(item.id.clone())), "hover decoration must preserve native Space activation");
         }
     }
-    crate::theme::set_dark(previous.0);
-    crate::theme::set_vision(previous.1);
+    solidcraft_theme::set_dark(previous.0);
+    solidcraft_theme::set_vision(previous.1);
 }
 
 fn draw(ctx: &egui::Context, paint: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
@@ -678,7 +678,7 @@ fn compass_keeps_signed_targets_hover_and_clicks_at_both_scales() {
 #[test]
 fn compass_negative_ends_are_hollow_and_positive_ends_are_chunkier() {
     for dark in [false, true] {
-        let t = Tokens::themed(dark, crate::theme::ColorVision::Off);
+        let t = Tokens::themed(dark, solidcraft_theme::ColorVision::Off);
         for (name, direction, positive) in [("x", Vec3::X, true), ("-x", -Vec3::X, false)] {
             let ctx = crate::fonts::test_context();
             let c = pos2(100.0, 100.0);
@@ -892,7 +892,7 @@ fn sketch_previews_selection_band_and_number_focus_follow_sketch_accent() {
             let output = draw(&h.ctx, |ui| {
                 let r = ui.add(egui::TextEdit::singleline(&mut String::from("20")));
                 r.request_focus();
-                crate::theme::TabAccent::number_focus(ui, &r);
+                solidcraft_theme::TabAccent::number_focus(ui, &r);
             });
             assert!(output.shapes.iter().any(|s| matches!(&s.shape, Shape::Rect(r) if r.stroke.color == t.sketch_accent)));
         }
@@ -922,7 +922,7 @@ fn three_dimensional_sketch_rubber_band_uses_sketch_accent() {
 #[test]
 fn a_hovered_compass_end_turns_white_and_its_letter_takes_the_axis_colour() {
     for dark in [false, true] {
-        let t = Tokens::themed(dark, crate::theme::ColorVision::Off);
+        let t = Tokens::themed(dark, solidcraft_theme::ColorVision::Off);
         for (name, direction, positive) in [("x", Vec3::X, true), ("-x", -Vec3::X, false)] {
             let ctx = crate::fonts::test_context();
             let c = pos2(100.0, 100.0);

@@ -4096,6 +4096,7 @@ dependencies = [
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",
+ "solidcraft-theme",
  "solidcraft-ui-egui",
  "solidcraft-ui-text",
  "ureq",
@@ -4364,6 +4365,16 @@ name = "solidcraft-testkit"
 version = "0.40.0-rc.3"
 
 [[package]]
+name = "solidcraft-theme"
+version = "0.40.0-rc.3"
+dependencies = [
+ "egui",
+ "serde",
+ "serde_json",
+ "solidcraft-color",
+]
+
+[[package]]
 name = "solidcraft-ui-egui"
 version = "0.40.0-rc.3"
 dependencies = [
@@ -4385,6 +4396,7 @@ dependencies = [
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",
+ "solidcraft-theme",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",
  "syn 2.0.119",

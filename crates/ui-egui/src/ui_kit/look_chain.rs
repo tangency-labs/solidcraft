@@ -1,7 +1,7 @@
 //! Appearance inheritance selector. The caller owns selection and commands.
 use super::{Sphere, sphere::paint_sphere};
-use crate::theme::Tokens;
 use egui::{Rect, Sense, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LookStep {

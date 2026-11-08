@@ -25,9 +25,9 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::doc::Component;
 
 use crate::SolveApp;
-use crate::theme::TabAccent;
 use crate::timeline_folders::Span;
 use crate::ui_kit::HistoryGroupChip;
+use solidcraft_theme::TabAccent;
 
 /// A history with no more features than this never folds: it still fits a window's width.
 pub(crate) const FOLD_FROM: usize = 50;

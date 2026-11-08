@@ -136,7 +136,7 @@ mod tests {
                     "short forms have less content even when both need scrolling: {short_content}, {dialog_content}"
                 );
                 assert!(short.height() <= dialog.height(), "short forms cannot grow taller: {short:?}, {dialog:?}");
-                let t = crate::theme::Tokens::get();
+                let t = solidcraft_theme::Tokens::get();
                 let chrome = f64::from(t.form_header_height + t.form_footer_height + t.form_gap_y * 2.0 + t.space_2);
                 if short_content + chrome < f64::from(dialog.height()) {
                     assert!(short.height() < dialog.height(), "unconstrained short forms must shrink: {short:?}, {dialog:?}");

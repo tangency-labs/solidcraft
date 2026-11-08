@@ -1,8 +1,9 @@
 //! Command-search composition: one expanding ribbon editor and a clipped results sheet.
 //! Domain ranking and command dispatch stay with the caller.
+use crate::icons;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{icons, theme::Tokens};
 use egui::{FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Copy)]
 pub(crate) enum SearchBadge {
@@ -414,7 +415,7 @@ mod tests {
     #[test]
     fn square_theme_search_and_focus_ring_stay_square_through_expansion() {
         let tokens = Tokens { radius_sm: 0, radius_md: 0, radius_lg: 0, radius_xl: 0, control_radius: 0, sketch_mode_radius: 0, ..Tokens::dark() };
-        let _theme = crate::theme::scoped_tokens(tokens);
+        let _theme = solidcraft_theme::scoped_tokens(tokens);
         let mut radii = Vec::new();
         for floating in [false, true] {
             for progress in [0.0, 0.5, 1.0] {

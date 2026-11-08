@@ -4,7 +4,6 @@ use crate::{
     SolveApp,
     browser::{self, Row},
     context_menu,
-    theme::Tokens,
     ui_kit::{self, Item},
 };
 use egui::Color32;
@@ -13,6 +12,7 @@ use solidcraft_engine::{
     Sel,
     doc::{ModelBody, appearance::Look},
 };
+use solidcraft_theme::Tokens;
 
 #[derive(Default)]
 pub(crate) struct Decoration {
@@ -62,7 +62,7 @@ fn look_name(app: &SolveApp, look: Option<&Look>) -> String {
 }
 fn look_color(app: &SolveApp, body: &ModelBody, look: Option<&Look>) -> Color32 {
     let color = look.map(|l| l.color).or_else(|| app.session.doc.body_color(body).map(|c| c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)));
-    color.map_or(Tokens::get().body, |rgb| crate::theme::srgb(rgb.map(|channel| f32::from(channel) / 255.0)))
+    color.map_or(Tokens::get().body, |rgb| solidcraft_theme::srgb(rgb.map(|channel| f32::from(channel) / 255.0)))
 }
 
 fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
@@ -435,7 +435,7 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
                 fold: Some(open),
                 count: &count,
                 swatch: Some(
-                    group.look.as_ref().map_or(Tokens::get().body, |l| crate::theme::srgb(l.color.map(|channel| f32::from(channel) / 255.0))),
+                    group.look.as_ref().map_or(Tokens::get().body, |l| solidcraft_theme::srgb(l.color.map(|channel| f32::from(channel) / 255.0))),
                 ),
                 ..Default::default()
             },

@@ -1,7 +1,7 @@
 //! Small deterministic material previews; no textures, jobs or graphics device.
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, Mesh, Rect, Response, Sense, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 use std::{collections::VecDeque, sync::Arc};
 
 const CACHE_ENTRIES: usize = 64;
@@ -252,7 +252,7 @@ pub(crate) struct SphereTile<'a> {
 impl SphereTile<'_> {
     pub(crate) fn show(&self, ui: &mut Ui) -> Response {
         let t = Tokens::get();
-        let accent = crate::theme::TabAccent::current(ui.ctx());
+        let accent = solidcraft_theme::TabAccent::current(ui.ctx());
         let side = t.control_height + t.space_6;
         let line_height = ui.fonts_mut(|fonts| fonts.row_height(&crate::fonts::semibold(t.font_small)));
         let height = t.space_16 + side + t.space_6 + line_height * 2.0 + t.space_3;

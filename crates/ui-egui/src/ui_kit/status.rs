@@ -1,7 +1,8 @@
 //! Status heading and constraint meter; Tokens: font_label, text, text_dim, accent, dialog_rule, sketch_accent, spacing.
+use crate::fonts::RichTextExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{fonts::RichTextExt as _, theme::Tokens};
 use egui::{RichText, vec2};
+use solidcraft_theme::Tokens;
 
 /// Status content for a named card. `key` is the scenario namespace, `fraction` is clamped.
 pub(crate) struct StatusHeader<'a> {

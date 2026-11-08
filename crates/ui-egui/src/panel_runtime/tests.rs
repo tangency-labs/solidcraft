@@ -4,8 +4,8 @@ use solidcraft_engine::panels::*;
 
 use super::*;
 
-fn surface_test_palette(dark: bool) -> crate::theme::Tokens {
-    let mut tokens = if dark { crate::theme::Tokens::dark() } else { crate::theme::Tokens::light() };
+fn surface_test_palette(dark: bool) -> solidcraft_theme::Tokens {
+    let mut tokens = if dark { solidcraft_theme::Tokens::dark() } else { solidcraft_theme::Tokens::light() };
     tokens.panel = if dark { egui::Color32::BLACK } else { egui::Color32::WHITE };
     let ink = if dark { egui::Color32::WHITE } else { egui::Color32::BLACK };
     tokens.text = ink;
@@ -19,7 +19,7 @@ fn surface_test_palette(dark: bool) -> crate::theme::Tokens {
 #[test]
 fn panel_surface_policy_keeps_disabled_host_storage_small() {
     assert!(
-        std::mem::size_of::<HostSurfaceStyle>() < std::mem::size_of::<crate::theme::Tokens>(),
+        std::mem::size_of::<HostSurfaceStyle>() < std::mem::size_of::<solidcraft_theme::Tokens>(),
         "disabled host policy must not embed whole palettes in SolveApp"
     );
 }
@@ -42,15 +42,17 @@ fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
         };
         Color32::from_rgb(channel(source.r(), ground.r()), channel(source.g(), ground.g()), channel(source.b(), ground.b()))
     };
-    let inks = |tokens: &crate::theme::Tokens| [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label];
-    for (name, authored) in [("light", crate::theme::Tokens::light()), ("dark", crate::theme::Tokens::dark()), ("high-contrast", high_contrast)] {
+    let inks = |tokens: &solidcraft_theme::Tokens| [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label];
+    for (name, authored) in
+        [("light", solidcraft_theme::Tokens::light()), ("dark", solidcraft_theme::Tokens::dark()), ("high-contrast", high_contrast)]
+    {
         let ctx = egui::Context::default();
-        let _scope = crate::theme::scoped_panel_tokens(authored);
+        let _scope = solidcraft_theme::scoped_panel_tokens(authored);
         assert!(inks(&authored).iter().all(|ink| ink.a() == 255), "these shipped canonical ink pairs are opaque: {name}");
         for floating in [false, true] {
             let raw = crate::ui_kit::panel_host_frame(&ctx, floating).fill.to_srgba_unmultiplied();
             let opaque = Color32::from_rgb(raw[0], raw[1], raw[2]);
-            let impossible = inks(&authored).iter().any(|ink| crate::theme::contrast_ratio(*ink, opaque) < 4.5);
+            let impossible = inks(&authored).iter().any(|ink| solidcraft_theme::contrast_ratio(*ink, opaque) < 4.5);
             for translucency_percent in [0.0_f32, 50.0, 100.0] {
                 let requested = 1.0 - translucency_percent / 100.0;
                 let style = HostSurfaceStyle::capture(&ctx, false, Some(requested), None);
@@ -74,7 +76,7 @@ fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
                         for ink in inks(palette) {
                             let physical_ink = blend(ink, background, linear);
                             assert!(
-                                crate::theme::contrast_ratio(physical_ink, background) >= 4.5,
+                                solidcraft_theme::contrast_ratio(physical_ink, background) >= 4.5,
                                 "{name}: primary/muted text at translucency {translucency_percent}, viewport {viewport}, linear={linear}"
                             );
                         }
@@ -90,7 +92,7 @@ fn captured_panel_surfaces_protect_all_inks_at_requested_translucencies() {
     let ctx = egui::Context::default();
     for dark in [false, true] {
         let tokens = surface_test_palette(dark);
-        let _scope = crate::theme::scoped_panel_tokens(tokens);
+        let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
         for translucency_percent in [0.0_f32, 50.0, 100.0] {
             let opacity = 1.0 - translucency_percent / 100.0;
             let style = HostSurfaceStyle::capture(&ctx, false, Some(opacity), None);
@@ -102,11 +104,11 @@ fn captured_panel_surfaces_protect_all_inks_at_requested_translucencies() {
                 assert!(effective_background_alpha >= opacity);
                 assert_eq!(effective_background_alpha, f32::from(appearance.fill.a()) / 255.0);
                 assert_eq!(style.palette(appearance), &tokens);
-                assert!(crate::theme::panel_surface_readable(appearance.fill, style.palette(appearance)));
+                assert!(solidcraft_theme::panel_surface_readable(appearance.fill, style.palette(appearance)));
                 if appearance.fill.a() > (opacity * 255.0).ceil() as u8 {
                     let [r, g, b, alpha] = appearance.fill.to_srgba_unmultiplied();
                     let previous = egui::Color32::from_rgba_unmultiplied(r, g, b, alpha - 1);
-                    assert!(!crate::theme::panel_surface_readable(previous, &tokens), "chosen byte is the first readable candidate");
+                    assert!(!solidcraft_theme::panel_surface_readable(previous, &tokens), "chosen byte is the first readable candidate");
                 }
             }
             assert_eq!(style.appearance(PanelSurface::Opaque, false).fill.a(), 255);
@@ -121,13 +123,13 @@ fn panel_contrast_checks_interior_luminance_and_translucent_muted_inks() {
     // viewport background can match it exactly. Endpoint checks alone are false.
     let middle = egui::Color32::from_gray(117);
     tokens.form_dim = middle;
-    assert!(crate::theme::contrast_ratio(middle, egui::Color32::BLACK) >= 4.5);
-    assert!(crate::theme::contrast_ratio(middle, egui::Color32::WHITE) >= 4.5);
-    assert!(!crate::theme::panel_surface_readable(egui::Color32::TRANSPARENT, &tokens));
+    assert!(solidcraft_theme::contrast_ratio(middle, egui::Color32::BLACK) >= 4.5);
+    assert!(solidcraft_theme::contrast_ratio(middle, egui::Color32::WHITE) >= 4.5);
+    assert!(!solidcraft_theme::panel_surface_readable(egui::Color32::TRANSPARENT, &tokens));
     tokens.form_dim = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 240);
-    assert!(crate::theme::panel_surface_readable(egui::Color32::WHITE, &tokens), "RGBA ink is composited rather than rejected");
+    assert!(solidcraft_theme::panel_surface_readable(egui::Color32::WHITE, &tokens), "RGBA ink is composited rather than rejected");
     tokens.form_dim = egui::Color32::TRANSPARENT;
-    assert!(!crate::theme::panel_surface_readable(egui::Color32::WHITE, &tokens), "invisible muted ink cannot satisfy contrast");
+    assert!(!solidcraft_theme::panel_surface_readable(egui::Color32::WHITE, &tokens), "invisible muted ink cannot satisfy contrast");
 }
 
 #[test]
@@ -153,10 +155,10 @@ fn panel_contrast_encloses_actual_premultiplied_gpu_blends() {
     let premultiplied = Color32::from_rgba_premultiplied(32, 32, 32, 128);
     let ground = Color32::from_gray(1);
     assert_eq!(physical(premultiplied, ground, false, 0.0), Color32::from_gray(32));
-    assert_eq!(crate::theme::composite(premultiplied, ground), Color32::from_gray(33), "round-trip reconstruction is a different blend");
+    assert_eq!(solidcraft_theme::composite(premultiplied, ground), Color32::from_gray(33), "round-trip reconstruction is a different blend");
     for background in [0, 1, 64, 117, 192, 254, 255] {
         let ground = Color32::from_gray(background);
-        let (low, high) = crate::theme::panel_composite_bounds(premultiplied, ground);
+        let (low, high) = solidcraft_theme::panel_composite_bounds(premultiplied, ground);
         for (linear, dither) in [(false, -0.475), (false, 0.0), (false, 0.475), (true, 0.0)] {
             let actual = physical(premultiplied, ground, linear, dither);
             assert!(low.r() <= actual.r() && actual.r() <= high.r(), "actual stored-byte blend lies inside conservative bounds");
@@ -166,7 +168,7 @@ fn panel_contrast_encloses_actual_premultiplied_gpu_blends() {
     for dark in [false, true] {
         let mut tokens = surface_test_palette(dark);
         tokens.form_dim = if dark { Color32::from_rgba_unmultiplied(255, 255, 255, 240) } else { Color32::from_rgba_unmultiplied(0, 0, 0, 240) };
-        let _scope = crate::theme::scoped_panel_tokens(tokens);
+        let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
         let style = HostSurfaceStyle::capture(&ctx, false, Some(0.0), None);
         let appearance = style.appearance(PanelSurface::Translucent, false);
         assert!(matches!(appearance.contrast, ContrastOutcome::Readable { .. }));
@@ -176,7 +178,7 @@ fn panel_contrast_encloses_actual_premultiplied_gpu_blends() {
                 for ink in [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label] {
                     let text = physical(ink, background, linear, 0.0);
                     assert!(
-                        crate::theme::contrast_ratio(text, background) >= 4.5,
+                        solidcraft_theme::contrast_ratio(text, background) >= 4.5,
                         "independent framebuffer blend preserves both primary and muted text"
                     );
                 }
@@ -190,17 +192,17 @@ fn panel_surface_cache_tracks_dark_mode_even_with_identical_authored_tokens() {
     struct RestoreDark(bool);
     impl Drop for RestoreDark {
         fn drop(&mut self) {
-            crate::theme::set_dark(self.0);
+            solidcraft_theme::set_dark(self.0);
         }
     }
-    let _restore = RestoreDark(crate::theme::is_dark());
+    let _restore = RestoreDark(solidcraft_theme::is_dark());
     let ctx = egui::Context::default();
     let mut tokens = surface_test_palette(false);
     tokens.form_dim = tokens.panel;
-    let _scope = crate::theme::scoped_panel_tokens(tokens);
-    crate::theme::set_dark(false);
+    let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
+    solidcraft_theme::set_dark(false);
     let light = HostSurfaceStyle::capture(&ctx, false, Some(0.5), None);
-    crate::theme::set_dark(true);
+    solidcraft_theme::set_dark(true);
     let dark = HostSurfaceStyle::capture(&ctx, false, Some(0.5), Some(&light));
     let light_appearance = light.appearance(PanelSurface::Translucent, false);
     let dark_appearance = dark.appearance(PanelSurface::Translucent, false);
@@ -214,7 +216,7 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
     let mut tokens = surface_test_palette(false);
     tokens.form_dim = tokens.panel;
     tokens.space_4 = 7.0;
-    let _scope = crate::theme::scoped_panel_tokens(tokens);
+    let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
     for override_alpha in [Some(0.5), Some(f32::NAN), Some(f32::INFINITY), Some(-0.1), Some(1.1)] {
         let style = HostSurfaceStyle::capture(&ctx, false, override_alpha, None);
         let appearance = style.appearance(PanelSurface::Translucent, false);
@@ -225,7 +227,7 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
         };
         assert_eq!(appearance.contrast, ContrastOutcome::RetainReadableFallback { reason: expected });
         assert_eq!(appearance.fill.a(), 255);
-        assert!(crate::theme::panel_surface_readable(appearance.fill, style.palette(appearance)));
+        assert!(solidcraft_theme::panel_surface_readable(appearance.fill, style.palette(appearance)));
         assert_eq!(style.palette(appearance).space_4, tokens.space_4, "fallback does not change layout metrics");
         let cached = HostSurfaceStyle::capture(&ctx, false, override_alpha, Some(&style));
         assert_eq!(cached, style, "even an invalid raw NaN override has a stable bitwise cache key");
@@ -236,7 +238,7 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
 fn panel_surface_capture_matches_shared_frames_and_respects_accessibility() {
     let ctx = egui::Context::default();
     let tokens = surface_test_palette(false);
-    let _scope = crate::theme::scoped_panel_tokens(tokens);
+    let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
     let style = HostSurfaceStyle::capture(&ctx, false, None, None);
     for floating in [false, true] {
         let requested = crate::ui_kit::panel_host_frame(&ctx, floating).fill;
@@ -248,36 +250,36 @@ fn panel_surface_capture_matches_shared_frames_and_respects_accessibility() {
     for floating in [false, true] {
         let appearance = forced.appearance(PanelSurface::Translucent, floating);
         assert_eq!(appearance.fill.a(), 255);
-        assert!(crate::theme::panel_surface_readable(appearance.fill, forced.palette(appearance)));
+        assert!(solidcraft_theme::panel_surface_readable(appearance.fill, forced.palette(appearance)));
     }
     let second_context = egui::Context::default();
     assert_eq!(HostSurfaceStyle::capture(&second_context, false, None, Some(&style)), style);
     let mut changed = tokens;
     changed.text_dim = egui::Color32::from_gray(20);
-    let _changed = crate::theme::scoped_panel_tokens(changed);
+    let _changed = solidcraft_theme::scoped_panel_tokens(changed);
     assert_ne!(HostSurfaceStyle::capture(&ctx, false, None, Some(&style)), style);
 }
 
 #[test]
 fn panel_paint_palette_scope_restores_nested_tokens_without_changing_base_theme() {
-    let before = crate::theme::Tokens::get();
-    let base = crate::theme::Tokens::base();
+    let before = solidcraft_theme::Tokens::get();
+    let base = solidcraft_theme::Tokens::base();
     let mut outer = before;
     outer.text = outer.file_primary_ink;
     {
-        let _outer = crate::theme::scoped_panel_tokens(outer);
-        assert_eq!(crate::theme::Tokens::get(), outer);
-        assert_eq!(crate::theme::Tokens::get_in(crate::theme::ColorVision::Off), outer);
-        assert_eq!(crate::theme::Tokens::base(), base);
+        let _outer = solidcraft_theme::scoped_panel_tokens(outer);
+        assert_eq!(solidcraft_theme::Tokens::get(), outer);
+        assert_eq!(solidcraft_theme::Tokens::get_in(solidcraft_theme::ColorVision::Off), outer);
+        assert_eq!(solidcraft_theme::Tokens::base(), base);
         {
             let inner = surface_test_palette(false);
-            let _inner = crate::theme::scoped_panel_tokens(inner);
-            assert_eq!(crate::theme::Tokens::get(), inner);
+            let _inner = solidcraft_theme::scoped_panel_tokens(inner);
+            assert_eq!(solidcraft_theme::Tokens::get(), inner);
         }
-        assert_eq!(crate::theme::Tokens::get(), outer);
+        assert_eq!(solidcraft_theme::Tokens::get(), outer);
     }
-    assert_eq!(crate::theme::Tokens::get(), before);
-    assert_eq!(crate::theme::Tokens::base(), base);
+    assert_eq!(solidcraft_theme::Tokens::get(), before);
+    assert_eq!(solidcraft_theme::Tokens::base(), base);
 }
 
 fn prepare_preference_fixture(app: &mut crate::SolveApp) {
@@ -2616,7 +2618,7 @@ impl RawPanelHost {
             // foreground container. Warmed frames establish real egui ownership.
             if let Some(bounds) = self.foreign_cover {
                 let container = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Window);
-                let frame = container.frame(ui.ctx(), crate::theme::Tokens::get().dialog_body, crate::frame::Side::Left).inner_margin(0);
+                let frame = container.frame(ui.ctx(), solidcraft_theme::Tokens::get().dialog_body, crate::frame::Side::Left).inner_margin(0);
                 container
                     .area(egui::Id::unique("unrelated_test_window"))
                     .order(self.foreign_order)
@@ -2674,7 +2676,7 @@ impl RawPanelHost {
             }
             let modal = self.late_modal.then(|| {
                 let container = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Window);
-                let frame = container.frame(ui.ctx(), crate::theme::Tokens::get().dialog_body, crate::frame::Side::Left);
+                let frame = container.frame(ui.ctx(), solidcraft_theme::Tokens::get().dialog_body, crate::frame::Side::Left);
                 container.modal(egui::Id::unique("unrelated_test_modal")).frame(frame).show(ui.ctx(), |ui| {
                     ui.set_min_size(egui::vec2(200.0, 80.0));
                     ui.label("Independent modal content");
@@ -3308,7 +3310,7 @@ fn raw_host_wider_perimeters_win_over_cards_tabs_and_clear_below_without_fallbac
                         assert!(output_paints_rect(
                             &output,
                             preview.bounds,
-                            Some(crate::theme::Tokens::get().form_primary.gamma_multiply(0.12)),
+                            Some(solidcraft_theme::Tokens::get().form_primary.gamma_multiply(0.12)),
                             None
                         ));
                         let shown = preview.projected.unwrap();
@@ -3409,7 +3411,12 @@ fn raw_host_perimeter_anchors_survive_source_detach_and_commit_the_exact_preview
                     );
                     assert!(preview.rejection.is_none(), "{preview:?}");
                     assert_eq!(preview.targets.len(), 1);
-                    assert!(output_paints_rect(&output, preview.bounds, Some(crate::theme::Tokens::get().form_primary.gamma_multiply(0.12)), None));
+                    assert!(output_paints_rect(
+                        &output,
+                        preview.bounds,
+                        Some(solidcraft_theme::Tokens::get().form_primary.gamma_multiply(0.12)),
+                        None
+                    ));
                     let shown = preview.projected.unwrap();
                     assert_eq!(raw.content.runtime.layout().inspect(), before);
                     assert_eq!(raw.content.native.commits, commits);
@@ -4467,7 +4474,7 @@ fn raw_below_short_card_previews_and_commits_halfway_through_clear_space_before_
 #[test]
 fn raw_drag_title_tracks_only_the_source_text_without_changing_host_state_or_footprints() {
     fn feedback(output: &egui::FullOutput, title: &str, source: egui::Rect, ink: egui::Color32, faded: bool, badge: bool) {
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         let (mut originals, mut badges, mut others) = (0, 0, 0);
         for clipped in &output.shapes {
             crate::test_support::each_shape(&clipped.shape, &mut |shape| {
@@ -4527,7 +4534,7 @@ fn raw_drag_title_tracks_only_the_source_text_without_changing_host_state_or_foo
             let source = egui_rect(raw.host.frame().unwrap().controls.iter().find(|control| control.target == target).unwrap().bounds);
             let controls = raw.host.frame().unwrap().controls.iter().map(|control| (control.id, control.bounds)).collect::<Vec<_>>();
             let title = raw.content.runtime.instance_presentation(&id("editor")).unwrap().title;
-            let ink = crate::theme::Tokens::get().form_primary; // Editor declares attention.
+            let ink = solidcraft_theme::Tokens::get().form_primary; // Editor declares attention.
             let start = raw.at(target);
             raw.pointer(start, true, false);
             let below = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(5.99, 0.0))], false);
@@ -4755,9 +4762,9 @@ fn raw_host_inactive_tab_widget_drag_obeys_threshold_and_moves_only_its_retained
         assert!(preview.rejection.is_none());
         assert_eq!(preview.destination, Some(Destination::JoinTab { section: section("destination"), index: 2 }));
         let projected = preview.projected.clone().unwrap();
-        assert!(output_paints_rect(&output, preview.bounds, Some(crate::theme::Tokens::get().form_primary.gamma_multiply(0.12)), None));
+        assert!(output_paints_rect(&output, preview.bounds, Some(solidcraft_theme::Tokens::get().form_primary.gamma_multiply(0.12)), None));
         assert!(
-            output_paints_rect(&output, preview.tab_marker.unwrap(), Some(crate::theme::Tokens::get().form_primary), None),
+            output_paints_rect(&output, preview.tab_marker.unwrap(), Some(solidcraft_theme::Tokens::get().form_primary), None),
             "paint the actual inserted-tab edge, not a nominal body highlight"
         );
         assert_eq!(raw.content.runtime.layout().inspect(), before, "preview cannot activate the tab or change layout");
@@ -7840,7 +7847,7 @@ fn raw_split_preview_paints_the_exact_landing_and_changed_neighbours_before_one_
             let preview = moving.preview.unwrap();
             assert!(preview.rejection.is_none());
             let projected = preview.projected.unwrap();
-            assert!(output_paints_rect(&output, preview.bounds, Some(crate::theme::Tokens::get().form_primary.gamma_multiply(0.12)), None));
+            assert!(output_paints_rect(&output, preview.bounds, Some(solidcraft_theme::Tokens::get().form_primary.gamma_multiply(0.12)), None));
             let changed = projected
                 .sections
                 .iter()
@@ -7850,7 +7857,7 @@ fn raw_split_preview_paints_the_exact_landing_and_changed_neighbours_before_one_
                 .collect::<Vec<_>>();
             assert!(!changed.is_empty());
             for card in changed {
-                assert!(output_paints_rect(&output, card.outer, None, Some(crate::theme::Tokens::get().form_primary.gamma_multiply(0.7))));
+                assert!(output_paints_rect(&output, card.outer, None, Some(solidcraft_theme::Tokens::get().form_primary.gamma_multiply(0.7))));
             }
             assert_eq!(raw.content.runtime.layout().inspect(), before);
             assert_eq!(raw.host.frame().unwrap().layout.usable, initial.usable, "landing paint never commits the candidate usable region");
@@ -9436,7 +9443,7 @@ impl PanelController for ReviewController {
                     crate::ui_kit::bounded_cell_editor(ui, editor_id, &mut self.draft, "Review editable value", false, 4096)
                 };
                 if self.key.instance.0 == "wrapping-editor" {
-                    let tokens = crate::theme::Tokens::get();
+                    let tokens = solidcraft_theme::Tokens::get();
                     let width = (response.rect.width() - 2.0 * tokens.form_inset).max(1.0);
                     let galley =
                         ui.fonts_mut(|fonts| fonts.layout(self.draft.clone(), egui::FontId::monospace(tokens.font_label), tokens.form_ink, width));
@@ -12731,7 +12738,7 @@ fn shared_menu_keyboard_entry_end_and_escape_restore_actual_opener() {
         scroll_real_host_popup_to_end(&mut raw);
         assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(first.id));
         let scrolled = raw.focused_response.as_ref().unwrap().clone();
-        let inner = egui_rect(raw.host.frame().unwrap().menu_bounds.unwrap()).shrink(crate::theme::Tokens::get().space_6);
+        let inner = egui_rect(raw.host.frame().unwrap().menu_bounds.unwrap()).shrink(solidcraft_theme::Tokens::get().space_6);
         assert!(scrolled.rect.bottom() < inner.top(), "manual scrolling can leave the focused first item outside the visible menu");
         raw.frame(Vec::new(), false);
         assert_eq!(raw.focused_response.as_ref().unwrap().rect, scrolled.rect, "idle repaint must not pull manual scroll back to the focused row");
@@ -12747,7 +12754,7 @@ fn shared_menu_keyboard_entry_end_and_escape_restore_actual_opener() {
         let response = raw.focused_response.as_ref().unwrap();
         assert_eq!(response.id, focused);
         let menu = egui_rect(raw.host.frame().unwrap().menu_bounds.unwrap());
-        let inner = menu.shrink(crate::theme::Tokens::get().space_6);
+        let inner = menu.shrink(solidcraft_theme::Tokens::get().space_6);
         assert!(inner.contains_rect(response.rect), "the final enabled action scrolls fully into the tiny menu's visible inner rectangle");
         assert!(response.interact_rect.is_positive());
         assert_eq!(response.interact_rect, response.rect, "the focused row must be fully interactable too");

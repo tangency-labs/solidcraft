@@ -1,7 +1,7 @@
 //! Shared theme browser vocabulary: toggle segments, slots, marked cards and scroll viewport.
 use super::*;
-use crate::theme::Tokens;
 use egui::{Align2, Color32, FontId, Painter, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum ThemeGlyph {

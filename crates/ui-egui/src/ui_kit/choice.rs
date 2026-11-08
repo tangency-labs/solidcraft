@@ -5,10 +5,10 @@ use super::{
     metrics::*,
     text::paint_text,
 };
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use egui::{Ui, vec2};
+use solidcraft_theme::Tokens;
 
 /// Text segments retain mixed states and optional compact clipping instead of dropdown fallback.
 #[derive(Default)]
@@ -59,7 +59,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         intrinsic,
         proportional,
     } = config;
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     let t = Tokens::get();
     let catalog = super::layout::in_catalog(ui);
     let font_size = if small || catalog { t.font_small } else { t.font_label };
@@ -235,7 +235,7 @@ pub(crate) struct IconSegment {
 pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[IconSegment], states: &[bool]) -> bool {
     let t = Tokens::get();
     let catalog = super::layout::in_catalog(ui);
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     let (rect, _) =
         ui.allocate_exact_size(vec2(dimension(ui.available_width()), if catalog { t.space_24 } else { row_height() }), egui::Sense::hover());
     if !catalog {
@@ -462,7 +462,7 @@ pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) ->
         return response;
     }
     if super::layout::in_catalog(ui) {
-        let accent = crate::theme::TabAccent::current(ui.ctx());
+        let accent = solidcraft_theme::TabAccent::current(ui.ctx());
         let width = ui.painter().layout_no_wrap(text.to_string(), crate::fonts::semibold(t.font_small), t.form_ink).size().x + t.space_16;
         let (rect, response) = ui.allocate_exact_size(vec2(width, t.space_16 + t.space_4), egui::Sense::click());
         ui.painter().rect_filled(rect, t.radius_xl, if selected { accent.soft } else { t.control_fill });
@@ -524,7 +524,7 @@ pub(crate) fn thumbnail_choice(ui: &mut Ui, key: &str, text: &str, state: Thumbn
         + t.space_8
         + t.space_14;
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), egui::Sense::click());
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     let ink = if state.selected { accent.ink } else { t.form_ink };
     ui.painter().rect(
         rect,
@@ -609,7 +609,7 @@ pub(crate) fn color_swatch<T: Send + Sync + 'static>(
     tip: &str,
     payload: T,
 ) -> egui::Response {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let response = ui
         .dnd_drag_source(id, payload, |ui| {
             let side = t.control_height + t.space_6;
@@ -683,7 +683,7 @@ pub(crate) fn popup_list(
     options: &[PopupOption<'_>],
     hint: &str,
 ) -> Option<usize> {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let mut chosen = None;
     let mut rows = Vec::with_capacity(options.len());
     // Wide enough for the longest suggestion; still capped so a hostile name cannot fill the screen (#8533).
