@@ -457,6 +457,9 @@ A reviewer checks each of these on a change that touches a definition, a net or 
    proof: an identity for ε = 0, an enclosure otherwise. No net is stored with an estimated bound.
 2. **S answers final questions.** Intersection points, projections, the model check and continuity
    grading read S, or B only inside a `NetScope` that asks for at least ε.
+   Until the volume enclosure widens a certified face by its ε, the sign of a body's volume (the
+   solid test and the local operation's gate) reads such a face on its net B, so it decides on the
+   body as stored.
 3. **A refusal names the size that fits.** A construction that cannot be certified returns a typed
    error with the cause and, where one exists, the largest size that builds (`FitSize`,
    `ExtendRefusal`'s distance), computed from the cause's geometry, never by building again.
