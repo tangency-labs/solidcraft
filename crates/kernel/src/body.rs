@@ -1096,7 +1096,12 @@ impl Body {
     /// makes a kept timeline snapshot expensive, so it dominates the estimate.
     pub fn retained_bytes(&self) -> usize {
         if let Some(m) = &self.mesh {
-            return m.positions.len() * 24 + m.triangles.len() * 12;
+            return m
+                .positions
+                .len()
+                .saturating_mul(24)
+                .saturating_add(m.triangles.len().saturating_mul(12))
+                .saturating_add(m.corner_normals.len().saturating_mul(72));
         }
         let uses: usize = self.record.faces.iter().flat_map(|f| &f.loops).map(|l| if let Loop::Edges { edges } = l { edges.len() } else { 1 }).sum();
         self.record.faces.len() * 2048 + uses * (512 + 96)

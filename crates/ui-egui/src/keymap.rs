@@ -17,7 +17,6 @@ pub(crate) const DRAG_ZOOM: &str = "view.tool.zoom";
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] = &[
     "Escape",
-    "S",
     "V",
     "F2",
     "F6",
@@ -616,7 +615,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     // A Preferences search lists the matching shortcuts too, and one recorded from there takes
     // the key like one on this page (#10043). Only a search field that has the keyboard keeps
     // its keys: going back to it to type stops the recording.
-    if ctx.memory(|m| m.has_focus(egui::Id::unique("prefs_search"))) && app.keymap.capturing.is_some() {
+    if ctx.memory(|m| m.has_focus(crate::prefs::search_id())) && app.keymap.capturing.is_some() {
         stop_capture(app);
     }
     // Keep a pending chord until it has settled and all keys are released. Modifier-only
@@ -733,7 +732,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::text(ui, app.tr(hint), ui_kit::Text::Hint("shortcut_capture_state"));
             }
         }
-        let q = if filtering { app.prefs_window.filter.trim().to_lowercase() } else { app.keymap.filter.to_lowercase() };
+        let q = if filtering { app.prefs_window.shell.filter.trim().to_lowercase() } else { app.keymap.filter.to_lowercase() };
         let commands: Vec<_> = command_specs()
             .into_iter()
             .filter_map(|c| {
@@ -1075,9 +1074,9 @@ pub fn stop_capture(app: &mut SolveApp) {
 /// or in a Preferences search, which shows the matching shortcuts on the page it started from
 /// (#10043).
 pub fn capturing(app: &SolveApp) -> bool {
-    app.prefs_window.open
+    app.prefs_window.shell.open
         && app.keymap.capturing.is_some()
-        && (app.prefs_window.section == crate::prefs::PAGE_SHORTCUTS || !app.prefs_window.filter.trim().is_empty())
+        && (app.prefs_window.shell.section == crate::prefs::PAGE_SHORTCUTS || !app.prefs_window.shell.filter.trim().is_empty())
 }
 
 #[cfg(test)]
@@ -1525,7 +1524,7 @@ mod tests {
         h.app.keymap.capturing = Some("solid.extrude".into());
         h.frames(1);
         h.step(&json!({"text": "z"})).expect("key while recording");
-        assert!(h.app.prefs_window.filter.is_empty(), "a shortcut being recorded keeps the key");
+        assert!(h.app.prefs_window.shell.filter.is_empty(), "a shortcut being recorded keeps the key");
     }
 
     /// A shortcut recorded from a Preferences search result takes the key, as on the Shortcuts
@@ -1549,7 +1548,7 @@ mod tests {
         h.step(&json!({"text": "p"})).unwrap();
         h.step(&json!({"key": "P", "pressed": false})).unwrap();
         h.frames(65);
-        assert_eq!(h.app.prefs_window.filter, "fix", "the key went to the search");
+        assert_eq!(h.app.prefs_window.shell.filter, "fix", "the key went to the search");
         assert!(h.app.dialog.is_none() && h.app.session.active_sketch.is_none(), "the key ran a command");
         assert!(h.app.keymap.capturing.is_none());
         let conflict = h.app.keymap.conflict.as_ref().map(|(id, key, ..)| (id.as_str(), key.as_str()));
@@ -1566,7 +1565,7 @@ mod tests {
         h.step(&json!({"text": "x"})).unwrap();
         h.frames(2);
         assert!(h.app.keymap.capturing.is_none(), "typing in the search stops the recording");
-        assert_eq!(h.app.prefs_window.filter, "fixx");
+        assert_eq!(h.app.prefs_window.shell.filter, "fixx");
     }
 
     #[test]
@@ -1580,7 +1579,7 @@ mod tests {
         assert!(h.app.session.active_sketch.is_none(), "C must not start a sketch while recording");
         h.call("ui.key", json!({"key": "Escape"}));
         h.frames(3);
-        assert!(h.app.prefs_window.open, "Escape should cancel the recorder, not close Preferences");
+        assert!(h.app.prefs_window.shell.open, "Escape should cancel the recorder, not close Preferences");
         assert!(h.app.keymap.capturing.is_none());
         assert_eq!(effective(&h.app, "solid.chamfer"), None);
     }
@@ -1610,7 +1609,7 @@ mod tests {
             assert!(h.app.keymap.capturing.is_some(), "{key} should still be pending");
             h.frames(65);
             assert_eq!(effective(&h.app, "sketch.mirror").as_deref(), Some(key));
-            assert!(h.app.prefs_window.open);
+            assert!(h.app.prefs_window.shell.open);
         }
     }
 
@@ -1884,6 +1883,43 @@ mod tests {
         h.frames(1);
         assert!(h.app.ui.palette_open && h.app.dialog.is_none(), "typing in a field never repeats");
     }
+
+    /// Command search is an ordinary command (#12190): S opens it out of the box, Preferences ›
+    /// Shortcuts can move it, and S is then free for another command.
+    #[test]
+    fn command_search_can_move_off_s_and_s_can_start_another_command() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(2);
+        assert_eq!(effective(&h.app, "ui.palette").as_deref(), Some("S"));
+        h.step(&json!({"key": "S"})).unwrap();
+        assert!(h.app.ui.palette_open, "S opens command search by default");
+        h.call("ui.palette", json!({"open": false}));
+        h.frames(2);
+        bind(&mut h.app, "ui.palette", "Shift+J", true).unwrap();
+        h.step(&json!({"key": "S"})).unwrap();
+        assert!(!h.app.ui.palette_open, "S no longer opens command search");
+        h.step(&json!({"key": "J", "shift": true})).unwrap();
+        assert!(h.app.ui.palette_open, "its new key does");
+        h.call("ui.palette", json!({"open": false}));
+        h.frames(2);
+        // The closed field shows the key command search has now, and no key once it has none.
+        let width = || crate::scenario::rect_of("ribbon:search").map(|r| r.width());
+        let shown = display_for(&h.app, "ui.palette");
+        assert_eq!(shown.as_deref(), Some("Shift+J"));
+        assert_eq!(width(), Some(crate::ui_kit::CommandSearch::closed_width(&h.ctx, shown.as_deref())));
+        assert!(width() > Some(crate::ui_kit::CommandSearch::closed_width(&h.ctx, Some("S"))), "not the old S");
+        bind(&mut h.app, "ui.palette", "", false).unwrap();
+        h.frames(2);
+        assert_eq!(width(), Some(crate::ui_kit::CommandSearch::closed_width(&h.ctx, None)));
+        bind(&mut h.app, "ui.palette", "Shift+J", true).unwrap();
+        h.frames(2);
+        bind(&mut h.app, "solid.box", "S", true).unwrap();
+        h.step(&json!({"key": "S"})).unwrap();
+        h.frames(1);
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.box"), "S starts the command given it");
+        assert!(!h.app.ui.palette_open);
+    }
 }
 
 #[cfg(test)]
@@ -1969,7 +2005,7 @@ mod card_tests {
         h.step(&json!({"key":"ShiftLeft","shift":true,"pressed":true})).unwrap();
         assert!(h.app.keymap.recorder.modifiers.shift, "the active recorder holds modifier state");
         h.step(&json!({"click":{"handle":"prefs:defaults"}})).unwrap();
-        assert!(h.app.prefs_window.open && h.app.keymap.capturing.is_none());
+        assert!(h.app.prefs_window.shell.open && h.app.keymap.capturing.is_none());
         assert!(h.app.keymap.recorder.key.is_none());
         assert_eq!(h.app.keymap.recorder.modifiers, egui::Modifiers::NONE);
         assert!(h.app.keymap.custom.is_empty());
@@ -2003,7 +2039,7 @@ mod card_tests {
         h.step(&json!({"click":{"handle":"keymap:capture:solid.extrude:7"}})).unwrap();
         assert_eq!(h.app.keymap.slot, 7);
         h.step(&json!({"key":"Escape"})).unwrap();
-        assert!(h.app.prefs_window.open && h.app.keymap.capturing.is_none());
+        assert!(h.app.prefs_window.shell.open && h.app.keymap.capturing.is_none());
         assert_eq!(keys(&h.app, "solid.extrude"), bindings);
     }
 
@@ -2044,9 +2080,9 @@ mod card_tests {
         }
         h.step(&json!({"click":{"handle":"keymap:capture:solid.extrude"}})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
-        assert!(h.app.prefs_window.open && h.app.keymap.capturing.is_none());
+        assert!(h.app.prefs_window.shell.open && h.app.keymap.capturing.is_none());
         h.step(&json!({"key":"Escape"})).unwrap();
-        assert!(!h.app.prefs_window.open);
+        assert!(!h.app.prefs_window.shell.open);
     }
 
     /// Export… writes the shortcuts file through `vfs`, like the other saves, so the web app hands

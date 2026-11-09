@@ -1132,6 +1132,29 @@ fn chamfer_wider_than_sloped_basin_rim_builds() {
 }
 
 #[test]
+fn mesh_corner_normals_survive_welding_reflection_and_nonuniform_scale() {
+    let positions = [Vec3::ZERO, Vec3::X, Vec3::Y];
+    let normals = [[Vec3::new(1., 0., 1.), Vec3::new(0., 1., 1.), Vec3::Z]];
+    let body = crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &normals).unwrap();
+    let matrix = [[-2., 0., 0., 0.], [0., 3., 0., 0.], [0., 0., 0.5, 0.], [7., 11., 13., 1.]];
+    let moved = crate::transform_matrix(&body, matrix).unwrap();
+    let mesh = moved.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+    let expected = [Vec3::new(-0.5, 0., 2.).normalized().unwrap(), Vec3::Z, Vec3::new(0., 1. / 3., 2.).normalized().unwrap()];
+    for (actual, expected) in mesh.normals.iter().zip(expected) {
+        assert!((*actual - expected).len() < 1e-12);
+    }
+    let tiny = crate::transform_matrix(&body, [[1e-6, 0., 0., 0.], [0., 1e-6, 0., 0.], [0., 0., 1e-6, 0.], [0., 0., 0., 1.]]).unwrap();
+    let tiny = tiny.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+    assert!((tiny.normals[0] - Vec3::new(1., 0., 1.).normalized().unwrap()).len() < 1e-12);
+    assert!((tiny.normals[0].len() - 1.).abs() < 1e-12, "normal magnitude must not depend on a small geometric scale");
+    let [a, b, c] = mesh.triangles[0].map(|i| mesh.positions[i as usize]);
+    assert!((b - a).cross(c - a).z > 0.);
+    assert_eq!(body.triangle_mesh().unwrap().1, &[[0, 1, 2]]);
+    assert!(crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &[[Vec3::ZERO; 3]]).is_err());
+    assert!(crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &[[Vec3::Z; 3]; 2]).is_err());
+}
+
+#[test]
 fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     // Unit cube as 12 triangles with repeated corners (welded on construction).
     let c = |i: u32| Vec3::new((i & 1) as f64 * 10.0, ((i >> 1) & 1) as f64 * 10.0, ((i >> 2) & 1) as f64 * 10.0);

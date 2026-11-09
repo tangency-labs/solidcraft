@@ -1397,7 +1397,8 @@ fn browser_collapsed_rail(app: &mut SolveApp, ui: &mut egui::Ui) {
     if response.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_expand")).clicked() {
         app.preferences.timeline_left_browser_collapsed = false;
     }
-    let galley = ui.painter().layout_no_wrap(solidcraft_ui_text::tr("ui.browser_title").to_owned(), crate::fonts::semibold(t.font_body), t.text);
+    let galley =
+        ui.painter().layout_no_wrap(solidcraft_ui_text::tr("ui.browser_title").to_owned(), crate::ui_kit::type_face::semibold(t.font_body), t.text);
     let title = Rect::from_min_max(rect.min + vec2(0.0, title_top), rect.max);
     ui.painter().add(
         egui::epaint::TextShape::new(title.center() - galley.size() / 2.0, galley, t.text)
@@ -1487,7 +1488,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let title = solidcraft_ui_text::tr("ui.browser_title").to_string();
     let kind = if collapsible { egui::Role::Button } else { egui::Role::Label };
     response.widget_info(|| egui::WidgetInfo::labeled(kind, true, &title));
-    let galley = ui.painter().layout_no_wrap(title, crate::fonts::semibold(t.font_heading), t.text);
+    let galley = ui.painter().layout_no_wrap(title, crate::ui_kit::type_face::semibold(t.font_heading), t.text);
     ui.painter().galley(pos2(rect.left() + t.space_6, rect.center().y - galley.size().y / 2.0), galley, t.text);
     let mut right = rect.right() - t.space_6;
     if collapsible {
@@ -2106,10 +2107,10 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         format_args!("{:.*}", usize::from(app.preferences.angle_decimals), 0.0)
     );
     if draw_row(ui, ui.scope_id().with("precision"), &Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() }).clicked {
-        if app.prefs_window.open {
-            crate::prefs::close(app, true);
+        if app.prefs_window.shell.open {
+            crate::prefs_window::close(app, true);
         } else {
-            app.prefs_window.open = true;
+            app.prefs_window.shell.open = true;
         }
     }
     let params = format!("Parameters ({})", app.session.doc.params.len());

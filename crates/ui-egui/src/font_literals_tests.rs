@@ -1,4 +1,4 @@
-//! Typography belongs to Tokens, and named font families belong to fonts.rs.
+//! Typography belongs to Tokens, and named font families belong to the kit's type API (ui_kit/type_face.rs).
 //! Like the colour guard, exceptions have a per-file count and an explicit reason.
 
 use std::path::Path;
@@ -84,8 +84,8 @@ impl<'ast> Visit<'ast> for Guard<'_> {
             if matches!(last, "ribbon_text" | "face_text") && call.args.iter().nth(3).is_some_and(has_number) {
                 self.found.push(format!("{last}(numeric size)"));
             }
-            if self.file != "fonts.rs" && names.iter().any(|s| s == "FontFamily") && last == "Name" {
-                self.found.push("FontFamily::Name outside fonts.rs".into());
+            if self.file != "ui_kit/type_face.rs" && names.iter().any(|s| s == "FontFamily") && last == "Name" {
+                self.found.push("FontFamily::Name outside ui_kit/type_face.rs".into());
             }
             if self.file.starts_with("ui_kit/")
                 && (matches!(last, "vec2" | "pos2") || (names.iter().any(|s| s == "Margin") && matches!(last, "same" | "symmetric")))
@@ -171,7 +171,7 @@ fn guard_catches_multiline_sizes_and_continues_after_test_modules() {
                 12.0
             );
             FontId::proportional(14.0 * zoom);
-            crate::fonts::semibold(13.0);
+            crate::ui_kit::type_face::semibold(13.0);
             FontFamily::Name("private-family".into());
             ui.spacing_mut().item_spacing.x = 5.0;
             ui.add_space(7.0);

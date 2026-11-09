@@ -2487,6 +2487,26 @@ fn compact_execute_keeps_changes_ids_and_default_replies() {
     }
 }
 
+/// #9180: a compact sketch reply counts the points of a spline's poles instead of listing them,
+/// and keeps the point ids of curves with only their ends.
+#[test]
+fn compact_sketch_replies_count_spline_poles() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY"}}));
+    let points = json!([[0, 0], [10, 5], [20, 0], [30, 5], [40, 0], [50, 5]]);
+    let full = tool(&mut s, "execute", json!({"command": "sketch.spline.fit_point", "params": {"points": points}}));
+    let listed = full["created"]["points"].as_array().unwrap().len();
+    let curves = full["created"]["curves"].as_array().unwrap().len();
+    assert!(listed > 2 * curves, "{full}");
+    let compact = tool(&mut s, "execute", json!({"command": "sketch.spline.fit_point", "params": {"points": points}, "verbose": false}));
+    assert_eq!(compact["created"]["point_count"], json!(listed), "{compact}");
+    assert!(compact["created"].get("points").is_none(), "{compact}");
+    assert_eq!(compact["created"]["curves"].as_array().map(Vec::len), Some(curves));
+    let rectangle =
+        tool(&mut s, "execute", json!({"command": "sketch.rectangle.two_point", "params": {"p0": [0, 20], "p1": [10, 30]}, "verbose": false}));
+    assert_eq!(rectangle["created"]["points"].as_array().map(Vec::len), Some(4), "{rectangle}");
+}
+
 /// A connected app sees exactly one engine call; no inventory inspection is needed.
 #[test]
 fn compact_execute_uses_one_backend_call_and_keeps_removed_bodies() {
