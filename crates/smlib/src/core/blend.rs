@@ -869,10 +869,15 @@ fn overflow_first(
         }
     }
     if lead.is_empty() || rest.is_empty() {
-        return Ok(match blend_edges(k, &mut fresh, &again, each, section, None, &[], None)? {
-            Ok(()) => untagged(fresh),
-            Err(e) => Err(failed(e)),
-        });
+        match blend_edges(k, &mut fresh, &again, each, section, None, &[], None)? {
+            Ok(()) => {}
+            Err(e) => return Ok(Err(failed(e))),
+        }
+        match validate_and_update_tolerances(k, &mut fresh, false, None, CheckLevel::Level2 as u8) {
+            Ok(_) => {}
+            Err(e) => return Ok(Err(Error::Internal(e.to_string()))),
+        }
+        return Ok(untagged(fresh));
     }
     if let Err(e) = blend_edges(k, &mut fresh, &lead, &lead_sizes, section, None, &[], None)? {
         return Ok(Err(failed(e)));
@@ -903,6 +908,10 @@ fn overflow_first(
         && let Err(e) = blend_edges(k, &mut fresh, &rest_edges, &rest_sizes, section, None, &[], None)?
     {
         return Ok(Err(failed(e)));
+    }
+    match validate_and_update_tolerances(k, &mut fresh, false, None, CheckLevel::Level2 as u8) {
+        Ok(_) => {}
+        Err(e) => return Ok(Err(Error::Internal(e.to_string()))),
     }
     Ok(untagged(fresh))
 }
@@ -1088,6 +1097,7 @@ fn blend_call(
                 Ok(_) => {}
                 Err(e) => return Ok(Err(Error::Internal(e.to_string()))),
             }
+            eprintln!("DEBUG blend_call: after tolerance grow, before finish");
             return finish(w, solid_in);
         }
         // Each corner opened: its patch removed, the edges round its hole in the result's
