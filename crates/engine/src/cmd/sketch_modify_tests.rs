@@ -5813,3 +5813,22 @@ fn fillet_refuses_meeting_ends_placed_by_different_expressions() {
         ids(&run(&mut s, "sketch.line", json!({"points": [["W", "0 mm"], ["W", "30 mm"]], "connect": false, "infer": false}))["curves"])[0].clone();
     s.execute("sketch.fillet", &json!({"a": a, "b": b, "radius": 5})).expect("one placement on both ends");
 }
+
+/// #11523: an end placed by expressions and one linked to a model vertex, at one place, can't
+/// become one corner point: the expressions would overwrite where the vertex moves it. Refused.
+#[test]
+fn fillet_refuses_meeting_ends_placed_by_an_expression_and_a_link() {
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+    let a =
+        ids(&run(&mut s, "sketch.line", json!({"points": [["0 mm", "0 mm"], ["W", "0 mm"]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "sketch.line", json!({"points": [[40, 0], [40, 30]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let id = s.active_sketch.unwrap();
+    let start = sketch(&s).resolve_point(&format!("{b}.start")).expect("b's start");
+    s.doc_mut().sketch_mut(id).unwrap().points[start].link = Some("model-vertex".into());
+    let err = s
+        .execute("sketch.fillet", &json!({"a": a, "b": b, "radius": 5}))
+        .expect_err("an expression and a link can't both hold one corner")
+        .to_string();
+    assert!(err.contains("one corner point can't follow both"), "{err}");
+}

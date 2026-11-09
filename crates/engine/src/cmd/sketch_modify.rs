@@ -1954,7 +1954,16 @@ fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
     fn clash<T: PartialEq>(keep_is_origin: bool, k: &Option<T>, g: &Option<T>) -> bool {
         g.is_some() && (keep_is_origin || k.is_some()) && k != g
     }
-    if clash(keep == 0, &keep_placed.0, &gone_placed.0) || clash(keep == 0, &keep_placed.1, &gone_placed.1) {
+    // Nor may one end bring an expression placement and the other a link: the expressions would
+    // overwrite where the linked model vertex moves the corner to.
+    let kinds = |(e, l): &(Option<Box<solidcraft_sketch::PointExprs>>, Option<String>)| (e.is_some(), l.is_some());
+    let mixed = |a: (bool, bool), b: (bool, bool)| a == (true, false) && b == (false, true);
+    let (keep_kinds, gone_kinds) = (kinds(&keep_placed), kinds(&gone_placed));
+    if clash(keep == 0, &keep_placed.0, &gone_placed.0)
+        || clash(keep == 0, &keep_placed.1, &gone_placed.1)
+        || mixed(keep_kinds, gone_kinds)
+        || mixed(gone_kinds, keep_kinds)
+    {
         return Err(bad(
             cmd,
             "the lines' ends at the corner are each placed by their own expressions or reference, and one corner point can't follow both",
