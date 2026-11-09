@@ -8,6 +8,7 @@ mod det_math;
 pub mod dexel;
 pub mod gcode;
 pub mod mesh;
+pub mod round;
 pub mod sim;
 pub mod sweep;
 pub mod toolpath;

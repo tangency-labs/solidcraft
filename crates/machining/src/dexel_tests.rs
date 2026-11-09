@@ -301,8 +301,15 @@ fn a_jump_after_home_is_not_cut_and_the_next_move_starts_from_it() {
 fn unsupported_shapes_are_reported_once_not_panicked() {
     let text = "T0 M6\nG0 X10 Y10 Z5\nG1 Z-4\nG1 X20\nG1 X30";
     let mut program = parse(text, &CodeTable::default());
-    program.tools =
-        vec![Tool { id: 0, shape: Shape::Ball, diameter: 5.0, flute_length: 20.0, shank: Vec::new(), holder: Vec::new(), stickout: 30.0 }];
+    program.tools = vec![Tool {
+        id: 0,
+        shape: Shape::Profile(vec![[0.0, 0.0], [5.0, 2.5]]),
+        diameter: 5.0,
+        flute_length: 20.0,
+        shank: Vec::new(),
+        holder: Vec::new(),
+        stickout: 30.0,
+    }];
     let mut s = slot_stock(0.5);
     let diags = simulate(&program, &mut s).expect("simulate");
     assert_eq!(diags.len(), 1, "{diags:?}");

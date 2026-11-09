@@ -52,7 +52,7 @@ impl FlatTool {
 }
 
 /// `|d . axis|` within this of 1 is parallel, within it of 0 is perpendicular.
-const AXIS_EPS: f64 = 1e-12;
+pub(crate) const AXIS_EPS: f64 = 1e-12;
 /// Brent evaluation budget per minimisation.
 const BRENT_EVALS: usize = 25;
 /// Penalty for "no tool here" in the minimisations. Far outside any real coordinate.
@@ -60,14 +60,14 @@ const PENALTY: f64 = 1e15;
 /// Stands in for an unbounded parameter range; far outside any stock.
 const BIG: f64 = 1e12;
 
-fn perp(v: Vec3, u: Vec3) -> Vec3 {
+pub(crate) fn perp(v: Vec3, u: Vec3) -> Vec3 {
     v - u * v.dot(u)
 }
 
 /// The open interval of `t` where `|w + t v| < r - EPS_MM`. Lagrange form: the minimum squared
 /// distance is `|w x v|^2 / |v|^2`, so a ray exactly tangent to the circle has a non-positive
 /// discriminant and no interval, with no rounding in the decision.
-fn chord_open(w: Vec3, v: Vec3, r: f64) -> Option<(f64, f64)> {
+pub(crate) fn chord_open(w: Vec3, v: Vec3, r: f64) -> Option<(f64, f64)> {
     let vv = v.len2();
     if vv < 1e-24 {
         return (w.len() < r - EPS_MM).then_some((-BIG, BIG));
@@ -272,7 +272,7 @@ fn swept_box(base: Aabb3, tool: &FlatTool) -> Aabb3 {
 }
 
 /// Clips the removed interval to the ray's range and pushes it if any length is left.
-fn push_clipped(found: Option<(f64, f64)>, t_range: (f64, f64), out: &mut Vec<(f64, f64)>) {
+pub(crate) fn push_clipped(found: Option<(f64, f64)>, t_range: (f64, f64), out: &mut Vec<(f64, f64)>) {
     if let Some((a, b)) = found {
         let (lo, hi) = (a.max(t_range.0), b.min(t_range.1));
         if lo < hi {
@@ -476,6 +476,12 @@ impl ArcFixedAxis {
         let sweep = if ccw { base + extra } else { base - extra };
         let lift = n * (end - start).dot(n);
         Some(ArcFixedAxis { centre, e1, e2, theta0: 0.0, r, sweep, lift, tool, axis_normal: n.dot(tool.axis).abs() > 1.0 - AXIS_EPS, normal: n })
+    }
+
+    /// The same arc moved by `shift`, swept with `tool` instead. A round tool's shank follows its tip
+    /// path this way, raised by its corner radius.
+    pub fn moved(&self, shift: Vec3, tool: FlatTool) -> ArcFixedAxis {
+        ArcFixedAxis { centre: self.centre + shift, tool, ..*self }
     }
 
     /// The arc's length, mm, its helix length: a lift along the normal counts.

@@ -1,5 +1,5 @@
-//! Runs a program's moves through the tool sweeps into a stock. S1a: flat end mills on a 3-axis
-//! tool; rapids cut as well as feeds. Anything else is reported as a diagnostic and skipped. A move
+//! Runs a program's moves through the tool sweeps into a stock. Flat, ball and bull-nose end mills on a
+//! 3-axis tool; rapids cut as well as feeds. Anything else is reported as a diagnostic and skipped. A move
 //! is cut in steps (a line in pieces, an arc a quarter turn at a time), so a caller can stop between
 //! them and see the cut so far.
 
@@ -10,6 +10,7 @@ use solidcraft_geom::prelude::*;
 
 use crate::SimError;
 use crate::dexel::Stock;
+use crate::round::{RoundPath, RoundPiece, RoundTool};
 use crate::sweep::{ArcFixedAxis, FlatTool, LinearFixedAxis, MAX_ARC_TURNS};
 use crate::toolpath::{Diag, MoveKind, NO_TOOL, Program, Shape};
 
@@ -32,6 +33,8 @@ fn finite(p: &[f64; 3]) -> bool {
 enum Step {
     Line(LinearFixedAxis),
     Arc(ArcFixedAxis),
+    /// A piece cut with a ball or bull-nose tool; its rounded part is sampled when the piece is swept.
+    Round(RoundPiece),
 }
 
 /// A move being cut: its steps, and how many are done. The steps go into the stock as they are cut,
@@ -214,17 +217,28 @@ fn plan(program: &Program, index: usize) -> Result<Cut, Stop> {
     let Some(tool) = program.tools.iter().find(|t| t.id == m.tool) else {
         return Err(refuse("missing", Diag::error(m.source, 0, format!("tool {} is not defined", m.tool))));
     };
-    if tool.shape != Shape::Flat {
-        return Err(refuse("shape", Diag::error(m.source, 0, format!("tool {} shape is not simulated yet", m.tool))));
-    }
+    // The corner radius of the round tools: the radius for a ball, `rc` for a bull-nose.
+    let corner = match &tool.shape {
+        Shape::Flat => None,
+        Shape::Ball => Some(tool.diameter / 2.0),
+        Shape::Bull { rc } => Some(*rc),
+        _ => return Err(refuse("shape", Diag::error(m.source, 0, format!("tool {} shape is not simulated yet", m.tool)))),
+    };
     if m.axis != [0.0, 0.0, 1.0] {
         return Err(refuse("axis", Diag::error(m.source, 0, format!("tilted tool axis is not simulated yet (tool {})", m.tool))));
     }
     let Some(flat) = FlatTool::new(tool.diameter / 2.0, tool.flute_length, Vec3::Z) else {
         return Err(refuse("size", Diag::error(m.source, 0, format!("tool {} has a bad diameter or flute length", m.tool))));
     };
+    let round = match corner {
+        None => None,
+        Some(rc) => match RoundTool::new(tool.diameter / 2.0, rc, tool.flute_length) {
+            Ok(round) => Some(round),
+            Err(why) => return Err(refuse("corner", Diag::error(m.source, 0, format!("tool {}: {why}", m.tool)))),
+        },
+    };
     let steps = match &m.kind {
-        MoveKind::Rapid | MoveKind::Feed => line_steps(Vec3::from(start), Vec3::from(m.tip), flat),
+        MoveKind::Rapid | MoveKind::Feed => line_steps(Vec3::from(start), Vec3::from(m.tip), flat, round),
         MoveKind::Arc { centre, normal, ccw, turns } => {
             if *turns > MAX_ARC_TURNS {
                 let msg = format!("arc at line {} has more than {MAX_ARC_TURNS} turns; not simulated", m.source);
@@ -232,7 +246,7 @@ fn plan(program: &Program, index: usize) -> Result<Cut, Stop> {
             }
             let arc = ArcFixedAxis::new(Vec3::from(start), Vec3::from(m.tip), Vec3::from(*centre), Vec3::from(*normal), *ccw, *turns, flat);
             match arc {
-                Some(arc) => arc.pieces(STEP_SWEEP).into_iter().map(Step::Arc).collect(),
+                Some(arc) => arc.pieces(STEP_SWEEP).into_iter().map(|piece| arc_step(piece, round)).collect(),
                 None => return Err(refuse("arc", Diag::error(m.source, 0, format!("degenerate arc at line {} skipped", m.source)))),
             }
         }
@@ -249,16 +263,31 @@ pub fn step_count(program: &Program, index: usize) -> usize {
 
 /// A straight move cut in pieces of at most `LINE_STEP_MM` (and at most `MAX_LINE_STEPS` of them), in
 /// order. Their union is the move, so the stock is the same as for one piece.
-fn line_steps(from: Vec3, to: Vec3, tool: FlatTool) -> Vec<Step> {
+fn line_steps(from: Vec3, to: Vec3, flat: FlatTool, round: Option<RoundTool>) -> Vec<Step> {
     let n = (((to - from).len() / LINE_STEP_MM).ceil() as usize).clamp(1, MAX_LINE_STEPS);
     let at = |k: usize| if k >= n { to } else { from + (to - from) * (k as f64 / n as f64) };
-    (0..n).map(|k| Step::Line(LinearFixedAxis { from: at(k), to: at(k + 1), tool })).collect()
+    (0..n)
+        .map(|k| match round {
+            Some(tool) => Step::Round(RoundPiece { path: RoundPath::Line { from: at(k), to: at(k + 1) }, tool }),
+            None => Step::Line(LinearFixedAxis { from: at(k), to: at(k + 1), tool: flat }),
+        })
+        .collect()
+}
+
+/// One quarter-turn piece of an arc as a step: a flat sweep, or a round tool's piece.
+fn arc_step(piece: ArcFixedAxis, round: Option<RoundTool>) -> Step {
+    match round {
+        Some(tool) => Step::Round(RoundPiece { path: RoundPath::Arc(piece), tool }),
+        None => Step::Arc(piece),
+    }
 }
 
 fn apply_step(step: &Step, tag: u32, stock: &mut Stock) -> Result<(), SimError> {
     match step {
         Step::Line(sweep) => stock.apply(sweep, tag),
         Step::Arc(sweep) => stock.apply(sweep, tag),
+        // The rounded part is sampled at the stock's finest ray spacing (see `RoundSweep`).
+        Step::Round(piece) => stock.apply(&piece.sweep(stock.cell_size())?, tag),
     }
 }
 

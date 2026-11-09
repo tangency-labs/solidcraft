@@ -63,6 +63,7 @@ pub enum Interp {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Tool {
     pub id: u32,
+    /// The cutting shape. Flat, ball and bull-nose are simulated (see `round.rs`).
     pub shape: Shape,
     pub diameter: f64,
     pub flute_length: f64,
@@ -76,10 +77,21 @@ pub struct Tool {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Shape {
     Flat,
+    /// Corner radius equal to the tool radius.
     Ball,
-    Bull { rc: f64 },
-    Cone { tip_d: f64, angle: f64 },
-    Taper { a0: f64, r0: f64, angle: f64 },
+    /// Corner radius `rc`, above 0 and below the tool radius.
+    Bull {
+        rc: f64,
+    },
+    Cone {
+        tip_d: f64,
+        angle: f64,
+    },
+    Taper {
+        a0: f64,
+        r0: f64,
+        angle: f64,
+    },
     Profile(Vec<[f64; 2]>),
 }
 

@@ -437,6 +437,11 @@ impl Stock {
         self.grids.iter().flat_map(|g| g.tiles.iter()).map(|t| t.segs.len()).sum()
     }
 
+    /// The smallest ray spacing of the stock, mm: the pitch a round tool's sampled sweep is taken at.
+    pub fn cell_size(&self) -> f64 {
+        self.cell.iter().copied().fold(f64::INFINITY, f64::min)
+    }
+
     /// The box's minimum and maximum corners, in the stored frame.
     pub(crate) fn bounds(&self) -> ([f64; 3], [f64; 3]) {
         (self.min, self.max)
