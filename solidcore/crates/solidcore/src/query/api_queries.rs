@@ -1080,31 +1080,44 @@ pub fn edge_plane_crossings(
         ));
     }
     let edge = brep.edge(id)?;
-    let curve = edge
-        .curve
-        .as_ref()
+    // The edge's evaluation copy carries the edge's tolerance, which the solve reads
+    // (`SmTol::GetZoneTol3d` through the curve's edge); the record's own curve cannot reach it.
+    let curve = edge::evaluation_curve(brep, id)?
         .ok_or(SolidError::invalid_input(OP, "the edge has no curve"))?;
+    let curve = &curve;
     // An edge made without a tolerance is solved to the kernel's zero.
     let tol = edge.tolerance.max(EFF_ZERO);
+    // The ends come from the edge uses: a closed edge's two ends are one vertex after the
+    // glue that closes it (`SmEdge::GetVertices`).
+    let (first_vertex, last_vertex) = edge::start_end_vertices(brep, id)?;
     let ends = [
-        (edge.interval.min(), edge.vertices[0]),
-        (edge.interval.max(), edge.vertices[1]),
+        (edge.interval.min(), first_vertex),
+        (edge.interval.max(), last_vertex),
     ];
     let end = |parameter: f64| -> Result<CrossingEnd> {
         let at = curve.evaluate_point(k, parameter)?;
+        // The end nearest along the edge whose vertex holds the point: a closed edge's two
+        // ends are one vertex, and a stretch from one to the other keeps both.
+        let mut snapped: Option<(f64, VertexId)> = None;
         for (end_parameter, vertex) in ends {
-            if brep.vertex(vertex)?.point.distance(at) <= tol {
-                return Ok(CrossingEnd {
-                    parameter: end_parameter,
-                    point: curve.evaluate_point(k, end_parameter)?,
-                    vertex: Some(vertex),
-                });
+            let Some(vertex) = vertex else { continue };
+            let nearer = snapped
+                .is_none_or(|(p, _)| (end_parameter - parameter).abs() < (p - parameter).abs());
+            if nearer && brep.vertex(vertex)?.point.distance(at) <= tol {
+                snapped = Some((end_parameter, vertex));
             }
         }
-        Ok(CrossingEnd {
-            parameter,
-            point: at,
-            vertex: None,
+        Ok(match snapped {
+            Some((end_parameter, vertex)) => CrossingEnd {
+                parameter: end_parameter,
+                point: curve.evaluate_point(k, end_parameter)?,
+                vertex: Some(vertex),
+            },
+            None => CrossingEnd {
+                parameter,
+                point: at,
+                vertex: None,
+            },
         })
     };
     let plane = crate::surface::plane::p1::Plane::from_normal(point, normal);

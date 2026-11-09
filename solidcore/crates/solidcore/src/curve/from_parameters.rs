@@ -161,8 +161,7 @@ pub fn record_parameter(
 ) -> Result<f64> {
     match record {
         Record::Circle { .. } | Record::Ellipse { .. } => {
-            // not built yet: the polar table comes in the next commit
-            let _ = (k, made);
+            let t = made.curve.convert_t_from_nurbs_to_step(k, t)?;
             Ok(interval[0] + (t - degrees(turned(interval)[0])).to_radians())
         }
         _ => Ok(t),
@@ -174,9 +173,12 @@ pub fn record_parameter(
 /// on an end moved onto that end (a solve's rounding past it), outside `None`.
 #[must_use]
 pub fn on_interval(interval: [f64; 2], t: f64) -> Option<f64> {
-    // not built yet: the kernel's classification comes in the next commit
-    let _ = (ExtentPointType::Inside, EFF_ZERO);
-    (interval[0] <= t && t <= interval[1]).then_some(t)
+    match Extent1d::from_min_max(interval[0], interval[1]).classify_point(t, EFF_ZERO) {
+        ExtentPointType::Start | ExtentPointType::Both => Some(interval[0]),
+        ExtentPointType::End => Some(interval[1]),
+        ExtentPointType::Inside => Some(t),
+        ExtentPointType::Outside | ExtentPointType::Unknown => None,
+    }
 }
 
 /// A circle or ellipse edge on its NURBS form `form` (a spline or rational spline, the
