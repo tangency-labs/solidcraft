@@ -271,7 +271,7 @@ fn save_mesh_with_a_chosen_program_writes_the_file_where_asked_and_sends_it_ther
 
 /// Puts back what the tests of the send commands make up, even when one fails.
 #[cfg(unix)]
-struct MadeUp;
+pub(crate) struct MadeUp;
 
 #[cfg(unix)]
 impl Drop for MadeUp {

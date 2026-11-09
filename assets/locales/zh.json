@@ -2432,6 +2432,7 @@
   "parts.dimension.width": "宽度",
   "parts.family.bearing": "深沟球轴承（外形）",
   "parts.family.button_head_cap_screw": "圆头内六角螺钉",
+  "parts.family.countersunk_socket_screw": "沉头内六角螺钉",
   "parts.family.dowel_pin": "圆柱销",
   "parts.family.hex_bolt": "六角头螺栓",
   "parts.family.hex_cap_screw_inch": "六角头螺栓（英制）",

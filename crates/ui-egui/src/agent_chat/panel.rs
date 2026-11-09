@@ -2,8 +2,8 @@
 //! or in Preferences), resizable, folded to a thin strip with Minimise, closed with ×. Its side,
 //! width and fold are preferences, so they come back next time.
 
-use crate::fonts::RichTextExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::type_face::RichTextExt as _;
 use crate::ui_kit::{Container, Edge, Surface};
 use egui::{Align, Align2, Color32, Id, Layout, Rect, RichText, Sense, Stroke, pos2, vec2};
 use solidcraft_engine::panels::Flow;

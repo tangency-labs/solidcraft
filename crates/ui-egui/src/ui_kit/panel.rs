@@ -107,7 +107,14 @@ fn header_actions(
     };
     let left = (icon_rect.right() + t.space_8).min(right);
     let title_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(right.max(left), rect.bottom()));
-    paint_text(ui, title_rect, title, crate::fonts::semibold(if icon.0.is_empty() { t.font_label } else { t.font_heading }), t.form_ink, false);
+    paint_text(
+        ui,
+        title_rect,
+        title,
+        crate::ui_kit::type_face::semibold(if icon.0.is_empty() { t.font_label } else { t.font_heading }),
+        t.form_ink,
+        false,
+    );
     let title_response = ui.interact(title_rect, ui.make_persistent_id("title_text"), egui::Sense::hover());
     title_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
     solidcraft_ui_registry::publish_rect("dialog:header", rect);
@@ -218,9 +225,9 @@ impl<'a> TopHeader<'a> {
         } else {
             crate::icons::paint_icon(ui.painter(), self.icon, icon, 1.0);
         }
-        let heading = crate::fonts::semibold(t.font_heading);
+        let heading = crate::ui_kit::type_face::semibold(t.font_heading);
         match state.text.as_deref() {
-            Some(status) => paint_text(ui, self.title, status, crate::fonts::medium(t.font_label), t.form_dim, false),
+            Some(status) => paint_text(ui, self.title, status, crate::ui_kit::type_face::medium(t.font_label), t.form_dim, false),
             None => paint_text(ui, self.title, title, heading.clone(), t.form_ink, false),
         }
         let title_response = ui.interact(self.title, ui.make_persistent_id("title_text"), egui::Sense::hover());
@@ -266,7 +273,8 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
             }
         });
     }
-    let badge_width = ui.painter().layout_no_wrap(kind.to_owned(), crate::fonts::semibold(t.font_small), t.form_ink).size().x + t.space_16;
+    let badge_width =
+        ui.painter().layout_no_wrap(kind.to_owned(), crate::ui_kit::type_face::semibold(t.font_small), t.form_ink).size().x + t.space_16;
     let badge = egui::Rect::from_center_size(
         egui::pos2(more_rect.left() - t.space_8 - badge_width / 2.0, rect.center().y),
         vec2(badge_width, t.space_16 + t.space_4),
@@ -276,7 +284,7 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
         super::workspace_chip(&mut badge_ui, kind);
     }
     let name = egui::Rect::from_min_max(egui::pos2(icon_rect.right() + t.space_8, rect.top()), egui::pos2(badge.left() - t.space_8, rect.bottom()));
-    paint_text(ui, name, title, crate::fonts::semibold(t.font_label), t.form_ink, false);
+    paint_text(ui, name, title, crate::ui_kit::type_face::semibold(t.font_label), t.form_ink, false);
     ui.interact(name, ui.make_persistent_id("inspector_title"), egui::Sense::hover())
         .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
     t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
@@ -1162,38 +1170,34 @@ impl<'a> Window<'a> {
         self,
         ctx: &egui::Context,
         selected: &mut usize,
-        pages: &[WindowPage<S>],
+        pages: &[WindowPage<'_, S>],
         state: &mut S,
         left: impl FnOnce(&mut Ui),
     ) -> (bool, super::Action) {
-        self.show_pages_inner(ctx, selected, pages, state, None, None, None, left)
+        self.show_pages_inner(ctx, selected, pages, state, None, left)
     }
 
-    /// Page navigation with a strip above the page body (Preferences search).
-    /// `on_select` runs when a page tab is clicked, before that page is drawn.
+    /// Page navigation with a strip above the page body (Preferences search), a hook for a page
+    /// tab's click and an optional block under the list.
     pub(crate) fn show_pages_with_header<S>(
         self,
         ctx: &egui::Context,
         selected: &mut usize,
-        pages: &[WindowPage<S>],
+        pages: &[WindowPage<'_, S>],
         state: &mut S,
-        header: fn(&mut Ui, &mut S),
-        on_select: fn(&mut S),
-        sidebar_footer: Option<(f32, fn(&mut Ui, &mut S))>,
+        hooks: &PageListHooks<'_, S>,
         left: impl FnOnce(&mut Ui),
     ) -> (bool, super::Action) {
-        self.show_pages_inner(ctx, selected, pages, state, Some(header), Some(on_select), sidebar_footer, left)
+        self.show_pages_inner(ctx, selected, pages, state, Some(hooks), left)
     }
 
     fn show_pages_inner<S>(
         mut self,
         ctx: &egui::Context,
         selected: &mut usize,
-        pages: &[WindowPage<S>],
+        pages: &[WindowPage<'_, S>],
         state: &mut S,
-        header: Option<fn(&mut Ui, &mut S)>,
-        on_select: Option<fn(&mut S)>,
-        sidebar_footer: Option<(f32, fn(&mut Ui, &mut S))>,
+        hooks: Option<&PageListHooks<'_, S>>,
         left: impl FnOnce(&mut Ui),
     ) -> (bool, super::Action) {
         self.body_padding = false;
@@ -1202,6 +1206,7 @@ impl<'a> Window<'a> {
         let padding = self.page_padding;
         let in_titlebar = self.page_header_in_titlebar;
         let (icon, title, closeable) = (self.icon, self.title, self.closeable);
+        let header = hooks.map(|hooks| hooks.header);
         let header_closed = std::cell::Cell::new(false);
         let result = self.show_with_left(
             ctx,
@@ -1224,18 +1229,7 @@ impl<'a> Window<'a> {
                         Some((Tokens::get().space_24 * 9.0 + Tokens::get().space_14, &mut accessory)),
                     );
                 }
-                page_list_sized(
-                    ui,
-                    selected,
-                    pages,
-                    state,
-                    rows,
-                    padding,
-                    if in_titlebar { None } else { header },
-                    on_select,
-                    sidebar_footer,
-                    header.is_some(),
-                );
+                page_list_sized(ui, selected, pages, state, rows, padding, if in_titlebar { None } else { header }, hooks, header.is_some());
             },
             left,
         );
@@ -1295,33 +1289,43 @@ impl<'a> Window<'a> {
     }
 }
 
-/// A page's existing icon, translated label key, stable handle and draw callback.
-pub(crate) struct WindowPage<S> {
-    pub icon: &'static str,
-    pub label: &'static str,
-    pub group: Option<&'static str>,
-    pub handle: &'static str,
+/// A page's icon, translated label key, stable handle and draw callback.
+pub(crate) struct WindowPage<'a, S> {
+    pub icon: super::Icon<'a>,
+    pub label: &'a str,
+    pub group: Option<&'a str>,
+    pub handle: &'a str,
     pub scroll: bool,
-    pub draw: fn(&mut Ui, &mut S),
+    pub draw: &'a dyn Fn(&mut Ui, &mut S),
+}
+
+/// What a page list draws besides its pages: a strip above the page body (Preferences search),
+/// what runs when a page tab is clicked (with that page's index, before it is drawn), and a block
+/// pinned under the list with its height.
+pub(crate) struct PageListHooks<'a, S> {
+    pub header: &'a dyn Fn(&mut Ui, &mut S),
+    pub on_select: &'a dyn Fn(&mut S, usize),
+    pub sidebar_footer: Option<(f32, &'a dyn Fn(&mut Ui, &mut S))>,
 }
 
 #[cfg(test)]
-pub(super) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<S>], state: &mut S) {
-    page_list_sized(ui, selected, pages, state, 16.0, egui::Margin::same(Tokens::get().space_16 as i8), None, None, None, false);
+pub(super) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<'_, S>], state: &mut S) {
+    page_list_sized(ui, selected, pages, state, 16.0, egui::Margin::same(Tokens::get().space_16 as i8), None, None, false);
 }
 
 fn page_list_sized<S>(
     ui: &mut Ui,
     selected: &mut usize,
-    pages: &[WindowPage<S>],
+    pages: &[WindowPage<'_, S>],
     state: &mut S,
     rows: f32,
     padding: egui::Margin,
-    header: Option<fn(&mut Ui, &mut S)>,
-    on_select: Option<fn(&mut S)>,
-    sidebar_footer: Option<(f32, fn(&mut Ui, &mut S))>,
+    header: Option<&dyn Fn(&mut Ui, &mut S)>,
+    hooks: Option<&PageListHooks<'_, S>>,
     search_scroll: bool,
 ) {
+    let on_select = hooks.map(|hooks| hooks.on_select);
+    let sidebar_footer = hooks.and_then(|hooks| hooks.sidebar_footer);
     let t = Tokens::get();
     // The search strip, the gap under it, and the following item spacing sit above the page.
     // They must not eat the rows the page already had, or the graphics checkboxes fall out of view.
@@ -1362,7 +1366,14 @@ fn page_list_sized<S>(
                     ui.add_space(t.space_8);
                     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_24), egui::Sense::hover());
                     let rect = rect.shrink2(vec2(t.space_10, 0.0));
-                    paint_text(ui, rect, &solidcraft_ui_text::tr(group).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim, true);
+                    paint_text(
+                        ui,
+                        rect,
+                        &solidcraft_ui_text::tr(group).to_uppercase(),
+                        crate::ui_kit::type_face::semibold(t.font_small),
+                        t.form_dim,
+                        true,
+                    );
                 }
                 let label = solidcraft_ui_text::tr(page.label);
                 let (rect, response) =
@@ -1370,7 +1381,7 @@ fn page_list_sized<S>(
                 if response.clicked() {
                     *selected = index;
                     if let Some(on_select) = on_select {
-                        on_select(state);
+                        on_select(state, index);
                     }
                 }
                 let on = *selected == index;
@@ -1383,13 +1394,16 @@ fn page_list_sized<S>(
                 let ink = if on { t.form_primary } else { t.form_ink };
                 let icon =
                     egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_10 + t.space_8, rect.center().y), vec2(t.space_16, t.space_16));
-                crate::icons::paint_ink(ui.painter(), icon, page.icon, if on { ink } else { t.form_dim });
+                match page.icon {
+                    super::Icon::Kit(name) => crate::icons::paint_ink(ui.painter(), icon, name, if on { ink } else { t.form_dim }),
+                    host => host.paint(ui.painter(), icon, 1.0),
+                }
                 let text_rect = egui::Rect::from_min_max(egui::pos2(icon.right() + super::NAV_ROW_GAP, rect.top()), rect.right_bottom());
                 paint_text(
                     ui,
                     text_rect,
                     label,
-                    if on { crate::fonts::semibold(t.font_label) } else { egui::FontId::proportional(t.font_label) },
+                    if on { crate::ui_kit::type_face::semibold(t.font_label) } else { egui::FontId::proportional(t.font_label) },
                     ink,
                     false,
                 );

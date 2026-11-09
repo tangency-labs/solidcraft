@@ -393,16 +393,16 @@ fn a_second_click_on_a_document_settings_entry_closes_its_window() {
 
         h.step(&row("Precision")).unwrap();
         h.frames(2);
-        assert!(h.app.prefs_window.open, "{mode:?}: the first click opens Preferences");
+        assert!(h.app.prefs_window.shell.open, "{mode:?}: the first click opens Preferences");
         let decimals = h.app.preferences.angle_decimals;
         h.app.preferences.angle_decimals = decimals + 2;
         h.step(&row("Precision")).unwrap();
         h.frames(2);
-        assert!(!h.app.prefs_window.open, "{mode:?}: the second click closes it");
+        assert!(!h.app.prefs_window.shell.open, "{mode:?}: the second click closes it");
         assert_eq!(h.app.preferences.angle_decimals, decimals, "{mode:?}: and puts back what changed there, as × does");
         h.step(&row("Precision")).unwrap();
         h.frames(2);
-        assert!(h.app.prefs_window.open, "{mode:?}: a third opens it again");
+        assert!(h.app.prefs_window.shell.open, "{mode:?}: a third opens it again");
         h.step(&json!({"key":"Escape"})).unwrap();
 
         h.step(&row("Parameters")).unwrap();
@@ -605,7 +605,7 @@ fn browser_title_uses_a_single_semibold_run() {
         })
         .collect();
     assert_eq!(titles.len(), 1);
-    assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::fonts::semibold(Tokens::get().font_heading));
+    assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::ui_kit::type_face::semibold(Tokens::get().font_heading));
 }
 
 #[test]
