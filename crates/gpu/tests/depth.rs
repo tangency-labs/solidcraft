@@ -17,6 +17,11 @@ use solidcraft_gpu::capture::{self, Capturer};
 use solidcraft_viewport::{Camera, Rgb, Scene, SceneLine, SceneMesh, StandardView};
 use std::sync::{Arc, OnceLock};
 
+/// The adapter policy the app's environment names (`SOLIDCRAFT_GPU`).
+fn policy() -> solidcraft_gpu::select::Policy {
+    solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))
+}
+
 fn or_skip(c: Result<&'static Capturer, &'static GpuError>) -> Option<&'static Capturer> {
     match c {
         Ok(c) => Some(c),
@@ -31,8 +36,9 @@ fn or_skip(c: Result<&'static Capturer, &'static GpuError>) -> Option<&'static C
 /// The device's own depth, then the 24-bit fallback (the same device kind, its own instance).
 fn capturers() -> Vec<(&'static str, &'static Capturer)> {
     static FALLBACK: OnceLock<solidcraft_gpu::Result<Capturer>> = OnceLock::new();
-    let Some(own) = or_skip(capture::shared()) else { return Vec::new() };
-    let Some(fallback) = or_skip(FALLBACK.get_or_init(|| Capturer::headless_with_depth(wgpu::TextureFormat::Depth24PlusStencil8)).as_ref()) else {
+    let Some(own) = or_skip(capture::shared(policy())) else { return Vec::new() };
+    let Some(fallback) = or_skip(FALLBACK.get_or_init(|| Capturer::headless_with_depth(policy(), wgpu::TextureFormat::Depth24PlusStencil8)).as_ref())
+    else {
         return Vec::new();
     };
     eprintln!("GPU: {}, depth {:?} and {:?}", own.adapter_name(), own.depth_format(), fallback.depth_format());
@@ -278,7 +284,7 @@ fn an_edge_just_behind_a_face_stays_hidden_on_a_large_design() {
 /// this runs on (D3D12, Vulkan, Metal) has `Depth32FloatStencil8`.
 #[test]
 fn the_device_draws_with_float_depth_where_it_has_it() {
-    let Some(c) = or_skip(capture::shared()) else { return };
+    let Some(c) = or_skip(capture::shared(policy())) else { return };
     eprintln!("GPU: {}, depth {:?}", c.adapter_name(), c.depth_format());
     let float = c.depth_format() == wgpu::TextureFormat::Depth32FloatStencil8;
     assert_eq!(float, reversed(c));

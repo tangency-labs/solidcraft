@@ -3413,15 +3413,16 @@ impl Batches {
 /// The tessellation pipeline (`shader`: its source), where display plans are evaluated: on a
 /// device that runs compute shaders with the storage buffers the evaluation binds (not WebGL2)
 /// and builds the pipeline. Elsewhere `None`, and bodies are built on the CPU: a device whose
-/// shader compiler rejects the shader (D3D12's FXC once did) only loses GPU evaluation.
-pub fn tessellation(adapter: &wgpu::Adapter, device: &wgpu::Device, queue: &wgpu::Queue, shader: &str) -> Option<crate::TessGpu> {
+/// shader compiler rejects the shader (D3D12's FXC once did) only loses GPU evaluation. With
+/// `force_cpu` (the host's choice) bodies are built on the CPU on any device.
+pub fn tessellation(adapter: &wgpu::Adapter, device: &wgpu::Device, queue: &wgpu::Queue, shader: &str, force_cpu: bool) -> Option<crate::TessGpu> {
     let compute = adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::COMPUTE_SHADERS)
         && device.limits().max_storage_buffers_per_shader_stage >= 4;
     if !compute {
         return None;
     }
     let info = adapter.get_info();
-    if hangs_on_gpu_tessellation(info.backend, &info.name) || std::env::var_os("SOLIDCRAFT_CPU_TESS").is_some() {
+    if hangs_on_gpu_tessellation(info.backend, &info.name) || force_cpu {
         log::warn!("bodies are built on the CPU on {} ({:?})", info.name, info.backend);
         return None;
     }
@@ -3447,19 +3448,19 @@ pub struct TessLater {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl TessLater {
-    /// Start compiling [`tessellation`]'s pipeline (`shader`) for `device`.
-    pub fn start(adapter: &wgpu::Adapter, device: &wgpu::Device, queue: &wgpu::Queue, shader: &'static str) -> TessLater {
+    /// Start compiling [`tessellation`]'s pipeline (`shader`, `force_cpu`) for `device`.
+    pub fn start(adapter: &wgpu::Adapter, device: &wgpu::Device, queue: &wgpu::Queue, shader: &'static str, force_cpu: bool) -> TessLater {
         let ready = Arc::new(std::sync::OnceLock::new());
         let threaded = crate::concurrent::threads_allowed(device);
         let (adapter, device, queue, slot) = (adapter.clone(), device.clone(), queue.clone(), ready.clone());
         let compile = move || {
-            if let Some(tess) = tessellation(&adapter, &device, &queue, shader) {
+            if let Some(tess) = tessellation(&adapter, &device, &queue, shader, force_cpu) {
                 let _ = slot.set(tess);
             }
         };
         // Where the device may not make pipelines on two threads at once (DXC, OpenGL), or no
         // thread starts, it compiles now, as before.
-        let worker = threaded.then(|| std::thread::Builder::new().name("solidcraft tessellation".into()).spawn(compile.clone()).ok()).flatten();
+        let worker = threaded.then(|| std::thread::Builder::new().name("viewport tessellation".into()).spawn(compile.clone()).ok()).flatten();
         if worker.is_none() {
             compile();
         }
@@ -3491,7 +3492,7 @@ impl Drop for TessLater {
 
 /// A device whose driver hangs on the evaluation shader, so bodies are built on the CPU there:
 /// the AMD FirePro D300/D500/D700 (Mac Pro 2013, Tahiti) under Metal, where macOS resets the GPU
-/// and the whole desktop freezes. `SOLIDCRAFT_CPU_TESS=1` forces CPU evaluation on any device.
+/// and the whole desktop freezes. [`tessellation`]'s `force_cpu` forces CPU evaluation on any device.
 pub fn hangs_on_gpu_tessellation(backend: wgpu::Backend, name: &str) -> bool {
     backend == wgpu::Backend::Metal && name.contains("FirePro")
 }
@@ -4646,7 +4647,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn rejected_geometry_allocation_returns_without_panicking() {
-        let Ok((_, device, _)) = crate::open_headless() else {
+        let Ok((_, device, _)) = crate::open_headless(crate::tests::policy()) else {
             eprintln!("skipping: no GPU adapter");
             return;
         };
@@ -4673,15 +4674,15 @@ mod tests {
     /// that does not compile never does, and bodies stay built on the CPU (#4860).
     #[test]
     fn a_renderer_takes_the_plan_evaluation_once_it_has_compiled() {
-        let Ok((adapter, device, queue)) = crate::open_headless() else {
+        let Ok((adapter, device, queue)) = crate::open_headless(crate::tests::policy()) else {
             eprintln!("skipped: no GPU adapter");
             return;
         };
         let depth = crate::depth_format(&device, true);
         let target = super::GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: Some(depth), samples: 1, tess: false, oit: false };
-        let compiles = super::tessellation(&adapter, &device, &queue, crate::SHADER).is_some();
+        let compiles = super::tessellation(&adapter, &device, &queue, crate::SHADER, false).is_some();
         for (shader, expected) in [(crate::SHADER, compiles), ("not a shader", false)] {
-            let mut later = super::TessLater::start(&adapter, &device, &queue, shader);
+            let mut later = super::TessLater::start(&adapter, &device, &queue, shader, false);
             later.wait();
             let mut renderer = super::Renderer::new(&device, target, None);
             renderer.take_ready_tessellation();
@@ -4690,6 +4691,20 @@ mod tests {
             renderer.take_ready_tessellation();
             assert_eq!(renderer.tess.is_some(), expected, "shader {shader:.12}");
         }
+    }
+
+    /// The host's `force_cpu` builds bodies on the CPU on a device that would evaluate them.
+    #[test]
+    fn force_cpu_leaves_the_evaluation_out() {
+        let Ok((adapter, device, queue)) = crate::open_headless(crate::tests::policy()) else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        if super::tessellation(&adapter, &device, &queue, crate::SHADER, false).is_none() {
+            eprintln!("skipped: this device builds bodies on the CPU");
+            return;
+        }
+        assert!(super::tessellation(&adapter, &device, &queue, crate::SHADER, true).is_none());
     }
 
     /// The viewport shader parses and validates (a bad shader would only fail at run time).
@@ -4977,7 +4992,7 @@ mod glass_tests {
         let mut descriptor = crate::instance_descriptor_from_env();
         descriptor.backends = wgpu::Backends::GL;
         let instance = wgpu::Instance::new(descriptor);
-        let policy = crate::select::Policy::from_env().expect("a valid GPU test policy");
+        let policy = crate::tests::policy();
         let Some((adapter, _)) = crate::select::pick_among(pollster::block_on(instance.enumerate_adapters(wgpu::Backends::GL)), policy) else {
             eprintln!("skipped: no OpenGL adapter qualifies under {}", policy.name());
             return;
@@ -5213,7 +5228,7 @@ mod glass_tests {
     /// and no geometry; a class change rebuilds the stream.
     #[test]
     fn a_colour_edit_keeps_the_sorted_glass_stream() {
-        let Ok((_, device, queue)) = crate::open_headless() else { return };
+        let Ok((_, device, queue)) = crate::open_headless(crate::tests::policy()) else { return };
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let mut r =
             Renderer::new(&device, GpuTarget { format, depth: Some(crate::depth_format(&device, true)), samples: 1, tess: false, oit: false }, None);
@@ -5263,7 +5278,7 @@ mod glass_tests {
     /// [`middle_pixel_in_slots_with_samples`] with a section cut (`Frame::clip`).
     fn middle_pixel_cut(scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32, clip: [f32; 4]) -> Option<[u8; 4]> {
         const SIZE: u32 = 64;
-        let (_, device, queue) = crate::open_headless().ok()?;
+        let (_, device, queue) = crate::open_headless(crate::tests::policy()).ok()?;
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false }, None);
@@ -5520,7 +5535,7 @@ mod glass_tests {
 
     #[test]
     fn product_highlights_keep_live_colour_and_occlude_faces_with_both_product_vertex_layouts_and_msaa() {
-        let (_, device, queue) = match crate::open_headless() {
+        let (_, device, queue) = match crate::open_headless(crate::tests::policy()) {
             Ok(opened) => opened,
             Err(error) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
                 eprintln!("skipping: {error}");
@@ -5700,7 +5715,7 @@ mod glass_tests {
 
     #[test]
     fn a_cached_cloud_picture_follows_its_style_without_uploading_again() {
-        let Some((_, device, queue)) = crate::open_headless().ok() else { return };
+        let Some((_, device, queue)) = crate::open_headless(crate::tests::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let mut renderer = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false }, None);
@@ -5750,7 +5765,7 @@ mod glass_tests {
     /// not decide for the whole bead.
     #[test]
     fn a_set_filter_keeps_the_part_of_a_bead_whose_ends_differ() {
-        let Some((_, device, queue)) = crate::open_headless().ok() else { return };
+        let Some((_, device, queue)) = crate::open_headless(crate::tests::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
@@ -5792,7 +5807,7 @@ mod glass_tests {
     /// drawn straight below the eye, where an end moved to a made-up place would pull a wedge.
     #[test]
     fn a_cloud_element_crossing_the_near_plane_is_cut_there() {
-        let Some((_, device, queue)) = crate::open_headless().ok() else { return };
+        let Some((_, device, queue)) = crate::open_headless(crate::tests::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
@@ -5839,7 +5854,7 @@ mod glass_tests {
     /// again rather than keeping the cached picture.
     #[test]
     fn a_still_frame_blits_the_cached_picture() {
-        let Some((_, device, queue)) = crate::open_headless().ok() else { return };
+        let Some((_, device, queue)) = crate::open_headless(crate::tests::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false }, None);
@@ -5862,7 +5877,7 @@ mod glass_tests {
     /// drawn offscreen with its own depth and MSAA, then blitted into the window's pass.
     #[test]
     fn a_split_window_target_blits_the_offscreen_scene() {
-        let Some((_, device, queue)) = crate::open_headless().ok() else { return };
+        let Some((_, device, queue)) = crate::open_headless(crate::tests::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let scene_target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
@@ -5885,7 +5900,7 @@ mod glass_tests {
     /// test device keeps wgpu's default handler).
     #[test]
     fn a_frame_the_device_refuses_is_drawn_smaller() {
-        let Some((_, device, queue)) = crate::open_headless().ok() else { return };
+        let Some((_, device, queue)) = crate::open_headless(crate::tests::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let scene_target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
@@ -5920,7 +5935,7 @@ mod glass_tests {
     /// resolve texture is cleared once when it is made (not every frame), and the picture shows.
     #[test]
     fn new_resolve_targets_are_cleared_before_their_first_resolve() {
-        let Some((adapter, device, queue)) = crate::open_headless().ok() else { return };
+        let Some((adapter, device, queue)) = crate::open_headless(crate::tests::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         if ![format, depth].iter().all(|f| adapter.get_texture_format_features(*f).flags.sample_count_supported(4)) {
@@ -5962,7 +5977,7 @@ mod glass_tests {
     /// order-independent transparency, it stayed frozen on that frame whatever the camera did.
     #[test]
     fn product_preview_never_paints_the_last_modelling_frame() {
-        let Some((_, device, queue)) = crate::open_headless().ok() else { return };
+        let Some((_, device, queue)) = crate::open_headless(crate::tests::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false }, None);
@@ -5991,7 +6006,7 @@ mod glass_tests {
     /// the build (`SOLIDCRAFT_REQUIRE_GPU=1` makes a missing adapter a failure, as in CI).
     #[test]
     fn startup_msaa_check_passes_and_detects_a_blank_resolve() {
-        let (adapter, device, queue) = match crate::open_headless() {
+        let (adapter, device, queue) = match crate::open_headless(crate::tests::policy()) {
             Ok(d) => d,
             Err(e @ crate::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
                 eprintln!("skipping: {e}");

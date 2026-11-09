@@ -113,9 +113,17 @@ pub fn install(
     // The evaluation shader compiles beside the window, which does not wait for it: on D3D12 it
     // takes seconds, most of the start (#4860). Bodies are built on the CPU until it is ready.
     #[cfg(not(target_arch = "wasm32"))]
-    let later = gpu_meshing.then(|| solidcraft_gpu::view::TessLater::start(&rs.adapter, &rs.device, &rs.queue, solidcraft_gpu::SHADER));
+    let later = gpu_meshing.then(|| {
+        solidcraft_gpu::view::TessLater::start(
+            &rs.adapter,
+            &rs.device,
+            &rs.queue,
+            solidcraft_gpu::SHADER,
+            solidcraft_gpu::env::force_cpu_tessellation(),
+        )
+    });
     #[cfg(target_arch = "wasm32")]
-    let tess = if gpu_meshing { solidcraft_gpu::view::tessellation(&rs.adapter, &rs.device, &rs.queue, solidcraft_gpu::SHADER) } else { None };
+    let tess = if gpu_meshing { solidcraft_gpu::view::tessellation(&rs.adapter, &rs.device, &rs.queue, solidcraft_gpu::SHADER, false) } else { None };
     #[cfg(not(target_arch = "wasm32"))]
     let tess = None;
     let (scene, window) = (GpuTarget { tess: tess.is_some(), ..scene }, GpuTarget { tess: tess.is_some(), ..window });
@@ -386,7 +394,7 @@ mod test_support {
     /// the reason printed, on a machine without a GPU adapter, and the test skips.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn test_picture_renderer() -> bool {
-        match solidcraft_gpu::capture::shared() {
+        match solidcraft_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
             Ok(c) => {
                 solidcraft_engine::capture::install(std::sync::Arc::new(move |scene, cam, w, h| {
                     c.rgba(scene, cam, w, h)
@@ -530,11 +538,11 @@ pub(crate) fn offscreen_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Q
 }
 
 /// A device of its own for an offscreen test (`None` without a GPU adapter the `SOLIDCRAFT_GPU`
-/// policy admits, or when the variable names no policy), on [`offscreen_backends`]. One test at a
+/// policy admits, or when the variable names no policy: [`solidcraft_gpu::env`]), on [`offscreen_backends`]. One test at a
 /// time starts its instance, adapter and device ([`offscreen_starting`]).
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn offscreen_own_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
-    let policy = solidcraft_gpu::select::Policy::from_env().map_err(|e| eprintln!("no offscreen device: {e}")).ok()?;
+    let policy = solidcraft_gpu::env::policy().map_err(|e| eprintln!("no offscreen device: {e}")).ok()?;
     let _one_at_a_time = offscreen_starting();
     let adapter = offscreen_adapter(policy)?;
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -551,7 +559,7 @@ pub(crate) fn offscreen_own_device() -> Option<(wgpu::Adapter, wgpu::Device, wgp
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn offscreen_tessellates(shader: &str) -> Option<bool> {
     let (adapter, device, queue) = offscreen_device()?;
-    Some(solidcraft_gpu::view::tessellation(&adapter, &device, &queue, shader).is_some())
+    Some(solidcraft_gpu::view::tessellation(&adapter, &device, &queue, shader, solidcraft_gpu::env::force_cpu_tessellation()).is_some())
 }
 
 /// Render `scene` offscreen on a device of its own, through the viewport's real resources and
@@ -752,7 +760,8 @@ fn offscreen(
     eprintln!("offscreen adapter: {:?}", adapter.get_info().backend);
     let format = if srgb { wgpu::TextureFormat::Rgba8UnormSrgb } else { wgpu::TextureFormat::Rgba8Unorm };
     let depth = solidcraft_gpu::depth_format(&device, true);
-    let compute = tess.and_then(|shader| solidcraft_gpu::view::tessellation(&adapter, &device, &queue, shader));
+    let compute =
+        tess.and_then(|shader| solidcraft_gpu::view::tessellation(&adapter, &device, &queue, shader, solidcraft_gpu::env::force_cpu_tessellation()));
     let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: compute.is_some(), oit: false };
     let mut resources = egui_wgpu::CallbackResources::default();
     resources.insert(Renderer::new(&device, target, compute));
@@ -875,7 +884,11 @@ impl OffscreenFrames {
         let (adapter, device, queue) = offscreen_device()?;
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let depth = solidcraft_gpu::depth_format(&device, true);
-        let compute = if tess { solidcraft_gpu::view::tessellation(&adapter, &device, &queue, solidcraft_gpu::SHADER) } else { None };
+        let compute = if tess {
+            solidcraft_gpu::view::tessellation(&adapter, &device, &queue, solidcraft_gpu::SHADER, solidcraft_gpu::env::force_cpu_tessellation())
+        } else {
+            None
+        };
         let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: compute.is_some(), oit: false };
         let mut resources = egui_wgpu::CallbackResources::default();
         resources.insert(Renderer::new(&device, target, compute));
@@ -1649,7 +1662,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn plans_are_drawn_on_the_gpu_once_the_evaluation_has_compiled() {
-        let Ok(tess) = solidcraft_gpu::TessGpu::headless() else {
+        let Ok(tess) = solidcraft_gpu::env::headless_tessellation() else {
             eprintln!("skipped: no GPU adapter that builds the evaluation");
             return;
         };

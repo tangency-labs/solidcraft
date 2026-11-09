@@ -1,7 +1,7 @@
 //! Pictures of a [`Scene`] drawn offscreen with the viewport's pipelines ([`crate::view`]): the
 //! same shading, edges, silhouettes, section cap and surface analysis the viewport shows, read
-//! back as RGBA. `solidcraft-cli snapshot`, MCP screenshots, `ui.render` and thumbnails draw
-//! through it, on the application's device ([`Capturer::new`]) or on a headless one
+//! back as RGBA. A host's command-line snapshots, screenshots and thumbnails draw through it, on
+//! the application's device ([`Capturer::new`]) or on a headless one
 //! ([`Capturer::headless`], [`shared`]). Without a qualifying adapter, the `auto` policy falls
 //! to the last tier, the CPU rasterizer ([`headless_rgba`]), and says so: every picture names the
 //! renderer that drew it (`gpu`, `gpu-software` or `cpu`); `hardware` and `software` fail with an
@@ -122,11 +122,11 @@ impl Capturer {
         self.is_lost()
     }
 
-    /// A device of its own, without a window (native only): the adapter the `SOLIDCRAFT_GPU`
-    /// policy picks ([`crate::select`]).
+    /// A device of its own, without a window (native only): the adapter `policy` picks
+    /// ([`crate::select`]).
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn headless() -> Result<Self> {
-        let (adapter, device, queue) = crate::open_headless()?;
+    pub fn headless(policy: crate::select::Policy) -> Result<Self> {
+        let (adapter, device, queue) = crate::open_headless(policy)?;
         // Errors are caught per picture (error scopes); anything else is logged, never a panic.
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let lost = watch_lost(&device);
@@ -135,8 +135,8 @@ impl Capturer {
 
     /// As [`Capturer::headless`], drawing with the depth format `depth` ([`Capturer::with_depth`]).
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn headless_with_depth(depth: wgpu::TextureFormat) -> Result<Self> {
-        let (adapter, device, queue) = crate::open_headless()?;
+    pub fn headless_with_depth(policy: crate::select::Policy, depth: wgpu::TextureFormat) -> Result<Self> {
+        let (adapter, device, queue) = crate::open_headless(policy)?;
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let lost = watch_lost(&device);
         Ok(Self::with_depth(&adapter, device, queue, depth)?.watching(lost))
@@ -145,8 +145,8 @@ impl Capturer {
     /// As [`Capturer::headless`], without multisampling: one sample per pixel, as the viewport
     /// draws where 4× isn't available (some browsers and devices, or MSAA turned off).
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn headless_single_sample() -> Result<Self> {
-        let (adapter, device, queue) = crate::open_headless()?;
+    pub fn headless_single_sample(policy: crate::select::Policy) -> Result<Self> {
+        let (adapter, device, queue) = crate::open_headless(policy)?;
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let depth = crate::depth_format(&device, true);
         let lost = watch_lost(&device);
@@ -330,56 +330,69 @@ impl Capturer {
     }
 }
 
-/// The process's headless capturer (native only), opened on first use under the `SOLIDCRAFT_GPU`
-/// policy and kept; the error when no adapter qualifies or the device fails (not retried).
+/// The process's headless capturer (native only), opened on first use on the adapter `policy`
+/// picks and kept, whatever later calls pass; the error when no adapter qualifies or the device
+/// fails (not retried). A host passes the same policy every time.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn shared() -> std::result::Result<&'static Capturer, &'static GpuError> {
+pub fn shared(policy: crate::select::Policy) -> std::result::Result<&'static Capturer, &'static GpuError> {
     static SHARED: std::sync::OnceLock<Result<Capturer>> = std::sync::OnceLock::new();
-    SHARED.get_or_init(Capturer::headless).as_ref()
+    SHARED.get_or_init(|| Capturer::headless(policy)).as_ref()
 }
 
 /// What draws this process's headless pictures (native only): the shared headless device, or the
-/// CPU rasterizer where the `SOLIDCRAFT_GPU` policy lands there (`cpu`, or `auto` with no
-/// qualifying adapter).
+/// CPU rasterizer where the policy lands there (`cpu`, or `auto` with no qualifying adapter).
 #[cfg(not(target_arch = "wasm32"))]
 pub enum Headless {
     Gpu(&'static Capturer),
     Cpu,
 }
 
-/// [`Headless`] under the `SOLIDCRAFT_GPU` policy; an error when the policy is `hardware` or
-/// `software` and no adapter of that tier opens (or the variable names no policy).
+/// [`Headless`] under `policy`; the error when the policy is `hardware` or `software` and no
+/// adapter of that tier opens.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn headless() -> std::result::Result<Headless, String> {
+pub fn headless(policy: crate::select::Policy) -> std::result::Result<Headless, &'static GpuError> {
     use crate::select::Policy;
-    let policy = Policy::from_env()?;
     if policy == Policy::Cpu {
         return Ok(Headless::Cpu);
     }
-    match shared() {
+    match shared(policy) {
         Ok(c) => Ok(Headless::Gpu(c)),
         Err(e) if policy == Policy::Auto => {
             log::warn!("pictures are drawn by the CPU rasterizer: {e}");
             Ok(Headless::Cpu)
         }
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(e),
     }
 }
 
-/// `scene` drawn by [`headless`]: straight RGBA and the renderer that drew it (`gpu`,
-/// `gpu-software` or `cpu`). The CPU rasterizer draws no surface analysis, highlights or legends.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn headless_rgba(scene: &Scene, cam: &Camera, width: u32, height: u32) -> std::result::Result<(Vec<u8>, &'static str), String> {
-    match headless()? {
-        Headless::Gpu(c) => c.rgba(scene, cam, width, height).map(|rgba| (rgba, c.renderer())).map_err(|e| e.to_string()),
-        Headless::Cpu => {
-            if !(1..=MAX_SIDE).contains(&width) || !(1..=MAX_SIDE).contains(&height) {
-                return Err(format!("a picture is 1 to {MAX_SIDE} pixels a side, not {width} × {height}"));
+impl Headless {
+    /// `scene` drawn: straight RGBA and the renderer that drew it (`gpu`, `gpu-software` or
+    /// `cpu`). The CPU rasterizer draws no surface analysis, highlights or legends.
+    pub fn rgba(&self, scene: &Scene, cam: &Camera, width: u32, height: u32) -> std::result::Result<(Vec<u8>, &'static str), String> {
+        match self {
+            Headless::Gpu(c) => c.rgba(scene, cam, width, height).map(|rgba| (rgba, c.renderer())).map_err(|e| e.to_string()),
+            Headless::Cpu => {
+                if !(1..=MAX_SIDE).contains(&width) || !(1..=MAX_SIDE).contains(&height) {
+                    return Err(format!("a picture is 1 to {MAX_SIDE} pixels a side, not {width} × {height}"));
+                }
+                let canvas = solidcraft_viewport::render(scene, cam, width as usize, height as usize);
+                Ok((canvas.rgba, "cpu"))
             }
-            let canvas = solidcraft_viewport::render(scene, cam, width as usize, height as usize);
-            Ok((canvas.rgba, "cpu"))
         }
     }
+}
+
+/// `scene` drawn by [`headless`] under `policy` ([`Headless::rgba`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn headless_rgba(
+    policy: crate::select::Policy,
+    scene: &Scene,
+    cam: &Camera,
+    width: u32,
+    height: u32,
+) -> std::result::Result<(Vec<u8>, &'static str), String> {
+    headless(policy).map_err(|e| e.to_string())?.rgba(scene, cam, width, height)
 }
 
 /// The frame parameters of a picture: the scene's own geometry as the model scene (key `key`),
@@ -661,7 +674,7 @@ mod tests {
     /// without one).
     #[test]
     fn a_moving_layer_is_drawn_moved_by_its_transform() {
-        let Ok(capturer) = Capturer::headless_single_sample() else {
+        let Ok(capturer) = Capturer::headless_single_sample(crate::tests::policy()) else {
             eprintln!("skipping: no GPU adapter");
             return;
         };
@@ -702,7 +715,7 @@ mod tests {
     /// placements moved.
     #[test]
     fn a_moving_layers_instances_are_drawn_moved_by_its_transform() {
-        let Ok(capturer) = Capturer::headless_single_sample() else {
+        let Ok(capturer) = Capturer::headless_single_sample(crate::tests::policy()) else {
             eprintln!("skipping: no GPU adapter");
             return;
         };

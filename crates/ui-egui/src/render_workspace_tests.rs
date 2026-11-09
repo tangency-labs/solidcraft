@@ -1739,7 +1739,7 @@ fn progressive_image_controls_route_to_the_registered_host() {
     use solidcraft_engine::render::job::Phase;
     use std::time::{Duration, Instant};
 
-    let host = solidcraft_gpu::select::Policy::from_env()
+    let host = solidcraft_gpu::env::policy()
         .and_then(|policy| solidcraft_gpu::select::pick(policy).ok_or_else(|| "no qualifying adapter".to_string()))
         .and_then(|(adapter, _)| solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
     let host = match host {

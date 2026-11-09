@@ -12,7 +12,7 @@ use solidcraft_viewport::{Camera, Rgb, Scene, SceneLine, StandardView};
 /// samples wherever it falls, which hides the fault.
 fn capturer() -> Option<&'static Capturer> {
     static SINGLE: std::sync::OnceLock<solidcraft_gpu::Result<Capturer>> = std::sync::OnceLock::new();
-    match SINGLE.get_or_init(Capturer::headless_single_sample).as_ref() {
+    match SINGLE.get_or_init(|| Capturer::headless_single_sample(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}")))).as_ref() {
         Ok(c) => {
             assert_eq!(c.samples(), 1);
             Some(c)

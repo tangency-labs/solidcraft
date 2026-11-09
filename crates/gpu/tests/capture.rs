@@ -13,7 +13,7 @@ use solidcraft_gpu::capture::{self, Capturer};
 use solidcraft_viewport::{Camera, Rgb, Scene, SceneLine};
 
 fn capturer() -> Option<&'static Capturer> {
-    match capture::shared() {
+    match solidcraft_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(c) => {
             eprintln!("GPU: {} ({}x MSAA)", c.adapter_name(), c.samples());
             Some(c)
@@ -382,7 +382,7 @@ fn bad_picture_sizes_are_errors() {
 #[test]
 fn pictures_read_back_while_another_thread_uses_the_device() {
     use std::sync::atomic::{AtomicBool, Ordering};
-    let policy = solidcraft_gpu::select::Policy::from_env().unwrap();
+    let policy = solidcraft_gpu::env::policy().unwrap();
     let Some((adapter, _)) = solidcraft_gpu::select::pick(policy) else {
         assert!(std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "no GPU adapter under the {} policy", policy.name());
         eprintln!("skipping: no GPU adapter under the {} policy", policy.name());

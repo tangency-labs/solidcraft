@@ -1,11 +1,11 @@
 //! What draws a headless picture: every adapter the platform's native backends offer is
 //! classified as hardware (a discrete, integrated or virtual GPU) or software (a GPU driver that
 //! runs on the CPU, such as llvmpipe, lavapipe or WARP), and a [`Policy`] picks one. The last
-//! tier, below any adapter, is SolidCraft's own CPU rasterizer (no surface analysis, highlights
+//! tier, below any adapter, is the viewport's CPU rasterizer (no surface analysis, highlights
 //! or legends): `auto` lands there only when no adapter qualifies, `cpu` forces it, `hardware`
-//! and `software` never use it. macOS uses Metal only, and has no software adapter. `SOLIDCRAFT_GPU`
-//! (`auto`, `hardware`, `software`, `cpu`) sets the policy from the environment; `WGPU_BACKEND`
-//! still narrows the backends.
+//! and `software` never use it. macOS uses Metal only, and has no software adapter. The host
+//! chooses the policy (from its settings or environment) and passes it; `WGPU_BACKEND`, wgpu's
+//! own variable, still narrows the backends.
 
 use serde::Serialize;
 
@@ -69,15 +69,6 @@ impl Policy {
             "software" | "sw" => Some(Policy::Software),
             "cpu" => Some(Policy::Cpu),
             _ => None,
-        }
-    }
-
-    /// The policy `SOLIDCRAFT_GPU` names; [`Policy::Auto`] when it is unset, and an error when
-    /// it names none.
-    pub fn from_env() -> Result<Policy, String> {
-        match std::env::var("SOLIDCRAFT_GPU") {
-            Ok(v) => Policy::parse(&v).ok_or_else(|| format!("SOLIDCRAFT_GPU must be auto, hardware, software or cpu, not `{v}`")),
-            Err(_) => Ok(Policy::Auto),
         }
     }
 

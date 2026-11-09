@@ -655,7 +655,7 @@ fn cmd_script(args: &[String]) -> Result<(), String> {
 fn cmd_gpu(args: &[String]) -> Result<(), String> {
     use solidcraft_gpu::select::{Policy, survey};
     let policy = match args {
-        [] => Policy::from_env()?,
+        [] => solidcraft_gpu::env::policy()?,
         [flag, v] if flag == "--policy" => Policy::parse(v).ok_or_else(|| format!("--policy must be auto, hardware, software or cpu, not `{v}`"))?,
         _ => return Err("usage: solidcraft-cli gpu [--policy auto|hardware|software|cpu]".into()),
     };
@@ -691,7 +691,7 @@ fn cmd_gpu(args: &[String]) -> Result<(), String> {
 /// error that names the policy.
 fn install_renderer() {
     solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-        let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+        let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
         Ok(solidcraft_engine::capture::Picture { rgba, renderer })
     }));
 }

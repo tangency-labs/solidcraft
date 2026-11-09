@@ -4,6 +4,11 @@ use solidcraft_kernel::{Body, BoolOp};
 
 use super::*;
 
+/// The adapter policy this crate's GPU tests run under: the host's, from its environment.
+pub(crate) fn policy() -> crate::select::Policy {
+    crate::env::policy().unwrap_or_else(|e| panic!("{e}"))
+}
+
 /// The kernel's plan; the GPU evaluates it in solidcore-tess's form, made by the model.
 type GeomPlan = solidcraft_geom::tess::TessPlan;
 
@@ -17,7 +22,7 @@ fn gpu_form(plan: &GeomPlan) -> TessPlan {
 /// (as D3D12's FXC once did), not a missing GPU. `SOLIDCRAFT_REQUIRE_GPU=1` (the Windows CI job,
 /// on the WARP software adapter) fails without an adapter too.
 fn gpu() -> Option<TessGpu> {
-    match TessGpu::headless() {
+    match TessGpu::headless(crate::tests::policy()) {
         Ok(g) => {
             eprintln!("GPU: {}", g.adapter_name());
             Some(g)
@@ -47,7 +52,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 /// mesh), not a panic in the device's uncaptured-error handler; and the device stays usable.
 #[test]
 fn a_pipeline_the_device_rejects_is_an_error_not_a_crash() {
-    let (adapter, device, queue) = match open_headless() {
+    let (adapter, device, queue) = match open_headless(crate::tests::policy()) {
         Ok(d) => d,
         Err(e) => {
             assert!(std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "a GPU is required here: {e}");

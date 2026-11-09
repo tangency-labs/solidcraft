@@ -507,7 +507,7 @@ fn snapshot_runs_its_script_on_the_in_design() {
         std::fs::read(&png).unwrap()
     };
     // Pictures are drawn on the GPU: without an adapter only the option checks below run.
-    match solidcraft_gpu::capture::shared() {
+    match solidcraft_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(_) => {
             let alone = shot("alone.png", &[shifted.as_os_str()]);
             let on_base = shot("on_base.png", &[shifted.as_os_str(), "--in".as_ref(), base.as_os_str()]);

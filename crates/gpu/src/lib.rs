@@ -1,4 +1,4 @@
-//! SolidCraft's GPU work: the viewport's render pipelines ([`view`]), pictures drawn with them
+//! The viewport's GPU work: its render pipelines ([`view`]), pictures drawn with them
 //! offscreen ([`capture`]), and display tessellation plans evaluated in a compute shader.
 //!
 //! Plan evaluation: the surface point and normal at every vertex's parameters, in a compute
@@ -22,6 +22,8 @@ use wgpu::util::DeviceExt;
 
 pub mod capture;
 pub mod concurrent;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod env;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod path;
 mod pbr;
@@ -79,8 +81,8 @@ fn caught(scopes: [wgpu::ErrorScopeGuard; 3]) -> Option<String> {
 }
 
 /// The D3D12 shader compiler every wgpu instance starts with (#6756). `WGPU_DX12_COMPILER` names
-/// one as wgpu reads it; unset, `auto` or a value wgpu does not know leave the choice to
-/// SolidCraft: DXC from the `dxcompiler.dll` beside the program, by its full path, else FXC.
+/// one as wgpu reads it; unset, `auto` or a value wgpu does not know leave the choice to this
+/// crate: DXC from the `dxcompiler.dll` beside the program, by its full path, else FXC.
 /// wgpu's own `auto` loads `dxcompiler.dll` by name, so Windows takes the first one on `PATH`,
 /// whichever program put it there, and DXC 1.8.2505 from such folders (Obsidian's, NVIDIA SDK
 /// Manager's) crashed every start. `WGPU_DX12_COMPILER=dxc` still loads it that way. Looked up
@@ -112,7 +114,7 @@ fn dxc_beside_program() -> Option<std::path::PathBuf> {
     dll.is_file().then_some(dll)
 }
 
-/// wgpu's instance settings from the environment, with SolidCraft's D3D12 shader compiler
+/// wgpu's instance settings from the environment, with the D3D12 shader compiler chosen here
 /// ([`dx12_compiler`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn instance_descriptor_from_env() -> wgpu::InstanceDescriptor {
@@ -122,11 +124,10 @@ pub fn instance_descriptor_from_env() -> wgpu::InstanceDescriptor {
 }
 
 /// An adapter and device without a window (native only): the adapter [`select::pick`] chooses
-/// under the `SOLIDCRAFT_GPU` policy. The environment may narrow the backends and pick the D3D12
-/// shader compiler (`WGPU_BACKEND`, `WGPU_DX12_COMPILER`).
+/// under `policy`, which the host passes. wgpu's environment may narrow the backends and pick the
+/// D3D12 shader compiler (`WGPU_BACKEND`, `WGPU_DX12_COMPILER`).
 #[cfg(not(target_arch = "wasm32"))]
-fn open_headless() -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
-    let policy = select::Policy::from_env().map_err(GpuError::Policy)?;
+fn open_headless(policy: select::Policy) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     let (adapter, _) = select::pick(policy).ok_or(GpuError::NoAdapter(policy.name()))?;
     let (device, queue) = open_device(&adapter)?;
     Ok((adapter, device, queue))
@@ -135,7 +136,7 @@ fn open_headless() -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
 #[cfg(not(target_arch = "wasm32"))]
 fn open_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("solidcraft headless"),
+        label: Some("headless device"),
         required_features: depth_features(adapter),
         required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
         ..Default::default()
@@ -149,7 +150,7 @@ const WORKGROUP: u32 = 64;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GpuError {
-    #[error("no GPU adapter qualifies under the `{0}` policy (SOLIDCRAFT_GPU); `solidcraft-cli gpu` lists the adapters this machine offers")]
+    #[error("no GPU adapter qualifies under the `{0}` policy")]
     NoAdapter(&'static str),
     #[error("{0}")]
     Policy(String),
@@ -256,10 +257,8 @@ impl TessGpu {
     }
 
     fn build(device: &wgpu::Device, shader: &str) -> (wgpu::ComputePipeline, wgpu::BindGroupLayout) {
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("solidcraft tessellation"),
-            source: wgpu::ShaderSource::Wgsl(shader.into()),
-        });
+        let module = device
+            .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("tessellation"), source: wgpu::ShaderSource::Wgsl(shader.into()) });
         let entry = |binding: u32, ty: wgpu::BufferBindingType| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::COMPUTE,
@@ -268,7 +267,7 @@ impl TessGpu {
         };
         let storage = |read_only| wgpu::BufferBindingType::Storage { read_only };
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("solidcraft tessellation"),
+            label: Some("tessellation"),
             entries: &[
                 entry(0, wgpu::BufferBindingType::Uniform),
                 entry(1, storage(true)),
@@ -278,12 +277,12 @@ impl TessGpu {
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("solidcraft tessellation"),
+            label: Some("tessellation"),
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("solidcraft tessellation"),
+            label: Some("tessellation"),
             layout: Some(&pipeline_layout),
             module: &module,
             entry_point: Some("main"),
@@ -293,10 +292,10 @@ impl TessGpu {
         (pipeline, layout)
     }
 
-    /// A device of its own, without a window (native only).
+    /// A device of its own, without a window (native only), on the adapter `policy` picks.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn headless() -> Result<Self> {
-        let (adapter, device, queue) = open_headless()?;
+    pub fn headless(policy: select::Policy) -> Result<Self> {
+        let (adapter, device, queue) = open_headless(policy)?;
         Self::new(adapter.get_info().name, device, queue)
     }
 

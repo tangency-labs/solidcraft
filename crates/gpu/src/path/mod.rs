@@ -125,7 +125,7 @@ pub fn host() -> Result<ImageHost> {
 /// Elsewhere a viewport on another backend is reopened on the same GPU through one of them.
 /// Without a usable adapter the executor is unavailable; CPU image methods remain usable.
 pub fn host_on_adapter(adapter: &wgpu::Adapter) -> Result<ImageHost> {
-    let policy = crate::select::Policy::from_env().map_err(gpu)?;
+    let policy = crate::env::policy().map_err(gpu)?;
     let info = adapter.get_info();
     if !viewport_path_backends(info.backend, cfg!(target_os = "windows")).intersects(crate::select::path_backends()) {
         return Err(gpu(format!("{VULKAN_ONLY}; the viewport uses {:?}", info.backend)));
@@ -183,7 +183,7 @@ fn open_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue)> {
     .map_err(gpu)
 }
 fn open_headless() -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
-    let policy = crate::select::Policy::from_env().map_err(gpu)?;
+    let policy = crate::env::policy().map_err(gpu)?;
     let (adapter, _) = crate::select::pick_path(policy, |_| true)
         .ok_or_else(|| gpu(format!("{VULKAN_ONLY}; no Vulkan or Metal adapter satisfies SOLIDCRAFT_GPU={}", policy.name())))?;
     let (device, queue) = open_device(&adapter)?;

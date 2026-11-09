@@ -21,7 +21,7 @@ fn measure_ground_ao_renderer_cost() -> Result<(), Box<dyn std::error::Error>> {
     ao_comparison(1)
 }
 fn ao_comparison(ground: u32) -> Result<(), Box<dyn std::error::Error>> {
-    let (adapter, _) = gpu::select::pick(gpu::select::Policy::from_env().map_err(std::io::Error::other)?).ok_or("no matching adapter")?;
+    let (adapter, _) = gpu::select::pick(gpu::env::policy().map_err(std::io::Error::other)?).ok_or("no matching adapter")?;
     let info = adapter.get_info();
     let features = wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
     if !adapter.features().contains(features) {
