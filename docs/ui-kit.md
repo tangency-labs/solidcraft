@@ -334,7 +334,7 @@ thirds, a 90% safe area and a centre mark from `FrameGuides`. These are viewport
 callers exclude them from exported images and result canvases.
 
 Module names below describe implementation locations, not caller import paths.
-Every inline element/variant has one entry in the light/dark `kit_gallery_tests::ELEMENTS`
+Every inline element/variant has one entry in the light/dark `gallery::ELEMENTS`
 table. Panel/Window/Confirm compositions also have dedicated geometry and interaction tests.
 
 | Module / element | Use and options | Main tokens |
@@ -577,7 +577,7 @@ weighted text.
 ## Extending and checking the kit
 
 Add one implementation, document its tokens/options here, re-export it through
-`mod.rs`, and add one table entry in `kit_gallery_tests::ELEMENTS`. Keep implementation-only
+`mod.rs`, and add one table entry in `gallery::ELEMENTS`. Keep implementation-only
 helpers private. Add interaction tests when the element introduces an action.
 
 The gallery checks geometry, label alignment, handles and effective paint bounds in
@@ -992,7 +992,7 @@ Gallery entries show all five sphere finishes, a mixed filled/empty look chain
 with Body active, and an empty chain with Face active in both themes.
 
 For CPU-rendered review images, run
-`SOLIDCRAFT_MATERIAL_WIDGET_EVIDENCE=/tmp/material-widgets cargo test -p solidcraft-ui-egui kit_gallery_tests::material_widgets_board_in_both_themes`.
+`SOLIDCRAFT_MATERIAL_WIDGET_EVIDENCE=/tmp/material-widgets cargo test -p solidcraft-ui-egui ui_kit::gallery::material_widgets_board_in_both_themes`.
 
 `catalog_scope` supplies compact catalog metrics to the shared search field, segments,
 icon segments and category chips. `catalog_footer` draws the quiet information hint.
@@ -1087,7 +1087,7 @@ Theme thumbnails (`paint_theme_thumbnail`, `paint_theme_system`) take a `ThemeSa
 `ThemeSample::from_tokens(&tokens)`), not the dialog's tokens, because a card shows its own theme.
 The Orientation figures and the visual-style icon are not repeated here: the app already has them.
 
-New pieces and figures each have an entry in `kit_gallery_tests::ELEMENTS` (`picture_card`, `toggle_tile`,
+New pieces and figures each have an entry in `gallery::ELEMENTS` (`picture_card`, `toggle_tile`,
 `preset_card`, `help_icon`, `theme_browser`, `preference_theme_thumbnails`, `preference_figures`), checked
 in both themes. `SOLIDCRAFT_PREFERENCE_WIDGET_EVIDENCE=<dir>` keeps the CPU-rendered boards
 (`preferences-widgets-*.png`, `preferences-figures-*.png`) from
