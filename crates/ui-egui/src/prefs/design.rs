@@ -196,16 +196,18 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn export_name(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
     ui_kit::settings_section(ui, "export_name", app.tr("prefs.export"), |ui| {
         ui_kit::settings_form(ui, label_width, |ui| {
-            ui_kit::settings_row_help(ui, app.tr("prefs.export_name"), app.tr("prefs.export_name_tip"), |ui| {
+            let tip = solidcraft_ui_text::format("prefs.export_name_tip", &[("placeholders", &crate::export_name::placeholder_list())]);
+            ui_kit::settings_row_help(ui, app.tr("prefs.export_name"), &tip, |ui| {
                 let hint = app.tr("prefs.export_name_hint").to_string();
                 let (_, response) = ui_kit::text_field_reserving(ui, &mut app.preferences.export_name, &hint, 0.0);
                 crate::scenario::publish_target("prefs:export_name", response.rect);
             });
         });
         if !app.preferences.export_name.trim().is_empty() {
-            let design = app.session.doc.name.clone();
             let body = crate::export_name::first_body(app);
-            let sample = crate::export_name::stem(&app.preferences.export_name, &design, body.as_deref(), &design);
+            let design = &app.session.doc.name;
+            let names = crate::export_name::Names { design, body: body.as_deref(), metadata: &app.session.doc.metadata };
+            let sample = crate::export_name::stem(&app.preferences.export_name, &names, design);
             ui_kit::text(
                 ui,
                 &solidcraft_ui_text::format("prefs.export_name_sample", &[("name", &format!("{sample}.step"))]),

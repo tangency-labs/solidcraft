@@ -600,7 +600,8 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
     let body = crate::selection::items(inputs, 0).body_names().into_iter().next();
     let design = &app.session.doc.name;
     let legacy = body.clone().unwrap_or_else(|| design.clone());
-    let name = crate::export_name::stem(&app.preferences.export_name, design, body.as_deref(), &legacy);
+    let names = crate::export_name::Names { design, body: body.as_deref(), metadata: &app.session.doc.metadata };
+    let name = crate::export_name::stem(&app.preferences.export_name, &names, &legacy);
     app.preferences.save_mesh_format = format.into();
     app.preferences.save_mesh_quality = QUALITIES.get(k.quality).map_or("standard", |q| q.1).into();
     // The file dialog answers later; the dialog closes meanwhile, as for every export.
@@ -997,6 +998,11 @@ mod tests {
         h.app.preferences.export_name = "{design}-{body}".into();
         assert_eq!(offer(&mut h), ["Bracket-Base.step", "Bracket-Base.stl"]);
         assert!(h.dir.join("Bracket-Base.step").is_file() && h.dir.join("Bracket-Base.stl").is_file(), "the files are written");
+
+        // Design properties are placeholders too, set as File › Design Properties sets them.
+        h.app.run("document.metadata.set", json!({"values": {"part_number": "RV-102", "revision": "C"}})).unwrap();
+        h.app.preferences.export_name = "{part_number}_rev{revision}".into();
+        assert_eq!(offer(&mut h), ["RV-102_revC.step", "RV-102_revC.stl"]);
     }
 
     #[test]

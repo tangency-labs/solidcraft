@@ -1,28 +1,87 @@
 //! The file name an export offers in the save dialog, from the Export file name preference: a
-//! template where `{design}` stands for the design's name and `{body}` for the exported body's.
+//! template where `{design}` stands for the design's name, `{body}` for the exported body's, and
+//! `{project}`, `{part_number}`, `{revision}` and the other Design Properties for their values.
 //! An empty template keeps the name each export offered before the preference existed.
 
-/// Placeholder for the design's name.
-pub(crate) const DESIGN: &str = "{design}";
-/// Placeholder for the exported body's name.
-pub(crate) const BODY: &str = "{body}";
+use solidcraft_engine::doc::Metadata;
+use solidcraft_engine::doc::metadata::{Owner, keys};
+
+/// Placeholder name for the design's name.
+const DESIGN: &str = "design";
+/// Placeholder name for the exported body's name.
+const BODY: &str = "body";
 
 /// Longest name offered, in characters; file systems commonly allow 255 bytes with the extension.
 const MAX_CHARS: usize = 200;
 
-/// The file name, without extension, offered for an export of design `design`. `body` is the
-/// exported body (the first one when an export holds several; `None` when the design has no
-/// body, and `{body}` then reads as the design's name). `legacy` is the name offered with an empty
-/// template, or when the template leaves nothing usable as a file name.
-pub(crate) fn stem(template: &str, design: &str, body: Option<&str>, legacy: &str) -> String {
+/// What the placeholders of a template stand for in one export.
+pub(crate) struct Names<'a> {
+    pub design: &'a str,
+    /// The exported body (the first one when an export holds several; `None` when the design has
+    /// no body, and `{body}` then reads as the design's name).
+    pub body: Option<&'a str>,
+    /// The design's properties (File › Design Properties); one that is not set reads as empty.
+    pub metadata: &'a Metadata,
+}
+
+impl Names<'_> {
+    /// The value of placeholder `name`, or `None` when it is no placeholder.
+    fn value(&self, name: &str) -> Option<&str> {
+        match name {
+            DESIGN => Some(self.design),
+            BODY => Some(self.body.unwrap_or(self.design)),
+            _ => keys(Owner::Design).find(|k| k.name == name).map(|k| self.metadata.text(k.name).unwrap_or_default()),
+        }
+    }
+}
+
+/// The file name, without extension, offered for an export. `legacy` is the name offered with an
+/// empty template, or when the template leaves nothing usable as a file name.
+pub(crate) fn stem(template: &str, names: &Names, legacy: &str) -> String {
     if template.trim().is_empty() {
         return legacy.to_string();
     }
-    let named = template.replace(DESIGN, design).replace(BODY, body.unwrap_or(design));
+    let named = fill(template, names);
     let safe: String = named.chars().map(|c| if forbidden(c) { '_' } else { c }).take(MAX_CHARS).collect();
     // Windows drops trailing dots and spaces; leading ones hide the file or read as a mistake.
     let safe = safe.trim_matches(|c: char| c.is_whitespace() || c == '.');
     if safe.chars().all(|c| c == '_') { legacy.to_string() } else { safe.to_string() }
+}
+
+/// `template` with each `{placeholder}` replaced, in one pass: a value that holds braces itself
+/// (a body named `{revision}`) is kept as it is. Other text in braces is kept as typed.
+fn fill(template: &str, names: &Names) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some((before, after)) = rest.split_once('{') {
+        out.push_str(before);
+        let Some((name, tail)) = after.split_once('}') else {
+            out.push('{');
+            rest = after;
+            continue;
+        };
+        match names.value(name) {
+            Some(value) => out.push_str(value),
+            None => {
+                out.push('{');
+                out.push_str(name);
+                out.push('}');
+            }
+        }
+        rest = tail;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Every placeholder with what it stands for, one per line, for the setting's help.
+pub(crate) fn placeholder_list() -> String {
+    let own = [(DESIGN, "prefs.export_name.design"), (BODY, "prefs.export_name.body")];
+    own.into_iter()
+        .chain(keys(Owner::Design).map(|k| (k.name, k.label)))
+        .map(|(name, label)| format!("{{{name}}}  {}", solidcraft_ui_text::tr(label)))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The body `{body}` names in an export of the whole design: its first body, in model order.
@@ -38,33 +97,77 @@ fn forbidden(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn metadata(values: serde_json::Value) -> Metadata {
+        serde_json::from_value(values).unwrap()
+    }
+
+    fn name(template: &str, design: &str, body: Option<&str>, legacy: &str) -> String {
+        stem(template, &Names { design, body, metadata: &Metadata::default() }, legacy)
+    }
 
     #[test]
     fn an_empty_template_offers_the_old_name() {
-        assert_eq!(stem("", "Bracket", Some("Base"), "Base"), "Base");
-        assert_eq!(stem("   ", "Bracket", None, "Bracket"), "Bracket");
+        assert_eq!(name("", "Bracket", Some("Base"), "Base"), "Base");
+        assert_eq!(name("   ", "Bracket", None, "Bracket"), "Bracket");
     }
 
     #[test]
     fn placeholders_take_the_design_and_body_names() {
-        assert_eq!(stem("{design}-{body}", "Bracket", Some("Base"), "x"), "Bracket-Base");
-        assert_eq!(stem("{body} ({design}) {body}", "Bracket", Some("Base"), "x"), "Base (Bracket) Base");
-        assert_eq!(stem("print_{design}", "Bracket", Some("Base"), "x"), "print_Bracket");
-        assert_eq!(stem("{design}-{unknown}", "Bracket", Some("Base"), "x"), "Bracket-{unknown}", "other text is kept as typed");
+        assert_eq!(name("{design}-{body}", "Bracket", Some("Base"), "x"), "Bracket-Base");
+        assert_eq!(name("{body} ({design}) {body}", "Bracket", Some("Base"), "x"), "Base (Bracket) Base");
+        assert_eq!(name("print_{design}", "Bracket", Some("Base"), "x"), "print_Bracket");
+        assert_eq!(name("{design}-{unknown}", "Bracket", Some("Base"), "x"), "Bracket-{unknown}", "other text is kept as typed");
+        assert_eq!(name("{design}-{body", "Bracket", Some("Base"), "x"), "Bracket-{body", "an unclosed brace too");
+    }
+
+    #[test]
+    fn design_properties_are_placeholders_and_an_unset_one_is_empty() {
+        let m = metadata(json!({"project": "Rover", "part_number": "RV-102", "revision": "C", "author": "Sam",
+            "organization": "Acme", "description": "Motor mount", "license": "CC-BY-4.0"}));
+        let names = Names { design: "Bracket", body: Some("Base"), metadata: &m };
+        let all = "{project} {part_number} {revision} {author} {organization} {description} {license}";
+        assert_eq!(stem(all, &names, "x"), "Rover RV-102 C Sam Acme Motor mount CC-BY-4.0");
+        assert_eq!(stem("{part_number}_rev{revision}", &names, "x"), "RV-102_revC");
+
+        let names = Names { design: "Bracket", body: None, metadata: &metadata(json!({"revision": 3})) };
+        assert_eq!(stem("{design}_rev{revision}", &names, "x"), "Bracket_rev", "unset, or not text, reads as empty");
+        assert_eq!(stem("{part_number}", &names, "Old"), "Old", "nothing is left");
+    }
+
+    #[test]
+    fn a_value_with_braces_is_not_filled_in_again() {
+        let m = metadata(json!({"revision": "C"}));
+        let names = Names { design: "{body}", body: Some("{revision}"), metadata: &m };
+        assert_eq!(stem("{design}-{body}-{revision}", &names, "x"), "{body}-{revision}-C");
     }
 
     #[test]
     fn a_design_with_no_body_names_the_body_after_the_design() {
-        assert_eq!(stem("{body}", "Bracket", None, "x"), "Bracket");
+        assert_eq!(name("{body}", "Bracket", None, "x"), "Bracket");
     }
 
     #[test]
     fn the_name_is_safe_as_a_file_name() {
-        assert_eq!(stem("{design}/{body}", "A:B", Some("C?"), "x"), "A_B_C_");
-        assert_eq!(stem(" .{design}. ", "Bracket", None, "x"), "Bracket");
-        assert_eq!(stem("{body}", "Bracket", Some("a\nb\t"), "x"), "a_b_");
-        assert_eq!(stem("{body}", "Bracket", Some(".."), "Old"), "Old", "nothing usable is left");
-        assert_eq!(stem("///", "Bracket", None, "Old"), "Old");
-        assert_eq!(stem(&"{design}".repeat(100), "Bracketé", None, "x").chars().count(), MAX_CHARS);
+        assert_eq!(name("{design}/{body}", "A:B", Some("C?"), "x"), "A_B_C_");
+        assert_eq!(name(" .{design}. ", "Bracket", None, "x"), "Bracket");
+        assert_eq!(name("{body}", "Bracket", Some("a\nb\t"), "x"), "a_b_");
+        assert_eq!(name("{body}", "Bracket", Some(".."), "Old"), "Old", "nothing usable is left");
+        assert_eq!(name("///", "Bracket", None, "Old"), "Old");
+        assert_eq!(name(&"{design}".repeat(100), "Bracketé", None, "x").chars().count(), MAX_CHARS);
+    }
+
+    #[test]
+    fn the_help_lists_every_placeholder_once() {
+        crate::i18n::install();
+        let _language = solidcraft_ui_text::scope("en");
+        let list = placeholder_list();
+        let names: Vec<&str> = list.lines().filter_map(|l| l.split_once("  ").map(|(n, _)| n)).collect();
+        assert_eq!(
+            names,
+            ["{design}", "{body}", "{project}", "{part_number}", "{revision}", "{author}", "{organization}", "{description}", "{license}"]
+        );
+        assert!(list.contains("{part_number}  Part number"), "each with its label: {list}");
     }
 }

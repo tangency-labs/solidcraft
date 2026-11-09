@@ -220,9 +220,19 @@ The control channel sets the same preference with `ui.prefs {"max_step_file_mb":
 ## Export file names
 
 **Preferences → Design → Export file name** sets the name that **File → Export** and **Save As
-Mesh** offer in the save dialog. `{design}` stands for the design's name and `{body}` for the
-exported body's name. When an export holds several bodies, `{body}` is the first one. With
-`{design}-{body}`, the body Base of the design Bracket is offered as `Bracket-Base.step` or
+Mesh** offer in the save dialog. The setting is a template. Each placeholder in it is replaced:
+
+| Placeholder | Replaced with |
+|---|---|
+| `{design}` | The design's name |
+| `{body}` | The exported body's name. When an export holds several bodies, the first one |
+| `{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}` | That [design property](#design-properties) |
+
+The help icon next to the setting lists the same placeholders. A design property that is not set
+is left out. Other text in braces stays as typed.
+
+With `{part_number}_rev{revision}`, a design with part number RV-102 and revision C is offered as
+`RV-102_revC.step`. With `{design}-{body}`, the body Base of the design Bracket is offered as
 `Bracket-Base.stl`. Characters that file names cannot hold (`/ \ : * ? " < > |`) become `_`. Left
 empty, STEP, OBJ and URDF offer the design's name, and a mesh offers its body's name. The control
 channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
