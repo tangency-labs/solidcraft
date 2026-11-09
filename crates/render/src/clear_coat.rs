@@ -137,11 +137,12 @@ mod tests {
             }
         }
         // A pure metal's density has no diffuse term: back toward the viewer, far from its
-        // mirror direction, it falls well below a dielectric's, which keeps the cosine lobe.
+        // mirror direction, it falls well below a dielectric's, which keeps the cosine lobe
+        // (with the old even split the two would be equal).
         let v = Vec3::new(0.6, 0.0, 0.8);
         let metal = surface_pdf(surface(1.0, 0.0), Vec3::Z, v, v).unwrap();
         let dielectric = surface_pdf(surface(0.0, 0.0), Vec3::Z, v, v).unwrap();
-        assert!(metal < 0.25 * dielectric, "{metal} vs {dielectric}");
+        assert!(metal < 0.5 * dielectric, "{metal} vs {dielectric}");
     }
 
     /// Sampling and density must describe one distribution. Samples drawn the way the GPU path
@@ -179,9 +180,7 @@ mod tests {
                             Vec3::new(x.sqrt() * phi.cos(), x.sqrt() * phi.sin(), (1.0 - x).sqrt())
                         } else {
                             let r = if component >= 1.0 - coat { 0.3_f64 } else { 0.5 };
-                            let c = ((1.0 - x) / (1.0 + (r.powi(4) - 1.0) * x)).sqrt();
-                            let radius = (1.0 - c * c).sqrt();
-                            let h = Vec3::new(radius * phi.cos(), radius * phi.sin(), c);
+                            let h = crate::glass_model::visible_normal(v, Vec3::Z, r * r, [x, radical_inverse(i, 3)]).unwrap();
                             h * (2.0 * v.dot(h)) - v
                         };
                         above += u32::from(l.z > 0.0);
