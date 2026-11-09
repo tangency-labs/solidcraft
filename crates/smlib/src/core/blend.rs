@@ -295,6 +295,7 @@ fn face_set(b: &Brep) -> solidcore::Result<HashSet<FaceId>> {
 /// [`Error::Unported`] naming it.
 fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> (Error, Option<EdgeId>) {
     let info = s.error_info();
+    let minimum = s.fit_setback();
     let (fit, reason) = match &e {
         SolidError::FilletRefused { fit, reason, .. } => (Some(*fit), reason.or(info.no_room_reason())),
         _ if info.code == FilletErrorType::NoRoom as i32 => (s.fit_size(), info.no_room_reason()),
@@ -314,6 +315,13 @@ fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> (Error, 
             FitKind::Chord => crate::FitKind::Chord,
         };
         (Error::TooLarge { size: fit.size, kind, at: None, why: reason.and_then(room_reason) }, fit.edge)
+    } else if !corner
+        && info.code == FilletErrorType::NoRoom as i32
+        && info.no_room_reason() != Some(NoRoomReason::RailLeavesFace)
+        && minimum.is_finite()
+        && minimum > 0.0
+    {
+        (Error::SetbackTooSmall { minimum }, None)
     } else {
         (blend_failure_unsized(info, e, corner), None)
     }

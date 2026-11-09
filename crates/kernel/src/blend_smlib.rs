@@ -459,6 +459,7 @@ mod imp {
                      run on tangentially into each other, or meet in a way no blend corner builds)"
                 )),
                 SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
+                SmError::SetbackTooSmall { minimum } => KernelError::Invalid(format!("{}{minimum} mm", crate::blend::SETBACK_AT_LEAST)),
                 // Not a size a smaller radius fixes: solidcore builds no swept turn there.
                 SmError::TurnRefused { why, at, .. } => {
                     let at = at.map(|[x, y, z]| format!(" at ({x:.3}, {y:.3}, {z:.3})")).unwrap_or_default();

@@ -46,6 +46,9 @@ pub enum Error {
     /// No room for the operation: an inward offset (a shell's wall, faces moved in) leaves none
     /// inside the body, or a blend is larger than the faces it rolls on allow.
     NoRoom,
+    /// A corner setback too short for a convex fill, with the smallest absolute setback
+    /// distance that solidcore certifies to build it.
+    SetbackTooSmall { minimum: f64 },
     /// An offset whose walls would meet (a shell's): the offsets of two faces touch without
     /// crossing, a hole's wall offset just reaching a side's, so the result would pinch to
     /// nothing along a line. A thinner or a thicker wall builds.
@@ -178,6 +181,9 @@ impl std::fmt::Display for Error {
             Error::NoMatch { point } => write!(f, "selection point {} is not near any edge or face", point + 1),
             Error::Ambiguous { point } => write!(f, "selection point {} is equally near to two edges or faces", point + 1),
             Error::NoRoom => write!(f, "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow"),
+            Error::SetbackTooSmall { minimum } => {
+                write!(f, "the smallest setback that builds is {minimum} mm")
+            }
             Error::WallsTouch => write!(f, "the offset's walls would meet along a line, which leaves no solid there"),
             Error::TooLarge { size, kind, at, why } => {
                 write!(f, "the blend is larger than its faces allow")?;
