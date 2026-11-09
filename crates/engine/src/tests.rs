@@ -5247,6 +5247,16 @@ fn names_an_edit_gives_a_pattern_of_two_bodies_name_its_copies_in_order() {
     run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"bodies": ["Post"], "body_names": ["Left", "Right"]}}));
     assert_eq!(shape(&mut s, "Left"), ("post", 30.0), "{:?}", names(&s));
     assert_eq!(shape(&mut s, "Right"), ("post", 60.0), "{:?}", names(&s));
+
+    // Names given that are the very names stored are still given: read in order, not moved.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new_body", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 0, 10], "operation": "new_body", "body_name": "Post"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base", "Post"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30, "name": "Pat"}));
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"body_names": ["Left", "Right"]}}));
+    assert_eq!(s.doc.find_feature("Pat").map(|f| f.body_names.clone()), Some(vec!["Left".to_string(), "Right".to_string()]));
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"bodies": ["Post"], "body_names": ["Left", "Right"]}}));
+    assert_eq!(shape(&mut s, "Left"), ("post", 30.0), "{:?}", names(&s));
 }
 
 /// A sketch side drawn as two collinear lines extrudes into one flat face, not two with an edge
