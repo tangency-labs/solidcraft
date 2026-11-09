@@ -1,0 +1,35 @@
+{
+  "area": "construction",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-point-three-planes-refuses-two-parallel",
+  "expected": {
+    "method": "XY and z = 5 are parallel: refused",
+    "outcome": "refused",
+    "refusal": "two of the planes are parallel",
+    "source": "analytic",
+    "sources": [],
+    "what": "three planes, two of them parallel"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 1 (construct.point.three_planes): two of the planes are parallel",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 1 (construct.point.three_planes): two of the planes are parallel",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "three planes, two of them parallel",
+  "why_not": [
+    "no kernel operation ran before the failure: step 1 (construct.point.three_planes): two of the planes are parallel"
+  ]
+}

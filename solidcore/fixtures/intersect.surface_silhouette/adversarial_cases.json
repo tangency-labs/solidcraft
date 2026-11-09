@@ -1,0 +1,4949 @@
+{
+ "cases": [
+  {
+   "name": "adv_plane_prev_axis_x",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 0,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       2,
+       -1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": -1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       5,
+       5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 2,
+      "t": [
+       1,
+       0,
+       0
+      ],
+      "uv": [
+       -5,
+       -5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_prev_ang_axis_x",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0,
+     0
+    ],
+    "tol": null,
+    "ang": 1.5,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_prev_axis_y",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     0,
+     1,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 0,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       2,
+       -1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": -1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       5,
+       5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 2,
+      "t": [
+       1,
+       0,
+       0
+      ],
+      "uv": [
+       -5,
+       -5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_prev_ang_axis_y",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     0,
+     1,
+     0
+    ],
+    "tol": null,
+    "ang": 1.5,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_prev_near_x",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     1e-09,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 0,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       2,
+       -1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": -1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       5,
+       5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 2,
+      "t": [
+       1,
+       0,
+       0
+      ],
+      "uv": [
+       -5,
+       -5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_prev_ang_near_x",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     1e-09,
+     0
+    ],
+    "tol": null,
+    "ang": 1.5,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_prev_near_x2",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0.0001,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 0,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       2,
+       -1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": -1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       5,
+       5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 2,
+      "t": [
+       1,
+       0,
+       0
+      ],
+      "uv": [
+       -5,
+       -5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_prev_ang_near_x2",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0.0001,
+     0
+    ],
+    "tol": null,
+    "ang": 1.5,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_prev_diag",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     1,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 0,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       2,
+       -1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": -1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       5,
+       5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 2,
+      "t": [
+       1,
+       0,
+       0
+      ],
+      "uv": [
+       -5,
+       -5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_prev_ang_diag",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     1,
+     0
+    ],
+    "tol": null,
+    "ang": 1.5,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_prev_neg_x",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     -1,
+     0,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 0,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       2,
+       -1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": -1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       5,
+       5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 2,
+      "t": [
+       1,
+       0,
+       0
+      ],
+      "uv": [
+       -5,
+       -5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_prev_ang_neg_x",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     -1,
+     0,
+     0
+    ],
+    "tol": null,
+    "ang": 1.5,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_prev_tilt",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0,
+     1e-09
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 0,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       2,
+       -1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": -1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       5,
+       5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 2,
+      "t": [
+       1,
+       0,
+       0
+      ],
+      "uv": [
+       -5,
+       -5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_prev_ang_tilt",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0,
+     1e-09
+    ],
+    "tol": null,
+    "ang": 1.5,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_persp_in_plane",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": true,
+    "eye": [
+     3,
+     0,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 2,
+      "t": [
+       0,
+       0,
+       1
+      ],
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       3,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_persp_on_pt",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": true,
+    "eye": [
+     1,
+     2,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 2,
+      "t": [
+       0,
+       0,
+       1
+      ],
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       3,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_persp_above",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": true,
+    "eye": [
+     0,
+     0,
+     5
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 2,
+      "t": [
+       0,
+       0,
+       1
+      ],
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       3,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_persp_in_plane_diag",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": true,
+    "eye": [
+     3,
+     3,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 2,
+      "t": [
+       0,
+       0,
+       1
+      ],
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       3,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_persp_near",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": true,
+    "eye": [
+     1,
+     2,
+     1e-12
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 2,
+      "t": [
+       0,
+       0,
+       1
+      ],
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       1,
+       2
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       3,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_scale_tiny",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      1e-06,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1e-06,
+      1e-06
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_scale_persp_tiny",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      1e-06,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1e-06,
+      1e-06
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": true,
+    "eye": [
+     4e-06,
+     0,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_scale_huge",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      100000.0,
+      200000.0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      100000.0,
+      100000.0
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_plane_scale_persp_huge",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      100000.0,
+      200000.0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      100000.0,
+      100000.0
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": true,
+    "eye": [
+     400000.0,
+     200000.0,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_pcyl_along_y",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "bspline",
+     "p": 2,
+     "q": 2,
+     "net": [
+      [
+       [
+        -1.0,
+        -1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        -0.33333333333333337,
+        -1.0,
+        0.055555555555555566,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.33333333333333337,
+        0.0,
+        0.055555555555555566,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.33333333333333337,
+        1.0,
+        0.055555555555555566,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0.33333333333333326,
+        -1.0,
+        0.05555555555555553,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.33333333333333326,
+        0.0,
+        0.05555555555555553,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.33333333333333326,
+        1.0,
+        0.05555555555555553,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        1.0,
+        -1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.5,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "perspective": false,
+    "eye": [
+     0,
+     1,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.2
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.3
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.6,
+       0.4
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.2,
+       0.9
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": -1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_pcyl_along_y_neg",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "bspline",
+     "p": 2,
+     "q": 2,
+     "net": [
+      [
+       [
+        -1.0,
+        -1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        -0.33333333333333337,
+        -1.0,
+        0.055555555555555566,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.33333333333333337,
+        0.0,
+        0.055555555555555566,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.33333333333333337,
+        1.0,
+        0.055555555555555566,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0.33333333333333326,
+        -1.0,
+        0.05555555555555553,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.33333333333333326,
+        0.0,
+        0.05555555555555553,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.33333333333333326,
+        1.0,
+        0.05555555555555553,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        1.0,
+        -1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.5,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "perspective": false,
+    "eye": [
+     0,
+     -1,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.2
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.3
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.6,
+       0.4
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.2,
+       0.9
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": -1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_pcyl_eye_far_y",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "bspline",
+     "p": 2,
+     "q": 2,
+     "net": [
+      [
+       [
+        -1.0,
+        -1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        -0.33333333333333337,
+        -1.0,
+        0.055555555555555566,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.33333333333333337,
+        0.0,
+        0.055555555555555566,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.33333333333333337,
+        1.0,
+        0.055555555555555566,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0.33333333333333326,
+        -1.0,
+        0.05555555555555553,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.33333333333333326,
+        0.0,
+        0.05555555555555553,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.33333333333333326,
+        1.0,
+        0.05555555555555553,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        1.0,
+        -1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.5,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "perspective": true,
+    "eye": [
+     0,
+     10000.0,
+     0.2
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.2
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.3
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.6,
+       0.4
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.2,
+       0.9
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": -1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_pcyl_along_y_tilt",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "bspline",
+     "p": 2,
+     "q": 2,
+     "net": [
+      [
+       [
+        -1.0,
+        -1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        -0.33333333333333337,
+        -1.0,
+        0.055555555555555566,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.33333333333333337,
+        0.0,
+        0.055555555555555566,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.33333333333333337,
+        1.0,
+        0.055555555555555566,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0.33333333333333326,
+        -1.0,
+        0.05555555555555553,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.33333333333333326,
+        0.0,
+        0.05555555555555553,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.33333333333333326,
+        1.0,
+        0.05555555555555553,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        1.0,
+        -1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        1.0,
+        0.5,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.5,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "perspective": false,
+    "eye": [
+     0,
+     1,
+     1e-09
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.2
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.3
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.6,
+       0.4
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.2,
+       0.9
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": -1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_saddle_chain_ang_None",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "bspline",
+     "p": 2,
+     "q": 2,
+     "net": [
+      [
+       [
+        -1.0,
+        -1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0.0,
+        -1.0,
+        -0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        1.0,
+        -0.5,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        1.0,
+        -1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0,
+     0.3
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.1,
+       0.1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.2,
+       0.15
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_saddle_chain_ang_0.001",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "bspline",
+     "p": 2,
+     "q": 2,
+     "net": [
+      [
+       [
+        -1.0,
+        -1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0.0,
+        -1.0,
+        -0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        1.0,
+        -0.5,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        1.0,
+        -1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0,
+     0.3
+    ],
+    "tol": null,
+    "ang": 0.001,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.1,
+       0.1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.2,
+       0.15
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_saddle_chain_ang_1.5",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "bspline",
+     "p": 2,
+     "q": 2,
+     "net": [
+      [
+       [
+        -1.0,
+        -1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0.0,
+        -1.0,
+        -0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        1.0,
+        -0.5,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        1.0,
+        -1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0,
+     0.3
+    ],
+    "tol": null,
+    "ang": 1.5,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.1,
+       0.1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.2,
+       0.15
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "adv_saddle_chain_ang_0.0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surface": {
+     "kind": "bspline",
+     "p": 2,
+     "q": 2,
+     "net": [
+      [
+       [
+        -1.0,
+        -1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0.0,
+        -1.0,
+        -0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        1.0,
+        -0.5,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        1.0,
+        -1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0.0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0,
+     0.3
+    ],
+    "tol": null,
+    "ang": 0.0,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.1,
+       0.1
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.2,
+       0.15
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "advx_plane_outside_par_in",
+   "upstream_ref": "review: adversarial (plane outside its extent)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       10,
+       10
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       1,
+       0,
+       0
+      ],
+      "uv": [
+       10,
+       -12
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       12,
+       3
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       30,
+       3
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       8,
+       8
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       8,
+       8
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "advx_plane_outside_par_wider",
+   "upstream_ref": "review: adversarial (plane outside its extent)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -20,
+     -20,
+     20,
+     20
+    ],
+    "perspective": false,
+    "eye": [
+     1,
+     0,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       10,
+       10
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       1,
+       0,
+       0
+      ],
+      "uv": [
+       10,
+       -12
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       12,
+       3
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       30,
+       3
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       8,
+       8
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       8,
+       8
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "advx_plane_outside_persp_in",
+   "upstream_ref": "review: adversarial (plane outside its extent)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": true,
+    "eye": [
+     30,
+     0,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       10,
+       10
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       1,
+       0,
+       0
+      ],
+      "uv": [
+       10,
+       -12
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       12,
+       3
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       30,
+       3
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       8,
+       8
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       8,
+       8
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "advx_plane_outside_persp_wider",
+   "upstream_ref": "review: adversarial (plane outside its extent)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -20,
+     -20,
+     20,
+     20
+    ],
+    "perspective": true,
+    "eye": [
+     30,
+     0,
+     0
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       10,
+       10
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       1,
+       0,
+       0
+      ],
+      "uv": [
+       10,
+       -12
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       12,
+       3
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       30,
+       3
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       8,
+       8
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       8,
+       8
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "advx_plane_outside_persp_above_in",
+   "upstream_ref": "review: adversarial (plane outside its extent)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -5,
+     -5,
+     5,
+     5
+    ],
+    "perspective": true,
+    "eye": [
+     0,
+     0,
+     3
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       10,
+       10
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       1,
+       0,
+       0
+      ],
+      "uv": [
+       10,
+       -12
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       12,
+       3
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       30,
+       3
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       8,
+       8
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       8,
+       8
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "advx_plane_outside_persp_above_wider",
+   "upstream_ref": "review: adversarial (plane outside its extent)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -5,
+      -5,
+      5,
+      5
+     ]
+    },
+    "domain": [
+     -20,
+     -20,
+     20,
+     20
+    ],
+    "perspective": true,
+    "eye": [
+     0,
+     0,
+     3
+    ],
+    "tol": null,
+    "ang": null,
+    "ops": [
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       0,
+       1,
+       0
+      ],
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": true,
+      "kind": 1,
+      "t": [
+       0,
+       0,
+       0
+      ],
+      "uv": [
+       10,
+       10
+      ]
+     },
+     {
+      "op": "cpv",
+      "dir": 1.0,
+      "use_prev": false,
+      "kind": 2,
+      "t": [
+       1,
+       0,
+       0
+      ],
+      "uv": [
+       10,
+       -12
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       12,
+       3
+      ]
+     },
+     {
+      "op": "lps",
+      "uv": [
+       30,
+       3
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": false,
+      "uv": [
+       8,
+       8
+      ]
+     },
+     {
+      "op": "on_curve",
+      "refine": true,
+      "uv": [
+       8,
+       8
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

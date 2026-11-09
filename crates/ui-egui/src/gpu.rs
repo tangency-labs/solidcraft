@@ -516,11 +516,28 @@ fn offscreen_adapter(policy: solidcraft_gpu::select::Policy) -> Option<wgpu::Ada
     }
 }
 
-/// A device of its own for an offscreen render or check (`None` without a GPU adapter the
-/// `SOLIDCRAFT_GPU` policy admits, or when the variable names no policy), on [`offscreen_backends`]. One test at a time starts its
-/// instance, adapter and device ([`offscreen_starting`]).
+/// The test process's offscreen device, for an offscreen render or check: started once, on
+/// [`offscreen_own_device`], and shared by every test after it (#13395). A new device for every
+/// render also compiled the viewport's pipelines anew: 28 renders took 55 s, on one device 4 s.
+/// `None` when [`offscreen_own_device`] is; only a device is kept, so after a failed start (a GPU
+/// briefly out of memory) the next test tries again rather than every later one skipping. A test
+/// that loses its device, or changes how the device reports errors or its loss, takes
+/// [`offscreen_own_device`] instead.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn offscreen_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    static SHARED: std::sync::Mutex<Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)>> = std::sync::Mutex::new(None);
+    let mut shared = SHARED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if shared.is_none() {
+        *shared = offscreen_own_device();
+    }
+    shared.clone()
+}
+
+/// A device of its own for an offscreen test (`None` without a GPU adapter the `SOLIDCRAFT_GPU`
+/// policy admits, or when the variable names no policy), on [`offscreen_backends`]. One test at a
+/// time starts its instance, adapter and device ([`offscreen_starting`]).
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn offscreen_own_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     let policy = solidcraft_gpu::select::Policy::from_env().map_err(|e| eprintln!("no offscreen device: {e}")).ok()?;
     let _one_at_a_time = offscreen_starting();
     let adapter = offscreen_adapter(policy)?;
@@ -1709,7 +1726,7 @@ mod tests {
     #[test]
     fn a_lost_device_stops_drawing_and_pictures_fall_back_to_the_cpu() {
         use egui_wgpu::wgpu;
-        let Some((adapter, device, queue)) = super::offscreen_device() else {
+        let Some((adapter, device, queue)) = super::offscreen_own_device() else {
             eprintln!("skipping: no GPU adapter");
             return;
         };
@@ -1749,7 +1766,7 @@ mod tests {
     #[test]
     fn the_lost_device_probe_is_clean_on_a_working_device() {
         use egui_wgpu::wgpu;
-        let Some((adapter, device, queue)) = super::offscreen_device() else {
+        let Some((adapter, device, queue)) = super::offscreen_own_device() else {
             eprintln!("skipping: no GPU adapter");
             return;
         };
@@ -1783,7 +1800,7 @@ mod tests {
     #[test]
     fn a_frame_that_meets_a_lost_device_is_survived() {
         use egui_wgpu::wgpu;
-        let Some((_, device, queue)) = super::offscreen_device() else {
+        let Some((_, device, queue)) = super::offscreen_own_device() else {
             eprintln!("skipping: no GPU adapter");
             return;
         };

@@ -1152,7 +1152,7 @@ pub(crate) fn selection_field(ui: &mut Ui, text: &str, options: Selection) -> Re
         ui,
         text_rect,
         text,
-        crate::fonts::medium(t.font_label),
+        crate::ui_kit::type_face::medium(t.font_label),
         match (active, filled) {
             (true, _) if inverted => t.selected_ink,
             (true, true) => t.selected_ink,

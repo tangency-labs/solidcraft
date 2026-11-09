@@ -1,0 +1,151 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "1649-crossing-cylinders-union-far-from-origin",
+  "expected": {
+    "body_count": 1,
+    "method": "A: axis x, r5, x 17.5..27.5 about (y,z)=(30,7.5); B: axis y, r12.5, y 30..35 about (x,z)=(17.5,15). V = Va + Vb - Vint, Va=pi*25*10=785.398, Vb=pi*156.25*5=2454.369. Vint = integral over z in [2.5,12.5] of L(z)*min(10,w(z)) dz with L=sqrt(25-(z-7.5)^2) (A's y half-chord, B only has y>=30) and w=sqrt(156.25-(z-15)^2) (B's x reach from x=17.5, A spans 10) = 346.31 (substitution z=7.5+5 sin t, Simpson; cross-checked by a 400^3 midpoint grid: 346.36). V = 3239.767 - 346.31 = 2893.46. The translation does not change it",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1649"
+    ],
+    "volume_mm3": 2893.458,
+    "what": "union of two crossing cylinders, both moved (1000,-700,300) mm: volume lost with position"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 7,
+      "vertices": 7
+    }
+  },
+  "records": "1649-crossing-cylinders-union-far-from-origin.bodies.json.gz",
+  "result": [
+    {
+      "body": "A",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1543.6683651652152,
+      "body_count": 1,
+      "edges": 9,
+      "faces": 6,
+      "vertices": 5,
+      "volume_mm3": 2893.457843396582
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1649"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "union of two crossing cylinders, both moved (1000,-700,300) mm: volume lost with position",
+  "why_not": []
+}

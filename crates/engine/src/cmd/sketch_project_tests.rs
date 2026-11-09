@@ -1803,3 +1803,87 @@ fn projected_references_can_start_as_construction() {
     run(&mut s, "sketch.project", json!({"refs": [{"edge": [40, 15, 20]}], "construction": false}));
     assert_eq!(flags(&mut s), vec![true, false]);
 }
+
+/// #13464: an imported mesh is one face with no edges, so Project on one of its faces projected
+/// nothing. The pick now means the flat patch of triangles there: a box's top projects as its
+/// rectangle, its side seen edge-on as a line, and the link keeps the pick's point (a mesh's face
+/// name says nothing of the patch), so the sketch still builds once finished.
+#[test]
+fn a_face_of_an_imported_mesh_projects_its_flat_patch() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-project-mesh-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("box.stl");
+    let mut src = Session::default();
+    run(&mut src, "solid.box", json!({"length": 20, "width": 10, "height": 5}));
+    run(&mut src, "file.export_stl", json!({"path": stl.to_string_lossy()}));
+
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let body = s.model.state().bodies[0].name.clone();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 20}));
+    run(&mut s, "sketch.project", json!({"refs": [{"body": body, "face": [10, 5, 5]}]}));
+    let si = inspect(&mut s);
+    let lines = linked_curves(&si);
+    assert_eq!(lines.len(), 4, "{si}");
+    let mut corners: Vec<(i64, i64)> = lines
+        .iter()
+        .flat_map(|c| [&c["start_at"], &c["end_at"]])
+        .map(|p| ((p[0].as_f64().unwrap() * 1e6).round() as i64, (p[1].as_f64().unwrap() * 1e6).round() as i64))
+        .collect();
+    corners.sort_unstable();
+    corners.dedup();
+    assert_eq!(corners, [(0, 0), (0, 10_000_000), (20_000_000, 0), (20_000_000, 10_000_000)], "{si}");
+    assert!(s.active_sketch.is_some());
+    run(&mut s, "sketch.finish", json!({}));
+    let failing: Vec<_> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(failing.is_empty(), "{failing:?}");
+
+    // A side seen edge-on: the line it makes.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 20}));
+    run(&mut s, "sketch.project", json!({"refs": [{"body": body, "face": [10, 0, 2.5]}]}));
+    assert_eq!(linked_curves(&inspect(&mut s)).len(), 1);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// #13464: on a sketch plane at a slant to the face, a flat patch's polygon keeps its straight
+/// sides. A rectangle's four corners and a triangle's three always lie on one circle, so they must
+/// not be taken for a circle seen at a slant (an ellipse); a tessellated circle still is one.
+#[test]
+fn a_mesh_face_keeps_its_straight_sides_on_a_slanted_plane() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-project-mesh-slant-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut src = Session::default();
+    run(&mut src, "solid.box", json!({"length": 20, "width": 10, "height": 5, "body_name": "box"}));
+    run(&mut src, "sketch.create", json!({"plane": "XY"}));
+    run(&mut src, "sketch.line", json!({"points": [[30, 0], [42, 0], [34, 9], [30, 0]]}));
+    run(&mut src, "sketch.finish", json!({}));
+    let sketch = src.doc.features.last().unwrap().id;
+    run(&mut src, "solid.extrude", json!({"sketch": sketch, "distance": 5, "body_name": "tri"}));
+    run(&mut src, "solid.cylinder", json!({"base": [60, 0, 0], "radius": 7, "height": 5}));
+    let mut stls = Vec::new();
+    for body in src.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>() {
+        let path = dir.join(format!("{body}.stl"));
+        run(&mut src, "file.export_stl", json!({"path": path.to_string_lossy(), "bodies": [body]}));
+        stls.push(path);
+    }
+
+    let mut s = Session::default();
+    for stl in &stls {
+        run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    }
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": "X", "angle": "30 deg", "name": "Tilt"}));
+    let kinds = |s: &mut Session, body: &str, at: [f64; 3]| -> Vec<String> {
+        run(s, "sketch.create", json!({"plane": "Tilt"}));
+        run(s, "sketch.project", json!({"refs": [{"body": body, "face": at}]}));
+        let kinds = linked_curves(&inspect(s)).iter().map(|c| c["type"].as_str().unwrap_or("").to_string()).collect();
+        run(s, "sketch.finish", json!({}));
+        kinds
+    };
+    assert_eq!(kinds(&mut s, &names[0], [10., 5., 5.]), ["line"; 4], "the box's top is a rectangle");
+    assert_eq!(kinds(&mut s, &names[1], [35., 3., 5.]), ["line"; 3], "the prism's top is a triangle");
+    let round = kinds(&mut s, &names[2], [60., 0., 5.]);
+    assert_eq!(round.len(), 1, "the cylinder's top is one curve: {round:?}");
+    assert_eq!(round[0], "ellipse", "the cylinder's round top, seen at a slant: {round:?}");
+    std::fs::remove_dir_all(&dir).ok();
+}

@@ -269,7 +269,7 @@ fn mouse_mapping_search_keeps_main_gesture_chords_and_actions() {
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
             scope(ui, |ui| {
                 ui.set_width(280.0);
-                let _search = crate::ui_kit::settings_search::begin(ui, query);
+                let _search = crate::ui_kit::settings_search::begin(ui, query, "prefs");
                 settings_mouse_mapping(
                     ui,
                     &[(vec!["Ctrl/Cmd".into(), "Middle drag".into()], "Zoom toward the cursor".into()), (vec!["Alt/Option".into()], "Orbit".into())],

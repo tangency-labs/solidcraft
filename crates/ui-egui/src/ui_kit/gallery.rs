@@ -1120,7 +1120,7 @@ const ELEMENTS: &[Element] = &[
         FileView::sample_grid(
             ui,
             "gallery:file:sample",
-            &[SampleCard { title: "Sample Plate", description: "Parametric plate with holes and a bored boss", icon: "new", thumbnail: None }],
+            &[SampleCard { title: "Sample Plate", description: "Parametric plate with holes and a bored boss", icon: "new".into(), thumbnail: None }],
         );
     }),
     element!("file_recovery", |ui, _| {
@@ -1145,6 +1145,7 @@ const ELEMENTS: &[Element] = &[
                 radius: CommandSearch::field_radius(1.0, true),
                 progress: 1.0,
             },
+            Some("S"),
             4096,
         );
         ui.add_space(Tokens::get().space_6);
@@ -1238,11 +1239,11 @@ const ELEMENTS: &[Element] = &[
             &mut s.selected,
             &[WindowPage {
                 group: Some("prefs.input"),
-                icon: "settings",
+                icon: Icon::Kit("settings"),
                 label: "ui.general",
                 handle: "gallery:page",
                 scroll: true,
-                draw: |ui, _: &mut ()| {
+                draw: &|ui, _: &mut ()| {
                     text(ui, "General", Text::Inline);
                 },
             }],
@@ -1918,7 +1919,7 @@ const ELEMENTS: &[Element] = &[
         let t = Tokens::get();
         let (rect, response) = ui.allocate_exact_size(vec2(t.form_button_height * 3.0, t.form_button_height * 2.0), egui::Sense::click());
         ui.painter().add(persistent_button_shape(ui, &response, rect));
-        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Selected", crate::fonts::semibold(t.font_label), t.selected_ink);
+        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Selected", crate::ui_kit::type_face::semibold(t.font_label), t.selected_ink);
         solidcraft_ui_registry::publish_target("gallery:persistent_button", rect);
     }),
     element!("native_button_focus", "gallery:native_button_focus", Some("gallery:native_button_focus"), |ui, _| {
