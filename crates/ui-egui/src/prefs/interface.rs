@@ -24,7 +24,7 @@ fn accent_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::swatch_grid(ui, &ACCENTS, |ui, hex| {
         let Some(color) = solidcraft_theme::parse_accent(hex) else { return };
         let chosen = app.preferences.accent.eq_ignore_ascii_case(hex);
-        let swatch = ui_kit::color_swatch(ui, egui::Id::new(("sc_accent", hex)), color, chosen, hex, ());
+        let swatch = ui_kit::color_swatch(ui, egui::Id::unique(("sc_accent", hex)), color, chosen, hex, ());
         crate::scenario::publish_target(&format!("prefs:accent:{hex}"), swatch.rect);
         if swatch.clicked() {
             app.preferences.accent = (*hex).to_string();
