@@ -1,6 +1,7 @@
 use super::*;
-use crate::{Camera, ProductMesh, StandardView};
+use crate::ProductMesh;
 use solidcraft_geom::{Aabb3, Mesh};
+use solidcraft_viewport::{Camera, StandardView};
 use std::sync::Arc;
 
 fn request() -> ImageRequest {
@@ -98,7 +99,7 @@ fn glass_is_sorted_back_to_front_independently_of_body_order() {
 fn physical_transmission_keeps_the_exact_scalar_cpu_preview() {
     let original = square("Glass", [80, 180, 140], 0.25, Vec3::ZERO);
     let mut glass = original.clone();
-    glass.surface = Some(crate::surface::OpaqueSurface::new(Vec3::new(0.2, 0.4, 0.3), 0.0, 0.1, 1.5).unwrap());
+    glass.surface = Some(solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.2, 0.4, 0.3), 0.0, 0.1, 1.5).unwrap());
     glass.transmission = Some(crate::transmission::Transmission::new(Vec3::new(-0.7_f64.ln(), -0.9_f64.ln(), 0.0) / 10.0, None).unwrap());
     let expected = finish(ImageTask::new(scene(vec![original]), request(), CancelToken::default()).unwrap());
     let actual = finish(ImageTask::new(scene(vec![glass]), request(), CancelToken::default()).unwrap());

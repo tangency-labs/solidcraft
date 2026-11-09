@@ -1,0 +1,584 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcore/issues/968",
+ "pr": "https://github.com/sinu0/solidcraft/commit/479ea28c2b4f04feef05f7649e70459a868380c6",
+ "test": "crates/engine/src/boolean_regression_tests.rs: a_tapered_pocket_floor_cut_on_down_after_corner_rounds_leaves_no_skin, a_tapered_cut_on_down_from_a_rounded_pocket_floor_leaves_no_skin (sinu0's fork; no SolidCraft issue or PR during the kernel pause)",
+ "summary": "An 80 x 80 x 40 block with a 60 x 60 pocket 15 deep whose walls lean out 10 degrees (floor side s = 60 - 30 tan 10 at z = 25), R3 on the pocket's 4 rim edges and 4 corner edges, then the floor cut 5 further down. SolidCraft's earlier kernel kept the old floor as a face of no thickness over a sealed void. The pocket is built from boxes (the box z 25..45 intersected with four boxes each turned 10 degrees about a floor edge), as SM_API has no drafted extrude of a profile with corner edges at the pin; the floor's corners after the rounds are quarter ellipses, so the cut sweeps the floor face's own boundary. Expected values are the issue's closed forms: the volume the cut removes (the rounded body's has none) and one lump (no void).",
+ "cases": [
+  {
+   "name": "floor_cut_straight_down",
+   "note": "variant (a): the rounded pocket's floor face swept 5 straight down and cut away. SolidCraft's earlier kernel kept the old floor at z = 25 as a face over a sealed void (two lumps).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      80,
+      80,
+      40
+     ]
+    },
+    {
+     "op": "box",
+     "id": "slab_x_lo",
+     "origin": [
+      12.644904710627,
+      -100,
+      0
+     ],
+     "size": [
+      200,
+      280,
+      100
+     ]
+    },
+    {
+     "op": "rotate",
+     "id": "wall_x_lo",
+     "body": "slab_x_lo",
+     "point": [
+      12.644904710627,
+      0,
+      25
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "degrees": -10
+    },
+    {
+     "op": "box",
+     "id": "slab_x_hi",
+     "origin": [
+      -132.644904710627,
+      -100,
+      0
+     ],
+     "size": [
+      200,
+      280,
+      100
+     ]
+    },
+    {
+     "op": "rotate",
+     "id": "wall_x_hi",
+     "body": "slab_x_hi",
+     "point": [
+      67.355095289373,
+      0,
+      25
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "degrees": 10
+    },
+    {
+     "op": "box",
+     "id": "slab_y_lo",
+     "origin": [
+      -100,
+      12.644904710627,
+      0
+     ],
+     "size": [
+      280,
+      200,
+      100
+     ]
+    },
+    {
+     "op": "rotate",
+     "id": "wall_y_lo",
+     "body": "slab_y_lo",
+     "point": [
+      0,
+      12.644904710627,
+      25
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "degrees": 10
+    },
+    {
+     "op": "box",
+     "id": "slab_y_hi",
+     "origin": [
+      -100,
+      -132.644904710627,
+      0
+     ],
+     "size": [
+      280,
+      200,
+      100
+     ]
+    },
+    {
+     "op": "rotate",
+     "id": "wall_y_hi",
+     "body": "slab_y_hi",
+     "point": [
+      0,
+      67.355095289373,
+      25
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "degrees": -10
+    },
+    {
+     "op": "box",
+     "id": "pocketband",
+     "origin": [
+      -100,
+      -100,
+      25
+     ],
+     "size": [
+      280,
+      280,
+      20
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "pocket1",
+     "a": "pocketband",
+     "b": "wall_x_lo"
+    },
+    {
+     "op": "intersection",
+     "id": "pocket2",
+     "a": "pocket1",
+     "b": "wall_x_hi"
+    },
+    {
+     "op": "intersection",
+     "id": "pocket3",
+     "a": "pocket2",
+     "b": "wall_y_lo"
+    },
+    {
+     "op": "intersection",
+     "id": "pocket",
+     "a": "pocket3",
+     "b": "wall_y_hi"
+    },
+    {
+     "op": "difference",
+     "id": "pocketed",
+     "a": "block",
+     "b": "pocket"
+    },
+    {
+     "op": "fillet",
+     "id": "rounded",
+     "body": "pocketed",
+     "edges": [
+      [
+       40,
+       10,
+       40
+      ],
+      [
+       70,
+       40,
+       40
+      ],
+      [
+       40,
+       70,
+       40
+      ],
+      [
+       10,
+       40,
+       40
+      ],
+      [
+       11.322452355313,
+       11.322452355313,
+       32.5
+      ],
+      [
+       68.677547644687,
+       11.322452355313,
+       32.5
+      ],
+      [
+       68.677547644687,
+       68.677547644687,
+       32.5
+      ],
+      [
+       11.322452355313,
+       68.677547644687,
+       32.5
+      ]
+     ],
+     "radius": 3
+    },
+    {
+     "op": "sweep_face",
+     "id": "floor_prism",
+     "body": "rounded",
+     "face": [
+      40,
+      40,
+      25
+     ],
+     "direction": [
+      0,
+      0,
+      -1
+     ],
+     "distance": 5
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "rounded",
+     "b": "floor_prism"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "rounded",
+     "value": 14928.928206,
+     "tol": 0.01,
+     "formula": "5 (s^2 - 4 delta), s = 60 - 30 tan 10 = 54.710191, delta = 1.854828 (the area one corner round takes from the square at every height)"
+    }
+   }
+  },
+  {
+   "name": "floor_cut_drafted_down",
+   "note": "variant (b): the cut continues the pocket's walls 10 degrees and its corner rounds down to z = 20: the frustum z 20..25 of the same walls, its four corner edges rounded 3 (the same cylinders as the pocket's corner rounds), cut away.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      80,
+      80,
+      40
+     ]
+    },
+    {
+     "op": "box",
+     "id": "slab_x_lo",
+     "origin": [
+      12.644904710627,
+      -100,
+      0
+     ],
+     "size": [
+      200,
+      280,
+      100
+     ]
+    },
+    {
+     "op": "rotate",
+     "id": "wall_x_lo",
+     "body": "slab_x_lo",
+     "point": [
+      12.644904710627,
+      0,
+      25
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "degrees": -10
+    },
+    {
+     "op": "box",
+     "id": "slab_x_hi",
+     "origin": [
+      -132.644904710627,
+      -100,
+      0
+     ],
+     "size": [
+      200,
+      280,
+      100
+     ]
+    },
+    {
+     "op": "rotate",
+     "id": "wall_x_hi",
+     "body": "slab_x_hi",
+     "point": [
+      67.355095289373,
+      0,
+      25
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "degrees": 10
+    },
+    {
+     "op": "box",
+     "id": "slab_y_lo",
+     "origin": [
+      -100,
+      12.644904710627,
+      0
+     ],
+     "size": [
+      280,
+      200,
+      100
+     ]
+    },
+    {
+     "op": "rotate",
+     "id": "wall_y_lo",
+     "body": "slab_y_lo",
+     "point": [
+      0,
+      12.644904710627,
+      25
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "degrees": 10
+    },
+    {
+     "op": "box",
+     "id": "slab_y_hi",
+     "origin": [
+      -100,
+      -132.644904710627,
+      0
+     ],
+     "size": [
+      280,
+      200,
+      100
+     ]
+    },
+    {
+     "op": "rotate",
+     "id": "wall_y_hi",
+     "body": "slab_y_hi",
+     "point": [
+      0,
+      67.355095289373,
+      25
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "degrees": -10
+    },
+    {
+     "op": "box",
+     "id": "pocketband",
+     "origin": [
+      -100,
+      -100,
+      25
+     ],
+     "size": [
+      280,
+      280,
+      20
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "pocket1",
+     "a": "pocketband",
+     "b": "wall_x_lo"
+    },
+    {
+     "op": "intersection",
+     "id": "pocket2",
+     "a": "pocket1",
+     "b": "wall_x_hi"
+    },
+    {
+     "op": "intersection",
+     "id": "pocket3",
+     "a": "pocket2",
+     "b": "wall_y_lo"
+    },
+    {
+     "op": "intersection",
+     "id": "pocket",
+     "a": "pocket3",
+     "b": "wall_y_hi"
+    },
+    {
+     "op": "difference",
+     "id": "pocketed",
+     "a": "block",
+     "b": "pocket"
+    },
+    {
+     "op": "fillet",
+     "id": "rounded",
+     "body": "pocketed",
+     "edges": [
+      [
+       40,
+       10,
+       40
+      ],
+      [
+       70,
+       40,
+       40
+      ],
+      [
+       40,
+       70,
+       40
+      ],
+      [
+       10,
+       40,
+       40
+      ],
+      [
+       11.322452355313,
+       11.322452355313,
+       32.5
+      ],
+      [
+       68.677547644687,
+       11.322452355313,
+       32.5
+      ],
+      [
+       68.677547644687,
+       68.677547644687,
+       32.5
+      ],
+      [
+       11.322452355313,
+       68.677547644687,
+       32.5
+      ]
+     ],
+     "radius": 3
+    },
+    {
+     "op": "box",
+     "id": "cutband",
+     "origin": [
+      -100,
+      -100,
+      20
+     ],
+     "size": [
+      280,
+      280,
+      5
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "cut1",
+     "a": "cutband",
+     "b": "wall_x_lo"
+    },
+    {
+     "op": "intersection",
+     "id": "cut2",
+     "a": "cut1",
+     "b": "wall_x_hi"
+    },
+    {
+     "op": "intersection",
+     "id": "cut3",
+     "a": "cut2",
+     "b": "wall_y_lo"
+    },
+    {
+     "op": "intersection",
+     "id": "cut",
+     "a": "cut3",
+     "b": "wall_y_hi"
+    },
+    {
+     "op": "fillet",
+     "id": "cut_rounded",
+     "body": "cut",
+     "edges": [
+      [
+       13.085722162398,
+       13.085722162398,
+       22.5
+      ],
+      [
+       66.914277837602,
+       13.085722162398,
+       22.5
+      ],
+      [
+       66.914277837602,
+       66.914277837602,
+       22.5
+      ],
+      [
+       13.085722162398,
+       66.914277837602,
+       22.5
+      ]
+     ],
+     "radius": 3
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "rounded",
+     "b": "cut_rounded"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "rounded",
+     "value": 14451.765937,
+     "tol": 0.01,
+     "formula": "integral over z 20..25 of s(z)^2 - 4 delta = 5 (s0^2 + s0 s1 + s1^2) / 3 - 20 delta, s(z) = 60 - 2 (40 - z) tan 10 (s0 = 52.946921, s1 = 54.710191), delta = 1.854828"
+    }
+   }
+  }
+ ]
+}

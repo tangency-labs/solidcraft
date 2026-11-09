@@ -35,7 +35,7 @@ mod native_crash;
 mod native_crash_macos;
 #[cfg(target_os = "windows")]
 mod native_frame;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 mod native_menu;
 mod nav_bridge;
 #[cfg(target_os = "macos")]
@@ -913,17 +913,7 @@ fn app_viewport(custom_titlebar: bool) -> Result<egui::ViewportBuilder, eframe::
     #[cfg(not(target_os = "macos"))]
     let icon =
         egui::IconData { rgba: app_icon::rgba(64).map_err(|e| eframe::Error::AppCreation(std::io::Error::other(e).into()))?, width: 64, height: 64 };
-    Ok(egui::ViewportBuilder::default()
-        .with_title("SolidCraft")
-        .with_icon(icon)
-        .with_inner_size([1600.0, 1000.0])
-        .with_min_inner_size([960.0, 600.0])
-        .with_drag_and_drop(true)
-        .with_decorations(!custom_titlebar)
-        .with_fullsize_content_view(true)
-        .with_titlebar_shown(false)
-        .with_title_shown(false)
-        .with_app_id(APP_ID))
+    Ok(solidcraft_ui_egui::window_chrome::viewport("SolidCraft", APP_ID, custom_titlebar).with_icon(icon))
 }
 
 /// The window's app id: it names the desktop entry, so it is the packages' reverse-DNS id.
@@ -1239,7 +1229,7 @@ fn main() -> eframe::Result {
                 app.session.undo.clear();
                 // Built straight into the session, so nothing asked for a fit: frame it at the
                 // home view as any opened design is (#9195). The fit waits for the first layout.
-                app.cam.set_view(solidcraft_engine::render::StandardView::Iso);
+                app.cam.set_view(solidcraft_viewport::StandardView::Iso);
                 app.fit_view();
             }
             // Lock files next to open designs: a design open on another computer says so (#5467),
@@ -1370,7 +1360,7 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
         let indirect = std::env::var(startup::INDIRECT_VALIDATION_ENV).ok();
         setup.instance_descriptor.flags = startup::window_instance_flags(setup.instance_descriptor.flags, intel_mac, indirect.as_deref());
         // Never a `dxcompiler.dll` another program put on PATH (#6756).
-        setup.instance_descriptor.backend_options.dx12.shader_compiler = solidcraft_gpu::dx12_compiler();
+        setup.instance_descriptor.backend_options.dx12.shader_compiler = solidcraft_viewport_gpu::dx12_compiler();
         let environment = std::env::var("WGPU_ADAPTER_NAME").ok();
         let adapter = graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string));
         startup::configure_adapter(setup, cpu, environment, adapter);

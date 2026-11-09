@@ -1,0 +1,6 @@
+{
+  "unit": "nlib.crv_tool_p2",
+  "cases": [
+    {"name": "fuzz00518_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/nlib.crv_tool_p2/fuzz00518.json (panic: rust: attempt to multiply with overflow at crates/solidcore/src/nurbs/crv_tool/p2.rs:229)", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "ok", "inputs": {"crv": {"cpts": [[4.37, -0.946, 4.38, 0.558]], "p": 9223372036854775807, "u": [1.0]}, "op": "remove_knots", "tol": 0.001}}
+  ]
+}

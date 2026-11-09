@@ -1,0 +1,291 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The merge queue tests each PR merged with the latest main (and the PRs ahead of it).
+  merge_group:
+  workflow_dispatch:
+
+# Every job runs on Blacksmith's hosted runners (blacksmith.sh; ephemeral VMs, sponsored
+# minutes, outside the org's 20-runner cap): pushes to main, every pull request (fork or not)
+# and Run workflow. Builds are cached with actions/cache (Swatinem/rust-cache). To fall back when the sponsorship ends, change the
+# `blacksmith-*` labels back to `ubuntu-latest`. A new push to a PR supersedes the run on its
+# previous head, so cancel it. Runs on main are keyed by commit, so they never queue behind or
+# cancel each other: every merge is checked.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # The upstream pin (UPSTREAM_REPO/UPSTREAM_VERSION/UPSTREAM_COMMIT) comes from
+  # scripts/upstream-pin.env, loaded by .github/actions/upstream.
+
+permissions:
+  contents: read
+
+jobs:
+  # The gate: fmt, clippy, the tests, wasm and the goldens (every unit's cases against their
+  # committed expected outputs).
+  #
+  # What this run must check. `code`: false only when a pull_request or merge_group change
+  # touches nothing but docs (DOCS_ONLY below); those skip the build/test/goldens jobs, whose
+  # required checks then report "skipped" (passing). `full`: code and not a push to main. A
+  # push to main was already tested on the identical tree by the merge queue, so it runs only
+  # what publishes main's artifacts (the solids report); everything else is skipped there.
+  changes:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      code: ${{ steps.c.outputs.code }}
+      full: ${{ steps.c.outputs.full }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: c
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: scripts/ci/changes.sh "$EVENT" "$BASE" >> "$GITHUB_OUTPUT"
+
+  ci-scripts:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
+      - run: scripts/ci/test-wasm-digest.sh
+      - run: python3 -I scripts/ci/check_record_ids.py
+
+  fmt:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain || rustup toolchain install
+      - run: cargo fmt --all --check
+      - name: No new entries in frozen archives (one file per finding / upstream issue)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: scripts/ci/check-frozen-archives.sh "$BASE"
+
+  clippy:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Panic-prone calls the deny lints don't see (integer / and %, Vec::remove, ...; #2490):
+      # one more clippy pass over the library crates with type-resolved lints (dependencies
+      # are already checked above), compared with plan/panic-sites.tsv, which may only shrink.
+      - name: Panic-site inventory
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          if [ -n "$BASE" ]; then
+            git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch -q --no-tags --depth=1 origin "$BASE"
+            python3 -I scripts/ci/check_panic_sites.py --base "$BASE"
+          else
+            python3 -I scripts/ci/check_panic_sites.py
+          fi
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    env:
+      # Tests that read upstream/TestFiles fail instead of skipping when it is missing.
+      SOLIDCORE_REQUIRE_UPSTREAM: "1"
+    steps:
+      - uses: actions/checkout@v4
+      # upstream/ for the tests that read its TestFiles.
+      - name: Upstream sources for the workspace tests
+        uses: ./.github/actions/upstream
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+      # Every test runs once, optimised, in the goldens profile (Cargo.toml
+      # [profile.goldens]: opt-level 3 with overflow-checks and debug-assertions still
+      # on; Rust floating point does not change with opt-level, and this is the build the
+      # goldens are checked with). Unoptimised, the suite took ~30 of
+      # this job's ~40 minutes; optimised it takes a few. Its solidcore is the one the
+      # solids report below reuses, so it is built once.
+      # cargo-nextest runs the tests of all binaries in parallel (one process per test),
+      # so a binary whose tests are slow no longer holds up the rest. nextest skips
+      # doctests, so they run separately. The two SolidCraft whole-corpus tests are
+      # #[ignore]d and run nightly (nightly.yml), as before.
+      - uses: taiki-e/install-action@v2
+        if: needs.changes.outputs.full == 'true'
+        with:
+          tool: cargo-nextest@0.9.150
+      - name: Workspace tests (goldens profile)
+        if: needs.changes.outputs.full == 'true'
+        run: cargo nextest run --workspace --cargo-profile goldens --no-fail-fast
+      - name: Doctests (goldens profile)
+        if: needs.changes.outputs.full == 'true'
+        run: cargo test --workspace --profile goldens --doc
+      # Solids: the primitives example's per-shape results (built, blocker, checks) for
+      # the site's Solids page. It reuses the goldens-profile build above and exits 1
+      # while any primitive fails, so only a crash (or a missing JSON) fails the job.
+      - name: Solids report (primitives example)
+        run: |
+          set +e
+          cargo run --profile goldens -p solidcore --example primitives -- --json reports/solids/solids.json
+          rc=$?
+          set -e
+          [ "$rc" -le 1 ] && test -s reports/solids/solids.json
+      # main's solids report is published from here (site), never committed.
+      - name: Upload solids report
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: solids-report
+          path: reports/solids/solids.json
+          if-no-files-found: error
+          retention-days: 90
+
+  # One build of solidcore in the goldens profile for the two checks that only run a binary:
+  # the kernel rig's test binary and the goldens binary, uploaded for the kernel-rig and
+  # goldens jobs below, so neither compiles the kernel again (rust-cache keeps dependencies,
+  # not workspace crates). The test job builds its own (every test binary, gigabytes, too much
+  # to pass between jobs) in parallel with this one.
+  build:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+          key: build
+      - name: Build the rig and goldens binaries (goldens profile)
+        run: |
+          mkdir -p dist
+          rig=$(cargo test --profile goldens -p solidcore-ops --test kernel_cases --no-run \
+                  --message-format=json \
+                | jq -r 'select(.reason == "compiler-artifact" and .target.name == "kernel_cases"
+                                and .profile.test) | .executable' | tail -n 1)
+          test -x "$rig"
+          cp "$rig" dist/kernel_cases
+          if [ "${{ needs.changes.outputs.full }}" = true ]; then
+            cargo build --profile goldens -p goldens
+            cp bin/goldens/goldens dist/goldens
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: check-binaries
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  # The kernel rig (#2394): SolidCraft's operation-level cases in
+  # crates/solidcore/tests/kernel_cases, replayed through solidcore-ops' public
+  # operations and graded against the rig's values (crates/solidcore-ops/tests/
+  # kernel_cases.rs). The test is #[ignore]d out of the workspace run; here it runs whole,
+  # from the build job's binary. It fails on a case that fails, on a hang, and on a
+  # known-failing case whose result moved (the list must shrink); an operation solidcore-ops
+  # does not have yet is reported unported, not run. When the corpus grows slow, shard it
+  # by area with KERNEL_CASES_AREA. The table is uploaded.
+  kernel-rig:
+    needs: [changes, build]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: check-binaries
+          path: dist
+      - name: Kernel rig
+        env:
+          KERNEL_CASES_REPORT: ${{ github.workspace }}/reports/kernel-rig/table.md
+        # run as cargo test runs it: from the crate's directory
+        run: |
+          mkdir -p reports/kernel-rig
+          chmod +x dist/kernel_cases
+          cd crates/solidcore-ops
+          "$GITHUB_WORKSPACE/dist/kernel_cases" --ignored --nocapture
+      - name: Upload the table
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-rig
+          path: reports/kernel-rig/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  wasm:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+      - run: rustup target add wasm32-unknown-unknown
+      - run: cargo check -p solidcore --target wasm32-unknown-unknown
+
+  # Each package builds on the Rust release its `rust-version` declares (scripts/ci/
+  # check-rust-version.sh). Downstream users build on older pinned toolchains than
+  # rust-toolchain.toml's, and nothing else here runs one.
+  rust-version:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+      - run: scripts/ci/check-rust-version.sh
+
+  # Same packaging check the release workflow runs before publishing (no secrets).
+  publish-dry-run:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+      - run: cargo publish -p solidcore --locked --dry-run
+
+  deny:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses bans sources
+
+  # Every unit's cases, run on solidcore and checked against the unit's golden
+  # (crates/goldens/expected/<unit>.jsonl): a case whose output changed (beyond the 1e-9
+  # relative rule and the unit's documented floors), a case added or missing, and a case
+  # that breaks (harness error or panic) all fail, each printed with its first
+  # differences. A golden changes only with `--bless`, justified in the pull request.
+  # --jobs 0: one child process per unit, one per vCPU (same output as a serial run).
+  goldens:
+    needs: [changes, build]
+    if: needs.changes.outputs.full == 'true'
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      # upstream/TestFiles: the .smb, .sms and point files many fixtures read.
+      - name: Upstream sources (TestFiles)
+        uses: ./.github/actions/upstream
+      - uses: actions/download-artifact@v4
+        with:
+          name: check-binaries
+          path: dist
+      - name: Every unit against its golden
+        run: |
+          chmod +x dist/goldens
+          dist/goldens --all --goldens --jobs 0 --no-report

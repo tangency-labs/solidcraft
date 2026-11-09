@@ -1,0 +1,45 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-timeline-reorder-cut-before-its-sketch-refused",
+  "expected": {
+    "method": "the cut cannot find its sketch there: the move breaks a feature that worked and is refused",
+    "outcome": "refused",
+    "refusal": "moving Notch there breaks Notch",
+    "source": "invariants",
+    "sources": [],
+    "what": "timeline.reorder of a cut to before its own sketch"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 6 (timeline.reorder): invalid parameters for `timeline.reorder`: moving Notch there breaks Notch (unknown sketch 2 (it must come earlier in the timeline))",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 6 (timeline.reorder): invalid parameters for `timeline.reorder`: moving Notch there breaks Notch (unknown sketch 2 (it must come earlier in the timeline))",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "timeline.reorder of a cut to before its own sketch",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 6 (timeline.reorder): invalid parameters for `timeline.reorder`: moving Notch there breaks Notch (unknown sketch 2 (it must come earlier in the timeline))"
+  ]
+}

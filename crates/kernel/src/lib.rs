@@ -2,12 +2,12 @@
 //!
 //! Everything SolidCraft does with solids goes through this crate: building bodies from planar
 //! regions (extrude, revolve) and primitives, booleans, fillets and chamfers, tessellation,
-//! measurement and STEP export and import. The implementation uses the `truck` crates (Apache-2.0; see
-//! `plan/adr/0001-geometry-kernel.md`) plus our own local operations (edge fillets and
-//! chamfers in `blend.rs`), but no truck type appears in the public API, so the kernel can be
-//! replaced without touching the rest of the workspace.
+//! measurement and STEP export and import. The implementation uses the vendored `solidcore`
+//! kernel (Apache-2.0, `solidcore`) plus our own local operations (edge fillets and
+//! chamfers in `blend.rs`), but no solidcore type appears in the public API, so the kernel can
+//! be replaced without touching the rest of the workspace.
 //!
-//! Every call into the third-party kernel runs under [`guard`]: a panic inside it becomes a
+//! Every call into the vendored kernel runs under [`guard`]: a panic inside it becomes a
 //! [`KernelError::Internal`] instead of taking the application down.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -99,6 +99,8 @@ mod outline_tests;
 mod par;
 pub use par::{KERNEL_STACK, for_each_on_threads, kernel_thread, map_on_threads, map_with_local_pools};
 #[cfg(test)]
+mod display_plan_tests;
+#[cfg(test)]
 mod pinch_tests;
 #[cfg(test)]
 mod planar_faces_tests;
@@ -140,7 +142,6 @@ mod sweep_path;
 #[cfg(test)]
 mod sweep_rails_tests;
 mod tangent_edge;
-mod tess;
 #[cfg(test)]
 mod thin_face_tests;
 #[cfg(test)]
@@ -199,7 +200,7 @@ pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
 pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
 pub use mesh_convert::convert_prismatic_mesh;
-pub use meshbody::{MAX_TRIANGLES, mesh_body};
+pub use meshbody::{MAX_TRIANGLES, mesh_body, mesh_body_with_normals};
 pub use native::{body_from_smlib, smlib_body};
 pub use native::{brep_record, decode_native_body, encode_native_body, native_preview_mesh};
 pub use offset::with_same_surface;
@@ -252,12 +253,23 @@ pub enum KernelError {
     /// shown like any feature that isn't supported yet.
     #[error("the operation failed: not supported yet: {0}")]
     TooLarge(String),
-    /// The third-party kernel panicked; the model is unchanged.
+    /// The vendored kernel panicked; the model is unchanged.
     #[error("kernel internal error: {0}")]
     Internal(String),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
+
+/// The mesher's error as the kernel's: the same words.
+impl From<solidcore_tess::TessError> for KernelError {
+    fn from(e: solidcore_tess::TessError) -> KernelError {
+        match e {
+            solidcore_tess::TessError::Invalid(m) => KernelError::Invalid(m),
+            solidcore_tess::TessError::Failed(m) => KernelError::Failed(m),
+            solidcore_tess::TessError::Internal(m) => KernelError::Internal(m),
+        }
+    }
+}
 
 /// Why a kernel step failed: a message, or an error of the solidcore wrapper, which may be a
 /// panic the wrapper caught ([`solidcraft_smlib::Error::Internal`]).
@@ -322,7 +334,7 @@ pub fn crash_test() -> Result<()> {
     solidcraft_smlib::crash_test().map_err(|e| KernelError::smlib("crash test", e))
 }
 
-/// Run third-party kernel code, converting a panic into an error.
+/// Run vendored kernel code, converting a panic into an error.
 pub fn guard<T>(what: &str, f: impl FnOnce() -> Result<T>) -> Result<T> {
     struct Depth;
     impl Drop for Depth {

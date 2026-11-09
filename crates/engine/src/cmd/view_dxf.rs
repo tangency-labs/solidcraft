@@ -13,7 +13,7 @@ pub(super) mod sketch;
 use serde_json::Value;
 use solidcore_record::Vec2;
 use solidcraft_io::{DxfEntity, DxfLayer, DxfLinetype, DxfShape};
-use solidcraft_render::Camera;
+use solidcraft_viewport::Camera;
 
 use super::CommandSpec;
 use crate::params::{bad, str_};

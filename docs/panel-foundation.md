@@ -26,6 +26,14 @@ Browser/History uses the existing content preference and suppresses the separate
 History body. Render Inspector, Shots and appearances keep their existing hosts
 and contribute their actual footprints to navigation and camera fitting.
 
+Assistant uses the shared flow and actual content width. Tall content keeps the
+conversation above its pinned composer. A viable Wide presentation puts the
+conversation beside the existing provider controls and composer; smaller widths
+retain the stacked presentation. Both use the same content identities, draft,
+scroll state and backend. Shared header status on hover and its attention indication
+come from the existing Assistant state and pending approvals. Classic and native
+Assistant composition is unchanged.
+
 Visible bodies report their natural scroll content and fixed control bands.
 A sole production panel hugs that content until column capacity requires scrolling;
 Assistant declares Fill to use the full available side height. A newly visible unmeasured
@@ -50,7 +58,7 @@ Each section contains ordered tabs. Inactive tabs still constrain composite size
 limits. Registrations declare allowed zones, PinOuter, Content/Fill height policy,
 text-heavy content, surface preference, header actions and independent
 `closable`/`hot_closable` flags. No generic host branches on product panel names.
-Only future History product registration allows Bottom; synthetic kinds can allow
+Only the History product registration allows Bottom; synthetic kinds can allow
 all zones. Quick close is an affordance, not the close capability itself.
 
 Layout is application/workspace preference data. It never enters CAD files,

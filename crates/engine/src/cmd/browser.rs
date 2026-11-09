@@ -1090,7 +1090,7 @@ pub(crate) fn saved_view_form(c: &Value) -> std::result::Result<solidcraft_doc::
 
 /// The camera `view.apply` turns to for a `camera` it is given, as the handler reads it (and
 /// `ApplyCamera`, its contract type), or the message the handler refuses it with.
-pub(crate) fn applied_camera_form(c: &Value) -> std::result::Result<crate::render::Camera, String> {
+pub(crate) fn applied_camera_form(c: &Value) -> std::result::Result<solidcraft_viewport::Camera, String> {
     if c.get("up").is_some() {
         return Err("camera `up` is not supported: the up axis comes from the design settings".into());
     }
@@ -1103,7 +1103,7 @@ pub(crate) fn applied_camera_form(c: &Value) -> std::result::Result<crate::rende
     if !(v.pitch.abs() <= std::f64::consts::FRAC_PI_2 + 1e-9) {
         return Err("camera `pitch` must be within ±π/2 radians (±90°)".into());
     }
-    let cam = crate::render::Camera { roll: roll.clamp(-std::f64::consts::PI, std::f64::consts::PI), ..camera_of(&v) };
+    let cam = solidcraft_viewport::Camera { roll: roll.clamp(-std::f64::consts::PI, std::f64::consts::PI), ..camera_of(&v) };
     if !usable_camera(&cam) {
         return Err("the camera must be finite with a positive distance".into());
     }
@@ -1112,7 +1112,7 @@ pub(crate) fn applied_camera_form(c: &Value) -> std::result::Result<crate::rende
 
 /// A camera the viewport can be put at: finite, with a positive distance and a field of view of
 /// at least 0.
-fn usable_camera(cam: &crate::render::Camera) -> bool {
+fn usable_camera(cam: &solidcraft_viewport::Camera) -> bool {
     cam.is_valid() && cam.fov.is_finite() && cam.fov >= 0.0
 }
 
@@ -1143,11 +1143,11 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
         (None, None) => return Err(bad(cmd, "`view` (a name) or `camera` is required")),
         (None, Some(c)) => applied_camera_form(c).map_err(|e| bad(cmd, e))?,
         // Standard view names come first, as in the browser's Named Views folder.
-        (Some(name), None) => match crate::render::StandardView::parse(name) {
+        (Some(name), None) => match solidcraft_viewport::StandardView::parse(name) {
             Some(sv) => {
                 let mut c = crate::view::home_camera(s)?;
                 c.set_view(sv);
-                c.fit(&crate::view::bounds(s)?);
+                c.fit(&solidcraft_render::view_bounds(&crate::view::bounds(s)?));
                 c
             }
             None => s.doc.named_views.iter().find(|v| v.name == name).map(camera_of).ok_or_else(|| bad(cmd, format!("no named view `{name}`")))?,
@@ -1161,8 +1161,8 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The orbit camera of a named view (Z up, no roll).
-fn camera_of(v: &solidcraft_doc::NamedView) -> crate::render::Camera {
-    crate::render::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, ..Default::default() }
+fn camera_of(v: &solidcraft_doc::NamedView) -> solidcraft_viewport::Camera {
+    solidcraft_viewport::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, ..Default::default() }
 }
 
 fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
@@ -2452,7 +2452,7 @@ mod tests {
     /// camera past a pole or a NaN behind.
     #[test]
     fn applying_a_camera_by_view_angles_reads_back_and_refuses_hostile_pitch() {
-        use crate::render::ViewAngles;
+        use solidcraft_viewport::ViewAngles;
         let mut s = Session::default();
         for (view, (yaw, pitch)) in
             [("front", (0.0, 0.0)), ("left", (90.0, 0.0)), ("right", (-90.0, 0.0)), ("back", (180.0, 0.0)), ("top", (0.0, 90.0))]
@@ -2462,7 +2462,7 @@ mod tests {
             assert!((a.yaw - yaw).abs() < 1e-3 && (a.pitch - pitch).abs() < 1e-3 && a.roll == 0.0, "{view}: {a:?}");
         }
         let typed = ViewAngles { yaw: -30.0, pitch: 15.0, roll: 5.0 };
-        let cam = crate::render::Camera::default().with_view_angles(typed).expect("finite angles");
+        let cam = solidcraft_viewport::Camera::default().with_view_angles(typed).expect("finite angles");
         let p = json!({"camera": {"target": [0, 0, 0], "yaw": cam.yaw, "pitch": cam.pitch, "roll": cam.roll, "distance": 80}});
         run(&mut s, "view.apply", p);
         let a = s.camera.expect("the typed camera").view_angles();
@@ -2655,7 +2655,7 @@ mod tests {
         run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Floor"}));
         let body = s.model.state().bodies[0].name.clone();
         let drain_name = s.doc.feature(drain).unwrap().name.clone();
-        let cam = solidcraft_render::Camera::default();
+        let cam = solidcraft_viewport::Camera::default();
         let lines = |s: &Session| crate::view::scene(s, &cam).unwrap().lines.len();
         let shown = |s: &mut Session| {
             let d = run(s, "document.inspect", json!({}));
@@ -2750,7 +2750,7 @@ mod tests {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
         s.mark_saved();
-        let cam = solidcraft_render::Camera::default();
+        let cam = solidcraft_viewport::Camera::default();
         let drawn = |s: &Session| crate::view::scene(s, &cam).unwrap().meshes.len();
         assert!(drawn(&s) > 0, "the box is drawn");
         assert!(!s.is_dirty());
