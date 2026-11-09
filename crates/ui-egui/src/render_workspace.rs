@@ -3145,7 +3145,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         app.viewport.hover = None;
     }
-    crate::gpu::paint_background(ui.painter(), viewport, &preview_background(app));
+    let background = preview_background(app);
+    crate::gpu::paint_background(ui.painter(), viewport, background.viewport_top, background.viewport_bottom);
     if live::has_picture(app) {
         live::paint(app, ui, rect);
         if live::picking_current(app) {
@@ -3180,7 +3181,7 @@ fn paint_product_feedback(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rec
 fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera: Camera, image: Option<egui::Rect>, feedback: bool) {
     let background = preview_background(app);
     if !feedback {
-        crate::gpu::paint_background(ui.painter(), rect, &background);
+        crate::gpu::paint_background(ui.painter(), rect, background.viewport_top, background.viewport_bottom);
     }
     let result = (|| -> Result<(), String> {
         if app.viewport.gpu.is_none() {

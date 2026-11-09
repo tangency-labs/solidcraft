@@ -18,15 +18,16 @@ pub struct ViewportCallback(pub Frame);
 /// A transparent, depth-correct selection/hover layer over live product pixels.
 pub(crate) struct ProductHighlightCallback(pub Frame);
 
-/// The viewport callback composites transparently onto this egui GPU mesh. Both its clear
-/// surface and gradient therefore use the same published/animated tokens as the panels; no
+/// The view's background: a vertical gradient from `top` at the top edge to `bottom` at the
+/// bottom edge. The viewport callback composites transparently onto this egui mesh, so the host
+/// passes the colours it shows (SolidCraft: the published, animated viewport tokens); no
 /// background colour belongs to a cached model scene or GPU upload.
-pub(crate) fn paint_background(painter: &egui::Painter, rect: egui::Rect, tokens: &solidcraft_theme::Tokens) {
+pub(crate) fn paint_background(painter: &egui::Painter, rect: egui::Rect, top: egui::Color32, bottom: egui::Color32) {
     let mut mesh = egui::Mesh::default();
-    mesh.colored_vertex(rect.left_top(), tokens.viewport_top);
-    mesh.colored_vertex(rect.right_top(), tokens.viewport_top);
-    mesh.colored_vertex(rect.right_bottom(), tokens.viewport_bottom);
-    mesh.colored_vertex(rect.left_bottom(), tokens.viewport_bottom);
+    mesh.colored_vertex(rect.left_top(), top);
+    mesh.colored_vertex(rect.right_top(), top);
+    mesh.colored_vertex(rect.right_bottom(), bottom);
+    mesh.colored_vertex(rect.left_bottom(), bottom);
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
     painter.add(egui::Shape::mesh(mesh));
@@ -1848,5 +1849,30 @@ mod background_picture_tests {
         let mut png = std::io::Cursor::new(Vec::new());
         image::RgbaImage::new(40, 20).write_to(&mut png, image::ImageFormat::Png).unwrap();
         assert_eq!(super::decode_background(png.get_ref(), 10).unwrap().size, [10, 5]);
+    }
+
+    /// The background is drawn from the two colours it is given, top edge then bottom edge, on a
+    /// bare context: no theme is published or read.
+    #[test]
+    fn the_background_is_a_gradient_of_the_colours_given() {
+        let (top, bottom) = (egui::Color32::from_rgb(10, 20, 30), egui::Color32::from_rgb(200, 150, 100));
+        let rect = Rect::from_min_size(pos2(5.0, 7.0), vec2(300.0, 200.0));
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::paint_background(ui.painter(), rect, top, bottom));
+        // The first frame of a bare context uploads the font atlas; nothing displays it here.
+        out.textures_delta.clear();
+        let meshes: Vec<_> = out
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Mesh(mesh) => Some(mesh),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(meshes.len(), 1);
+        let corners: Vec<_> = meshes[0].vertices.iter().map(|v| (v.pos, v.color)).collect();
+        let want = [(rect.left_top(), top), (rect.right_top(), top), (rect.right_bottom(), bottom), (rect.left_bottom(), bottom)];
+        assert_eq!(corners, want);
+        assert_eq!(meshes[0].indices, [0, 1, 2, 0, 2, 3]);
     }
 }
