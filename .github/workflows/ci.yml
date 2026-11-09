@@ -1040,7 +1040,7 @@ jobs:
     # commit's real run instead: the merge queue reads `ci` from the newest run of a commit, so a
     # run without a passing `ci` would block a pull request that passed (#1850, #3182, #3252).
     name: ci
-    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-startup, dependency-advisories, wasm, solidcore]
+    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-startup, dependency-advisories, wasm, solidcore, solidcore-standalone]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
@@ -1100,6 +1100,7 @@ jobs:
           WASM: ${{ needs.wasm.result }}
           SOLIDCORE_RUN: ${{ needs.changes.outputs.solidcore }}
           SOLIDCORE: ${{ needs.solidcore.result }}
+          SOLIDCORE_STANDALONE: ${{ needs.solidcore-standalone.result }}
         run: |
           test "$CHANGES" = success
           test "$CHECKS" = success
@@ -1140,6 +1141,7 @@ jobs:
           # solidcore/** changed on an approved pull request, in a merge group or on main.
           if [ "$SOLIDCORE_RUN" = true ]; then
             test "$SOLIDCORE" = success
+            test "$SOLIDCORE_STANDALONE" = success
           fi
       - name: Note a carried result
         if: needs.changes.outputs.carried != ''
@@ -1175,6 +1177,35 @@ jobs:
   # solidcore/** (Select checks' `solidcore`), where `ci` requires it; skipped otherwise. Its build,
   # kernel-rig and goldens jobs are one entry here, so the rig and goldens binaries are built once
   # without an artifact between jobs.
+  # solidcore/ exported alone (as the mirror to tangency-labs/solidcore carries it) must still check: the
+  # `layers` rule reads the manifests, this builds them without the rest of the repository around.
+  solidcore-standalone:
+    name: SolidCore builds on its own
+    needs: changes
+    if: needs.changes.outputs.solidcore == 'true'
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Export solidcore/ alone
+        run: |
+          mkdir -p "$RUNNER_TEMP/sc"
+          git archive HEAD solidcore | tar -x -C "$RUNNER_TEMP/sc"
+      - name: Toolchain (solidcore/rust-toolchain.toml)
+        working-directory: ${{ runner.temp }}/sc/solidcore
+        run: rustup show active-toolchain || rustup toolchain install
+      # Main saves the cache; every other run restores it, read-only.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: "${{ runner.temp }}/sc/solidcore -> bin"
+          key: solidcore-standalone
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Check the exported tree
+        working-directory: ${{ runner.temp }}/sc/solidcore
+        run: cargo check --workspace --all-targets --locked
+
   solidcore:
     name: SolidCore checks (${{ matrix.check }})
     needs: changes
