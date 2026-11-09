@@ -1,0 +1,159 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b9": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b10"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b11"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b11"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b15",
+        "b16"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b17"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "561-extrude-the-end-face-of-a-sweep",
+  "expected": {
+    "body_count": 1,
+    "method": "bar V = 40 * 70 = 2800 (mitred, see 96); the end cap is the plane x = 40, 8 high (z 26..34) and 5 wide: extruding it outward 6 mm adds 8 * 5 * 6 = 240: V = 3040.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#561",
+      "tangency-labs/solidcraft#677"
+    ],
+    "volume_mm3": 3040.0,
+    "what": "the end cap of a mitred swept bar (8 x 5 section, 30 up then 40 across) extruded 6 mm further along the path"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12
+    }
+  },
+  "records": "561-extrude-the-end-face-of-a-sweep.bodies.json.gz",
+  "result": [
+    {
+      "body": "Bar",
+      "made": "b17"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2055.999999999999,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12,
+      "volume_mm3": 3039.999999999999
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#561",
+    "tangency-labs/solidcraft#677"
+  ],
+  "traced_ops": [
+    "sweep",
+    "extrude",
+    "boolean",
+    "sweep",
+    "extrude",
+    "boolean",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "the end cap of a mitred swept bar (8 x 5 section, 30 up then 40 across) extruded 6 mm further along the path",
+  "why_not": []
+}

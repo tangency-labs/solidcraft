@@ -1,6 +1,7 @@
 //! Shared chord keycaps and the Preferences title-bar search field.
-use crate::{icons, theme::Tokens};
+use crate::icons;
 use egui::{FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 fn chord_parts(chord: &str) -> Vec<&str> {
     // A literal plus key follows the separator, as in Ctrl++; keep its own full keycap.
@@ -18,7 +19,7 @@ fn chord_parts(chord: &str) -> Vec<&str> {
 pub(crate) fn shortcut_binding_width(ui: &Ui, chord: &str) -> f32 {
     let t = Tokens::get();
     if chord.is_empty() {
-        return super::ContentWidth::label(ui, crate::i18n::tr("prefs.shortcuts_not_assigned")) + t.space_8;
+        return super::ContentWidth::label(ui, solidcraft_ui_text::tr("prefs.shortcuts_not_assigned")) + t.space_8;
     }
     let parts = chord_parts(chord);
     parts
@@ -39,7 +40,7 @@ pub(crate) fn shortcut_binding(ui: &mut Ui, chord: &str, editable: bool) -> Resp
     }
     let mut x = rect.left();
     if chord.is_empty() {
-        let text = crate::i18n::tr("prefs.shortcuts_not_assigned");
+        let text = solidcraft_ui_text::tr("prefs.shortcuts_not_assigned");
         let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_label), t.form_dim);
         ui.painter().galley(pos2(x + t.space_4, rect.center().y - galley.size().y / 2.0), galley, t.form_dim);
     } else {
@@ -56,18 +57,19 @@ pub(crate) fn shortcut_binding(ui: &mut Ui, chord: &str, editable: bool) -> Resp
         egui::WidgetInfo::labeled(
             if editable { egui::Role::Button } else { egui::Role::Label },
             ui.is_enabled(),
-            if chord.is_empty() { crate::i18n::tr("prefs.shortcuts_not_assigned") } else { chord },
+            if chord.is_empty() { solidcraft_ui_text::tr("prefs.shortcuts_not_assigned") } else { chord },
         )
     });
     response
 }
 
-/// Native text editing with the same token frame and leading magnifier as command search.
-pub(crate) fn preferences_search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
-    search_with_icon(ui, id, value, hint)
+/// Native text editing with the same token frame and leading magnifier as command search. Its frame
+/// and clear button are published as `{prefix}:search:frame` and `{prefix}:search:clear`.
+pub(crate) fn preferences_search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, prefix: &str) -> Response {
+    search_with_icon(ui, id, value, hint, prefix)
 }
 
-fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
+fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, prefix: &str) -> Response {
     let t = Tokens::get();
     let height = t.form_close_size;
     let (r, frame) = ui.allocate_exact_size(vec2(super::metrics::dimension(ui.available_width()), height), Sense::click());
@@ -84,7 +86,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
     icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
     let show_clear = !value.is_empty();
     let clear_side = if show_clear { height } else { super::CommandSearch::key(ui, r.right_center() - vec2(t.space_6, 0.0), "Ctrl F") + t.space_12 };
-    crate::scenario::publish_rect("prefs:search:frame", r);
+    solidcraft_ui_registry::publish_rect(&format!("{prefix}:search:frame"), r);
     let editor =
         Rect::from_min_max(pos2((icon.right() + t.space_6).min(r.right()), r.top()), pos2((r.right() - clear_side).max(icon.right()), r.bottom()));
     let response = ui
@@ -94,7 +96,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
                 editor.size(),
                 super::fields::text_input(egui::TextEdit::singleline(value))
                     .id(id)
-                    .hint_text(crate::i18n::tr_label(hint))
+                    .hint_text(solidcraft_ui_text::tr_label(hint))
                     .font(FontId::proportional(t.font_label))
                     .text_color(t.form_ink)
                     .margin(vec2(t.space_4, 0.0))
@@ -109,9 +111,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
     if show_clear {
         let clear_rect = Rect::from_center_size(pos2(r.right() - height * 0.5, r.center().y), vec2(height, height));
         let clear = ui.push_id(id.with("clear"), |ui| super::quiet_icon_button_at(ui, clear_rect, "close", "Clear")).inner;
-        if id == egui::Id::unique("prefs_search") {
-            crate::scenario::publish_handle("prefs:search:clear", clear_rect.center());
-        }
+        solidcraft_ui_registry::publish_handle(&format!("{prefix}:search:clear"), clear_rect.center());
         if clear.clicked() {
             value.clear();
             cleared = true;
@@ -122,7 +122,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
     }
     super::layout::publish(ui, &response, egui::Role::TextInput);
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), crate::i18n::tr_label(hint));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), solidcraft_ui_text::tr_label(hint));
         info.current_text_value = Some(value.clone());
         info
     });

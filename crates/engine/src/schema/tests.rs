@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use super::check::schema_keys;
 use super::features::{BoxParams, ExtrudeParams};
+use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use super::*;
 use crate::Session;
 
@@ -366,8 +367,11 @@ fn issues_are_read_from_the_commands_own_contract() {
     let issues = super::issues("solid.box", &json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"}));
     assert_eq!(messages(&issues), ["unknown key `operaton`; did you mean `operation`?"]);
     assert_eq!(issues, box_contract().check(&json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"})));
-    // No contract, or no such command: nothing to say.
-    assert!(super::issues("solid.chamfer", &json!({"nonsense": 1})).is_empty());
+    // No contract, or no such command: nothing to say. The first command without a contract
+    // stands for them all, so converting a command doesn't break this.
+    if let Some(c) = crate::cmd::command_specs().into_iter().find(|c| c.contract.is_none()) {
+        assert!(super::issues(c.id, &json!({"nonsense": 1})).is_empty(), "{}", c.id);
+    }
     assert!(super::issues("no.such", &json!({"nonsense": 1})).is_empty());
 }
 
@@ -1131,6 +1135,80 @@ fn axis_lines_match_the_axis_reader() {
     for v in [json!({"type": "edge", "at": "x"}), json!({"dir": [0, 0, 0]})] {
         assert!(parse::<AxisLine>(v.clone()).is_none() && conforms(schema, schema, &v), "{v}");
     }
+}
+
+/// A revolve's `axis` is accepted as `features::axis_param` reads it before it looks anything up,
+/// and its schema says the same, apart from what a schema can't say (below).
+#[test]
+fn revolve_axes_match_the_axis_reader() {
+    let schema = input_schema_for::<RevolveAxis>();
+    let schema = schema.as_value();
+    for (v, accepted) in [
+        (json!("y"), true),
+        (json!("Z"), true),
+        (json!("z"), true),
+        (json!("l1"), true),
+        (json!("Spindle"), true),
+        (json!(""), true),
+        (json!({"dir": [0, 0, 1]}), true),
+        (json!({"dir": [0, 0, 0]}), true),
+        (json!({"origin": [1, 2, 3], "dir": {"x": 0, "y": 1, "z": 0}}), true),
+        (json!({"origin": ["1 mm", 0, {"x": 1}], "dir": [0, 0, 1]}), false),
+        (json!({"origin": ["1 mm", "w / 2", 0], "dir": [0, 0, 1]}), true),
+        (json!({"origin": {"x": 1, "y": 2, "z": "3 mm"}, "dir": [0, 0, 1]}), true),
+        (json!({"origin": "o", "dir": [0, 0, 1]}), false),
+        (json!({"origin": null, "dir": [0, 0, 1]}), false),
+        (json!({"origin": [1, 2], "dir": [0, 0, 1]}), false),
+        (json!({"origin": [0, 0, 0]}), false),
+        (json!({"dir": [0, 1]}), false),
+        (json!({"dir": "y"}), false),
+        (json!({"dir": [0, 0, 1], "type": "sketch_line", "extra": 1}), true),
+        (json!({"type": "world", "axis": "X"}), true),
+        (json!({"type": "world", "axis": "X", "origin": 5, "dir": "q"}), true),
+        (json!({"type": "world", "axis": "x"}), false),
+        (json!({"type": "world", "axis": 5}), false),
+        (json!({"type": "world"}), false),
+        (json!({"type": "world", "dir": [0, 0, 1]}), false),
+        (json!({"edge": [1, 2, 3]}), true),
+        (json!({"face": [1, 2, 3], "dir": [0, 0, 1]}), true),
+        (json!({"face": "x", "dir": [0, 0, 1]}), false),
+        (json!({"type": "face", "at": [1, 2, 3]}), true),
+        (json!({"type": "vertex", "at": [1, 2, 3]}), false),
+        (json!({"face": "x", "vertex": [1, 2, 3]}), false),
+        (json!({}), false),
+        (json!(5), false),
+        (json!(true), false),
+        (json!(null), false),
+        (json!([0, 0, 1]), false),
+    ] {
+        assert_eq!(parse::<RevolveAxis>(v.clone()).is_some(), accepted, "{v}");
+        assert_eq!(conforms(schema, schema, &v), accepted, "schema {v}");
+    }
+    // Where the schema can't follow the reader: a saved edge is read whole by serde.
+    let v = json!({"type": "edge", "at": "x"});
+    assert!(parse::<RevolveAxis>(v.clone()).is_none() && conforms(schema, schema, &v), "{v}");
+}
+
+/// Revolve's `direction` and `convention` take what the handler reads, and its `to` is a point.
+#[test]
+fn revolve_keywords_match_the_handler() {
+    for (v, accepted) in
+        [(json!("symmetric"), true), (json!("SYMMETRIC"), true), (json!(" symmetric"), false), (json!("negative"), false), (json!(true), false)]
+    {
+        assert_eq!(parse::<RevolveDirection>(v.clone()).is_some(), accepted, "{v}");
+        let schema = input_schema_for::<RevolveDirection>();
+        assert_eq!(conforms(schema.as_value(), schema.as_value(), &v), accepted && v == json!("symmetric"), "schema {v}");
+    }
+    for (v, accepted) in [
+        (json!("sketch_normal"), true),
+        (json!("legacy_axis_start"), true),
+        (json!("Sketch_Normal"), false),
+        (json!("legacy_per_side"), false),
+        (json!(null), false),
+    ] {
+        assert_eq!(parse::<RevolveConventionParam>(v.clone()).is_some(), accepted, "{v}");
+    }
+    assert!(parse::<RevolveToPoint>(json!([1, 2, 3])).is_some() && parse::<RevolveToPoint>(json!([1, 2])).is_none());
 }
 
 /// A construction plane's name is refused when `features::check_plane_name` refuses it. (The

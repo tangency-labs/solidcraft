@@ -1,0 +1,12 @@
+Updates: plan/upstream-issues/UB-67--surface-helpers-read-empty-arrays-or-unset-counts.md
+
+#### UB-67 (update, 2026-10-30). The `BuildPolarBox` NULL surface is confirmed, from an offset's infinite-region ray fire
+
+The third defect of UB-67, `SmBezierAux2d::BuildPolarBox` (`source/SMLib/src/SmSurfaceCache.cpp:1184`) dereferencing a NULL `mBA_pSurface`, now crashes the C++ reference, on a trigger other than the zero-direction line solve UB-67 lists.
+
+- **Location:** the root branch of `BuildPolarBox`, `SmSurfaceCache.cpp:1281-1282`: when the walk up the tree reaches the root without finding a polar box, `pLastAux->mBA_pSurface->CalculateBoundingBox(...)` is called on the root's aux data. The faulting instruction is the vtable load of that call (`mov 0x120(%rsi),%rdi` loads `mBA_pSurface`, then `mov (%rdi),%rax` faults; the call's other arguments are the aux's `m_sUVDomain` and `m_sPolarBox`), so `mBA_pSurface` of the root aux is NULL.
+- **Call path:** `SmBezierAux2d::BuildPolarBox` <- `GetPolarBox` <- `SmLSIGlobalSolver::LocalSolve` <- `SmGlobalSolver::SolveIt` <- `SmSurface::GlobalLineIntersect` <- `SmTLSPointFace::SolveIt` <- `SmTopologySolver::BrepPointSolve` <- `SmBrep::RayFire` <- `SmBrep::FindInfiniteRegion` <- `FindAndSetInfiniteRegion` <- `SmStitch::DoStitching` <- `StitchIntoSolid` <- `SmOffsetExecutive::PiecewiseMerge` <- `DoExtendedOffset`. The ray's direction is not zero here (it is the ray fire's), so the NULL comes from the face cache's tree, the `BuildTreeTop` heads UB-67 names, not from the zero line vector.
+- **Trigger:** `Boolean/BoltMBox1.smb`, `SmOffsetExecutive` solid offset with shell face 3 (the shim's face order), distance 3.683, inset, extend convex edges on, merge results off, B-rep tolerance and member approximation tolerance `2.830417167026e-3` (difftest unit `offset.offset_executive_p2`, operation `solid`). Shell faces 0 to 2, and the outset of all four, complete.
+- **How found:** crash in the C++ reference run (offset coverage sweep, difftest PR #1689). Re-run alone in a fresh process; SIGSEGV backtrace from an `LD_PRELOAD` handler, frames resolved with `addr2line` and the faulting instruction read from the disassembly (the prebuilt reference libraries have no line info).
+- **Confirmed:** yes for the crash in `BuildPolarBox` on this path (reproduced alone). That the NULL is `mBA_pSurface` of the root aux is read from the disassembly.
+- **Rust port:** no crash; the Rust side of the trigger runs to completion (checked with the C++ call skipped). UB-67's port note is unchanged.

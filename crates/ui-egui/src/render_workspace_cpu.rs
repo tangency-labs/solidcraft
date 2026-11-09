@@ -24,9 +24,10 @@ pub(super) fn validate_progressive_image(app: &SolveApp) -> Result<(), String> {
         return Err(super::inspector::size_limit_reason(app, width, height));
     }
     if view.method == super::ImageMethod::CpuRaytrace {
-        view.raytrace.budget.validate_image(width, height, camera_sampling).map_err(|error| error.to_string())?;
-        if view.studio.denoise {
-            solidcraft_engine::render::job::validate_cpu_denoise_image(width, height).map_err(|error| error.to_string())?;
+        let (trace_width, trace_height) = trace_dimensions(view, width, height)?;
+        view.raytrace.budget.validate_image(trace_width, trace_height, camera_sampling).map_err(|error| error.to_string())?;
+        if view.studio.denoise || view.studio.denoise_diagnostics {
+            solidcraft_engine::render::job::validate_cpu_denoise_image(trace_width, trace_height).map_err(|error| error.to_string())?;
         }
         if let Some(output) = super::studio::cpu_output(view) {
             output.validate_image(width, height).map_err(|error| error.to_string())?;
@@ -35,6 +36,27 @@ pub(super) fn validate_progressive_image(app: &SolveApp) -> Result<(), String> {
     Ok(())
 }
 
+/// Match captured CPU output admission. A saved identity output object still uses
+/// native pixels; only processing that needs the linear output route adds its 8K envelope.
+fn bounded_output(view: &super::ViewState) -> bool {
+    let output = solidcraft_engine::render::job::OutputOptions {
+        tone_map: view.studio.tone_map,
+        finishing: view.studio.finishing,
+        backdrop: view.studio.backdrop_enabled.then_some(view.studio.backdrop),
+        linear_exr: view.studio.linear_exr,
+    };
+    view.studio.supersampling != 1 || view.studio.denoise || view.studio.denoise_diagnostics || output.linear_exr || !output.identity_display()
+}
+
+fn trace_dimensions(view: &super::ViewState, width: u32, height: u32) -> Result<(u32, u32), String> {
+    if bounded_output(view) {
+        solidcraft_engine::render::job::supersampled_dimensions(width, height, view.studio.supersampling).map_err(|error| error.to_string())
+    } else {
+        Ok((width, height))
+    }
+}
+
+/// Validate captured/saved intent without applying the bounds of a new size edit.
 pub(super) fn image_limits(app: &SolveApp) -> solidcraft_engine::render::RenderLimits {
     if app.render_workspace.view.method == super::ImageMethod::GpuRaytrace {
         return solidcraft_engine::render::job::GPU_PATH_LIMITS;
@@ -44,16 +66,31 @@ pub(super) fn image_limits(app: &SolveApp) -> solidcraft_engine::render::RenderL
     }
     let options = &app.render_workspace.view.raytrace;
     let mut limits = options.budget.image_limits(options.progressive.is_some());
-    if app.render_workspace.view.studio.denoise {
-        limits.max_dimension = limits.max_dimension.min(8192);
-        limits.max_pixels = limits.max_pixels.min(16_777_216);
+    let scale = u64::from(app.render_workspace.view.studio.supersampling.max(1));
+    // Profiles bound the internal trace grid; native legacy requests retain the
+    // profile envelope until a bounded linear-output feature is explicitly chosen.
+    limits.max_dimension /= scale;
+    limits.max_pixels /= scale.saturating_mul(scale).max(1);
+    if bounded_output(&app.render_workspace.view) {
+        limits.max_dimension = limits.max_dimension.min(u64::from(solidcraft_engine::render::job::MAX_OUTPUT_DIMENSION));
+        limits.max_pixels = limits.max_pixels.min(solidcraft_engine::render::job::MAX_OUTPUT_PIXELS);
     }
     let sampling =
         solidcraft_engine::render::job::cpu_camera_sampling(options.progressive, app.render_workspace.view.studio.adaptive, options.budget)
             .unwrap_or(options.progressive);
     if let Some(progressive) = sampling {
-        limits.max_pixels = limits.max_pixels.min(options.budget.limits().max_camera_samples / u64::from(progressive.samples_per_pixel.max(1)));
+        let work = u64::from(progressive.samples_per_pixel.max(1)).saturating_mul(scale).saturating_mul(scale);
+        limits.max_pixels = limits.max_pixels.min(options.budget.limits().max_camera_samples / work.max(1));
     }
+    limits
+}
+
+/// Every explicit UI size selection, including Largest, stays inside the output
+/// controls' envelope without narrowing a valid already-authored native request.
+pub(super) fn size_selection_limits(app: &SolveApp) -> solidcraft_engine::render::RenderLimits {
+    let mut limits = image_limits(app);
+    limits.max_dimension = limits.max_dimension.min(u64::from(solidcraft_engine::render::job::MAX_OUTPUT_DIMENSION));
+    limits.max_pixels = limits.max_pixels.min(solidcraft_engine::render::job::MAX_OUTPUT_PIXELS);
     limits
 }
 
@@ -73,6 +110,7 @@ pub(super) fn profile_for_size(app: &SolveApp, width: u64, height: u64) -> Optio
     }
     let width = u32::try_from(width).ok()?;
     let height = u32::try_from(height).ok()?;
+    let (width, height) = if view.method == super::ImageMethod::CpuRaytrace { trace_dimensions(view, width, height).ok()? } else { (width, height) };
     CpuBudget::ALL.into_iter().find(|budget| {
         solidcraft_engine::render::job::cpu_camera_sampling(
             app.render_workspace.view.raytrace.progressive,
@@ -194,7 +232,8 @@ pub(super) fn progressive_controls(app: &mut SolveApp, ui: &mut egui::Ui) -> boo
         ui_kit::text(ui, app.tr("render.children.progressive_reason"), ui_kit::Text::Note("render.children.progressive_reason"));
     }
     ui.add_enabled_ui(enabled, |ui| {
-        let maximum = app.render_workspace.view.raytrace.budget.limits().max_samples_per_pixel;
+        let profile_maximum = app.render_workspace.view.raytrace.budget.limits().max_samples_per_pixel;
+        let maximum = profile_maximum.min(super::quality::MAX_UI_SAMPLES);
         let range = app
             .render_workspace
             .view
@@ -202,17 +241,19 @@ pub(super) fn progressive_controls(app: &mut SolveApp, ui: &mut egui::Ui) -> boo
             .adaptive
             .and_then(|adaptive| {
                 let minimum = adaptive.min_samples.max(16);
-                let cap = maximum.checked_sub(adaptive.pilot_samples)?;
+                let cap = profile_maximum.checked_sub(adaptive.pilot_samples)?.min(super::quality::MAX_UI_SAMPLES);
                 (minimum <= cap).then_some(minimum..=cap)
             })
             .unwrap_or(1..=maximum);
         let response = ui_kit::row(ui, app.tr("render.cpu_progressive_spp"), |ui| {
-            let field = ui_kit::number_field_preserving(ui, &mut options.samples_per_pixel, range, 1.0, "");
+            let field = ui_kit::number_field_preserving(ui, &mut options.samples_per_pixel, range.clone(), 1.0, "");
             crate::scenario::publish_target("render:cpu-spp-field", field.rect);
             field
         });
         app.render_workspace.view.dirty |= response.changed();
         crate::scenario::publish_target("render:cpu-spp", response.rect);
+        app.render_workspace.view.dirty |= super::quality::sample_presets(ui, &mut options.samples_per_pixel, range, "render:cpu-samples-preset");
+        super::quality::legacy_samples_note(app, ui, options.samples_per_pixel);
         let response = ui_kit::row(ui, app.tr("render.cpu_progressive_seed"), |ui| {
             let field = ui_kit::number_field(ui, &mut options.seed, 0..=u32::MAX, 1.0, "");
             crate::scenario::publish_target("render:cpu-seed-field", field.rect);
@@ -233,11 +274,10 @@ pub(super) fn progressive_adoption_reason(app: &SolveApp) -> Option<String> {
     if options.reflections.as_ref().is_some_and(|r| !r.bodies.is_empty() && r.samples != 1) {
         Some(app.tr("render.cpu_progressive_reflection_adopt").into())
     } else {
-        options
-            .budget
-            .validate_image(app.render_workspace.view.draft.width, app.render_workspace.view.draft.height, Some(Default::default()))
+        let view = &app.render_workspace.view;
+        trace_dimensions(view, view.draft.width, view.draft.height)
+            .and_then(|(width, height)| options.budget.validate_image(width, height, Some(Default::default())).map_err(|error| error.to_string()))
             .err()
-            .map(|e| e.to_string())
     }
 }
 pub(super) fn adopt_progressive(app: &mut SolveApp) -> Result<(), String> {
@@ -273,7 +313,7 @@ fn path_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(mut path) = app.render_workspace.view.raytrace.path {
         let label = app.tr("render.cpu_path_depth").to_string();
         let response = ui_kit::row(ui, &label, |ui| {
-            let field = ui_kit::number_field_preserving(ui, &mut path.max_depth, 1..=16, 1.0, "");
+            let field = ui_kit::number_field_preserving(ui, &mut path.max_depth, 1..=solidcraft_engine::render::job::MAX_PATH_DEPTH, 1.0, "");
             crate::scenario::publish_target("render:cpu-path-depth", field.rect);
             field
         });
@@ -492,15 +532,20 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
     options.sky = None;
     options.volume = app.render_workspace.view.studio.volume;
     options.caustics = app.render_workspace.view.studio.caustics;
+    options.texture_filtering = app.render_workspace.view.studio.texture_filtering;
+    options.metal_energy_compensation = app.render_workspace.view.studio.metal_energy_compensation;
     options.output = super::studio::cpu_output(&app.render_workspace.view);
     options.adaptive = app.render_workspace.view.studio.adaptive.map(Box::new);
     options.denoise = app.render_workspace.view.studio.denoise;
+    options.denoise_settings = app.render_workspace.view.studio.denoise_settings;
+    options.denoise_diagnostics = app.render_workspace.view.studio.denoise_diagnostics;
+    options.supersampling = app.render_workspace.view.studio.supersampling;
     options.lens = app.render_workspace.view.studio.lens_enabled.then_some(app.render_workspace.view.studio.lens);
     if let Some(lens) = options.lens {
         lens.validate_camera(&app.cam).map_err(|error| error.to_string())?;
     }
     if options.area_samples.is_some_and(|n| !matches!(n, 1 | 4 | 16 | 64)) {
-        return Err(crate::i18n::tr("render.error_area_samples").into());
+        return Err(solidcraft_ui_text::tr("render.error_area_samples").into());
     }
     if options.area_lights.as_ref().is_none_or(Vec::is_empty) {
         options.area_samples = None;

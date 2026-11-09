@@ -1,0 +1,191 @@
+{
+  "issue": "none: user's design (a52.solidcraft)",
+  "pr": "none: user's design (a52.solidcraft)",
+  "test": "none: user's design (a52.solidcraft)",
+  "summary": "More operations of the user's e-bike battery model (a52.solidcraft, v2) on solidcore, beyond a52-battery-shapes and a52-wire-harness, chosen for coplanar, coaxial, coincident-cylinder and tangent contact between the booleans' operands. Dimensions are the model's own parameters: insert_dia 4, insert_depth 7, insert_mouth 0.35 and a 90 degree countersink on a boss_dia 8 stud (the inserty hole); access_dia 20, socket_dia 21.6, socket_depth 3.6, lip 1.6, pitch 22.7 (the gniazda counterbore holes of the cell holder plate); strip 0.15 (the nickel strips); peg_dia 3.8 and peg_reach 1.5 (the tray pegs); seat_r tube_od / 2 + foam_t = 25 (the cell tube seat); panel 3 with rib_depth 0.8 and rib_angle 60 deg (the panel ribs); grommet_bore 8.4, grommet_panel 3.3, grommet_flange 13 and wire_dia 5.5 (the grommet in its bore). Stand-ins, not in the model: the plate outline (69.4 x 46.7), the tray (100 x 60 x tray_floor 6), the seat block (100 x 60 x 26), the panel patch (20 x 60), the 6 wide strip, the 60 x 40 wall. The model's chamfers (rim_chamfer, plate_chamfer, bumper_chamfer, ...) and fillets have no step; a52-battery-shapes' fillet case stands for them. Every expected volume is a closed form written in its formula.",
+  "cases": [
+    {
+      "name": "insert_countersink_hole",
+      "note": "inserty: a blind hole coaxial with a boss, its 90 degree countersink mouth cut by a revolved tool that overshoots the top face",
+      "steps": [
+        { "op": "cylinder", "id": "boss", "origin": [0, 0, 0], "radius": 4, "height": 8 },
+        {
+          "op": "revolve",
+          "id": "hole",
+          "plane": "xz",
+          "axis_point": [0, 0, 0],
+          "axis_dir": [0, 0, 1],
+          "angle_deg": 360,
+          "profile": [{ "kind": "polygon", "points": [[0, 1], [2, 1], [2, 7.65], [3.35, 9], [0, 9]] }]
+        },
+        { "op": "difference", "id": "result", "a": "boss", "b": "hole" }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 313.34467656,
+          "tol": 0.01,
+          "formula": "pi * 4^2 * 8 - pi * 2^2 * 6.65 - pi * 0.35 / 3 * (2^2 + 2 * 2.35 + 2.35^2) (the bore r 2 from z 1 to 7.65, then the cone frustum 0.35 long from r 2 to r 2.35 = (insert_dia + 2 * insert_mouth) / 2 at the top, z 8; the tool's axis is the boss's)"
+        }
+      }
+    },
+    {
+      "name": "socket_counterbore_grid",
+      "note": "gniazda: a 3 x 2 grid of counterbored holes, a r 10 through hole then a r 10.8 counterbore 3.6 deep, coaxial, on the 22.7 pitch",
+      "steps": [
+        { "op": "box", "id": "plate", "origin": [-12, -12, 0], "size": [69.4, 46.7, 5.2] },
+        { "op": "cylinder", "id": "access", "origin": [0, 0, -1], "radius": 10, "height": 7.2 },
+        { "op": "cylinder", "id": "socket", "origin": [0, 0, 1.6], "radius": 10.8, "height": 4 },
+        {
+          "op": "difference",
+          "id": "drilled",
+          "a": "plate",
+          "b": "access",
+          "pattern": { "count": [3, 2], "pitch": [[22.7, 0, 0], [0, 22.7, 0]] }
+        },
+        {
+          "op": "difference",
+          "id": "result",
+          "a": "drilled",
+          "b": "socket",
+          "pattern": { "count": [3, 2], "pitch": [[22.7, 0, 0], [0, 22.7, 0]] }
+        }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 5922.16312288,
+          "tol": 0.01,
+          "formula": "69.4 * 46.7 * 5.2 - 6 * pi * (10^2 * 5.2 + (10.8^2 - 10^2) * 3.6) (each hole is the r 10 bore through the 5.2 plate plus the ring 10..10.8 over the top 3.6, z 1.6 to 5.2; the counterbore tool shares the through hole's axis)"
+        }
+      }
+    },
+    {
+      "name": "strip_bridging_holes",
+      "note": "nickel strip: a 0.15 thick strip laid flush on the plate top (and its side faces) across the through holes of the first row",
+      "steps": [
+        { "op": "box", "id": "plate", "origin": [-12, -12, 0], "size": [69.4, 46.7, 5.2] },
+        { "op": "cylinder", "id": "access", "origin": [0, 0, -1], "radius": 10, "height": 7.2 },
+        {
+          "op": "difference",
+          "id": "drilled",
+          "a": "plate",
+          "b": "access",
+          "pattern": { "count": [3, 2], "pitch": [[22.7, 0, 0], [0, 22.7, 0]] }
+        },
+        { "op": "box", "id": "strip", "origin": [-12, -3, 5.2], "size": [69.4, 6, 0.15] },
+        { "op": "union", "id": "result", "a": "drilled", "b": "strip" }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 7113.7869208,
+          "tol": 0.01,
+          "formula": "69.4 * 46.7 * 5.2 - 6 * pi * 10^2 * 5.2 + 69.4 * 6 * 0.15 (the strip stands on the top face z 5.2, so it adds its whole volume; it shares only area with the plate, over the ring between the holes, and spans the three holes of the y = 0 row, each r 10 wider than the strip)"
+        }
+      }
+    },
+    {
+      "name": "tray_pegs_tangent",
+      "note": "leze-czopy: four r 1.9 pegs standing on the tray top, one with its base circle tangent to the tray's left edge",
+      "steps": [
+        { "op": "box", "id": "tray", "origin": [0, 0, 0], "size": [100, 60, 6] },
+        {
+          "op": "extrude",
+          "id": "pegs",
+          "origin": [0, 0, 6],
+          "distance": 1.5,
+          "profile": [
+            { "kind": "circle", "center": [1.9, 30], "radius": 1.9 },
+            { "kind": "circle", "center": [31.9, 30], "radius": 1.9 },
+            { "kind": "circle", "center": [1.9, 40], "radius": 1.9 },
+            { "kind": "circle", "center": [31.9, 40], "radius": 1.9 }
+          ]
+        },
+        { "op": "union", "id": "result", "a": "tray", "b": "pegs" }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 36068.04689688,
+          "tol": 0.01,
+          "formula": "100 * 60 * 6 + 4 * pi * 1.9^2 * 1.5 (pegs at x 1.9, 31.9 and y 30, 40: each base disc lies on the top face z 6; the x = 1.9 ones are tangent to the edge x = 0 at a point)"
+        }
+      }
+    },
+    {
+      "name": "cell_seat_half_cylinder",
+      "note": "the cell tube seat: a r 25 = tube_od / 2 + foam_t cylinder along X cut from a block, its axis in the block's top plane, leaving a 1 mm floor",
+      "steps": [
+        { "op": "box", "id": "block", "origin": [0, 0, 0], "size": [100, 60, 26] },
+        { "op": "cylinder", "id": "tube", "origin": [-10, 30, 26], "axis": [1, 0, 0], "radius": 25, "height": 120 },
+        { "op": "difference", "id": "result", "a": "block", "b": "tube" }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 57825.22957532,
+          "tol": 0.02,
+          "formula": "100 * 60 * 26 - 100 * pi * 25^2 / 2 (the cylinder's axis lies in the top face z 26, so exactly half of it is inside the block; it spans the block's length with 10 to spare at each end, and stays 1 mm clear of the bottom z 0 and 5 of each side)"
+        }
+      }
+    },
+    {
+      "name": "panel_rib_sawtooth",
+      "note": "panel-ryfle: eight 60 degree V grooves, 0.8 deep, side by side so that their mouths meet in knife-edge ridges in the panel's top face",
+      "steps": [
+        { "op": "box", "id": "panel", "origin": [0, 0, 0], "size": [20, 60, 3] },
+        {
+          "op": "extrude",
+          "id": "groove",
+          "plane": "zx",
+          "origin": [0, -1, 0],
+          "distance": 62,
+          "profile": [{ "kind": "polygon", "points": [[2.2, 5.4618802153517], [4, 4.4226497308104], [4, 6.5011106998930]] }]
+        },
+        {
+          "op": "difference",
+          "id": "result",
+          "a": "panel",
+          "b": "groove",
+          "pattern": { "count": [8, 1], "pitch": [[0.9237604307034014, 0, 0], [0, 0, 0]] }
+        }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 3422.6379973,
+          "tol": 0.01,
+          "formula": "20 * 60 * 3 - 8 * 60 * 0.8^2 * tan(30 deg) (a groove cross-section is the triangle with apex at z 2.2 and half width 0.8 * tan(30 deg) at the top face z 3, so each groove takes 0.5 * (1.6 * tan(30 deg)) * 0.8 * 60; the pitch 1.6 * tan(30 deg) = 0.92376 is that width, so the grooves touch along lines in z = 3; the tool triangles overlap above the face, not in the panel)"
+        }
+      }
+    },
+    {
+      "name": "grommet_in_bore",
+      "note": "grommet in its wall: a revolved stepped ring whose neck is the bore's cylinder (coincident surfaces) and whose flange sits on the wall top (coplanar annulus)",
+      "steps": [
+        { "op": "box", "id": "wall", "origin": [-30, -20, 0], "size": [60, 40, 3.3] },
+        { "op": "cylinder", "id": "bore", "origin": [0, 0, -1], "radius": 4.2, "height": 5.3 },
+        {
+          "op": "revolve",
+          "id": "grommet",
+          "plane": "xz",
+          "axis_point": [0, 0, 0],
+          "axis_dir": [0, 0, 1],
+          "angle_deg": 360,
+          "profile": [{ "kind": "polygon", "points": [[2.75, 0], [4.2, 0], [4.2, 3.3], [6.5, 3.3], [6.5, 5.3], [2.75, 5.3]] }]
+        },
+        { "op": "difference", "id": "bored", "a": "wall", "b": "bore" },
+        { "op": "union", "id": "result", "a": "bored", "b": "grommet" }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 8059.54561868,
+          "tol": 0.01,
+          "formula": "60 * 40 * 3.3 - pi * 2.75^2 * 3.3 + pi * (6.5^2 - 2.75^2) * 2 (the neck r 2.75..4.2, z 0 to 3.3, fills the r 4.2 bore exactly, leaving the wire hole r 2.75 = wire_dia / 2 through the wall; the flange r 2.75..6.5, 2 thick, stands on the wall top z 3.3 and adds its whole volume)"
+        }
+      }
+    }
+  ]
+}

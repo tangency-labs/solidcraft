@@ -40,9 +40,9 @@ fn error(level: ParamCheck, id: &str, p: &Value) -> Option<String> {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<ProjectParams>(), &["projection_link", "ref", "refs"]);
-    assert_keys(input_schema_for::<IntersectParams>(), &["projection_link", "ref", "refs"]);
-    assert_keys(input_schema_for::<Include3dParams>(), &["ref", "refs"]);
+    assert_keys(input_schema_for::<ProjectParams>(), &["construction", "projection_link", "ref", "refs"]);
+    assert_keys(input_schema_for::<IntersectParams>(), &["construction", "projection_link", "ref", "refs"]);
+    assert_keys(input_schema_for::<Include3dParams>(), &["construction", "ref", "refs"]);
     assert_keys(input_schema_for::<ProjectToSurfaceParams>(), &["body", "curves", "face"]);
     assert_keys(input_schema_for::<IntersectionCurveParams>(), &["a", "b"]);
     assert_keys(input_schema_for::<SpunProfileParams>(), &["axis", "body"]);

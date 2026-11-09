@@ -1,0 +1,6 @@
+{
+  "unit": "curve.projected_curve",
+  "cases": [
+    {"name": "fuzz01303_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/curve.projected_curve/fuzz01303.json (panic: rust: capacity overflow)", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "ok", "inputs": {"left": true, "n": 9223372036854775807, "nonzero": false, "op": "eval", "pc": {"curve": {"hermite": {"d1": [-45.7, 48.6, -49.3], "d2": [45.6, -2.78, -27.9], "dim": 3, "p1": [-32.4, 1e-300, -21.0], "p2": [-23.5, -35.3, 26.7]}}, "ptype": 2}, "t": 0.887}}
+  ]
+}

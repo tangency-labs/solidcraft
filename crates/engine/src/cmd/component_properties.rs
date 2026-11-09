@@ -2,14 +2,16 @@
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Mat};
 use solidcraft_geom::Aabb3;
 use solidcraft_geom::inertia::{self, Tensor3};
 
 use crate::params::bad;
-use crate::schema::component::{BodyProperties, BoundingBox, InertiaAbout, PhysicalProperties, PropertiesResult, TotalProperties};
+use crate::schema::component::{
+    BodyProperties, BoundingBox, InertiaAbout, OccurrencePropertiesResult, PhysicalProperties, PropertiesResult, TotalProperties,
+};
 use crate::{Result, Session};
 
 fn descendants(p: &Value, cmd: &str) -> Result<bool> {
@@ -104,10 +106,9 @@ pub(super) fn occurrence(s: &mut Session, p: &Value) -> Result<Value> {
             _ => return Err(bad(cmd, "occurrence has multiple placements; supply its `path`")),
         }
     };
-    let mut out = properties(s, &doc, &path, descendants(p, cmd)?, about(p, cmd)?, cmd)?;
-    out["occurrence"] = json!(id);
-    out["name"] = json!(doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.as_str()));
-    Ok(out)
+    let properties = measure(s, &doc, &path, descendants(p, cmd)?, about(p, cmd)?, cmd)?;
+    let name = doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone());
+    super::reply(OccurrencePropertiesResult { occurrence: id, name, properties, param_warnings: Vec::new() })
 }
 
 /// The linear part of `m` is a rotation (no scale, shear or mirror), to rounding.
@@ -197,11 +198,6 @@ fn measure_placed(body: &solidcraft_doc::ModelBody, transform: Mat) -> Result<Pl
         edges: m.merged.edges,
         vertices: m.merged.vertices,
     })
-}
-
-/// [`measure`] as the JSON `occurrence.properties` adds its own keys to.
-fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, about: Option<Vec3>, cmd: &str) -> Result<Value> {
-    super::reply(measure(s, doc, selected, descendants, about, cmd)?)
 }
 
 fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, about: Option<Vec3>, cmd: &str) -> Result<PhysicalProperties> {

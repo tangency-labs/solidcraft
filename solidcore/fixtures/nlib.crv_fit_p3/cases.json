@@ -1,0 +1,11916 @@
+{
+ "cases": [
+  {
+   "name": "end_derivs_fit_p2_par1_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "end_derivs_fit_p2_par1_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "end_derivs_fit_p2_par2_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "end_derivs_fit_p2_par2_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "end_derivs_fit_p2_par3_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "end_derivs_fit_p2_par3_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "end_derivs_fit_p3_par1_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "end_derivs_fit_p3_par1_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "end_derivs_fit_p3_par2_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "end_derivs_fit_p3_par2_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "end_derivs_fit_p3_par3_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "end_derivs_fit_p3_par3_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "end_derivs_fit_p4_par1_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "end_derivs_fit_p4_par1_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "end_derivs_fit_p4_par2_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "end_derivs_fit_p4_par2_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "end_derivs_fit_p4_par3_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "end_derivs_fit_p4_par3_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "end_derivs_fit_p5_par1_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "end_derivs_fit_p5_par1_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "end_derivs_fit_p5_par2_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "end_derivs_fit_p5_par2_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "end_derivs_fit_p5_par3_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "end_derivs_fit_p5_par3_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "end_derivs_points_p3_est_start",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "p": 3,
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "end_derivs_points_p3_est_end",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "p": 3,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "end_derivs_two_points_p3_uniform",
+   "upstream_ref": "source/SMLib/src/NL_CrvApprox.cpp:2436 / :2518 (N_FitCrvDerivs with kk = 1, p = 3 and kk = 2, p = 4, NL_UNIFORM)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      4,
+      1,
+      0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     1,
+     2,
+     0
+    ],
+    "de": [
+     2,
+     -1,
+     0.5
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "end_derivs_three_points_p4_uniform",
+   "upstream_ref": "source/SMLib/src/NL_CrvApprox.cpp:2436 / :2518 (N_FitCrvDerivs with kk = 1, p = 3 and kk = 2, p = 4, NL_UNIFORM)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      2,
+      3,
+      1
+     ],
+     [
+      4,
+      1,
+      0
+     ]
+    ],
+    "p": 4,
+    "ds": [
+     1,
+     2,
+     0
+    ],
+    "de": [
+     2,
+     -1,
+     0.5
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "end_derivs_p1_rejected",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 1,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "end_derivs_p_above_kk_plus_2",
+   "upstream_ref": "source/SMLib/src/NL_CrvApprox.cpp:2436 / :2518 (N_FitCrvDerivs with kk = 1, p = 3 and kk = 2, p = 4, NL_UNIFORM)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      4,
+      1,
+      0
+     ]
+    ],
+    "p": 4,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "end_derivs_inherited_p2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 4,
+    "cur": {
+     "n": 13,
+     "p": 2,
+     "knots": [
+      0.0,
+      0.0,
+      0.0,
+      0.08333333333333333,
+      0.16666666666666666,
+      0.25,
+      0.3333333333333333,
+      0.4166666666666667,
+      0.5,
+      0.5833333333333334,
+      0.6666666666666666,
+      0.75,
+      0.8333333333333334,
+      0.9166666666666666,
+      1.0,
+      1.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "end_derivs_existing_curve_p2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 2,
+    "cur": {
+     "n": 15,
+     "p": 2,
+     "knots": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "end_derivs_inherited_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 4,
+    "cur": {
+     "n": 13,
+     "p": 3,
+     "knots": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.09090909090909091,
+      0.18181818181818182,
+      0.2727272727272727,
+      0.36363636363636365,
+      0.45454545454545453,
+      0.5454545454545454,
+      0.6363636363636364,
+      0.7272727272727273,
+      0.8181818181818182,
+      0.9090909090909091,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "end_derivs_existing_curve_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 2,
+    "cur": {
+     "n": 15,
+     "p": 3,
+     "knots": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "end_derivs_existing_curve_too_small",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "end_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 2,
+    "cur": {
+     "n": 12,
+     "p": 3,
+     "knots": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "cubic_fit_par1_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "cubic_spline",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "cubic_fit_par1_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "cubic_spline",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "cubic_points_par1_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "cubic_spline",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "cubic_fit_par2_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "cubic_spline",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "cubic_fit_par2_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "cubic_spline",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "cubic_points_par2_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "cubic_spline",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "cubic_fit_par3_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "cubic_spline",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "cubic_fit_par3_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data)",
+   "inputs": {
+    "op": "cubic_spline",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "cubic_points_par3_estimated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "cubic_spline",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "cubic_single_point",
+   "upstream_ref": "source/SMLib/src/NL_Spiral.cpp:191 (N_FitCubicSplineInterp, NL_UNIFORM)",
+   "inputs": {
+    "op": "cubic_spline",
+    "pts": [
+     [
+      1,
+      2,
+      3
+     ]
+    ],
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "cubic_two_points",
+   "upstream_ref": "source/SMLib/src/NL_Spiral.cpp:191 (N_FitCubicSplineInterp, NL_UNIFORM)",
+   "inputs": {
+    "op": "cubic_spline",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      3,
+      1,
+      0
+     ]
+    ],
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "cubic_three_points",
+   "upstream_ref": "source/SMLib/src/NL_Spiral.cpp:191 (N_FitCubicSplineInterp, NL_UNIFORM)",
+   "inputs": {
+    "op": "cubic_spline",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      3,
+      1,
+      0
+     ],
+     [
+      5,
+      4,
+      1
+     ]
+    ],
+    "ds": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -5.0,
+     0.0
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "cubic_four_points_estimated",
+   "upstream_ref": "source/SMLib/src/NL_Spiral.cpp:191 (N_FitCubicSplineInterp, NL_UNIFORM)",
+   "inputs": {
+    "op": "cubic_spline",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "ds": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "first_derivs_fit_p2_vec1_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "vec": 1,
+    "par": 1
+   }
+  },
+  {
+   "name": "first_derivs_fit_p2_vec1_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "vec": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "first_derivs_fit_p2_vec1_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "vec": 1,
+    "par": 3
+   }
+  },
+  {
+   "name": "first_derivs_fit_p2_vec2_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "vec": 2,
+    "par": 1
+   }
+  },
+  {
+   "name": "first_derivs_fit_p2_vec2_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "vec": 2,
+    "par": 2
+   }
+  },
+  {
+   "name": "first_derivs_fit_p2_vec2_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "vec": 2,
+    "par": 3
+   }
+  },
+  {
+   "name": "first_derivs_points_p2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.27798,
+      -0.610273,
+      -20.9805
+     ],
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ]
+    ],
+    "d": [
+     [
+      0.03929999999999989,
+      -0.132382,
+      0.1264000000000003
+     ],
+     [
+      0.04222999999999999,
+      -0.34127399999999997,
+      0.27250000000000085
+     ],
+     [
+      -0.017840000000000078,
+      -0.507662,
+      0.28580000000000183
+     ],
+     [
+      -0.051590000000000025,
+      -0.68323,
+      0.2582000000000022
+     ],
+     [
+      -0.07508999999999988,
+      -0.7919099999999999,
+      0.21600000000000108
+     ],
+     [
+      -0.10897000000000023,
+      -0.76762,
+      0.17579999999999885
+     ],
+     [
+      -0.15264000000000033,
+      -0.7020400000000002,
+      0.13189999999999813
+     ],
+     [
+      -0.16733999999999982,
+      -0.6653700000000002,
+      0.01529999999999987
+     ],
+     [
+      -0.10874999999999968,
+      -0.4855800000000001,
+      -0.11969999999999814
+     ],
+     [
+      -0.049900000000000055,
+      -0.3094699999999997,
+      -0.19120000000000203
+     ],
+     [
+      -0.037840000000000096,
+      -0.27066999999999997,
+      -0.21350000000000335
+     ],
+     [
+      -0.03501999999999983,
+      -0.2201200000000001,
+      -0.18849999999999767
+     ],
+     [
+      -0.0631400000000002,
+      -0.2092299999999998,
+      -0.18689999999999785
+     ],
+     [
+      -0.11351000000000022,
+      -0.11392999999999986,
+      -0.06879999999999953
+     ],
+     [
+      -0.1187699999999996,
+      0.0513300000000001,
+      -0.5528000000000013
+     ],
+     [
+      -0.10614999999999997,
+      0.1861799999999998,
+      -0.6463999999999999
+     ],
+     [
+      -0.11395,
+      0.3677999999999999,
+      -0.159399999999998
+     ],
+     [
+      -0.0767500000000001,
+      0.5410300000000001,
+      -0.23600000000000065
+     ],
+     [
+      0.0006899999999996353,
+      0.6231,
+      -0.26420000000000243
+     ],
+     [
+      0.04532999999999987,
+      0.6826099999999999,
+      -0.21640000000000015
+     ],
+     [
+      0.06795000000000018,
+      0.7530299999999999,
+      -0.13700000000000045
+     ],
+     [
+      0.0961000000000003,
+      0.64459,
+      -0.0724000000000018
+     ],
+     [
+      0.11158000000000001,
+      0.48582000000000014,
+      -0.026899999999997704
+     ],
+     [
+      0.10510999999999981,
+      0.45262,
+      0.04010000000000247
+     ],
+     [
+      0.07669999999999977,
+      0.38388999999999984,
+      0.10820000000000007
+     ],
+     [
+      0.055680000000000174,
+      0.2837019999999999,
+      0.1341000000000001
+     ],
+     [
+      0.09009,
+      0.29674500000000004,
+      0.17769999999999797
+     ],
+     [
+      0.1514199999999999,
+      0.306484,
+      0.20459999999999923
+     ],
+     [
+      0.23015000000000008,
+      0.2061320000000001,
+      0.534200000000002
+     ],
+     [
+      0.21336000000000022,
+      0.003798000000000079,
+      0.5190999999999981
+     ],
+     [
+      0.07156000000000029,
+      -0.06837300000000002,
+      0.08019999999999783
+     ]
+    ],
+    "p": 2,
+    "vec": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "first_derivs_two_points_p2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      0.0,
+      3.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "vec": 2,
+    "par": 2
+   }
+  },
+  {
+   "name": "first_derivs_fit_p3_vec1_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "vec": 1,
+    "par": 1
+   }
+  },
+  {
+   "name": "first_derivs_fit_p3_vec1_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "vec": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "first_derivs_fit_p3_vec1_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "vec": 1,
+    "par": 3
+   }
+  },
+  {
+   "name": "first_derivs_fit_p3_vec2_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "vec": 2,
+    "par": 1
+   }
+  },
+  {
+   "name": "first_derivs_fit_p3_vec2_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "vec": 2,
+    "par": 2
+   }
+  },
+  {
+   "name": "first_derivs_fit_p3_vec2_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "vec": 2,
+    "par": 3
+   }
+  },
+  {
+   "name": "first_derivs_points_p3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.27798,
+      -0.610273,
+      -20.9805
+     ],
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ]
+    ],
+    "d": [
+     [
+      0.03929999999999989,
+      -0.132382,
+      0.1264000000000003
+     ],
+     [
+      0.04222999999999999,
+      -0.34127399999999997,
+      0.27250000000000085
+     ],
+     [
+      -0.017840000000000078,
+      -0.507662,
+      0.28580000000000183
+     ],
+     [
+      -0.051590000000000025,
+      -0.68323,
+      0.2582000000000022
+     ],
+     [
+      -0.07508999999999988,
+      -0.7919099999999999,
+      0.21600000000000108
+     ],
+     [
+      -0.10897000000000023,
+      -0.76762,
+      0.17579999999999885
+     ],
+     [
+      -0.15264000000000033,
+      -0.7020400000000002,
+      0.13189999999999813
+     ],
+     [
+      -0.16733999999999982,
+      -0.6653700000000002,
+      0.01529999999999987
+     ],
+     [
+      -0.10874999999999968,
+      -0.4855800000000001,
+      -0.11969999999999814
+     ],
+     [
+      -0.049900000000000055,
+      -0.3094699999999997,
+      -0.19120000000000203
+     ],
+     [
+      -0.037840000000000096,
+      -0.27066999999999997,
+      -0.21350000000000335
+     ],
+     [
+      -0.03501999999999983,
+      -0.2201200000000001,
+      -0.18849999999999767
+     ],
+     [
+      -0.0631400000000002,
+      -0.2092299999999998,
+      -0.18689999999999785
+     ],
+     [
+      -0.11351000000000022,
+      -0.11392999999999986,
+      -0.06879999999999953
+     ],
+     [
+      -0.1187699999999996,
+      0.0513300000000001,
+      -0.5528000000000013
+     ],
+     [
+      -0.10614999999999997,
+      0.1861799999999998,
+      -0.6463999999999999
+     ],
+     [
+      -0.11395,
+      0.3677999999999999,
+      -0.159399999999998
+     ],
+     [
+      -0.0767500000000001,
+      0.5410300000000001,
+      -0.23600000000000065
+     ],
+     [
+      0.0006899999999996353,
+      0.6231,
+      -0.26420000000000243
+     ],
+     [
+      0.04532999999999987,
+      0.6826099999999999,
+      -0.21640000000000015
+     ],
+     [
+      0.06795000000000018,
+      0.7530299999999999,
+      -0.13700000000000045
+     ],
+     [
+      0.0961000000000003,
+      0.64459,
+      -0.0724000000000018
+     ],
+     [
+      0.11158000000000001,
+      0.48582000000000014,
+      -0.026899999999997704
+     ],
+     [
+      0.10510999999999981,
+      0.45262,
+      0.04010000000000247
+     ],
+     [
+      0.07669999999999977,
+      0.38388999999999984,
+      0.10820000000000007
+     ],
+     [
+      0.055680000000000174,
+      0.2837019999999999,
+      0.1341000000000001
+     ],
+     [
+      0.09009,
+      0.29674500000000004,
+      0.17769999999999797
+     ],
+     [
+      0.1514199999999999,
+      0.306484,
+      0.20459999999999923
+     ],
+     [
+      0.23015000000000008,
+      0.2061320000000001,
+      0.534200000000002
+     ],
+     [
+      0.21336000000000022,
+      0.003798000000000079,
+      0.5190999999999981
+     ],
+     [
+      0.07156000000000029,
+      -0.06837300000000002,
+      0.08019999999999783
+     ]
+    ],
+    "p": 3,
+    "vec": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "first_derivs_two_points_p3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      0.0,
+      3.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "vec": 2,
+    "par": 2
+   }
+  },
+  {
+   "name": "first_derivs_degree_4_rejected",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "vec": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "first_derivs_zero_tangent",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:980 (N_FitCrvFirstDeriv)",
+   "inputs": {
+    "op": "first_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "d": [
+     [
+      0.0,
+      3.0,
+      0.0
+     ],
+     [
+      1.0,
+      5.0,
+      0.0
+     ],
+     [
+      5.0,
+      -1.0,
+      0.0
+     ],
+     [
+      8.0,
+      0.0,
+      0.0
+     ],
+     [
+      8.0,
+      2.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      4.0,
+      1.0,
+      0.0
+     ],
+     [
+      5.0,
+      2.0,
+      0.0
+     ],
+     [
+      6.0,
+      -1.0,
+      0.0
+     ],
+     [
+      4.0,
+      -4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "vec": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "kt_fit_tan0_p2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 2
+   }
+  },
+  {
+   "name": "kt_fit_tan0_p2_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 2
+   }
+  },
+  {
+   "name": "kt_fit_tan0_p3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan0_p3_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan0_p4",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 4
+   }
+  },
+  {
+   "name": "kt_fit_tan0_p4_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 4
+   }
+  },
+  {
+   "name": "kt_fit_tan0_knots_cubic01_per0.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan0_knots_quad04_per0.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan0_knots_cubic01_per0.6",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.6,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan0_knots_quad04_per0.6",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.6,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan0_knots_cubic01_per0.8",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan0_knots_quad04_per0.8",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan0_knots_cubic01_per1.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan0_knots_quad04_per1.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_points_tan0_knots",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.1,
+     0.2,
+     0.3,
+     0.4,
+     0.5,
+     0.6,
+     0.7,
+     0.8,
+     0.9,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan1_p2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 2
+   }
+  },
+  {
+   "name": "kt_fit_tan1_p2_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 2
+   }
+  },
+  {
+   "name": "kt_fit_tan1_p3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan1_p3_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan1_p4",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 4
+   }
+  },
+  {
+   "name": "kt_fit_tan1_p4_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 4
+   }
+  },
+  {
+   "name": "kt_fit_tan1_knots_cubic01_per0.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan1_knots_quad04_per0.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan1_knots_cubic01_per0.6",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.6,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan1_knots_quad04_per0.6",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.6,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan1_knots_cubic01_per0.8",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan1_knots_quad04_per0.8",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan1_knots_cubic01_per1.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan1_knots_quad04_per1.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_points_tan1_knots",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.1,
+     0.2,
+     0.3,
+     0.4,
+     0.5,
+     0.6,
+     0.7,
+     0.8,
+     0.9,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan2_p2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 2
+   }
+  },
+  {
+   "name": "kt_fit_tan2_p2_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 2
+   }
+  },
+  {
+   "name": "kt_fit_tan2_p3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan2_p3_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan2_p4",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 4
+   }
+  },
+  {
+   "name": "kt_fit_tan2_p4_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 4
+   }
+  },
+  {
+   "name": "kt_fit_tan2_knots_cubic01_per0.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan2_knots_quad04_per0.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan2_knots_cubic01_per0.6",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.6,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan2_knots_quad04_per0.6",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.6,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan2_knots_cubic01_per0.8",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan2_knots_quad04_per0.8",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan2_knots_cubic01_per1.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan2_knots_quad04_per1.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_points_tan2_knots",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "tan": 2,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.1,
+     0.2,
+     0.3,
+     0.4,
+     0.5,
+     0.6,
+     0.7,
+     0.8,
+     0.9,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan3_p2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 2
+   }
+  },
+  {
+   "name": "kt_fit_tan3_p2_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 2
+   }
+  },
+  {
+   "name": "kt_fit_tan3_p3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan3_p3_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan3_p4",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 4
+   }
+  },
+  {
+   "name": "kt_fit_tan3_p4_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 4
+   }
+  },
+  {
+   "name": "kt_fit_tan3_knots_cubic01_per0.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan3_knots_quad04_per0.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan3_knots_cubic01_per0.6",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.6,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan3_knots_quad04_per0.6",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.6,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan3_knots_cubic01_per0.8",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan3_knots_quad04_per0.8",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan3_knots_cubic01_per1.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan3_knots_quad04_per1.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_points_tan3_knots",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.1,
+     0.2,
+     0.3,
+     0.4,
+     0.5,
+     0.6,
+     0.7,
+     0.8,
+     0.9,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan4_p2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 2
+   }
+  },
+  {
+   "name": "kt_fit_tan4_p2_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 2
+   }
+  },
+  {
+   "name": "kt_fit_tan4_p3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan4_p3_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan4_p4",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 4
+   }
+  },
+  {
+   "name": "kt_fit_tan4_p4_given_u",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 2,
+    "per": 1.0,
+    "p": 4
+   }
+  },
+  {
+   "name": "kt_fit_tan4_knots_cubic01_per0.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan4_knots_quad04_per0.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan4_knots_cubic01_per0.6",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.6,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan4_knots_quad04_per0.6",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.6,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan4_knots_cubic01_per0.8",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan4_knots_quad04_per0.8",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan4_knots_cubic01_per1.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_fit_tan4_knots_quad04_per1.0",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0,
+     2.25,
+     2.5,
+     2.75,
+     3.0,
+     3.25,
+     4.0,
+     4.0,
+     4.0
+    ],
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_points_tan4_knots",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "tan": 4,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.1,
+     0.2,
+     0.3,
+     0.4,
+     0.5,
+     0.6,
+     0.7,
+     0.8,
+     0.9,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 0.8,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_bad_per",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.5,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_p1_rejected",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 1
+   }
+  },
+  {
+   "name": "kt_flat_knots",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5
+    ],
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_invalid_knots",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 3,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.5,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_u_not_spanning_knots",
+   "upstream_ref": "source/SMLib/src/NL_SrfFit.cpp:9903 (N_FitCrvKnotsAndTangents with a shared knot vector)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "u": [
+     0.0,
+     0.09090909090909091,
+     0.18181818181818182,
+     0.2727272727272727,
+     0.36363636363636365,
+     0.45454545454545453,
+     0.5454545454545454,
+     0.6363636363636364,
+     0.7272727272727273,
+     0.8181818181818182,
+     0.9090909090909091,
+     1.0
+    ],
+    "tan": 0,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.5,
+     2.0,
+     2.0,
+     2.0,
+     2.0
+    ],
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_zero_tangent",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tan": 3,
+    "ts": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "kt_two_points_one_tangent_p3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2818 (N_FitCrvKnotsAndTangents, NL_TANGENT, per 1.0)",
+   "inputs": {
+    "op": "knots_and_tangents",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ]
+    ],
+    "tan": 1,
+    "ts": [
+     1.0,
+     2.0,
+     0.0
+    ],
+    "te": [
+     1.0,
+     -1.0,
+     0.0
+    ],
+    "der": 1,
+    "per": 1.0,
+    "p": 3
+   }
+  },
+  {
+   "name": "closed_fit_p2_k0_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "k": 0,
+    "par": 1
+   }
+  },
+  {
+   "name": "closed_fit_p2_k0_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "k": 0,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p2_k0_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "k": 0,
+    "par": 3
+   }
+  },
+  {
+   "name": "closed_fit_p2_k1_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "k": 1,
+    "par": 1
+   }
+  },
+  {
+   "name": "closed_fit_p2_k1_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "k": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p2_k1_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "k": 1,
+    "par": 3
+   }
+  },
+  {
+   "name": "closed_fit_p2_given_d",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "d": [
+     [
+      1.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "k": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_points_p2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.27798,
+      -0.610273,
+      -20.9805
+     ],
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ]
+    ],
+    "p": 2,
+    "k": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p3_k0_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "k": 0,
+    "par": 1
+   }
+  },
+  {
+   "name": "closed_fit_p3_k0_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "k": 0,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p3_k0_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "k": 0,
+    "par": 3
+   }
+  },
+  {
+   "name": "closed_fit_p3_k1_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "k": 1,
+    "par": 1
+   }
+  },
+  {
+   "name": "closed_fit_p3_k1_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "k": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p3_k1_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "k": 1,
+    "par": 3
+   }
+  },
+  {
+   "name": "closed_fit_p3_k2_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "k": 2,
+    "par": 1
+   }
+  },
+  {
+   "name": "closed_fit_p3_k2_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "k": 2,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p3_k2_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "k": 2,
+    "par": 3
+   }
+  },
+  {
+   "name": "closed_fit_p3_given_d",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "d": [
+     [
+      1.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "k": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_points_p3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.27798,
+      -0.610273,
+      -20.9805
+     ],
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ]
+    ],
+    "p": 3,
+    "k": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p4_k0_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "k": 0,
+    "par": 1
+   }
+  },
+  {
+   "name": "closed_fit_p4_k0_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "k": 0,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p4_k0_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "k": 0,
+    "par": 3
+   }
+  },
+  {
+   "name": "closed_fit_p4_k1_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "k": 1,
+    "par": 1
+   }
+  },
+  {
+   "name": "closed_fit_p4_k1_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "k": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p4_k1_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "k": 1,
+    "par": 3
+   }
+  },
+  {
+   "name": "closed_fit_p4_k2_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "k": 2,
+    "par": 1
+   }
+  },
+  {
+   "name": "closed_fit_p4_k2_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "k": 2,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p4_k2_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "k": 2,
+    "par": 3
+   }
+  },
+  {
+   "name": "closed_fit_p4_given_d",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "d": [
+     [
+      1.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "k": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_points_p4",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.27798,
+      -0.610273,
+      -20.9805
+     ],
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ]
+    ],
+    "p": 4,
+    "k": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p5_k0_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "k": 0,
+    "par": 1
+   }
+  },
+  {
+   "name": "closed_fit_p5_k0_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "k": 0,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p5_k0_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "k": 0,
+    "par": 3
+   }
+  },
+  {
+   "name": "closed_fit_p5_k1_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "k": 1,
+    "par": 1
+   }
+  },
+  {
+   "name": "closed_fit_p5_k1_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "k": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p5_k1_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "k": 1,
+    "par": 3
+   }
+  },
+  {
+   "name": "closed_fit_p5_k2_par1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "k": 2,
+    "par": 1
+   }
+  },
+  {
+   "name": "closed_fit_p5_k2_par2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "k": 2,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_fit_p5_k2_par3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "k": 2,
+    "par": 3
+   }
+  },
+  {
+   "name": "closed_fit_p5_given_d",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "d": [
+     [
+      1.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "k": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_points_p5",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.27798,
+      -0.610273,
+      -20.9805
+     ],
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ]
+    ],
+    "p": 5,
+    "k": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_k_equals_p",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "k": 2,
+    "par": 2
+   }
+  },
+  {
+   "name": "closed_triangle_p2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2793 (N_FitCrvApproxClosedConditions, k = 1)",
+   "inputs": {
+    "op": "closed_conditions",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      0,
+      0,
+      0
+     ]
+    ],
+    "p": 2,
+    "k": 1,
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p1_k0_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 1,
+    "ds": [],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p2_k0_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p2_k0_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p2_k1_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p2_k1_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p3_k0_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p3_k0_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p3_k0_l2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p3_k1_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p3_k1_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p3_k1_l2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p3_k2_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p3_k2_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p3_k2_l2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k0_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k0_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k0_l2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k0_l3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ],
+     [
+      -1.0,
+      0.0,
+      0.25
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k1_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k1_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k1_l2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k1_l3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ],
+     [
+      -1.0,
+      0.0,
+      0.25
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k2_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k2_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k2_l2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k2_l3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ],
+     [
+      -1.0,
+      0.0,
+      0.25
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k3_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     [
+      0.5,
+      0.5,
+      -1.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k3_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     [
+      0.5,
+      0.5,
+      -1.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k3_l2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     [
+      0.5,
+      0.5,
+      -1.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p4_k3_l3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     [
+      0.5,
+      0.5,
+      -1.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ],
+     [
+      -1.0,
+      0.0,
+      0.25
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k0_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k0_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k0_l2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k0_l3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ],
+     [
+      -1.0,
+      0.0,
+      0.25
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k1_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k1_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k1_l2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k1_l3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ],
+     [
+      -1.0,
+      0.0,
+      0.25
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k2_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k2_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k2_l2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k2_l3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ],
+     [
+      -1.0,
+      0.0,
+      0.25
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k3_l0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     [
+      0.5,
+      0.5,
+      -1.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k3_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     [
+      0.5,
+      0.5,
+      -1.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k3_l2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     [
+      0.5,
+      0.5,
+      -1.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_fit_p5_k3_l3",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     [
+      0.5,
+      0.5,
+      -1.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     [
+      2.0,
+      1.0,
+      0.0
+     ],
+     [
+      -1.0,
+      0.0,
+      0.25
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_points_p3_par1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "p": 3,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_points_p3_par3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "p": 3,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_single_point_p2_k1_l1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": [
+     [
+      1,
+      1,
+      1
+     ]
+    ],
+    "p": 2,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_kk_equals_p",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      1.0,
+      -2.0,
+      0.5
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_p_above_n",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:2836 (N_FitCrvHighDerivs) and NL_CrvApprox.cpp:1644",
+   "inputs": {
+    "op": "high_derivs",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  }
+ ]
+}
