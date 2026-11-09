@@ -528,21 +528,44 @@ impl Lexer<'_> {
     }
 }
 
-/// Part 21 short entity names (ISO 10303-21's short-name form, which some AP203 writers use) of
-/// the geometry and topology entities a B-rep is read from, with their long names. Origin:
-/// `step-import`'s table (#2582).
-const SHORT_NAMES: [(&str, &str); 11] = [
+/// Part 21 short entity names (the short-name form ISO 10303-21 allows, which some AP203 writers
+/// use, STEP Tools' among them) of the entities a B-rep, its representation, product and units
+/// are read from, with their long names. The first eleven are `step-import`'s table (#2582); the
+/// rest are the AP203 names of the product structure, representations and units those files
+/// use.
+const SHORT_NAMES: [(&str, &str); 29] = [
     ("A2PL3D", "AXIS2_PLACEMENT_3D"),
     ("BSCWK", "B_SPLINE_CURVE_WITH_KNOTS"),
     ("BSSWK", "B_SPLINE_SURFACE_WITH_KNOTS"),
     ("CLSSHL", "CLOSED_SHELL"),
     ("CMCRSG", "COMPOSITE_CURVE"),
+    ("CNBSUN", "CONVERSION_BASED_UNIT"),
     ("CRTPNT", "CARTESIAN_POINT"),
+    ("DMNEXP", "DIMENSIONAL_EXPONENTS"),
     ("DRCTN", "DIRECTION"),
+    ("FBSR", "FACETED_BREP_SHAPE_REPRESENTATION"),
     ("FCOTBN", "FACE_OUTER_BOUND"),
     ("FCSRF", "FACE_SURFACE"),
+    ("FCTBR", "FACETED_BREP"),
+    (
+        "GBSSR",
+        "GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION",
+    ),
+    ("GMRPCN", "GEOMETRIC_REPRESENTATION_CONTEXT"),
+    ("GMTST", "GEOMETRIC_SET"),
+    ("LMWU", "LENGTH_MEASURE_WITH_UNIT"),
+    ("LNGUNT", "LENGTH_UNIT"),
+    ("NMDUNT", "NAMED_UNIT"),
+    ("PAMWU", "PLANE_ANGLE_MEASURE_WITH_UNIT"),
     ("PLYLP", "POLY_LOOP"),
+    ("PRDCT", "PRODUCT"),
+    ("PRDDFN", "PRODUCT_DEFINITION"),
+    ("PRDFSH", "PRODUCT_DEFINITION_SHAPE"),
+    ("SHDFRP", "SHAPE_DEFINITION_REPRESENTATION"),
+    ("SHPRPR", "SHAPE_REPRESENTATION"),
+    ("SHRPRL", "SHAPE_REPRESENTATION_RELATIONSHIP"),
     ("TRMCRV", "TRIMMED_CURVE"),
+    ("UMWU", "UNCERTAINTY_MEASURE_WITH_UNIT"),
 ];
 
 /// An entity name as its long form where it is one of [`SHORT_NAMES`].

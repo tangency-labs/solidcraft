@@ -20,6 +20,15 @@ use crate::body::Body;
 use crate::{KernelError, Result};
 use p21::{Entity, Exchange, Param};
 
+/// The representation the file's unlisted topology is read as, under an id the reader keeps for
+/// it (it is used only when the file's representations hold nothing to read).
+const UNLISTED: u64 = u64::MAX;
+/// Whether an item of representation `rep` is read as a body: a solid or surface model, and in
+/// the file's unlisted topology ([`UNLISTED`]) a shell or face on its own too.
+fn body_item(rep: u64, name: &str) -> bool {
+    solidcore_step::topology::is_solid_item(name) || (rep == UNLISTED && solidcore_step::topology::is_body_item(name))
+}
+
 /// Deepest assembly nesting followed.
 const MAX_ASSEMBLY_DEPTH: usize = 32;
 /// Most body instances in one import.
@@ -688,18 +697,12 @@ impl Reader {
             }
             let Some(e) = self.ex.get(item) else { continue };
             match e.name() {
-                "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL" => {
+                name if body_item(rep, name) => {
                     // Only batch consecutive solids: mapped items must retain traversal and
                     // first-use unit/cache order. Bound temporary geometry independently of file size.
                     let mut batch = vec![item];
                     let capacity = MAX_BODIES.saturating_sub(self.bodies_so_far()).min(64);
-                    while batch.len() < capacity
-                        && items.peek().is_some_and(|id| {
-                            self.ex.get(*id).is_some_and(|e| {
-                                matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL")
-                            })
-                        })
-                    {
+                    while batch.len() < capacity && items.peek().is_some_and(|id| self.ex.get(*id).is_some_and(|e| body_item(rep, e.name()))) {
                         if let Some(next) = items.next() {
                             batch.push(next);
                         }
@@ -1283,10 +1286,7 @@ impl StepReading {
             .iter()
             .flat_map(|(r, (items, _))| items.iter().map(move |i| (*r, *i)))
             .filter(|(_, i)| !rd.used_items.contains(i))
-            .filter(|(_, i)| {
-                ex.get(*i)
-                    .is_some_and(|e| matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL"))
-            })
+            .filter(|(_, i)| ex.get(*i).is_some_and(|e| solidcore_step::topology::is_solid_item(e.name())))
             .map(|(r, _)| r)
             .collect();
         loose.sort();
@@ -1299,6 +1299,25 @@ impl StepReading {
                 rd.rep_bodies(r, &identity, &[], "Import", None, &mut bodies, 0);
             }
             tree.push(StepNode { name: "Import".into(), transform: identity, bodies, children: Vec::new() });
+        }
+        // Topology outside every representation (bare geometry files, or ones whose topology no
+        // representation lists): its unlisted solids, shells and faces, read in the file's one
+        // representation context where it has exactly one.
+        if rd.plan.is_empty() {
+            let roots = solidcore_step::topology::roots(&ex);
+            if !roots.is_empty() {
+                let mut contexts = ex.entities.iter().filter(|(_, e)| e.has("GEOMETRIC_REPRESENTATION_CONTEXT")).map(|(id, _)| *id);
+                let context = match (contexts.next(), contexts.next()) {
+                    (Some(c), None) => Some(c),
+                    _ => None,
+                };
+                rd.reps.insert(UNLISTED, (roots, context));
+                let mut bodies = Vec::new();
+                rd.node_items = rd.used_items.clone();
+                rd.visits = 0;
+                rd.rep_bodies(UNLISTED, &identity, &[], "Import", None, &mut bodies, 0);
+                tree.push(StepNode { name: "Import".into(), transform: identity, bodies, children: Vec::new() });
+            }
         }
         let single = workers <= 1;
         Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single })

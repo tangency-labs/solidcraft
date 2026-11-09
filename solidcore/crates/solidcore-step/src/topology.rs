@@ -172,6 +172,61 @@ fn representation(e: &Entity) -> Option<(Vec<u64>, Option<u64>)> {
 }
 
 const SOLID_ITEMS: [&str; 4] = ["MANIFOLD_SOLID_BREP", "BREP_WITH_VOIDS", "SHELL_BASED_SURFACE_MODEL", "FACETED_BREP"];
+/// The shells a file may hold outside any solid or surface model.
+const SHELL_ITEMS: [&str; 4] = ["CLOSED_SHELL", "OPEN_SHELL", "ORIENTED_CLOSED_SHELL", "ORIENTED_OPEN_SHELL"];
+/// The faces a file may hold outside any shell.
+const FACE_ITEMS: [&str; 4] = ["ADVANCED_FACE", "FACE_SURFACE", "FACE", "ORIENTED_FACE"];
+
+/// Whether an item is a solid or a surface model, read as a body wherever a representation lists
+/// it.
+pub fn is_solid_item(name: &str) -> bool {
+    SOLID_ITEMS.contains(&name)
+}
+
+/// Whether an item of the file's unlisted topology ([`roots`]) is read as a body: a solid or
+/// surface model, or a shell or face on its own. A representation's own shell or face items (a
+/// presentation's, a tolerance's) are not bodies.
+pub fn is_body_item(name: &str) -> bool {
+    SOLID_ITEMS.contains(&name) || SHELL_ITEMS.contains(&name) || FACE_ITEMS.contains(&name)
+}
+
+/// The topology a file holds outside any representation, as bodies to read (a file of bare
+/// geometry, or one whose topology no shape representation lists): every solid or surface model
+/// no other entity refers to, then every shell no solid, model or other shell lists, then every
+/// face no shell lists (each a one-face sheet), in id order within each. As solidcore's
+/// step-import read such files (#2583, topology first): what the file's topology holds is read
+/// whether or not a product structure names it.
+pub fn roots(ex: &Exchange) -> Vec<u64> {
+    fn refer(p: &Param, out: &mut HashSet<u64>, depth: usize) {
+        match p {
+            Param::Ref(id) => {
+                out.insert(*id);
+            }
+            Param::List(items) | Param::Typed(_, items) if depth < 64 => {
+                for q in items {
+                    refer(q, out, depth + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut referenced = HashSet::new();
+    for e in ex.entities.values() {
+        for r in &e.records {
+            for p in &r.params {
+                refer(p, &mut referenced, 0);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for kinds in [&SOLID_ITEMS[..], &SHELL_ITEMS[..], &FACE_ITEMS[..]] {
+        let mut ids: Vec<u64> =
+            ex.entities.iter().filter(|(id, e)| kinds.contains(&e.name()) && !referenced.contains(id)).map(|(id, _)| *id).collect();
+        ids.sort_unstable();
+        out.extend(ids);
+    }
+    out
+}
 
 /// Where each solid item sits: its representation's context, and the product that representation
 /// (or one related to it) is the shape of.
@@ -446,8 +501,10 @@ fn item_shells(ex: &Exchange, item: u64) -> R<(Vec<u64>, Kind)> {
             let (closed, open) = model_shells(ex, &ids);
             Ok((if closed.is_empty() || open.is_empty() { ids } else { open }, Kind::Model))
         }
-        // A closed shell of a surface model that has open shells too ([`items`]).
-        "CLOSED_SHELL" | "ORIENTED_CLOSED_SHELL" => Ok((vec![item], Kind::Model)),
+        // A closed shell of a surface model that has open shells too ([`items`]), or a shell or
+        // face no solid or model lists ([`roots`]): a model of that one shell, or of the one face.
+        "CLOSED_SHELL" | "ORIENTED_CLOSED_SHELL" | "OPEN_SHELL" | "ORIENTED_OPEN_SHELL" => Ok((vec![item], Kind::Model)),
+        n if FACE_ITEMS.contains(&n) => Ok((vec![item], Kind::Model)),
         n => Err(unsupported(n)),
     }
 }
@@ -459,6 +516,8 @@ fn shell_faces(ex: &Exchange, id: u64) -> R<(Vec<u64>, bool)> {
     let p = e.params();
     let (faces, flip) = match e.name() {
         "CLOSED_SHELL" | "OPEN_SHELL" => (refs(p.get(1), "shell faces")?, false),
+        // A face read on its own ([`roots`]) is a shell of that face.
+        n if FACE_ITEMS.contains(&n) => (vec![id], false),
         "ORIENTED_CLOSED_SHELL" | "ORIENTED_OPEN_SHELL" => {
             let inner = rid(p.get(2), "oriented shell element")?;
             let inner_e = entity(ex, inner)?;
@@ -530,6 +589,10 @@ struct Builder<'b, 'a> {
     face_ids: HashSet<u64>,
     faces: Vec<FaceB>,
     sense_mismatches: usize,
+    /// Line edges whose vertices lie off their LINE, read as the segment between the vertices.
+    lines_between_vertices: usize,
+    /// Inner loops written running the way the outer loop runs, run the other way.
+    inner_loops_turned: usize,
     /// Edges whose tolerance was raised to the gap their curve has to a face's surface.
     raised_edges: HashSet<u32>,
     /// The line edges of POLY_LOOPs, by their two CARTESIAN_POINTs (lower id first): faces that
@@ -552,6 +615,8 @@ impl<'b, 'a> Builder<'b, 'a> {
             face_ids: HashSet::new(),
             faces: Vec::new(),
             sense_mismatches: 0,
+            lines_between_vertices: 0,
+            inner_loops_turned: 0,
             raised_edges: HashSet::new(),
             poly_edges: HashMap::new(),
         }
@@ -714,13 +779,28 @@ impl<'b, 'a> Builder<'b, 'a> {
         let vertices = if mapped.with_step { [vs, ve] } else { [ve, vs] };
         // The gaps as the record will be read: its curve at its interval's ends.
         let eval = CurveEval::new(&mapped.curve).map_err(|m| format!("edge #{id}: {m}"))?;
-        for (t, v) in mapped.interval.into_iter().zip(vertices) {
+        let mut gaps = [0.0; 2];
+        for ((t, v), g) in mapped.interval.into_iter().zip(vertices).zip(gaps.iter_mut()) {
             let at = eval.point(t).ok_or_else(|| format!("edge #{id}: no point at {t}"))?;
-            let gap = at.dist(v3(self.point(v)?));
+            *g = at.dist(v3(self.point(v)?));
+        }
+        let (mut curve, mut interval) = (mapped.curve, mapped.interval);
+        // Topology first: a straight edge whose vertices lie off its LINE (a direction or a
+        // magnitude written wrong) is the segment between its vertices, which the faces it
+        // bounds share; any other curve is the edge's shape, and a vertex far off it is refused.
+        let far = gaps.iter().any(|g| !(VERTEX_GAP_MARGIN * g <= MAX_TOLERANCE));
+        if far && matches!(curve, BCurve::Line { .. }) && !closed && ps != pe {
+            let [a, z] = vertices;
+            curve = BCurve::Line { start: self.point(a)?, end: self.point(z)? };
+            interval = [0.0, 1.0];
+            gaps = [0.0; 2];
+            self.lines_between_vertices += 1;
+        }
+        for (v, gap) in vertices.into_iter().zip(gaps) {
             self.raise_vertex(v, gap, id)?;
         }
         let i = index(self.edges.len())?;
-        self.edges.push(EdgeB { curve: mapped.curve, interval: mapped.interval, vertices, tolerance: self.tol, form: None });
+        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, form: None });
         self.edge_ids.insert(id, (i, mapped.with_step));
         Ok((i, mapped.with_step))
     }
@@ -1061,6 +1141,12 @@ impl<'b, 'a> Builder<'b, 'a> {
         let seams = self.add_seams()?;
         if seams > 0 {
             notes.push(format!("{seams} seam edges added to faces that wind around their surface"));
+        }
+        if self.inner_loops_turned > 0 {
+            notes.push(format!("{} inner loops written the way their outer loop runs turned round", self.inner_loops_turned));
+        }
+        if self.lines_between_vertices > 0 {
+            notes.push(format!("{} line edges whose vertices lie off their LINE read as the segment between them", self.lines_between_vertices));
         }
         if self.sense_mismatches > 0 {
             notes.push(format!("{} edges run against their same_sense (read by their vertices)", self.sense_mismatches));
@@ -1568,7 +1654,26 @@ impl<'b, 'a> Builder<'b, 'a> {
         if flip {
             face.forward = !face.forward;
         }
-        let pcs: Vec<Vec<Curve2>> = if rerun { pcs.into_iter().map(|l| l.into_iter().rev().collect()).collect() } else { pcs };
+        let mut pcs: Vec<Vec<Curve2>> = if rerun { pcs.into_iter().map(|l| l.into_iter().rev().collect()).collect() } else { pcs };
+        // An inner bound written the way the outer one runs (its FACE_BOUND orientation wrong):
+        // on a face whose loops all close in (u, v), each loop but the outer runs clockwise, so
+        // such a loop is run the other way. Its uses and their pcurves are the same.
+        if can_turn && !seams_only && shapes.iter().all(Option::is_some) {
+            for (i, area) in shapes.iter().enumerate() {
+                let Some(a) = *area else { continue };
+                let a = if rerun { -a } else { a };
+                if i == outer || !(a > 0.0) {
+                    continue;
+                }
+                if let Some(LoopB::Edges(es)) = positions.get(i).and_then(|&p| face.loops.get_mut(p)) {
+                    reverse(es);
+                }
+                if let Some(l) = pcs.get_mut(i) {
+                    l.reverse();
+                }
+                self.inner_loops_turned += 1;
+            }
+        }
         let domain = face_domain(&surface, &pcs)?;
         Ok((pcs, domain, flip, form))
     }
