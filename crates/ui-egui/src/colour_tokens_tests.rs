@@ -244,6 +244,7 @@ fn drop_test_items(items: &mut Vec<syn::Item>) {
                 }
             }
             syn::Item::Impl(i) => i.items.retain(|item| !test_only(impl_item_attrs(item))),
+            syn::Item::Trait(t) => t.items.retain(|item| !test_only(trait_item_attrs(item))),
             _ => {}
         }
     }
@@ -267,6 +268,17 @@ fn item_attrs(item: &syn::Item) -> &[syn::Attribute] {
         Item::Type(i) => &i.attrs,
         Item::Union(i) => &i.attrs,
         Item::Use(i) => &i.attrs,
+        _ => &[],
+    }
+}
+
+fn trait_item_attrs(item: &syn::TraitItem) -> &[syn::Attribute] {
+    use syn::TraitItem;
+    match item {
+        TraitItem::Const(i) => &i.attrs,
+        TraitItem::Fn(i) => &i.attrs,
+        TraitItem::Macro(i) => &i.attrs,
+        TraitItem::Type(i) => &i.attrs,
         _ => &[],
     }
 }
@@ -296,12 +308,17 @@ impl Paint {
     fn sample() -> Color32 { Color32::BLUE }
     fn ink() -> Vec<Color32> { vec![Color32::WHITE] }
 }
+trait Shade {
+    #[cfg(test)]
+    fn sample() -> Color32 { Color32::GOLD }
+    fn shade() -> Color32 { Color32::from_gray(9) }
+}
 #[cfg(test)]
 mod tests {
     fn more() -> Color32 { Color32::BLACK }
 }
 "#;
-    assert_eq!(colour_literals(src), Ok(3));
+    assert_eq!(colour_literals(src), Ok(4));
 }
 
 #[test]
