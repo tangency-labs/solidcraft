@@ -1625,3 +1625,23 @@ fn fuzz_seed_185_pattern_builds() {
     assert!(m.volume > 0.0, "the pattern result must be a real solid: {}", m.volume);
     println!("#10 seed 185: pattern result volume {volume:.2} mm³", volume = m.volume);
 }
+
+/// Issue #10: fuzzer seed 178. Box, fillet, cut cylinder, cut box, shell, rectangular pattern,
+/// then fillet. The final fillet is refused as "SMLib fillet: SMLib's check refuses the result:
+/// Tolerance: Edge tolerance relative to brep tolerance (offset=0.083186985, tolerance=0.01)".
+/// Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a regression test
+/// that fails without the fix.
+/// Root cause not yet found — fillet result tolerance, topologically different from seed 73's
+/// "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the fillet tolerance root cause for seed 178 is found (#10)"]
+#[test]
+fn fuzz_seed_178_fillet_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_178_fillet.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the fillet must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the filleted body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the fillet result must be a real solid: {}", m.volume);
+    println!("#10 seed 178: filleted body volume {volume:.2} mm³", volume = m.volume);
+}
