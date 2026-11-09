@@ -881,7 +881,12 @@ fn a_combine_leaves_out_a_tool_whose_feature_is_suppressed() {
     let third = cube(&mut doc, Vec3::new(40.0, 0.0, 0.0), [10.0; 3], Operation::NewBody);
     let join = doc
         .add_feature(
-            FeatureKind::Combine { target: "Body1".into(), tools: vec!["Body2".into(), "Body3".into()], operation: Operation::Join, keep_tools: false },
+            FeatureKind::Combine {
+                target: "Body1".into(),
+                tools: vec!["Body2".into(), "Body3".into()],
+                operation: Operation::Join,
+                keep_tools: false,
+            },
             None,
         )
         .unwrap();
@@ -899,6 +904,14 @@ fn a_combine_leaves_out_a_tool_whose_feature_is_suppressed() {
     assert!(rel(bodies[0].1, 2000.0) < 1e-6, "{bodies:?}");
     // A tool that no feature makes is still an error.
     doc.feature_mut(third).unwrap().body_names.clear();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    assert!(m.result(join).unwrap().error.as_deref().is_some_and(|e| e.contains("unknown body")), "{:?}", m.result(join).unwrap().error);
+    // So is one that only a suppressed feature after the Combine would make.
+    let later = cube(&mut doc, Vec3::new(60.0, 0.0, 0.0), [10.0; 3], Operation::NewBody);
+    let f = doc.feature_mut(later).unwrap();
+    f.body_names = vec!["Body3".into()];
+    f.suppressed = true;
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.result(join).unwrap().error.as_deref().is_some_and(|e| e.contains("unknown body")), "{:?}", m.result(join).unwrap().error);
