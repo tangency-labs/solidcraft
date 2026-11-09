@@ -1059,8 +1059,8 @@ mod tests {
     /// A renamed setting is still found by its old label in the user's language, not only in English.
     #[test]
     fn search_finds_a_renamed_setting_by_its_old_localized_label() {
-        let _language = crate::i18n::scope("de");
-        let label = crate::i18n::tr("prefs.sketch.state_icons");
+        let _language = solidcraft_ui_text::scope("de");
+        let label = solidcraft_ui_text::tr("prefs.sketch.state_icons");
         assert!(matches_text("Skizzensymbole", &[label]), "{label} is the former Skizzensymbole in der Farbe ihres Zustands");
         assert!(!matches_text("Qqqq", &[label]));
     }
