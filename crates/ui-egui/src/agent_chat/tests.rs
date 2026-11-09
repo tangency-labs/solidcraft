@@ -4762,3 +4762,249 @@ fn a_picture_only_prompt_and_a_thought_have_no_copy_message_action() {
     assert!(crate::scenario::handle_at("agent_chat:copy:1").is_none(), "a thought has no copy action");
     assert!(h.widget("Copy message").is_none(), "nothing to click");
 }
+
+fn shared_assistant_harness() -> (crate::scenario::Harness, Script) {
+    let mut h = narrow_chat();
+    h.app.home.open = false;
+    h.app.ui.show_browser = false;
+    h.app.ui.show_timeline = false;
+    h.app.preferences.ai_features = true;
+    h.app.preferences.agent_chat_popped = false;
+    h.app.preferences.language = "en".into();
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.input = "Retained responsive composer draft".into();
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "A retained conversation".into() });
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Retained profile"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let feature = h.app.session.doc.features[0].id;
+    h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Feature { id: feature }]})).unwrap();
+    h.app.preferences.shared_panel_layout = true;
+    h.frames(6);
+    assert!(h.app.panel_runtime().is_some());
+    assert!(h.app.agent_chat.detecting.is_none(), "the deterministic discovery fixture starts no worker");
+    assert!(script.calls().is_empty());
+    (h, script)
+}
+
+fn shared_assistant_float(h: &mut crate::scenario::Harness, width: f32, height: f32) {
+    use solidcraft_engine::panels::{Destination, InstanceId, LayoutAction, Mutation, Point, SectionId, SectionLocation, Size};
+    let instance = InstanceId::new("assistant").unwrap();
+    let source = h.app.panel_runtime().unwrap().layout().layout().containing(&instance).unwrap();
+    let origin = Point { x: 300.0, y: 200.0 };
+    let size = Size { width, height };
+    let mutation = if matches!(source.location, SectionLocation::Floating { .. }) {
+        Mutation::SetFloatingRect { section: source.id.clone(), origin, size }
+    } else {
+        Mutation::Move {
+            instance,
+            destination: Destination::NewSection {
+                section: SectionId::new("responsive-assistant").unwrap(),
+                index: 0,
+                location: SectionLocation::Floating { origin },
+                size,
+            },
+        }
+    };
+    h.app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![mutation] }).unwrap();
+    h.frames(6);
+}
+
+fn shared_assistant_body(h: &crate::scenario::Harness) -> egui::Rect {
+    let body = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|panel| panel.instance.0 == "assistant").unwrap().body.unwrap();
+    egui::Rect::from_min_size(egui::pos2(body.origin.x, body.origin.y), egui::vec2(body.size.width, body.size.height))
+}
+
+#[test]
+fn shared_assistant_wide_and_compact_present_real_regions_without_losing_the_composer_selection() {
+    use solidcraft_engine::panels::{Destination, InstanceId, LayoutAction, Mutation, SectionId, SectionLocation, Size, Zone};
+    let (mut h, script) = shared_assistant_harness();
+    let input = egui::Id::unique("sc_agent_chat_input");
+    h.ctx.memory_mut(|memory| memory.request_focus(input));
+    h.frames(2);
+    let mut editor = egui::TextEdit::load_state(&h.ctx, input).unwrap();
+    editor.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(2), egui::text::CCursor::new(10))));
+    editor.store(&h.ctx, input);
+    h.frame();
+    let caret = egui::TextEdit::load_state(&h.ctx, input).unwrap().cursor.char_range();
+    assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(input), "the docked composer starts focused");
+    let response = h.ctx.read_response(input).unwrap();
+    assert!(response.enabled() && response.interact_rect.is_positive(), "the focused composer is live and interactable");
+    assert!(!caret.unwrap().is_empty(), "exercise a real selection before moving the panel");
+    let draft = h.app.agent_chat.input.clone();
+    let document = h.app.session.doc.clone();
+    let model = h.app.session.model.state();
+    let selection = h.app.session.selection.clone();
+    let camera = h.app.cam;
+    let session = h.app.session.uid;
+    let revision = h.app.session.revision;
+    let undo = h.app.session.undo.len();
+    let dirty = h.app.session.is_dirty();
+    let controllers = h.app.panel_runtime().unwrap().controller_count();
+    for (width, height, wide) in [(900.0, 420.0, true), (500.0, 340.0, false)] {
+        shared_assistant_float(&mut h, width, height);
+        let body = shared_assistant_body(&h);
+        assert!(body.width() > body.height(), "both cases exercise the Wide host flow");
+        let conversation = crate::scenario::rect_of("agent_chat:conversation").unwrap();
+        let composer = crate::scenario::rect_of("agent_chat:composer_footer").unwrap();
+        let switcher = crate::scenario::rect_of("agent_chat:switcher").unwrap();
+        assert!(body.expand(1.0).contains_rect(conversation));
+        assert!(body.expand(1.0).contains_rect(composer));
+        assert!(body.expand(1.0).contains_rect(switcher));
+        if wide {
+            assert!(conversation.right() <= composer.left(), "a viable Wide body puts the real transcript beside its composer");
+            assert!(conversation.right() <= switcher.left(), "provider controls share the composer's column");
+            assert!(conversation.height() > composer.height(), "the transcript can use the full height of its own column");
+        } else {
+            assert!(conversation.bottom() <= composer.top() + 1.0, "a compact Wide body falls back to the existing vertical composition");
+            assert!(conversation.left() < composer.right() && composer.left() < conversation.right());
+        }
+        assert_eq!(h.app.agent_chat.input, draft);
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(input));
+        assert_eq!(egui::TextEdit::load_state(&h.ctx, input).unwrap().cursor.char_range(), caret);
+    }
+    h.app.preferences.language = "ar".into();
+    shared_assistant_float(&mut h, 900.0, 420.0);
+    let conversation = crate::scenario::rect_of("agent_chat:conversation").unwrap();
+    let composer = crate::scenario::rect_of("agent_chat:composer_footer").unwrap();
+    assert!(composer.right() <= conversation.left(), "Wide mirrors the two real regions in RTL");
+    assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(input), "RTL keeps the composer focused");
+    assert_eq!(egui::TextEdit::load_state(&h.ctx, input).unwrap().cursor.char_range(), caret);
+    h.app.preferences.language = "en".into();
+    h.app
+        .dispatch_panel_layout(LayoutAction::Apply {
+            expected_revision: None,
+            mutations: vec![Mutation::Move {
+                instance: InstanceId::new("assistant").unwrap(),
+                destination: Destination::NewSection {
+                    section: SectionId::new("responsive-assistant-side").unwrap(),
+                    index: 0,
+                    location: SectionLocation::Dock { zone: Zone::Right },
+                    size: Size { width: 360.0, height: 420.0 },
+                },
+            }],
+        })
+        .unwrap();
+    h.frames(6);
+    let conversation = crate::scenario::rect_of("agent_chat:conversation").unwrap();
+    let composer = crate::scenario::rect_of("agent_chat:composer_footer").unwrap();
+    assert!(conversation.bottom() <= composer.top() + 1.0);
+    assert_eq!(h.app.agent_chat.input, draft);
+    assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(input));
+    assert_eq!(egui::TextEdit::load_state(&h.ctx, input).unwrap().cursor.char_range(), caret);
+    assert_eq!(h.app.session.uid, session);
+    assert!(Arc::ptr_eq(&h.app.session.doc, &document));
+    assert!(Arc::ptr_eq(&h.app.session.model.state(), &model));
+    assert_eq!(h.app.session.selection, selection);
+    assert_eq!(h.app.cam, camera);
+    assert_eq!(h.app.session.revision, revision);
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.is_dirty(), dirty);
+    assert_eq!(h.app.panel_runtime().unwrap().controller_count(), controllers);
+    assert!(script.calls().is_empty(), "changing presentation must not submit, cancel or restart the retained service");
+}
+
+#[test]
+fn shared_assistant_transcript_keeps_its_scroll_position_through_responsive_width_changes() {
+    use solidcraft_engine::panels::{Destination, InstanceId, LayoutAction, Mutation, SectionId, SectionLocation, Size, Zone};
+    let (mut h, script) = shared_assistant_harness();
+    h.app.agent_chat.items = (0..80).map(|n| Item::Agent { thought: false, text: format!("Parts list row {n}") }).collect();
+    shared_assistant_float(&mut h, 900.0, 420.0);
+    assert_eq!(rows_in_view(&h).last().unwrap().0, 79);
+    let conversation = crate::scenario::rect_of("agent_chat:conversation").unwrap();
+    h.call("ui.scroll", json!({"x":conversation.center().x,"y":conversation.center().y,"delta":1200}));
+    h.frames(30);
+    let before = rows_in_view(&h).first().unwrap().0;
+    assert!(before > 0 && before < 70, "exercise a middle position, not an automatic endpoint");
+    for width in [1040.0, 900.0] {
+        shared_assistant_float(&mut h, width, 420.0);
+        let after = rows_in_view(&h).first().unwrap().0;
+        assert!(before.abs_diff(after) <= 1, "fixed-height short messages keep their scroll anchor across a width change: {before} → {after}");
+        assert!(!rows_in_view(&h).iter().any(|row| row.0 == 79), "a reparent must not reset stick-to-bottom");
+    }
+    h.app
+        .dispatch_panel_layout(LayoutAction::Apply {
+            expected_revision: None,
+            mutations: vec![Mutation::Move {
+                instance: InstanceId::new("assistant").unwrap(),
+                destination: Destination::NewSection {
+                    section: SectionId::new("scrolled-assistant-side").unwrap(),
+                    index: 0,
+                    location: SectionLocation::Dock { zone: Zone::Right },
+                    size: Size { width: 360.0, height: 420.0 },
+                },
+            }],
+        })
+        .unwrap();
+    h.frames(6);
+    let after = rows_in_view(&h).first().unwrap().0;
+    assert!(before.abs_diff(after) <= 1, "returning to Tall retains the same transcript scroll anchor: {before} → {after}");
+    assert!(script.calls().is_empty());
+    assert!(h.app.agent_chat.backend.is_some());
+}
+
+#[test]
+fn shared_assistant_header_uses_live_status_and_one_click_starts_one_new_chat() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
+    use solidcraft_engine::panels::{ControlId, InstanceId};
+    let (mut h, script) = shared_assistant_harness();
+    shared_assistant_float(&mut h, 900.0, 420.0);
+    let assistant = InstanceId::new("assistant").unwrap();
+    for state in [State::Ready, State::Busy, State::NeedsAuth, State::Exited, State::Failed] {
+        h.app.agent_chat.state = Some(state);
+        h.frames(2);
+        let presentation = h.app.panel_runtime().unwrap().instance_presentation(&assistant).unwrap();
+        assert_eq!(presentation.status.as_deref(), Some(state.label()));
+        assert_eq!(presentation.attention, matches!(state, State::NeedsAuth | State::Exited | State::Failed));
+    }
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.items.push(Item::Permission { key: 42, title: "Review this local request".into(), options: Vec::new(), answer: None });
+    h.frames(2);
+    let presentation = h.app.panel_runtime().unwrap().instance_presentation(&assistant).unwrap();
+    assert_eq!(presentation.status.as_deref(), Some(trf("ui.assistant_waiting", &[("count", "1")]).as_str()));
+    assert!(presentation.attention);
+    assert_eq!(h.app.agent_chat.waiting(), 1, "rendering status never answers the pending request");
+    h.app.agent_chat.items.pop();
+    h.app.agent_chat.pending.push(Pending {
+        text: "Keep this queued request until confirmation".into(),
+        image: false,
+        context: Context::default(),
+        files: Vec::new(),
+    });
+    h.app.preferences.agents =
+        (0..24).map(|n| agents::AgentConfig { id: format!("review-{n}"), name: format!("Review provider {n}"), ..Default::default() }).collect();
+    h.app.agent_chat.picking = Some(true);
+    h.frames(4);
+    let providers = crate::scenario::rect_of("agent_chat:providers").unwrap();
+    assert!(providers.contains(crate::scenario::handle_at("agent_chat:pick:review-0").unwrap()));
+    h.call("ui.scroll", json!({"x":providers.center().x,"y":providers.center().y,"delta":-900}));
+    h.frames(30);
+    let providers = crate::scenario::rect_of("agent_chat:providers").unwrap();
+    let switcher = crate::scenario::rect_of("agent_chat:switcher").unwrap();
+    assert!(
+        switcher.bottom() < providers.top() - solidcraft_theme::Tokens::get().control_height * 4.0,
+        "the real provider scroller is far from its top before New Chat"
+    );
+    assert!(script.calls().is_empty(), "scrolling the deterministic provider list starts no agent");
+    let target = HostControlTarget::Pointer(HostPointerTarget::HeaderAction { instance: assistant, action: ControlId::new("new-chat").unwrap() });
+    let control = h.app.universal_panel_frame().unwrap().controls.iter().find(|control| control.target == target).unwrap();
+    let at = egui::pos2(control.bounds.origin.x + control.bounds.size.width / 2.0, control.bounds.origin.y + control.bounds.size.height / 2.0);
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    h.frames(4);
+    assert!(h.app.agent_chat.confirm_new);
+    assert_eq!(h.app.agent_chat.pending.len(), 1);
+    assert!(script.calls().is_empty(), "opening confirmation cannot invoke New Chat early");
+    let confirm = crate::scenario::rect_of("agent_chat:new_confirm").unwrap();
+    let providers = crate::scenario::rect_of("agent_chat:providers").unwrap();
+    let composer = crate::scenario::rect_of("agent_chat:composer_footer").unwrap();
+    assert!(providers.expand(1.0).contains_rect(confirm), "a newly requested confirmation is fully visible inside the actual provider clip");
+    assert!(shared_assistant_body(&h).contains_rect(confirm));
+    assert!(confirm.left() >= composer.left(), "the real confirmation remains reachable in the interaction column");
+    click_at(&mut h, confirm.center(), egui::PointerButton::Primary);
+    h.frames(4);
+    assert_eq!(script.calls().iter().filter(|call| call.as_str() == "new_session").count(), 1);
+    assert!(!script.calls().iter().any(|call| call.starts_with("prompt:") || call == "cancel"));
+    assert_eq!(h.app.agent_chat.input, "Retained responsive composer draft");
+    assert!(h.app.agent_chat.items.is_empty());
+}
