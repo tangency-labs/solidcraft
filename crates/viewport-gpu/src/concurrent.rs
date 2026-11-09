@@ -282,22 +282,19 @@ mod tests {
     /// builds on an NVIDIA GPU, and in 2 of 4 runs of 2,000 builds on WARP. 300 builds catch that
     /// in only some runs; for a longer run, in PowerShell on Windows (FXC named, since DXC builds
     /// on one thread):
-    /// `$env:WGPU_BACKEND='dx12'; $env:WGPU_DX12_COMPILER='fxc'; $env:SOLIDCRAFT_PIPELINE_BUILDS='5000'`,
-    /// then `cargo test -p solidcraft-gpu the_viewports_pipelines`.
+    /// `$env:WGPU_BACKEND='dx12'; $env:WGPU_DX12_COMPILER='fxc'; $env:VIEWPORT_TEST_PIPELINE_BUILDS='5000'`,
+    /// then `cargo test -p solidcraft-viewport-gpu the_viewports_pipelines`.
     /// Other backends have no such cache and compile every build, so they build twice. Only a
-    /// missing adapter skips the test, and not with `SOLIDCRAFT_REQUIRE_GPU` (the Windows CI job).
+    /// missing adapter skips the test, and not with `VIEWPORT_TEST_REQUIRE_GPU` (the Windows CI job).
     #[test]
     fn the_viewports_pipelines_build_again_and_again_on_several_threads() {
-        let (adapter, device, _) = match crate::open_headless() {
+        let (adapter, device, _) = match crate::open_headless(crate::test_env::policy()) {
             Ok(d) => d,
-            Err(e @ crate::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
-                solidcraft_geom::note!("skipped: {e}");
-                return;
-            }
+            Err(e @ crate::GpuError::NoAdapter(_)) if crate::test_env::skip_unless_required(crate::test_env::required(), &e) => return,
             Err(e) => panic!("the pipeline builds need a GPU: {e}"),
         };
         let d3d12 = adapter.get_info().backend == wgpu::Backend::Dx12;
-        let builds = std::env::var("SOLIDCRAFT_PIPELINE_BUILDS").ok().and_then(|n| n.parse().ok()).unwrap_or(if d3d12 { 300 } else { 2 });
+        let builds = std::env::var("VIEWPORT_TEST_PIPELINE_BUILDS").ok().and_then(|n| n.parse().ok()).unwrap_or(if d3d12 { 300 } else { 2 });
         let target = crate::view::GpuTarget {
             format: wgpu::TextureFormat::Rgba8Unorm,
             depth: Some(crate::depth_format(&device, true)),
