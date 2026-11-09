@@ -1017,7 +1017,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             close_tip: "Close",
             more_tip: solidcraft_ui_text::tr_label("All open designs"),
             new_tip: &new_tip,
-            id: egui::Id::unique("sc_doc_tabs"),
+            id: tab_strip_id(),
             handles: TAB_HANDLES,
         };
         crate::app_bar::tabs(ui, &mut strip, r, x0, x1)
@@ -1241,6 +1241,16 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
     }
     quit_step(app);
     batch_step(app);
+}
+
+/// Where SolidCraft's document tab strip keeps its state.
+fn tab_strip_id() -> egui::Id {
+    egui::Id::unique("sc_doc_tabs")
+}
+
+/// Whether the document tab strip's list of every open design is open.
+pub fn tab_list_open(ctx: &egui::Context) -> bool {
+    crate::app_bar::tab_list_open(ctx, tab_strip_id())
 }
 
 /// A tab's tooltip ([`crate::app_bar::tab_tip`] over [`tab_place`]).

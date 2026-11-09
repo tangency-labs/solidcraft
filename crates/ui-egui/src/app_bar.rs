@@ -462,6 +462,12 @@ pub struct TabStrip<'a> {
     pub handles: TabHandles<'a>,
 }
 
+/// Whether the strip that keeps its state at `id` ([`TabStrip::id`]) has its list of every tab
+/// open.
+pub fn tab_list_open(ctx: &egui::Context, id: egui::Id) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(id.with("more")).unwrap_or(false))
+}
+
 /// What the user chose on the tab strip this frame.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TabAction {
@@ -743,7 +749,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         if mresp.clone().backing_on_hover_text(strip.more_tip).clicked() {
             ui.ctx().data_mut(|d| d.insert_temp(id, !d.get_temp::<bool>(id).unwrap_or(false)));
         }
-        if ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
+        if tab_list_open(ui.ctx(), strip.id) {
             let mut listed = None;
             let resp = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Popup)
                 .area(id.with("area"))
