@@ -38,18 +38,19 @@ Sizes are non-test lines on main `1c8fdde4ba` (tests in brackets). "Callers" cou
 
 | Job | SolidCraft code (lines) | Layer | Notes | Callers |
 |---|---|---|---|---|
-| Mesh-based model decisions | `xtask/mesh-decisions.txt`: 181 functions (doc 96, engine 51, kernel 34). In the kernel crate: `Body::{faces, edges, meets, meets_each, volume_at}`, `measure`, `topo`, `provenance`, blend and offset picks. Their mesh tools: `geom/src/{mesh,bvh,mesh_distance,compare}.rs` (2.4k) | ops queries over kernel measures | `Body::meets` has its kernel half merged on `kernel` (#13554, #13660). About 43 lines pick by nearness, 42 measure (volume, gap, clearance), 38 name or trace | everywhere |
-| Picking (ray/body) | `ui-egui/src/viewport.rs` `pick_hits` on display meshes, `geom::Mesh::raycast`, `bvh.rs`; engine `face_at_state`, `frames::frame_at`, `sketch_inspect::face_at` | kernel primitive (layers §1); ops query | `solidcore::intersect::ray_tracer` exists; no ops entry | ui-egui, engine, doc |
+| Mesh-based model decisions | `xtask/mesh-decisions.txt`: 181 functions (doc 96, engine 51, kernel 34). In the kernel crate: `Body::{faces, edges, meets, meets_each, volume_at}`, `measure`, `topo`, `provenance`, blend and offset picks. Their mesh tools: `geom/src/{mesh,bvh,mesh_distance,compare}.rs` (2.4k) | ops queries over kernel measures; the mesh tools stay for mesh bodies (row below) | `Body::meets` has its kernel half merged on `kernel` (#13554, #13660). About 43 lines pick by nearness, 42 measure (volume, gap, clearance), 38 name or trace | everywhere |
+| Picking (ray/body) | `ui-egui/src/viewport.rs` `pick_hits` on display meshes, `geom::Mesh::raycast`, `bvh.rs`; engine `face_at_state`, `frames::frame_at`, `sketch_inspect::face_at` | hover may use the display mesh; the pick decision (which face or edge, the point) is a kernel ray/body call through ops | `solidcore::intersect::ray_tracer` exists; no ops entry | ui-egui, engine, doc |
 | Tangent chains | four walks: `kernel/src/blend.rs::tangent_chain`, `geom::Mesh::tangent_chain`, `doc/src/eval.rs::{tangent_face_chain, smooth_chain}`, `ui-egui/src/context_menu.rs::tangent_chain`; tangency test `kernel/src/tangent_edge.rs` (0.4k) | ops walk; kernel tangency measure | #13662, no PR | engine 2, geom 2, ui-egui 3 |
 | Display-only edges and isoparms | `kernel/src/{smooth_edges,iso}.rs` (1.0k) | tess | regression #13542 lives here | render, ui-egui |
-| Surface construction | `geom/src/{fill,fill_iso,fill_general,fill_matched,network,blend}.rs`, `kernel/src/{fill,boundary_network,boundary,bridge,matchsurf,fair}.rs` (12.7k); `geom/src/{bspline,spline_space,tspline/}` + `kernel/src/tspline.rs` (3.6k); `geom/src/{arcfit,catmull_rom}.rs` (0.5k) | kernel (build, fit); ops (the commands) | solidcore has curve and surface fitting (`nurbs/crv_fit`, `srf_fit`), no curve-network fill, no T-splines | kernel, engine, doc |
-| Planar builds, sewing, certificates | `kernel/src/{prism,prism_curve,planar_sources,planar_regularize,polybool,sew,mesh_convert}.rs` (5.5k) | kernel | solidcore has `prism`, `Boolean2D`, stitching; overlap not measured | kernel |
-| Local surface commands | `kernel/src/{surfaces,surface_trim,surface_untrim,surface_extend,surface_ruled,splitface,delete_face,emboss,lip,repair}.rs` (8.2k) | ops recipes | ops has `split`, `untrim`, `extend`, `stitch` | kernel, engine |
-| Hidden lines, sections, projections | `geom/src/hlr/` (4.5k, own ray/surface intersection and inversion), `geom/src/section.rs`; `doc/src/project.rs` silhouettes and sections by mesh, `project3d.rs` | kernel (silhouette, section); ops (the view recipe) | kernel has `surface_silhouette`; drawings work is on the `drawings` branch | kernel, doc |
-| Sheet metal | `doc/src/sheet.rs` (10.3k: flat pattern, bend zones, fold maps), `sheet_convert.rs` | app rules; folding and the folded solid are kernel transforms and ops builds | no counterpart | doc, engine |
-| IGES | `kernel/src/{iges_in,iges_in/assembly,iges_out}.rs` (2.7k) | record, ops (same split as STEP) | no counterpart | kernel |
+| Surface construction | `geom/src/{fill,fill_iso,fill_general,fill_matched,network,blend}.rs`, `kernel/src/{fill,boundary_network,boundary,bridge,matchsurf,fair}.rs` (12.7k); `geom/src/{bspline,spline_space,tspline/}` + `kernel/src/tspline.rs` (3.6k); `geom/src/{arcfit,catmull_rom}.rs` (0.5k) | kernel primitives, with thin ops commands: layers §1 lists "curves and surfaces from control points", "skin" and "constrained fits (an edge row matched to a target at G0/G1/G2)", which is Match Surface | solidcore has curve and surface fitting (`nurbs/crv_fit`, `srf_fit`), no curve-network fill, no T-splines | kernel, engine, doc |
+| Planar builds, sewing, certificates | `kernel/src/{prism,prism_curve,planar_sources,planar_regularize,sew}.rs` (4.6k) | kernel ("build, sew and heal", layers §1) | solidcore has `prism`, `Boolean2D`, stitching; overlap not measured | kernel |
+| Local surface commands | `kernel/src/{surfaces,surface_trim,surface_untrim,surface_extend,surface_ruled,splitface,delete_face,emboss,lip,repair}.rs` (8.2k) | ops recipes over kernel primitives; any math they need becomes a kernel primitive first | ops has `split`, `untrim`, `extend`, `stitch` | kernel, engine |
+| Hidden lines, sections, projections | `geom/src/hlr/` (4.5k, own ray/surface intersection and inversion), `geom/src/section.rs`; `doc/src/project.rs` silhouettes and sections by mesh, `project3d.rs` | kernel (silhouettes, sections, visibility); tess (the drawable polylines); ops ("make a drawing view") | kernel has `surface_silhouette`; drawings work is on the `drawings` branch | kernel, doc |
+| Sheet metal | `doc/src/sheet.rs` (10.3k: flat pattern, bend zones, fold maps), `sheet_convert.rs` | kernel (unfold and fold maths); ops (flange, bend, unfold commands); the app keeps the sheet settings (K-factor, gauge) and passes them in | no counterpart | doc, engine |
+| IGES | `kernel/src/{iges_in,iges_in/assembly,iges_out}.rs` (2.7k) | record (model, parser), ops (build): "every other importer (IGES, STL and so on) follows the same split" (layers §2) | no counterpart | kernel |
+| Mesh-body tools | `kernel/src/{meshbody,mesh_convert,polybool}.rs` (1.0k); `geom/src/{mesh,bvh,mesh_distance,compare}.rs` (2.4k); mesh formats in `io` (STL, 3MF, glTF, PLY, OBJ) | app, for now: layers.md covers B-reps, and SolidCraft may keep mesh bodies. Their uses on B-rep bodies go with the mesh decisions above | none needed | kernel, engine, io |
 
-Out of scope here, flagged for jyviko (§4): `crates/sketch` (2D constraint solver, 32k), `crates/dynamics`, camera and lighting maths in `render` and `gpu`, and the mesh file formats in `io` (STL, 3MF, glTF, PLY, OBJ), which are data.
+Out of scope for this RFC: `crates/sketch` (the 2D constraint solver, 32k), `crates/dynamics`, and the camera and lighting maths in `render` and `gpu`.
 
 **Totals.** About 108k non-test lines in SolidCraft overlap a solidcore job or are geometry outside solidcore: about 56k with a solidcore counterpart (1a), about 52k without (1b), not counting the 147 mesh-decision functions in `doc` and `engine`. The seam allowlist has one line (`crates/smlib -> solidcore`), and no SolidCraft crate calls `solidcore-ops` or `solidcore-tess` yet.
 
@@ -86,6 +87,7 @@ Every PR uses the gates below, plus the gate named in its row.
 | 1.6 | SolidCraft reads STEP through `solidcore-record` + ops build; delete `crates/step` reading and `kernel/src/step_in` | main | `tests/step-conformance`, `tests/step-regressions`, `kernel-cases/import` unchanged or better; bake-off: opens ≥218, refuses 0, ≥22 of 23 volumes | after 1.5 |
 | 1.7 | STEP write: measure both writers by round trip on the corpus, keep one, delete the other | main or kernel by the survivor | round-trip volumes and face counts | after 1.6 |
 | 1.8 | Evaluation: SolidCraft's callers of `geom::brep::{eval, form, normal_section}` move to ops and tess queries over `solidcore::eval`; the geom copies are deleted | main | Rig; record checks unchanged | after 1.3 |
+| 1.9 | IGES: model and parser into `solidcore-record`, building into ops, the same split as STEP; delete `kernel/src/iges_*` | kernel, then main for the callers | the IGES import tests and `kernel-cases/import` unchanged or better | after 1.6 |
 
 ### Phase 2: ops recipes (stage 3b)
 
@@ -101,9 +103,13 @@ Each PR adds the kernel primitive it needs (with tests), the ops recipe, and swi
 | 2.6 | #13662 | the tangent-chain walk; replaces the four walks | kernel, then main for the callers |
 | 2.7 | #13661 (#13925) | continuity report and combs | kernel, then main |
 | 2.8 | #13671, #13672 | provenance tags and caller-owned sessions | kernel |
-| 2.9 | new | surface construction as kernel primitives: fills, curve networks, bridge, match, fair, T-splines (§4 q3) | kernel |
+| 2.9 | new | surface construction as kernel primitives (fills, curve networks, bridge, Match Surface as the constrained fit, fair, T-splines), each command a thin ops call; one family per PR (§4) | kernel, then main |
+| 2.10 | new | planar builds, sewing and the prism certificates as kernel primitives ("build, sew and heal") | kernel, then main |
+| 2.11 | new | local surface commands (trim, untrim, extend, ruled, split, delete face, emboss, lip, repair) as ops recipes; any new math is a kernel primitive first, in its own PR | kernel, then main |
+| 2.12 | new | sheet metal: fold and unfold maths in the kernel; flange, bend and unfold commands in ops; K-factor and gauge passed in from the document | kernel, then main |
+| 2.13 | new | hidden lines, sections, projections: silhouettes, sections and visibility in the kernel, polylines in tess, "make a drawing view" in ops; replaces `geom/src/hlr` and the mesh-based `doc/src/project*.rs` paths. Lands through the `drawings` branch | kernel, then drawings |
 
-2.1 to 2.5 and 2.8 run in parallel. 2.6 and 2.7 need 2.1's lint. 2.9 waits for jyviko's answer to q3.
+2.1 to 2.5, 2.8 and 2.10 to 2.13 run in parallel. 2.6 and 2.7 need 2.1's lint. 2.9 starts once jyviko answers §4.
 
 ### Phase 3: exact queries in place of mesh decisions
 
@@ -141,11 +147,6 @@ The remaining lines of `app-geometry.txt` and `mesh-decisions.txt`, one cluster 
 - **Naming survives topology changes.** When a move changes a body's topology (as truck's split cylinder sides did in R70), add the face-name mapping in SolidCraft's naming layer (`crates/doc/src/naming.rs`, `history_names.rs`) so saved references resolve. Never bend the kernel's topology to match the old names.
 - **Tests move with the code**, into the layer's test files; kernel cases go in `solidcore/crates/solidcore/tests/kernel_cases/`.
 
-## 4. Open questions for jyviko
+## 4. Open question for jyviko
 
-1. **Surface construction with no counterpart** (§1b, about 16k lines: fills, curve networks, bridge, match, fair, T-splines): port it into the kernel as it is, with its tests, or design it anew in solidcore first?
-2. **Picking:** may hover picking stay on the display mesh's face ids, with only the picked point and any decision taken from a kernel ray/body call?
-3. **The kernel crate after the switch:** does `crates/kernel` remain as an app crate under the seam rule, or do its commands all move into ops?
-4. **STEP write:** is a round-trip measurement enough to choose between `step-export` and SolidCraft's writer?
-5. **Scope:** are `crates/sketch`'s 2D solver and sheet metal's fold maps app geometry to move, or app logic over kernel transforms?
-6. **Evaluation (1.8):** before the switch, or with it?
+**Surface construction** (§1b, about 16k lines: fills, curve networks, bridge, Match Surface, fair, T-splines): do we port the existing code into the kernel with its tests, or redesign it in solidcore first?
