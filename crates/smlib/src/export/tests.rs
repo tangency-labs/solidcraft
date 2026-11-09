@@ -458,7 +458,7 @@ mod native_tests {
 mod mapped_tests {
     use super::*;
     use solidcore_record::brep::{Budget, check_curve2};
-    use solidcraft_geom::brep::pcurve::eval;
+    use solidcore_ops::pcurve::eval;
 
     /// A cubic trim on [3, 5]: clamped, one interior knot.
     fn base() -> b::Curve2 {
