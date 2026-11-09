@@ -30,10 +30,15 @@ type_complexity = "allow"
 neg_cmp_op_on_partial_ord = "allow"
 
 [dependencies]
+solidcraft-viewport-gpu = { workspace = true }
+solidcraft-viewport = { workspace = true }
 solidcraft-engine = { workspace = true }
+solidcraft-control = { workspace = true }
 # The D3D12 shader compiler the window starts with (#6756).
 solidcraft-gpu = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
+solidcraft-ui-text = { workspace = true }
+solidcraft-theme = { workspace = true }
 solidcraft-space-mouse = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
 egui = { workspace = true }
@@ -45,7 +50,6 @@ rfd = { workspace = true }
 ron = "0.12"
 # Waits for wgpu's adapter list when choosing the graphics backend before the window opens.
 pollster = { workspace = true }
-getrandom = "0.3"
 # The update check (docs/updates.md): HTTPS with rustls, certificates from the operating system.
 ureq = { version = "3.4", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }

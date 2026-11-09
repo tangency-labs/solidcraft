@@ -13,6 +13,12 @@ use solidcraft_sketch::{ConstraintKind, LinkKind, LinkSource, Sketch};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, str_, vec3};
+use crate::schema::sketch_project::{
+    AutoProjectParams, AutoProjectResult, FitCurvesParams, FitSectionResult, Include3dParams, IntersectParams, IntersectionCurveParams,
+    IsoCurveParams, LinkMade, ProjectParams, ProjectResult, ProjectToSurfaceParams, ProjectToSurfaceResult, ProjectedLink, SketchBreakLinkParams,
+    SketchBreakLinkResult, SketchLinkResult, SpunProfileParams,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 macro_rules! refs_doc {
@@ -21,105 +27,160 @@ macro_rules! refs_doc {
     };
 }
 
+const PROJECT_CONTRACT: TypedContract<ProjectParams> = TypedContract::new();
+const INTERSECT_CONTRACT: TypedContract<IntersectParams> = TypedContract::new();
+const INCLUDE_3D_CONTRACT: TypedContract<Include3dParams> = TypedContract::new();
+const PROJECT_TO_SURFACE_CONTRACT: TypedContract<ProjectToSurfaceParams> = TypedContract::new();
+const INTERSECTION_CURVE_CONTRACT: TypedContract<IntersectionCurveParams> = TypedContract::new();
+const SPUN_PROFILE_CONTRACT: TypedContract<SpunProfileParams> = TypedContract::new();
+const ISO_CURVE_CONTRACT: TypedContract<IsoCurveParams> = TypedContract::new();
+const FIT_SECTION_CONTRACT: TypedContract<FitCurvesParams> = TypedContract::new();
+const BREAK_LINK_CONTRACT: TypedContract<SketchBreakLinkParams> = TypedContract::new();
+const AUTO_PROJECT_CONTRACT: TypedContract<AutoProjectParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.project", "Project", project_cmd).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).params(
-        concat!(refs_doc!(), "; projection_link?: bool (default true)", created_doc!()),
+    CommandSpec::new("sketch.project", "Project", crate::checked!("sketch.project", project_cmd)).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).contract(&PROJECT_CONTRACT).output(output_schema_for::<ProjectResult>).params(
+        concat!(refs_doc!(), "; projection_link?: bool (default true); construction?: bool (default the session's preference, off: the created curves are construction geometry)", created_doc!()),
     ),
-    CommandSpec::new("sketch.intersect", "Intersect", intersect_cmd).at("SKETCH", "CREATE").icon("intersect").enabled(in_sketch).params(
-        concat!("refs: [{body}, {face: [x,y,z], body?}, {edge: [x,y,z], body?}, {sketch, curve}]: section curves (or points) with the sketch plane; projection_link?: bool (default true)", created_doc!()),
+    CommandSpec::new("sketch.intersect", "Intersect", crate::checked!("sketch.intersect", intersect_cmd)).at("SKETCH", "CREATE").icon("intersect").enabled(in_sketch).contract(&INTERSECT_CONTRACT).output(output_schema_for::<ProjectResult>).params(
+        concat!("refs: [{body}, {face: [x,y,z], body?}, {edge: [x,y,z], body?}, {sketch, curve}]: section curves (or points) with the sketch plane; projection_link?: bool (default true); construction?: bool (default the session's preference, off: the created curves are construction geometry)", created_doc!()),
     ),
-    CommandSpec::new("sketch.include_3d", "Include 3D Geometry", include_cmd)
+    CommandSpec::new("sketch.include_3d", "Include 3D Geometry", crate::checked!("sketch.include_3d", include_cmd))
         .at("SKETCH", "CREATE")
         .icon("include")
         .enabled(in_sketch)
-        .params(concat!("refs: like Project (edges, vertices, sketch curves and points); curves out of the sketch plane are flattened onto it", created_doc!())),
-    CommandSpec::new("sketch.project_to_surface", "Project To Surface", project_to_surface)
+        .contract(&INCLUDE_3D_CONTRACT).output(output_schema_for::<ProjectResult>).params(concat!("refs: like Project (edges, vertices, sketch curves and points); curves out of the sketch plane are flattened onto it; construction?: bool (default the session's preference, off: the created curves are construction geometry)", created_doc!())),
+    CommandSpec::new("sketch.project_to_surface", "Project To Surface", crate::checked!("sketch.project_to_surface", project_to_surface))
         .at("SKETCH", "CREATE")
         .icon("project_surface")
         .enabled(in_sketch)
-        .params(concat!("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face, body?: projected along the active sketch's normal onto the face, as linked 3D curves", created_doc!())),
-    CommandSpec::new("sketch.intersection_curve", "Intersection Curve", intersection_curve)
+        .contract(&PROJECT_TO_SURFACE_CONTRACT).output(output_schema_for::<ProjectToSurfaceResult>).params(concat!("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face, body?: projected along the active sketch's normal onto the face, as linked 3D curves", created_doc!())),
+    CommandSpec::new("sketch.intersection_curve", "Intersection Curve", crate::checked!("sketch.intersection_curve", intersection_curve))
         .at("SKETCH", "CREATE")
         .icon("intersection_curve")
         .enabled(in_sketch)
-        .params(concat!("a, b: {body} | {face: [x,y,z], body?} | {sketch, curve} (a curve of another sketch, standing in for its extrusion along that sketch's normal): where they meet, as linked 3D curves", created_doc!())),
-    CommandSpec::new("sketch.spun_profile", "Spun Profile", spun_profile)
+        .contract(&INTERSECTION_CURVE_CONTRACT).output(output_schema_for::<SketchLinkResult>).params(concat!("a, b: {body} | {face: [x,y,z], body?} | {sketch, curve} (a curve of another sketch, standing in for its extrusion along that sketch's normal): where they meet, as linked 3D curves", created_doc!())),
+    CommandSpec::new("sketch.spun_profile", "Spun Profile", crate::checked!("sketch.spun_profile", spun_profile))
         .at("SKETCH", "CREATE")
         .icon("spun")
         .enabled(in_sketch)
-        .params(concat!("body: name, axis: a line of the active sketch (curve id) | X|Y|Z: the body's outline revolved about the axis, in the sketch plane", created_doc!())),
-    CommandSpec::new("sketch.isoparametric_curve", "Isoparametric Curve", iso_curve)
+        .contract(&SPUN_PROFILE_CONTRACT).output(output_schema_for::<SketchLinkResult>).params(concat!("body: name, axis: a line of the active sketch (curve id) | X|Y|Z: the body's outline revolved about the axis, in the sketch plane", created_doc!())),
+    CommandSpec::new("sketch.isoparametric_curve", "Isoparametric Curve", crate::checked!("sketch.isoparametric_curve", iso_curve))
         .at("SKETCH", "CREATE")
         .icon("iso_curve")
         .enabled(in_sketch)
-        .params(concat!("face: [x,y,z] point on the face (the curve passes through it), body?, direction?: u|v|[x,y,z] (default u): linked 3D curve", created_doc!())),
-    CommandSpec::new("sketch.fit_curves_to_section", "Fit Curves to Mesh Section", fit_section)
+        .contract(&ISO_CURVE_CONTRACT).output(output_schema_for::<SketchLinkResult>).params(concat!("face: [x,y,z] point on the face (the curve passes through it), body?, direction?: u|v|[x,y,z] (default u): linked 3D curve", created_doc!())),
+    CommandSpec::new("sketch.fit_curves_to_section", "Fit Curves to Mesh Section", crate::checked!("sketch.fit_curves_to_section", fit_section))
         .at("SKETCH", "CREATE")
         .icon("fit_section")
         .enabled(in_sketch)
-        .params(concat!("body: name (a mesh or solid body): its section with the sketch plane, fitted with lines and arcs, as normal (unlinked) geometry", created_doc!())),
-    CommandSpec::new("sketch.break_link", "Break Link", break_link).icon("sketch_break")
+        .contract(&FIT_SECTION_CONTRACT).output(output_schema_for::<FitSectionResult>).params(concat!("body: name (a mesh or solid body): its section with the sketch plane, fitted with lines and arcs, as normal (unlinked) geometry", created_doc!())),
+    CommandSpec::new("sketch.break_link", "Break Link", crate::checked!("sketch.break_link", break_link)).icon("sketch_break")
         .enabled(in_sketch)
-        .params("link?: link id (j1) | entities?: [curve or point ids]: linked geometry becomes normal sketch geometry"),
-    CommandSpec::new("sketch.auto_project", "Auto-Project Edges on Reference", auto_project).icon("project")
+        .contract(&BREAK_LINK_CONTRACT).output(output_schema_for::<SketchBreakLinkResult>).params("link?: link id (j1) | entities?: [curve or point ids]: linked geometry becomes normal sketch geometry"),
+    CommandSpec::new("sketch.auto_project", "Auto-Project Edges on Reference", crate::checked!("sketch.auto_project", auto_project)).icon("project")
         .noundo()
-        .params("value?: bool (default toggles): project a face's edges when a sketch is created on it"),
+        .contract(&AUTO_PROJECT_CONTRACT).output(output_schema_for::<AutoProjectResult>).params("value?: bool (default toggles): project a face's edges when a sketch is created on it"),
 ];
 
-/// Parse one reference.
-fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
+/// What a reference says in its JSON, before the design is asked what it names (`source` goes on
+/// from here, and so does the contract of the commands that take references).
+pub(crate) enum RefForm<'a> {
+    /// Text: `origin`, an axis letter or a body name, which the design decides.
+    Name(&'a str),
+    /// `{edge: [x,y,z], body?}`.
+    Edge { body: String, at: Vec3 },
+    /// `{face: [x,y,z], body?}`.
+    Face { body: String, at: Vec3 },
+    /// `{vertex: [x,y,z], body?}`.
+    Vertex { body: String, at: Vec3 },
+    /// `{sketch, curve}` or `{sketch, point}`: the sketch as the lookup reads it (an id or a name)
+    /// and the `curve` or `point` given. With neither, the handler refuses it once the sketch is
+    /// found.
+    Sketch { key: String, curve: Option<&'a str>, point: Option<&'a str> },
+    /// `{body: name}`.
+    Body(&'a str),
+    /// `{axis: X|Y|Z|name}`.
+    Axis(&'a str),
+    /// `{plane: XY|XZ|YZ|name}`.
+    Plane(&'a str),
+    /// `{origin: …}`.
+    Origin,
+}
+
+/// The form of one reference, or the message (without the command's name) for what no design
+/// could make sense of. The forms are tried in this order, the first that fits wins: an edge, face
+/// or vertex whose value is not a point is passed over, not refused.
+pub(crate) fn ref_form(v: &Value) -> std::result::Result<RefForm<'_>, String> {
     if let Some(name) = v.as_str() {
-        return match name.to_ascii_lowercase().as_str() {
-            "origin" => Ok(LinkSource::Origin),
-            "x" | "y" | "z" => Ok(LinkSource::Axis { name: name.to_ascii_uppercase() }),
-            _ if s.model.state().body(name).is_some() => Ok(LinkSource::Body { body: name.to_string() }),
-            _ => Err(bad(cmd, format!("unknown reference `{name}`"))),
-        };
+        return Ok(RefForm::Name(name));
     }
     let body = || str_(v, "body").unwrap_or("").to_string();
     if let Some(at) = v.get("edge").and_then(vec3) {
-        return Ok(LinkSource::Edge { body: body(), at });
+        return Ok(RefForm::Edge { body: body(), at });
     }
     if let Some(at) = v.get("face").and_then(vec3) {
-        return Ok(LinkSource::Face { body: body(), at });
+        return Ok(RefForm::Face { body: body(), at });
     }
     if let Some(at) = v.get("vertex").and_then(vec3) {
-        return Ok(LinkSource::Vertex { body: body(), at });
+        return Ok(RefForm::Vertex { body: body(), at });
     }
     if let Some(sk) = v.get("sketch") {
         let key = match sk {
             Value::Number(n) => n.to_string(),
             Value::String(x) => x.clone(),
-            _ => return Err(bad(cmd, "`sketch` must be an id or a name")),
+            _ => return Err("`sketch` must be an id or a name".into()),
         };
-        let f = s.doc.find_feature(&key).ok_or_else(|| bad(cmd, format!("no sketch `{key}`")))?;
-        if !matches!(f.kind, FeatureKind::Sketch { .. }) {
-            return Err(bad(cmd, format!("`{key}` is not a sketch")));
-        }
-        if Some(f.id) == s.active_sketch {
-            return Err(bad(cmd, "a sketch cannot project its own geometry"));
-        }
-        if let Some(c) = str_(v, "curve") {
-            return Ok(LinkSource::SketchCurve { sketch: f.id, curve: c.to_string() });
-        }
-        if let Some(p) = str_(v, "point") {
-            return Ok(LinkSource::SketchPoint { sketch: f.id, point: p.to_string() });
-        }
-        return Err(bad(cmd, "a sketch reference needs `curve` or `point`"));
+        return Ok(RefForm::Sketch { key, curve: str_(v, "curve"), point: str_(v, "point") });
     }
     if let Some(b) = str_(v, "body") {
-        return Ok(LinkSource::Body { body: b.to_string() });
+        return Ok(RefForm::Body(b));
     }
     if let Some(a) = str_(v, "axis") {
-        return axis_source(s, a, cmd);
+        return Ok(RefForm::Axis(a));
     }
     if let Some(p) = str_(v, "plane") {
-        return Ok(LinkSource::Plane { name: p.to_string() });
+        return Ok(RefForm::Plane(p));
     }
     if v.get("origin").is_some() {
-        return Ok(LinkSource::Origin);
+        return Ok(RefForm::Origin);
     }
-    Err(bad(cmd, format!("cannot project {v}")))
+    Err(format!("cannot project {v}"))
+}
+
+/// Parse one reference.
+fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
+    match ref_form(v).map_err(|why| bad(cmd, why))? {
+        RefForm::Name(name) => match name.to_ascii_lowercase().as_str() {
+            "origin" => Ok(LinkSource::Origin),
+            "x" | "y" | "z" => Ok(LinkSource::Axis { name: name.to_ascii_uppercase() }),
+            _ if s.model.state().body(name).is_some() => Ok(LinkSource::Body { body: name.to_string() }),
+            _ => Err(bad(cmd, format!("unknown reference `{name}`"))),
+        },
+        RefForm::Edge { body, at } => Ok(LinkSource::Edge { body, at }),
+        RefForm::Face { body, at } => Ok(LinkSource::Face { body, at }),
+        RefForm::Vertex { body, at } => Ok(LinkSource::Vertex { body, at }),
+        RefForm::Sketch { key, curve, point } => {
+            let f = s.doc.find_feature(&key).ok_or_else(|| bad(cmd, format!("no sketch `{key}`")))?;
+            if !matches!(f.kind, FeatureKind::Sketch { .. }) {
+                return Err(bad(cmd, format!("`{key}` is not a sketch")));
+            }
+            if Some(f.id) == s.active_sketch {
+                return Err(bad(cmd, "a sketch cannot project its own geometry"));
+            }
+            if let Some(c) = curve {
+                return Ok(LinkSource::SketchCurve { sketch: f.id, curve: c.to_string() });
+            }
+            if let Some(p) = point {
+                return Ok(LinkSource::SketchPoint { sketch: f.id, point: p.to_string() });
+            }
+            Err(bad(cmd, "a sketch reference needs `curve` or `point`"))
+        }
+        RefForm::Body(b) => Ok(LinkSource::Body { body: b.to_string() }),
+        RefForm::Axis(a) => axis_source(s, a, cmd),
+        RefForm::Plane(p) => Ok(LinkSource::Plane { name: p.to_string() }),
+        RefForm::Origin => Ok(LinkSource::Origin),
+    }
 }
 
 /// An origin axis (`X`, `Y` or `Z`, in any case), or a construction axis by its name (#9324).
@@ -367,8 +428,10 @@ fn add_link_unless_present(
     if skip_present && r.wires.is_empty() && sk.link_geometry_present(&r.geom) {
         return Ok(None);
     }
+    // A mesh body is one face whose name says nothing of the flat patch picked: the link keeps
+    // the point instead (#13464), as an edge of a mesh body keeps no name.
     let name = if let LinkSource::Face { body, at } = &r.source {
-        st.body(body).and_then(|body| {
+        st.body(body).filter(|body| !body.body.is_mesh()).and_then(|body| {
             if let Some(index) = r.face_index {
                 solidcraft_doc::naming::face_names(body).get(index).filter(|name| !name.is_empty()).cloned()
             } else {
@@ -391,10 +454,37 @@ fn add_link_unless_present(
     Ok(Some(link))
 }
 
-fn link_json(sk: &Sketch, link: &str) -> Value {
+/// Make the curves of `link` construction geometry: references to draw against, left out of
+/// profiles (#13142). They stay linked; a link rebuilt because its shape changed comes back as
+/// normal geometry, as curves switched to construction by hand do.
+fn mark_construction(sk: &mut Sketch, link: &str) {
+    for c in sk.link_curves(link) {
+        if let Some(curve) = sk.curves.get_mut(c) {
+            curve.construction = true;
+        }
+    }
+}
+
+/// [`mark_construction`] for `link` in sketch `id`, as the session's preference asks of the face
+/// edges a new sketch projects (#13142).
+pub(super) fn construct_link(s: &mut Session, id: u64, link: &str) -> Result<()> {
+    sketch_store::update(s, id, |_, _, sk| {
+        mark_construction(sk, link);
+        Ok(())
+    })
+}
+
+/// A command's reply as JSON: they build their replies from the types their output schemas
+/// describe, so the two can't drift apart.
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// The ids of the curves and of the points that link `link` made.
+fn link_parts(sk: &Sketch, link: &str) -> (Vec<String>, Vec<String>) {
     let curves: Vec<String> = sk.link_curves(link).iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect();
     let points: Vec<String> = sk.link_points(link).iter().filter_map(|p| sk.points.get(*p).map(|p| p.id.clone())).collect();
-    json!({"link": link, "curves": curves, "points": points})
+    (curves, points)
 }
 
 fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_link: bool) -> Result<Value> {
@@ -406,6 +496,11 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
     if refs.is_empty() {
         return Err(bad(cmd, "`refs` is empty"));
     }
+    let construction = match p.get("construction") {
+        None => s.project_construction,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`construction` must be a boolean")),
+    };
     let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
     let sources: Vec<LinkSource> = refs.iter().map(|v| source(s, v, cmd)).collect::<Result<_>>()?;
     let (out, present) = sketch_store::update(s, id, |s, doc, sk| {
@@ -418,9 +513,13 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
             let what = src.describe();
             match add_link_unless_present(s, doc, id, sk, kind, src, kind == LinkKind::Project) {
                 Ok(Some(l)) => {
-                    let mut result = link_json(sk, &l);
+                    let (curves, points) = link_parts(sk, &l);
+                    if construction {
+                        mark_construction(sk, &l);
+                    }
+                    let mut result = ProjectedLink { link: Some(l.clone()), curves, points };
                     if !projection_link {
-                        result["link"] = Value::Null;
+                        result.link = None;
                         sk.break_link(&l)?;
                     }
                     out.push(result);
@@ -435,11 +534,7 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
         }
         Ok((out, present))
     })?;
-    let mut r = json!({"links": out});
-    if !present.is_empty() {
-        r["already_projected"] = json!(present);
-    }
-    Ok(r)
+    reply(cmd, ProjectResult { links: out, already_projected: present, created: None, param_warnings: Vec::new() })
 }
 
 fn project_cmd(s: &mut Session, p: &Value) -> Result<Value> {
@@ -489,7 +584,7 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
 
 /// A model's reference among a command's operands (#6348): an `{edge: [x,y,z], body?}` or a
 /// `{vertex: [x,y,z], body?}`.
-fn model_ref(v: &Value) -> bool {
+pub(crate) fn model_ref(v: &Value) -> bool {
     v.get("edge").is_some() || v.get("vertex").is_some()
 }
 
@@ -508,7 +603,7 @@ fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Va
 
 /// Most model references one call may project into a sketch: each one is a link and a resolve,
 /// so the count is capped before any of them is projected.
-const MAX_PROJECTED_ENTITIES: usize = 1_000;
+pub(crate) const MAX_PROJECTED_ENTITIES: usize = 1_000;
 
 /// A dimension's entities may be model geometry (#7912): an `{edge: [x,y,z], body?}` or
 /// `{vertex: [x,y,z], body?}` among them is projected into the sketch first, as Project does,
@@ -543,16 +638,15 @@ pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<
 }
 
 /// Add one link from `src` to the active sketch and report it.
-fn one_link(s: &mut Session, cmd: &str, kind: LinkKind, src: LinkSource) -> Result<Value> {
+fn one_link(s: &mut Session, cmd: &str, kind: LinkKind, src: LinkSource) -> Result<LinkMade> {
     let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
     sketch_store::update(s, id, |s, doc, sk| {
         refresh(s, doc, id, sk);
         let what = src.describe();
         let l = add_link(s, doc, id, sk, kind, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
-        let mut out = link_json(sk, &l);
+        let (curves, points) = link_parts(sk, &l);
         let wires: Vec<String> = sk.link_wires(&l).iter().filter_map(|w| sk.wires.get(*w).map(|w| w.id.clone())).collect();
-        out["wires"] = json!(wires);
-        Ok(out)
+        Ok(LinkMade { link: l, curves, points, wires })
     })
 }
 
@@ -571,7 +665,7 @@ fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
         };
         out.push(one_link(s, cmd, LinkKind::Project, LinkSource::OnSurface { sketch, curve, body: body.clone(), at })?);
     }
-    Ok(json!({"links": out}))
+    reply(cmd, ProjectToSurfaceResult { links: out, created: None, param_warnings: Vec::new() })
 }
 
 fn intersection_curve(s: &mut Session, p: &Value) -> Result<Value> {
@@ -584,7 +678,8 @@ fn intersection_curve(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let (a, b) = (side("a")?, side("b")?);
-    one_link(s, cmd, LinkKind::Include, LinkSource::Intersection { a: Box::new(a), b: Box::new(b) })
+    let made = one_link(s, cmd, LinkKind::Include, LinkSource::Intersection { a: Box::new(a), b: Box::new(b) })?;
+    reply(cmd, SketchLinkResult { made, created: None, param_warnings: Vec::new() })
 }
 
 fn spun_profile(s: &mut Session, p: &Value) -> Result<Value> {
@@ -605,7 +700,8 @@ fn spun_profile(s: &mut Session, p: &Value) -> Result<Value> {
             (wa, wb - wa)
         }
     };
-    one_link(s, cmd, LinkKind::Project, LinkSource::Spun { body, origin, dir })
+    let made = one_link(s, cmd, LinkKind::Project, LinkSource::Spun { body, origin, dir })?;
+    reply(cmd, SketchLinkResult { made, created: None, param_warnings: Vec::new() })
 }
 
 fn iso_curve(s: &mut Session, p: &Value) -> Result<Value> {
@@ -620,7 +716,8 @@ fn iso_curve(s: &mut Session, p: &Value) -> Result<Value> {
             format!("{},{},{}", d.x, d.y, d.z)
         }
     };
-    one_link(s, cmd, LinkKind::Include, LinkSource::Iso { body, at, dir })
+    let made = one_link(s, cmd, LinkKind::Include, LinkSource::Iso { body, at, dir })?;
+    reply(cmd, SketchLinkResult { made, created: None, param_warnings: Vec::new() })
 }
 
 fn fit_section(s: &mut Session, p: &Value) -> Result<Value> {
@@ -636,7 +733,7 @@ fn fit_section(s: &mut Session, p: &Value) -> Result<Value> {
         sk.break_link(&l)?;
         Ok(curves)
     })?;
-    Ok(json!({"curves": curves}))
+    reply(cmd, FitSectionResult { curves, created: None, param_warnings: Vec::new() })
 }
 
 fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
@@ -670,12 +767,12 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(links)
     })?;
-    Ok(json!({"broken": links}))
+    reply(cmd, SketchBreakLinkResult { broken: links, created: None, param_warnings: Vec::new() })
 }
 
 fn auto_project(s: &mut Session, p: &Value) -> Result<Value> {
     s.auto_project = bool_(p, "value").unwrap_or(!s.auto_project);
-    Ok(json!({"auto_project": s.auto_project}))
+    reply("sketch.auto_project", AutoProjectResult { auto_project: s.auto_project, created: None, param_warnings: Vec::new() })
 }
 
 /// `"x:<a>+<b>:x,y"` from interactive snapping: two distinct curve ids and a hint point.

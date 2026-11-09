@@ -2,10 +2,10 @@
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::{
     SolveApp,
-    theme::Tokens,
     ui_kit::{self, Container, Edge},
 };
 use egui::{Rect, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) fn reset_shell(app: &mut SolveApp) {
     app.shell.workspace_panels.retain(|id, _| !id.starts_with("render:"));
@@ -17,7 +17,7 @@ pub(crate) fn focused(app: &SolveApp) -> bool {
 }
 
 pub(crate) fn compact(app: &SolveApp, width: f32) -> bool {
-    width < 1100.0 || app.ui.layout == crate::shell::LayoutMode::Docked
+    width < 1100.0 || app.ui.layout == crate::ui_kit::LayoutMode::Docked
 }
 
 pub(crate) fn focus_shortcut(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -188,7 +188,9 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// Draw render controls and status above the active model or image viewport.
 pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::render_workspace::show_shader_preparation(app, ui.ctx());
     crate::shell::register_panel(app, "render:focus:exit", None, None);
     if focused(app) {
         dock_chip(app, ui, "render:focus:exit", "render.exit_focus", "view.render_focus", serde_json::json!({"on":false}));
@@ -265,8 +267,8 @@ fn shots_pill(app: &mut SolveApp, ui: &mut egui::Ui, free: Rect) {
         free.left_bottom() + vec2(Tokens::get().space_8, -Tokens::get().space_8),
         egui::Align2::LEFT_BOTTOM,
         |ui| {
-            let response =
-                ui_kit::strip_toggle(ui, false, crate::i18n::tr_label("Shots")).backing_on_hover_text(crate::i18n::tr_label("Show Shots strip"));
+            let response = ui_kit::strip_toggle(ui, false, solidcraft_ui_text::tr_label("Shots"))
+                .backing_on_hover_text(solidcraft_ui_text::tr_label("Show Shots strip"));
             crate::scenario::publish_target("render:shots:show", response.rect);
             if response.clicked() {
                 let _ = app.run("view.shots_strip", serde_json::json!({"visible":true}));

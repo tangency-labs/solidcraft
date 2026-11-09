@@ -15,6 +15,76 @@ fn near(value: &Value, expected: f64) {
 }
 
 #[test]
+fn ambiguous_component_names_are_refused_without_changing_the_session() {
+    let mut s = Session::default();
+    let first = run(&mut s, "component.create", json!({"name":"A","activate":false}))["component"].as_u64().unwrap();
+    let second = run(&mut s, "component.create", json!({"name":"A","activate":false}))["component"].as_u64().unwrap();
+    // A placement with that name must not hide an ambiguous component lookup.
+    s.doc_mut().occurrences.first_mut().unwrap().name = "A".into();
+    run(&mut s, "component.create", json!({"name":"Temporary","activate":false}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(!s.redo.is_empty(), "exercise refusal with an existing redo step");
+    let commands = [
+        ("component.delete", json!({"component":"A"})),
+        ("component.rename", json!({"component":"A","name":"Changed"})),
+        ("component.activate", json!({"component":"A"})),
+        ("component.create", json!({"name":"Child","parent":"A"})),
+        ("component.metadata.set", json!({"component":"A","description":"Changed"})),
+        ("component.break_link", json!({"component":"A"})),
+        ("selection.delete", json!({"components":["A"]})),
+        ("assembly.bom", json!({"component":"A"})),
+        ("config.column", json!({"component_appearance":"A"})),
+        ("appearance.chain", json!({"target":{"component":"A"}})),
+        ("appearance.assign", json!({"components":["A"],"appearance":"ABS - Red"})),
+        ("appearance.replace", json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"components":["A"]}})),
+        ("parts.resize", json!({"component":"A","size":"M6"})),
+        ("solid.pattern.rectangular", json!({"components":["A"],"dir1":[1,0,0],"count1":2,"spacing1":10})),
+    ];
+    for (command, params) in commands {
+        let doc = s.doc.clone();
+        let undo = s.undo.len();
+        let redo = s.redo.len();
+        let error = s.execute(command, &params).unwrap_err();
+        assert!(matches!(&error, crate::EngineError::BadParams { .. }), "{command}: {error}");
+        let message = error.to_string();
+        for expected in ["ambiguous component `A`", &first.to_string(), &second.to_string(), "numeric component ID"] {
+            assert!(message.contains(expected), "{command}: {message}");
+        }
+        assert_eq!(s.doc, doc, "{command} changed the document");
+        assert_eq!(s.undo.len(), undo, "{command} changed undo");
+        assert_eq!(s.redo.len(), redo, "{command} changed redo");
+        assert_eq!(s.active_component, 0, "{command} changed the active component");
+        assert!(s.active_occurrence_path.is_none(), "{command} changed the active placement");
+    }
+    run(&mut s, "component.delete", json!({"component":second}));
+    assert!(s.doc.components.iter().any(|component| component.id == first));
+    assert!(!s.doc.components.iter().any(|component| component.id == second));
+    run(&mut s, "component.rename", json!({"component":"A","name":"Unique"}));
+    assert_eq!(s.doc.find_component("Unique"), Some(first));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.find_component("A"), Some(first));
+}
+
+#[test]
+fn component_ids_take_priority_over_numeric_names_and_survive_reopen() {
+    let mut s = Session::default();
+    let named = run(&mut s, "component.create", json!({"name":"3","activate":false}))["component"].as_u64().unwrap();
+    let target = run(&mut s, "component.create", json!({"name":"Target","activate":false}))["component"].as_u64().unwrap();
+    assert_eq!(target, 3);
+    let zero_name = run(&mut s, "component.create", json!({"name":"03","activate":false}))["component"].as_u64().unwrap();
+    for key in [json!(target), json!(target.to_string())] {
+        run(&mut s, "component.activate", json!({"component":key}));
+        assert_eq!(s.active_component, target);
+    }
+    run(&mut s, "component.activate", json!({"component":"03"}));
+    assert_eq!(s.active_component, zero_name);
+    let mut reopened = Session::opened(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), None);
+    run(&mut reopened, "component.rename", json!({"component":target.to_string(),"name":"Renamed"}));
+    assert_eq!(reopened.doc.components.iter().find(|component| component.id == named).unwrap().name, "3");
+    assert_eq!(reopened.doc.find_component("Renamed"), Some(target));
+}
+
+#[test]
 fn component_create_rejects_bodies_without_changing_design() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body1"}));
@@ -1830,6 +1900,31 @@ fn a_body_copied_in_another_design_pastes_as_an_imported_body() {
     assert!(s.model.state().body("Cube (2)").is_none());
 }
 
+/// A body pasted from another design while an exploded view moves the target component is at
+/// the world coordinates it had there once the target is shown assembled again.
+#[test]
+fn a_body_pasted_from_another_design_while_an_exploded_view_is_shown_keeps_its_world_position() {
+    let mut source = Session::default();
+    source.doc_mut().name = "Bracket".into();
+    run(&mut source, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"}));
+    let was = source.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
+    let copy = crate::ForeignCopy::of(&source, vec!["Cube".into()], Vec::new()).unwrap();
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Block"}));
+    let (a, a_at) = created(&mut s, "A");
+    run(&mut s, "occurrence.move", json!({"occurrence": a_at, "translate": [100,0,0]}));
+    // An exploded view needs two placements: B stays put.
+    run(&mut s, "component.create", json!({"name": "B", "parent": 0, "activate": false}));
+    let view = run(&mut s, "explode.create", json!({"moves": [{"occurrence": a_at, "translate": [0, 60, 0]}]}))["view"].as_u64().unwrap();
+    run(&mut s, "explode.show", json!({"view": view}));
+    s.foreign_copy = Some(std::sync::Arc::new(copy));
+    run(&mut s, "component.paste_from_design", json!({"component": a, "component_path": [a_at]}));
+    run(&mut s, "explode.show", json!({}));
+    let is = s.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
+    assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
+}
+
 /// A body seen in another placement of its component ("Cube (Holder:2)") pastes into another
 /// design under its own name, at that placement's position.
 #[test]
@@ -1852,4 +1947,82 @@ fn a_body_seen_in_another_placement_pastes_into_another_design_under_its_own_nam
     assert_eq!(out["bodies"], json!(["Cube"]));
     let is = s.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
+}
+
+// #12150: `occurrence.move` with `to` / `to_matrix` places the occurrence at a target pose, not
+// on top of its current one.
+#[test]
+fn absolute_move_places_at_target_whatever_the_current_placement() {
+    let mut s = Session::default();
+    let (_, occ) = created(&mut s, "Part");
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [7,8,9], "axis": [1,0,0], "angle": "30 deg"}));
+    for _ in 0..2 {
+        let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [10,20,30], "axis": [0,0,1], "angle": "90 deg"}}));
+        let t = &r["transform"];
+        near(&t[3][0], 10.0);
+        near(&t[3][1], 20.0);
+        near(&t[3][2], 30.0);
+        // X turns onto Y about Z.
+        near(&t[0][0], 0.0);
+        near(&t[0][1], 1.0);
+        near(&t[2][2], 1.0);
+    }
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [1,2,3]}}));
+    near(&r["transform"][0][0], 1.0);
+    near(&r["transform"][3][2], 3.0);
+}
+
+#[test]
+fn absolute_move_to_matrix_in_world_under_a_turned_parent() {
+    let mut s = Session::default();
+    let (_, parent) = created(&mut s, "Parent");
+    run(&mut s, "occurrence.move", json!({"occurrence": parent, "translate": [100,0,0], "axis": [0,0,1], "angle": "90 deg"}));
+    let (_, child) = created(&mut s, "Child");
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "path": [parent, child], "translate": [3,4,5]}));
+    let target = json!([1, 0, 0, 10, 0, 1, 0, 20, 0, 0, 1, 30]);
+    for _ in 0..2 {
+        run(&mut s, "occurrence.move", json!({"occurrence": child, "path": [parent, child], "space": "world", "to_matrix": target}));
+        let result = run(&mut s, "occurrence.properties", json!({"occurrence": child, "path": [parent,child]}));
+        near(&result["total"]["center_of_mass"][0], 10.5);
+        near(&result["total"]["center_of_mass"][1], 20.5);
+        near(&result["total"]["center_of_mass"][2], 30.5);
+    }
+    // Local: the same numbers are the placement in the parent.
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": child, "to_matrix": target}));
+    near(&r["transform"][3][0], 10.0);
+    near(&r["transform"][3][1], 20.0);
+}
+
+#[test]
+fn absolute_move_refuses_relative_keys_and_keeps_capture_and_grounding() {
+    let mut s = Session::default();
+    let (_, occ) = created(&mut s, "Part");
+    for extra in [
+        json!({"translate": [1,0,0]}),
+        json!({"axis": [0,0,1]}),
+        json!({"angle": 1}),
+        json!({"origin": [0,0,0]}),
+        json!({"matrix": [1,0,0,0,0,1,0,0,0,0,1,0]}),
+        json!({"to_matrix": [1,0,0,0,0,1,0,0,0,0,1,0]}),
+    ] {
+        let mut p = json!({"occurrence": occ, "to": {"position": [1,2,3]}});
+        for (k, v) in extra.as_object().unwrap() {
+            p[k] = v.clone();
+        }
+        assert!(s.execute("occurrence.move", &p).is_err(), "{p}");
+    }
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to_matrix": [1,0,0,0,0,1,0,0,0,0,1,0], "translate": [1,0,0]})).is_err());
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"axis": [0,0,1]}})).is_err());
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"position": [0,0,0], "spin": 1}})).is_err());
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to_matrix": [2,0,0,0,0,1,0,0,0,0,1,0]})).is_err());
+    let before = s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().transform;
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [5,0,0]}, "capture": false}));
+    assert_eq!(r["pending"], json!(true));
+    near(&r["transform"][3][0], 5.0);
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().transform, before);
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": true}));
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"position": [9,0,0]}})).is_err());
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [9,0,0]}, "move_grounded": true}));
+    near(&r["transform"][3][0], 9.0);
 }

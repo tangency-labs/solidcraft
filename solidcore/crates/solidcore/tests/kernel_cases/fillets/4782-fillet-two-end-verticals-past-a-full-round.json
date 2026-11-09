@@ -1,0 +1,183 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b32"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b32"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b33"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b33"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b34"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "the blend is larger than its faces allow at the edge at (80.000, 0.000, 10.000): one blend runs inside the band another takes off a face they share; the largest radius that fits is 7.4999999999992655",
+      "inputs": [
+        "b34"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  80.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  80.0,
+                  0.0,
+                  20.0
+                ]
+              ],
+              "index": 10
+            },
+            {
+              "at": [
+                [
+                  80.0,
+                  15.0,
+                  0.0
+                ],
+                [
+                  80.0,
+                  15.0,
+                  20.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              80.0,
+              0.0,
+              10.0
+            ],
+            [
+              80.0,
+              15.0,
+              10.0
+            ]
+          ],
+          "tolerance": 4.191763653560053
+        },
+        "kind": "round",
+        "sizes": [
+          7.51,
+          7.51
+        ]
+      }
+    }
+  ],
+  "case": "4782-fillet-two-end-verticals-past-a-full-round",
+  "expected": {
+    "method": "box 80x15x20, the two vertical edges at x=80 rounded r10 with the exact fit (the default): the two rounds meet at r = 15/2 = 7.5, where they use up the 15 mm end face (a full round, as 199-fillet-uses-up-end-face); past it no round fits, so the right answer is a clean refusal that names 7.5 mm, the largest radius that fits (fillet_max, three significant digits: 7.50)",
+    "outcome": "refused",
+    "refusal": "the largest radius that fits is 7.5 mm",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#4782"
+    ],
+    "what": "both vertical edges of a 15 mm wide box end rounded r10, past the full round (7.5): refused naming the largest radius that fits, 7.5"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 2 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow, at the edge at (80.000, 0.000, 10.000): one blend runs inside the band another takes off a face they share; the largest radius that fits is 7.5 mm",
+    "kernel_error": "the blend is larger than its faces allow at the edge at (80.000, 0.000, 10.000): one blend runs inside the band another takes off a face they share; the largest radius that fits is 7.4999999999992655",
+    "ran": false
+  },
+  "records": "4782-fillet-two-end-verticals-past-a-full-round.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow, at the edge at (80.000, 0.000, 10.000): one blend runs inside the band another takes off a face they share; the largest radius that fits is 7.5 mm",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4782"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "refusal \"the largest radius that fits is 7.5 mm\": SolidCraft's wording of the kernel's error"
+  ],
+  "what": "both vertical edges of a 15 mm wide box end rounded r10, past the full round (7.5): refused naming the largest radius that fits, 7.5",
+  "why_not": []
+}

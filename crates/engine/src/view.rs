@@ -6,15 +6,16 @@ use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
 use solidcore_record::{Plane, Vec3};
+use solidcraft_color::AnalysisColors;
 use solidcraft_geom::Aabb3;
-use solidcraft_render::{AnalysisColors, Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
 use solidcraft_sketch::Sketch;
+use solidcraft_viewport::{Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
 
 use crate::{Result, Sel, Session};
 
 /// Colours (shared with the GPU viewport).
 pub mod colors {
-    use solidcraft_render::Rgb;
+    use solidcraft_viewport::Rgb;
     pub const BODY: Rgb = Rgb(176, 186, 198);
     pub const BODY_SELECTED: Rgb = Rgb(110, 170, 235);
     pub const EDGE: Rgb = Rgb(40, 44, 52);
@@ -42,7 +43,7 @@ pub mod colors {
     pub const BG_TOP: Rgb = Rgb(240, 243, 247);
     pub const BG_BOTTOM: Rgb = Rgb(203, 210, 221);
     /// What the section cap is tinted toward.
-    pub const SECTION_CAP: Rgb = solidcraft_render::SECTION_CAP;
+    pub const SECTION_CAP: Rgb = solidcraft_viewport::SECTION_CAP;
 }
 
 /// The colours a headless scene is drawn in. [`Palette::DEFAULT`] is [`colors`], the light
@@ -101,7 +102,7 @@ impl Palette {
         sketch_centerline: colors::SKETCH_CENTERLINE,
         axes: [colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z],
         cap: colors::SECTION_CAP,
-        hatch: solidcraft_render::SECTION_HATCH,
+        hatch: solidcraft_viewport::SECTION_HATCH,
         isocurve: colors::ISOCURVE,
         analysis: AnalysisColors::DEFAULT,
     };
@@ -883,7 +884,7 @@ fn build_scene(
         // A see-through appearance is drawn see-through, as the viewport draws it; a selected
         // body is drawn solid, so the selection colour reads.
         let opacity = if selected { 1.0 } else { s.doc.model_body_opacity(body) as f32 };
-        let cut_solid = section.is_some() && body.is_closed() && opacity >= solidcraft_render::SEE_THROUGH;
+        let cut_solid = section.is_some() && body.is_closed() && opacity >= solidcraft_viewport::SEE_THROUGH;
         sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default() });
         let at = sc.meshes.len() - 1;
         if cosmetic_threads
@@ -908,14 +909,14 @@ fn build_scene(
                 sc.lines.push(SceneLine { points: vec![*a, *b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
             }
             if cut_solid && !segments.is_empty() {
-                cuts.push((at, solidcraft_render::hatch::seed(&body.name), segments));
+                cuts.push((at, solidcraft_viewport::hatch::seed(&body.name), segments));
             }
         }
     }
     if let Some((_, n)) = section {
-        let parts: Vec<solidcraft_render::hatch::CutPart> =
-            cuts.iter().map(|(_, seed, segments)| solidcraft_render::hatch::CutPart { seed: *seed, segments }).collect();
-        for ((at, _, _), hatch) in cuts.iter().zip(solidcraft_render::hatch::hatches(&parts, n)) {
+        let parts: Vec<solidcraft_viewport::hatch::CutPart> =
+            cuts.iter().map(|(_, seed, segments)| solidcraft_viewport::hatch::CutPart { seed: *seed, segments }).collect();
+        for ((at, _, _), hatch) in cuts.iter().zip(solidcraft_viewport::hatch::hatches(&parts, n)) {
             if let Some(m) = sc.meshes.get_mut(*at) {
                 m.hatch = hatch;
             }
@@ -1203,7 +1204,7 @@ pub fn home_camera(s: &Session) -> Result<Camera> {
     let mut c = Camera::default();
     let b = bounds(s)?;
     if !b.is_empty() {
-        c.fit(&b);
+        c.fit(&solidcraft_render::view_bounds(&b));
     } else {
         c.distance = 150.0;
     }
@@ -1287,6 +1288,18 @@ mod tests {
         assert!(sc.meshes.iter().any(|m| m.face_colors.iter().any(|(_, c)| *c == Rgb(40, 170, 80))));
     }
 
+    /// A headless picture draws each body's own display mesh, the allocation the model holds:
+    /// the renderer's mesh is the model's type, so nothing is copied or converted on the way.
+    #[test]
+    fn snapshot_scene_shares_the_bodies_meshes() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let sc = scene(&s, &home_camera(&s).unwrap()).unwrap();
+        let state = s.model.state();
+        let body = state.bodies.first().unwrap().mesh();
+        assert!(sc.meshes.iter().any(|m| Arc::ptr_eq(&m.mesh, &body)));
+    }
+
     /// A render can leave out the ground grid and the origin's axes (a box straddling Z 0 is cut
     /// through by the grid), each on its own; the body's own lines stay.
     #[test]
@@ -1359,7 +1372,7 @@ mod tests {
         assert!(scene(&s, &cam).unwrap().analysis.is_none());
         s.analysis = Some(crate::SurfaceAnalysis::Curvature { radius: 5.0 });
         let a = scene(&s, &cam).unwrap().analysis.unwrap();
-        assert_eq!((a.mode, a.colors), (solidcraft_render::AnalysisMode::Curvature { radius: 5.0 }, Palette::DEFAULT.analysis));
+        assert_eq!((a.mode, a.colors), (solidcraft_viewport::AnalysisMode::Curvature { radius: 5.0 }, Palette::DEFAULT.analysis));
     }
 
     /// The CPU rasterizer (the last tier of headless pictures, `SOLIDCRAFT_GPU=cpu` or no adapter
@@ -1369,7 +1382,7 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.sphere", &json!({"diameter": 20})).unwrap();
         let cam = home_camera(&s).unwrap();
-        let img = solidcraft_render::render(&scene(&s, &cam).unwrap(), &cam, 400, 400);
+        let img = solidcraft_viewport::render(&scene(&s, &cam).unwrap(), &cam, 400, 400);
         let dark = img.rgba.chunks(4).filter(|p| p[0] < 70 && p[1] < 70 && p[2] < 75).count();
         assert!(dark > 40, "silhouette pixels: {dark}");
     }
@@ -1380,11 +1393,11 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
         let cam = home_camera(&s).unwrap();
-        let whole = solidcraft_render::render(&scene(&s, &cam).unwrap(), &cam, 200, 140).rgba;
+        let whole = solidcraft_viewport::render(&scene(&s, &cam).unwrap(), &cam, 200, 140).rgba;
         s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
         let sc = scene(&s, &cam).unwrap();
         assert!(sc.clip.is_some());
-        let cut = solidcraft_render::render(&sc, &cam, 200, 140).rgba;
+        let cut = solidcraft_viewport::render(&sc, &cam, 200, 140).rgba;
         let changed = whole.chunks(4).zip(cut.chunks(4)).filter(|(a, b)| a != b).count();
         assert!(changed > 500, "{changed} pixels changed");
     }
@@ -1414,7 +1427,7 @@ mod tests {
                 width: 3.0,
                 on_top: false,
             });
-            let img = solidcraft_render::render(&sc, &cam, 300, 220);
+            let img = solidcraft_viewport::render(&sc, &cam, 300, 220);
             let px = || img.rgba.chunks(4);
             let marker = px().filter(|p| p[0] > 200 && p[1] < 60 && p[2] < 60).count();
             assert_eq!(marker, 0, "fov {fov}: the inside shows through the cut face");
@@ -1435,7 +1448,7 @@ mod tests {
         let mut picture = |hatch: bool| {
             let plane = json!({"origin": [0, 15, 0], "normal": [0, -1, 0]});
             s.execute("inspect.section", &json!({"plane": plane, "hatch": hatch})).unwrap();
-            solidcraft_render::render(&scene(&s, &cam).unwrap(), &cam, 300, 220).rgba
+            solidcraft_viewport::render(&scene(&s, &cam).unwrap(), &cam, 300, 220).rgba
         };
         // Pixels in the body's exact colour: only a plain cut has them (lit faces are shaded).
         let solid = |img: &[u8]| img.chunks(4).filter(|p| p[..3] == [40, 160, 90]).count();
@@ -1470,7 +1483,7 @@ mod tests {
                     oblique(&mut cam);
                 }
                 let sc = scene(&s, &cam).unwrap();
-                let img = solidcraft_render::render(&sc, &cam, 400, 400);
+                let img = solidcraft_viewport::render(&sc, &cam, 400, 400);
                 let vp = cam.view_proj(1.0, sc.radius);
                 let mut wrong = Vec::new();
                 for x in (10..=30).map(f64::from) {

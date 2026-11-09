@@ -44,6 +44,15 @@ when you send a message or press **Connect** (or at launch, when you turned that
 
 ## The panel
 
+With **Preferences → Layout → Use shared panel layout** enabled, side panels keep
+the conversation above the composer. A wide floating panel places the conversation
+beside the provider controls and composer when both columns have enough width.
+Smaller widths keep the stacked layout. The conversation, unsent draft and scroll
+state stay with the same Assistant when the layout changes. Hovering over its shared
+header reports the current agent state or pending approvals; requests that need
+attention use the shared attention indication. Classic and the Assistant's own
+native window keep their existing layout.
+
 In the floating layout, Assistant fills the viewport height in the shared rounded panel, with
 space around its edges. The compass and navigation bar move into the remaining space beside it. It overlays the model without changing the viewport projection;
 clicks and scrolling over the panel stay in the chat. The docked layout retains its side panel.
@@ -290,7 +299,8 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   `my-agent --acp`. SolidCraft starts it directly, not through a shell.
 - **OpenAI-compatible API:** a preset (Ollama `http://localhost:11434/v1`, LM Studio
   `http://localhost:1234/v1`, OpenClaw `http://localhost:18789/v1`, OpenAI, Mistral AI
-  `https://api.mistral.ai/v1`, Mammouth AI `https://api.mammouth.ai/v1`,
+  `https://api.mistral.ai/v1`, Google Gemini `https://generativelanguage.googleapis.com/v1beta/openai`,
+  Mammouth AI `https://api.mammouth.ai/v1`,
   OpenCode Go `https://opencode.ai/zen/go/v1`, DeepSeek `https://api.deepseek.com`,
   Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
   `https://api.cheaperinference.com/v1`, OpenRouter

@@ -1,0 +1,6 @@
+{
+  "unit": "curve.conic",
+  "cases": [
+    {"name": "fuzz01075_derivative_count", "origin": "fuzz-out/n2000/curve.conic/fuzz01075.json (crash: rust: killed by signal 6 (memory allocation of 103079215128 bytes failed))", "cpp": "harness: invalid argument: derivative count", "rust": "error: status_1001", "inputs": {"n": 4294967296, "op": "evaluate"}}
+  ]
+}

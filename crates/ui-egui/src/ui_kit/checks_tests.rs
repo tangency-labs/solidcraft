@@ -232,10 +232,10 @@ fn surface(
 
 #[test]
 fn actual_config_appearance_preferences_and_menu_boxes_and_ticks_match_at_1x_2x() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     let evidence = std::env::var_os("SOLIDCRAFT_CHECKBOX_EVIDENCE").map(std::path::PathBuf::from);
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for ppp in [1.0, 2.0] {
             let reference_ctx = crate::fonts::test_context();
             reference_ctx.set_pixels_per_point(ppp);
@@ -275,7 +275,7 @@ fn actual_config_appearance_preferences_and_menu_boxes_and_ticks_match_at_1x_2x(
                 if name == "preferences" {
                     // Find the redesigned Layout checkbox by its current visible label.
                     crate::prefs::open_at(&mut app, crate::prefs::PAGE_LAYOUT);
-                    app.prefs_window.filter = app.tr("prefs.layout_page.active_commands").to_string();
+                    app.prefs_window.shell.filter = app.tr("prefs.layout_page.active_commands").to_string();
                 }
                 let mut textures = HashMap::new();
                 let mut final_output = None;
@@ -335,14 +335,14 @@ fn actual_config_appearance_preferences_and_menu_boxes_and_ticks_match_at_1x_2x(
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn grid_palette_inline_and_menu_share_every_box_state() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for ppp in [1.0, 2.0] {
             for on in [false, true] {
                 for state in ["idle", "hover", "focus", "disabled"] {
@@ -423,7 +423,7 @@ fn grid_palette_inline_and_menu_share_every_box_state() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]

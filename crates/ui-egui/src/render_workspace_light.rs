@@ -225,7 +225,11 @@ pub(super) fn rows(app: &SolveApp) -> Result<Vec<Light>, String> {
 }
 
 pub(super) fn name(app: &SolveApp, light: &Light) -> String {
-    if light.number <= 3 { app.tr(&light.name_key).into() } else { crate::i18n::format(&light.name_key, &[("number", &light.number.to_string())]) }
+    if light.number <= 3 {
+        app.tr(&light.name_key).into()
+    } else {
+        solidcraft_ui_text::format(&light.name_key, &[("number", &light.number.to_string())])
+    }
 }
 
 /// A known volume-only/transport adoption preserves the analytic rig's addresses.
@@ -540,7 +544,7 @@ pub(super) fn preview(app: &SolveApp) -> Result<Vec<[f32; 16]>, String> {
             Geometry::Area { edge_u_mm: [ux, uy, uz], edge_v_mm: [vx, vy, vz], .. } => {
                 let normal = solidcore_record::Vec3::new(ux, uy, uz).cross(solidcore_record::Vec3::new(vx, vy, vz));
                 let area = normal.len();
-                let n = solidcraft_engine::render::surface::unit_direction(normal).unwrap_or(-solidcore_record::Vec3::Z);
+                let n = solidcraft_viewport::surface::unit_direction(normal).unwrap_or(-solidcore_record::Vec3::Z);
                 ([n.x, n.y, n.z], 0.0, 0.0, area, 0.001)
             }
             _ => ([0.0; 3], 0.0, 0.0, 1.0, 0.001),
@@ -724,7 +728,10 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     let readout = if unsupported {
                                         app.tr("render.lighting_unsupported").to_string()
                                     } else {
-                                        crate::i18n::format("render.lighting_used", &[("used", &count.to_string()), ("limit", &limit.to_string())])
+                                        solidcraft_ui_text::format(
+                                            "render.lighting_used",
+                                            &[("used", &count.to_string()), ("limit", &limit.to_string())],
+                                        )
                                     };
                                     column.add_enabled_ui(!unsupported, |ui| ui_kit::text(ui, &readout, ui_kit::Text::Inline));
                                 }

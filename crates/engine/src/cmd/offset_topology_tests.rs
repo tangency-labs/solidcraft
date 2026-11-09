@@ -2,6 +2,7 @@
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::{FeatureKind, ProfileSel};
+use solidcraft_geom::MeshGeom;
 
 use crate::Session;
 

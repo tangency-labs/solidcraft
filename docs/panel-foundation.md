@@ -2,13 +2,51 @@
 
 The public contracts are `solidcraft_engine::panels` and
 `solidcraft_ui_egui::panel_runtime`. The #11305 host is explicitly enabled and
-uses synthetic controllers to exercise shared behaviour. Production Browser,
-History, Assistant, Render, Sketch, feature forms and BOM adapters are sibling
-work. The shipping shell, content, preferences and Classic behaviour retain
-their existing defaults. A specimen is not production migration or visual evidence.
-The current migration boundary permits only existing docked Browser, History and
-Assistant content and their allowed Render counterparts in future sibling work.
+uses synthetic controllers to exercise shared behaviour. Preferences → Layout →
+Use shared panel layout mounts the existing Browser, History, Assistant and Render
+Scene Browser content in that host. Apply enables the setting; clearing it returns
+to the existing Classic placement. Classic remains the shipping default.
+Sketch, feature forms, BOM and the other Render panels remain separate work.
+A specimen is not production migration or visual evidence.
 Draggable tool windows and the existing native Assistant retain their legacy hosts.
+
+## Initial real-content integration
+
+The shared runtime owns placement and small presentation descriptors. Existing
+`SolveApp` document state, Browser semantic rows, History playback and `AgentChat`
+continue to own content. A frame-scoped callback invokes the existing renderers
+inside the shared host's stable content identity and current focus-report service.
+It retains no application reference beyond that paint call. Immutable host
+geometry remains visible to content commands throughout the call.
+
+Hidden bodies do not render. History playback and Assistant polling stay in their
+existing application paths. Closing an Assistant panel does not stop its backend
+or clear its draft. Popped Assistant windows keep the legacy path. Combined
+Browser/History uses the existing content preference and suppresses the separate
+History body. Render Inspector, Shots and appearances keep their existing hosts
+and contribute their actual footprints to navigation and camera fitting.
+
+Assistant uses the shared flow and actual content width. Tall content keeps the
+conversation above its pinned composer. A viable Wide presentation puts the
+conversation beside the existing provider controls and composer; smaller widths
+retain the stacked presentation. Both use the same content identities, draft,
+scroll state and backend. Shared header status on hover and its attention indication
+come from the existing Assistant state and pending approvals. Classic and native
+Assistant composition is unchanged.
+
+Visible bodies report their natural scroll content and fixed control bands.
+A sole production panel hugs that content until column capacity requires scrolling;
+Assistant declares Fill to use the full available side height. A newly visible unmeasured
+width starts at capacity until its first real paint supplies its natural extent.
+No hidden body is rendered to obtain a measurement.
+
+Bottom History declares a fixed, symmetrically padded icon row. It has no collapse
+or height-resize control; commands enforce the same bounds. A new side column
+inherits the current source column's width, or the registered standard width when
+the source has no column. The standard width matches Classic Browser's default.
+Existing columns and explicit resizing keep their width.
+The full responsive/native acceptance matrix remains roadmap work. This initial
+integration does not close the parent rollout issue.
 
 ## Ownership
 
@@ -20,7 +58,7 @@ Each section contains ordered tabs. Inactive tabs still constrain composite size
 limits. Registrations declare allowed zones, PinOuter, Content/Fill height policy,
 text-heavy content, surface preference, header actions and independent
 `closable`/`hot_closable` flags. No generic host branches on product panel names.
-Only future History product registration allows Bottom; synthetic kinds can allow
+Only the History product registration allows Bottom; synthetic kinds can allow
 all zones. Quick close is an affordance, not the close capability itself.
 
 Layout is application/workspace preference data. It never enters CAD files,
@@ -41,6 +79,45 @@ binding. A fallible content action cannot be mixed with structural mutations in
 one runtime transaction. Synthetic Apply/Finish/Pulse actions never run Session
 commands. Real History playback and Assistant New Chat bindings belong to their
 content migrations.
+
+## Application preferences
+
+The opt-in preference adapter connects the existing envelope and catalogue to
+`SolveApp::prefs` and `load_prefs`, under the application-level `panel_layout` key.
+Desktop and web store this same Rust value through their existing preference
+writers. The adapter adds no design-file field, filesystem backend or browser
+storage path. A runtime must explicitly enable this integration; Classic remains
+the production default and ordinary specimens remain ephemeral.
+
+`PanelLayoutPreferences` retains deferred input until a registered runtime is
+available. The runtime's layout and injected catalogue remain authoritative once
+enabled. The stored workspace identifies what to restore at startup; it is not a
+second live workspace selection. Tool, document and ribbon changes do not select
+a layout workspace.
+
+The application record uses the existing bounded envelope/catalogue codecs.
+Current records take precedence over one-time legacy placement import and
+defaults. A corrupt or future current record is present data, so it must remain
+recoverable instead of repeatedly triggering legacy import. Layout records keep
+columns, saved proportions, tab/collapse state, closed placements and native
+return memory. They exclude measured content height, usable-space geometry,
+camera state and live controllers. Restored Content/Fill geometry is measured at
+the current width through the same host admission path.
+
+The existing Layout page exposes registered workspaces and named layouts only
+when this integration is enabled. Its controls use `layout.workspace.select`,
+`layout.apply`, `layout.save` and `layout.reset`. Built-ins remain immutable;
+replacing a user layout is explicit. Reset affects the current workspace and
+preserves the named layout library. Preferences Apply/Cancel and held writes
+cover layout changes too. A refused restore keeps the Preferences dialog and its
+snapshot available rather than discarding the restore obligation.
+
+Settings profiles carry the selected layout workspace and the current arrangement
+of every workspace, excluding the named library and machine-specific native window
+geometry. Layout page defaults preserve arrangements and the library. Applying a profile uses
+the same validated runtime path and reports a refused layout through the existing
+skipped-field result. Product adapters supply their actual preset registrations;
+synthetic fixture layouts do not stand in for migrated production content.
 
 ## Allocation and presentation
 
@@ -267,19 +344,106 @@ reparent the window.
 
 The default adapter truthfully advertises no native windows. Actual Window
 placement needs the native sibling's monitor/DPI, focus and close/redock services.
-The renderer retains the shared Container's fill alpha; captured `paint_alpha`
-reports it separately from declarative surface intent. Input and occlusion remain
-reserved regardless of alpha. Unsupported translucent effective policies still
-refuse. Contrast proof, comprehensive accessibility/keyboard bindings, persisted
-workspace rollout and real content adapters remain their named peers' work.
+The renderer resolves surface intent through the shared Container, raising its
+fill alpha when canonical text needs more contrast. Captured `paint_alpha` and
+`contrast` report the effective paint and any readable fallback separately from
+declarative intent. Input and occlusion remain reserved regardless of alpha.
+Remaining panel migrations, native window services and full workspace rollout
+stay with their named peers.
+
+### Keyboard, accessibility and motion
+
+The shared host exposes disclosure state, selected tabs and tab lists, action
+toggle state, menu items and oriented splitters to accessibility. Disabled actions
+retain their reason. Keyboard menu navigation returns focus to its opener on
+Escape, and panel focus traversal reveals headers inside bounded scroll extents.
+
+Nine contextual commands use the existing command registry and keymap for panel
+focus, collapse, moving to the next permitted zone and sash resize/reset. They
+resolve the actual owned host context, then use the existing typed admission and
+dispatch path. They do not infer focus from a model or headless session. Automatic
+shortcuts defer to focused text editors and foreign or modal UI. Explicit command
+calls can resolve an owned editor's panel without borrowing its caret keys.
+
+Controller and egui identities retain editor state. Focus restoration is scoped
+to the controller owner, document and viewport; it must not steal deliberate
+focus from another control. Hidden bodies are never rendered to restore focus.
+Adapters report freshly rendered focusable responses through
+`PanelLocalServices::register_focus_response`. The host accepts only eligible
+responses from the current content slot, rather than relying on egui's
+previous-pass widget lookup. Without a current response, an explicit panel focus
+request uses the visible header and leaves retained editor memory intact.
+Bookmarks retain a focused text editor's cursor range because egui collapses a
+selection during an unfocused render. Eligible restoration replaces only that
+range in the existing editor state; undo, IME and scroll state stay in egui.
+
+The native host follows the effective locale's logical direction, including
+Arabic and Hebrew, through the existing edge mapping. Saved layout coordinates
+and physical floating/native window positions remain unchanged. Theme motion
+uses a 120–160 ms cubic-out paint transition. Reduced motion or disabled theme
+animation completes immediately; layout, semantics and focus never wait for it.
 
 ## Specimens and verification boundary
 
 `ui.panel_fixture` is authenticated, off by default, and refuses to replace another
 runtime. Presets: `docks`, `tabs`, `collapsed`, `floating`, `overflow` (24 instances),
 `pinned`, `columns` (three independent Left columns), `stack_tabs`, `content_fill`
-(short Content versus Fill), and `inline` (one editable total row). The old `rails`
+(short Content versus Fill), `inline` (one editable total row), and `surfaces`
+(declared surface preferences with the existing synthetic bodies). The old `rails`
 preset is replaced by `collapsed`; it is not an alias to the retired experience.
+The optional `remember:true` enable parameter attaches the application preference
+catalogue for isolated restart review. A restart must explicitly enable the same
+specimen with `remember:true`; loading preferences alone never starts it. Saved
+restoration waits for valid host dimensions and uses normal runtime admission.
+Fixture workspace/preset registrations remain synthetic evidence, not shipping
+production registrations.
+The optional `reduced_motion` boolean updates the enabled specimen in place.
+It changes no saved preference, controller identity, draft or layout and refuses
+without a specimen owner. This review seam adds no operating-system motion service.
+
+### Surface review specimen
+
+The `surfaces` preset alone opts out of the host's compatibility opaque default.
+It contains an inactive text-heavy editor tab beside an active log tab, explicit
+Opaque and Translucent side members, and FollowZone Bottom and Floating members.
+The same existing content, commands and translated captions remain in use.
+Other presets retain their previous opaque presentation.
+
+`ui.panel_fixture {"preset":"surfaces","translucency_percent":50}` requests
+50% translucency for this explicitly enabled specimen. The optional value is a
+finite number from 0 to 100; opacity is `1 - translucency_percent / 100`.
+Zero requests an opaque surface and 100 requests a fully transparent surface
+before readability protection. The override is not a saved preference.
+`ui.panel_fixture {"translucency_percent":100}` updates the already enabled
+specimen host in place, preserving retained controllers, drafts and layout.
+It refuses when no specimen host is enabled or another provider owns the runtime.
+The parameter is also accepted with other explicitly enabled specimen presets;
+their compatibility opaque policy still applies. Omitting the
+override uses current theme/preferences rather than a specimen colour palette.
+
+Surface resolution uses every registered tab's metadata, including inactive tabs.
+Explicit Opaque wins, then explicit Translucent. Otherwise FollowZone is opaque
+for Bottom/Window or a multi-tab group containing a text-heavy member, and
+translucent elsewhere. Effective opacity may increase to protect both primary
+and muted text at 4.5:1 over possible viewport backgrounds. When the authored
+token pair cannot meet that guarantee even at full opacity, the renderer uses a
+known accessible opaque fallback pair and reports the failure, rather than
+describing the authored pair as compliant. Existing blur infrastructure remains
+independent of opacity and input capture.
+
+Section inspection reports declarative `surface`, actual `paint_alpha`, and
+optional `contrast`. The latter preserves `ContrastOutcome`, including the
+fallback reason; fallback is not a successful proof for the original pair.
+Actual clipped surface footprints continue to own input even when translucent.
+Uncovered short-panel gaps remain navigable, while content scrolling and actual
+controls shield the model. Temporary popup shielding is not a Fit/Centre obstacle.
+
+This is shared surface policy and an opt-in review seam, not a production content
+migration or a new appearance preset. Classic and shipping defaults remain.
+The initial approved docked adapters are Browser, History, Assistant and their allowed
+RenderSceneBrowser counterpart; other content conversions require a separate
+scope decision. Persistent legacy forms retain their existing hosts and continue
+to contribute their actual footprints until their own migrations.
 The original synthetic controllers expose draft, transaction, action, lifecycle,
 render and service counters plus process-local equality tokens. They do not expose
 fake production actions or pretend to perform CAD work.

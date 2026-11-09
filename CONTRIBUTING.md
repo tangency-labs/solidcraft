@@ -17,15 +17,30 @@ Before choosing a task, check the [command inventory](docs/features.md) and
 
 Questions, ideas or want to say what you're working on? Join the [Discord](https://discord.gg/FtU4NQNVDH).
 
-## Kernel work is paused
+## Kernel work goes in solidcore/
 
-We're moving to a new geometry kernel. Until that's done, please don't open pull requests that
-change `crates/kernel/`, `crates/geom/` or `vendor/truck*`, or issues and discussions about kernel
-work: booleans, fillets, chamfers, shell, offsets, sweeps and lofts, threads and holes, STEP/IGES
-import and export, or tessellation. The pinned issue on the tracker explains it. New ones get the
-`kernel-paused` label (`.github/workflows/kernel-paused.yml`) and a maintainer answers them. Crashes
-and data loss are still taken as issues. Pull requests outside those directories carry on as normal,
-including the dialogs and tools for these features.
+Kernel and geometry work is welcome: booleans, fillets, chamfers, shell, offsets, sweeps and lofts,
+threads and holes, STEP/IGES import and export, tessellation. It goes in `solidcore/`, the vendored
+solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.md) and
+`skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
+`crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
+
+A kernel pull request targets `main` like any other, with a code owner (jyviko or me) approving the
+`solidcore/` part; a change that touches the kernel and the app is one pull request. The `kernel` branch
+is only for multi-step kernel work that isn't safe on `main` until every step has landed: send those
+steps to `kernel`, and it merges into `main` when the work is done.
+Crashes and data loss are still taken first.
+
+### Updating a PR that was moved from solidcore
+
+solidcore's open PRs were re-opened here on `moved/solidcore-N` branches in tangency-labs, so
+contributors without write access can't push to them. To update one:
+
+1. `git fetch https://github.com/tangency-labs/solidcraft moved/solidcore-N:moved/solidcore-N`, then
+   `git switch moved/solidcore-N`.
+2. Commit your changes on it and push it to your fork: `git push <your-fork> moved/solidcore-N`.
+3. Open a PR against `kernel` that says "Replaces #M" (M is the moved PR's number). The moved one
+   gets closed.
 
 ## Get it running (about 10 minutes on a fast machine)
 
@@ -90,10 +105,11 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
 - `crates/sketch`: our own constraint solver, plus profile finding.
 - `crates/dynamics`: multibody dynamics: rigid bodies, joint constraints, gravity and springs,
   integrated in time (RFC #9719). It depends only on `geom`.
-- `crates/kernel`: the B-rep kernel boundary. It wraps [truck](https://github.com/ricosjp/truck),
-  and it's the only crate allowed to touch truck. Fillets, chamfers, shell/offset, Delete Face,
-  Split Face, STEP/IGES read and write, and face provenance are our own code here. Patched
-  copies of three truck crates live in `vendor/` and are excluded from our fmt/clippy rules.
+- `crates/kernel`: the B-rep kernel boundary: solids, extrude/revolve, booleans, fillets,
+  meshes, measures and STEP, behind our own API (implemented with `solidcore`). `crates/smlib` is
+  the safe wrapper around `solidcore`, and `solidcore` is vendored in this repository at
+  `solidcore/`; `.github/workflows/solidcore-mirror.yml` mirrors changes to it back to
+  [tangency-labs/solidcore](https://github.com/tangency-labs/solidcore).
 - `crates/doc`: the document. It holds parameters and expressions, the feature timeline and its
   incremental rebuild, components and occurrences, joints, appearances, and persistent naming.
 - `crates/io`: design files and mesh formats (3MF, STL, OBJ).
@@ -105,6 +121,12 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
 - `crates/mcp`, `apps/solidcraft`, `apps/solidcraft-cli`, `apps/solidcraft-web`.
 
 `cargo xtask layers` fails the build if a lower layer depends on a higher one.
+
+Whether a change belongs in SolidCraft or in SolidCore is decided by
+[`solidcore/docs/layers.md`](solidcore/docs/layers.md). Its tests: the **kernel** (`solidcore`)
+computes geometry any client could use; **ops** (`solidcore-ops`) is a recipe of kernel calls for a
+workflow, with no geometric quantity of its own; the **app** (SolidCraft) holds state and maps input
+to commands, with no geometry math.
 
 ## Rules that aren't negotiable
 
@@ -133,7 +155,7 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
      `crates/threedx-client/src/macos.rs` (the 3Dconnexion driver's client API on macOS), and the
      compiler denies it.
    - An unsupported case returns an error ("not supported yet: …"); it never panics.
-   - Every call into truck goes through `solidcraft_kernel::guard`.
+   - Every call into the vendored kernel goes through `solidcraft_kernel::guard`.
    - Every crash fix comes with a regression test.
 5. **Everything is a command, with a test.** A new feature means a `CommandSpec` in
    `crates/engine/src/cmd/` with input and output schemas (see
@@ -168,14 +190,15 @@ The reference for what the kernel builds is the kernel-cases ladder (`tests/kern
 
 **Kernel cases go to solidcore.** A case that checks a kernel operation (a boolean, a blend, a
 shell, a sweep, an import's geometry) is a new entry in solidcore's corpus,
-`crates/solidcore/tests/kernel_cases/<area>/` in
-[tangency-labs/solidcore](https://github.com/tangency-labs/solidcore), with an answer in closed
-form or exact. Draft it as a rig case here, export it with
+`solidcore/crates/solidcore/tests/kernel_cases/<area>/` in this repository, with an answer
+in closed form or exact. Draft it as a rig case here, export it with
 `cargo xtask kernel-cases --area <area> --export DIR`, add `DIR/<area>/<case>.json` and its
-`.bodies.json.gz` there, and delete the draft; or write the entry by hand as that folder's README
-describes. `tests/kernel-cases/` takes no new cases: its `CASES` list only shrinks
-(`cargo xtask lists`). App-level cases (what a command does, the UI, product rules) stay in
-SolidCraft, as tests in their area's existing test file or UI scenarios.
+`.bodies.json.gz` under `solidcore`, and delete the draft; or write the entry by hand as
+that folder's README describes. The mirror workflow pushes the change to
+[tangency-labs/solidcore](https://github.com/tangency-labs/solidcore). `tests/kernel-cases/` takes
+no new cases: its `CASES` list only shrinks (`cargo xtask lists`). App-level cases (what a command
+does, the UI, product rules) stay in SolidCraft, as tests in their area's existing test file or UI
+scenarios.
 
 The naming corpus checks persistent names: every name a corpus design stores still finds a face or
 an edge, and two builds name its faces and edges alike
@@ -205,7 +228,7 @@ Either include the fix in the same PR, or mark the test `#[ignore = "fails until
 (it can then merge right away), and remove that line in the PR that fixes the bug.
 
 **Use the `ci` profile.** CI runs the tests with `--profile ci`: light optimisation, line tables,
-no LTO, and debug assertions off (truck has debug-only assertions that reject valid geometry). It
+no LTO, and debug assertions off. It
 builds several times faster than `--release`. If a test fails only in a plain debug build, say so
 in the PR. `cargo xtask test` builds the tests with it and then runs every test binary at once
 (`cargo test` runs them one after another); arguments after `--` go to each binary, e.g.
@@ -352,7 +375,10 @@ and a fresh CI run:
    quick compile (`cargo check`) when you push. Once a maintainer has reviewed it they add the
    `approved-for-ci` label when the PR is ready to merge, which runs the full CI (build, tests,
    goldens, Clippy); every push after that runs the full set again. Maintainers merge approved
-   PRs in groups by area, so PRs that touch the same code meet a conflict at most once.
+   PRs in groups by area, so PRs that touch the same code meet a conflict at most once. The one
+   exception is the pull request that first vendored SolidCore: it must land with a real merge
+   commit, because a squash merge drops the subtree parent and the mirror can no longer
+   fast-forward SolidCore (`.github/workflows/solidcore-mirror.yml`).
 4. Reference the issue (`Fixes #12`). In the PR, say what you tested and how. For geometry work, include the measured numbers (and
    the expected ones).
 5. Write the PR title and first sentence for someone who hasn't seen your chat, the issue or the
@@ -418,9 +444,13 @@ owning one area, with a human setting direction and reporting bugs. Their workin
 [AGENTS.md](AGENTS.md). Human contributors are just as welcome. Use whatever tools you like, as
 long as the change meets the rules above.
 
+If you run an agent, keep one long-running session rather than restarting it, don't `--resume` one
+whose prompt cache has gone cold (it re-reads the whole history at full price), and act on CodeRabbit
+comments only when they're about crashes, wrong results, data loss or security.
+
 Two quick checks run on every pull request (`.github/workflows/pr-checks.yml`, not required): it
 fails when a lower-numbered open PR by someone else already closes the same issue (the label
-`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt).
+`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt). A default here is a UX default only: a control, setting, preference or tool behaviour a user sees by default; a changed kernel or geometry result is `Changes a default: no`.
 
 ## Labels and triage
 
@@ -445,13 +475,13 @@ correct them freely and it won't put them back.
 
 ## Where help is wanted most
 
-**Kernel speed (slow fillets, booleans, STEP):** please don't rewrite the current kernel code for speed; it is being replaced by [solidcore](https://github.com/bherbruck/solidcore) ([progress](https://tangency-labs.github.io/solidcore/)). Report slow cases with a file under the `kernel-perf` label, and put kernel effort into solidcore instead. See [#1597](https://github.com/tangency-labs/solidcraft/issues/1597).
+**Kernel speed (slow fillets, booleans, STEP):** report slow cases with a file under the `kernel-perf` label, and put kernel effort into the vendored kernel, [solidcore](https://github.com/tangency-labs/solidcore) ([progress](https://tangency-labs.github.io/solidcore/)). See [#1597](https://github.com/tangency-labs/solidcraft/issues/1597).
 
 See the [`help wanted`](https://github.com/tangency-labs/solidcraft/labels/help%20wanted) and
 [`good first issue`](https://github.com/tangency-labs/solidcraft/labels/good%20first%20issue) labels.
 In order of how much they'd help users:
 
-1. **Fillet and blend robustness.** Fillets are our own code (truck has no fillet operation).
+1. **Fillet and blend robustness.** Fillets are the vendored kernel's code (`solidcore`).
    Constant, variable-radius and chord fillets work, and so do corners where fillets of
    different radii meet, including three rounds meeting at a vertex. Next are setback corners, fillets along curved edges between curved
    faces, and fillets that consume neighbouring faces.

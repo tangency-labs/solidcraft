@@ -11,8 +11,8 @@ use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, vec2};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::Ring;
 
-use crate::theme::Tokens;
 use crate::viewport::{Proj, projected_polygon};
+use solidcraft_theme::Tokens;
 
 /// A part of the triad.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -482,7 +482,7 @@ mod tests {
         let limit = (0.45 * 2f64.sqrt() * LEN_PX) as f32 + 3.0;
         let mut worst = 0.0f32;
         for dir in crate::viewport::orbit_directions() {
-            let cam = solidcraft_engine::render::Camera::default().looking_from(dir);
+            let cam = solidcraft_viewport::Camera::default().looking_from(dir);
             let proj = Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
             let l = mm_per_px(&proj, t.center).unwrap() * LEN_PX;
             let sh = shapes(&proj, &t, l).unwrap();

@@ -1,0 +1,57 @@
+{
+  "area": "import",
+  "bodies": {},
+  "calls": [],
+  "case": "3730-void-oriented-shell-false",
+  "expected": {
+    "area_mm2": 4650.0,
+    "body_count": 1,
+    "edges": 24,
+    "faces": 12,
+    "method": "V = 40*30*12.5 - 20*6*5 = 15000 - 600; A = 2(40*30+40*12.5+30*12.5) + 2(20*6+20*5+6*5) = 4150 + 500; faces 6+6, edges 12+12, vertices 8+8; one body with two shells (outer and cavity)",
+    "shells": 2,
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3730",
+      "tangency-labs/solidcraft#3872"
+    ],
+    "vertices": 16,
+    "volume_mm3": 14400.0,
+    "what": "a block with a closed cavity written as BREP_WITH_VOIDS whose void shell (outward-facing faces) is turned by ORIENTED_CLOSED_SHELL .F.; the cavity must be taken out, not added"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4650.0,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16,
+      "volume_mm3": 14399.999999999998
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3730",
+    "tangency-labs/solidcraft#3872"
+  ],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a block with a closed cavity written as BREP_WITH_VOIDS whose void shell (outward-facing faces) is turned by ORIENTED_CLOSED_SHELL .F.; the cavity must be taken out, not added",
+  "why_not": [
+    "body \"Hollow\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

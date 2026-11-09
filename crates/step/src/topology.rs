@@ -46,7 +46,7 @@ use solidcore_record::brep::{
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval, face_flux};
 use solidcraft_geom::brep::pcurve::{self, EdgeUse, TrimEdge, TrimFace, TrimUse, Trims};
 
-use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Placement, dot, scale, sub};
+use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Placement, Transform, dot, scale, sub};
 use crate::p21::{Entity, Exchange, Param};
 use crate::read::{R, Reader};
 use crate::units;
@@ -87,6 +87,11 @@ const MAX_TOLERANCE: f64 = 1.0;
 const VERTEX_GAP_MARGIN: f64 = 1.5;
 /// Intervals an edge's curve is measured over against each face's surface it bounds.
 const EDGE_GAP_SAMPLES: usize = 16;
+/// The least span of a face's parameter box along a direction of its surface that is not
+/// closed on itself, where its natural range has room ([`face_domain`]): 50 times the 2e-5 mm
+/// within which SMLib takes two of a surface's sides for one (#12757: a planar sliver face
+/// 1e-5 mm wide).
+const OPEN_DOMAIN_SPAN: f64 = 1e-3;
 /// An edge's tolerance over the largest gap measured between its pcurves and its curve, as the
 /// record check measures it: with margin, as a vertex's.
 const EDGE_GAP_MARGIN: f64 = 1.5;
@@ -745,6 +750,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             match c {
                 Curve::SurfaceCurve { curve_3d, .. } => c = curve_3d,
                 Curve::Trimmed { basis, .. } => c = basis,
+                Curve::Replica { parent, transform } => return replicate(parent, transform, 0),
                 _ => return Ok(c.clone()),
             }
         }
@@ -948,6 +954,10 @@ impl<'b, 'a> Builder<'b, 'a> {
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
         // at its poles.
         self.complete_slits()?;
+        let slits = self.drop_inner_slits();
+        if slits > 0 {
+            notes.push(format!("{slits} slits of no area left out of the faces they lie in"));
+        }
         let at_poles = self.split_at_poles()?;
         if at_poles > 0 {
             notes.push(format!("{at_poles} edges split where they pass through a face's pole"));
@@ -1628,9 +1638,21 @@ fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2]; 2]> {
                     y = a + TAU;
                 }
             }
+            // A direction not closed on itself: the box is the reader's to choose within the
+            // natural range (all of it for a plane, or along a cylinder's axis), and SMLib
+            // refuses a surface whose opposite sides lie within its tolerance of each other
+            // (`SmSurface` test #6, "partially coincident boundaries"), so a sliver face's box
+            // is at least `OPEN_DOMAIN_SPAN` across where its range has room: widened about its
+            // middle, and shifted off a bound it would cross. Pcurves wholly outside the range
+            // stay an empty box.
             Some(Natural::Range(n0, n1)) => {
                 x = x.max(*n0);
                 y = y.min(*n1);
+                if x < y && y - x < OPEN_DOMAIN_SPAN {
+                    let span = OPEN_DOMAIN_SPAN.min(*n1 - *n0);
+                    let lo = (0.5 * (x + y) - 0.5 * span).clamp(*n0, *n1 - span);
+                    (x, y) = (lo, (lo + span).min(*n1));
+                }
             }
             None => {}
         }
@@ -1704,6 +1726,42 @@ fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
     })
 }
 
+/// A CURVE_REPLICA's curve: the parent (under its SURFACE_CURVE and TRIMMED_CURVE wrappers)
+/// moved by `t`, as the same kind of curve, with the parent's parameter. A mirroring operator
+/// would turn a conic over, so it is not supported.
+fn replicate(parent: &Curve, t: &Transform, depth: usize) -> R<Curve> {
+    if depth > MAX_NESTING {
+        return Err("curve replicas nested too deeply".into());
+    }
+    if !t.is_proper() {
+        return Err(unsupported("a CURVE_REPLICA that mirrors"));
+    }
+    let place = |p: &Placement| Placement { origin: t.point(p.origin), axis: t.direction(p.axis), ref_direction: t.direction(p.ref_direction) };
+    let k = t.scale;
+    Ok(match parent {
+        Curve::Line { origin, direction, magnitude } => {
+            Curve::Line { origin: t.point(*origin), direction: t.direction(*direction), magnitude: magnitude * k }
+        }
+        Curve::Circle { position, radius } => Curve::Circle { position: place(position), radius: radius * k },
+        Curve::Ellipse { position, semi_axis_1, semi_axis_2 } => {
+            Curve::Ellipse { position: place(position), semi_axis_1: semi_axis_1 * k, semi_axis_2: semi_axis_2 * k }
+        }
+        Curve::Hyperbola { position, semi_axis, semi_imag_axis } => {
+            Curve::Hyperbola { position: place(position), semi_axis: semi_axis * k, semi_imag_axis: semi_imag_axis * k }
+        }
+        Curve::Parabola { position, focal_dist } => Curve::Parabola { position: place(position), focal_dist: focal_dist * k },
+        Curve::BSpline(b) => {
+            let mut moved = (**b).clone();
+            moved.points = b.points.iter().map(|p| t.point(*p)).collect();
+            Curve::BSpline(Box::new(moved))
+        }
+        Curve::Polyline(points) => Curve::Polyline(points.iter().map(|p| t.point(*p)).collect()),
+        Curve::SurfaceCurve { curve_3d: inner, .. } | Curve::Trimmed { basis: inner, .. } => replicate(inner, t, depth + 1)?,
+        Curve::Replica { parent, transform } => replicate(&replicate(parent, transform, depth + 1)?, t, depth + 1)?,
+        Curve::OffsetCurve3d { .. } => return Err(unsupported("a CURVE_REPLICA of an OFFSET_CURVE_3D")),
+    })
+}
+
 /// An edge on its schema curve.
 #[derive(Debug)]
 struct Mapped {
@@ -1771,6 +1829,7 @@ fn map_edge(curve: &Curve, ps: P3, pe: P3, same_sense: bool, closed: bool, full:
             open_conic(curve, ps, pe, same_sense, closed, |lo, hi| swept::parabola_spline(position, *focal_dist, lo, hi))
         }
         Curve::OffsetCurve3d { .. } => Err(unsupported("OFFSET_CURVE_3D")),
+        Curve::Replica { parent, transform } => map_edge(&replicate(parent, transform, 0)?, ps, pe, same_sense, closed, full, tol),
         Curve::Trimmed { .. } | Curve::SurfaceCurve { .. } => Err(unsupported("nested trimmed or surface curves")),
     }
 }

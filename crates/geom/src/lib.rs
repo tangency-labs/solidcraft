@@ -40,7 +40,6 @@ mod profile;
 pub mod section;
 pub mod simplify;
 pub mod spline_space;
-pub mod srgb;
 pub mod stderr;
 pub mod tess;
 pub mod title_block;
@@ -55,7 +54,7 @@ pub use blend::hermite_bezier;
 pub use bvh::{Bvh, MeshIndex};
 pub use chain::{Chain, Closed, Ends, Open, Path, Planar, Ring};
 pub use grid::Grid;
-pub use mesh::{Aabb3, BoxedTriangle, InsideIndex, MassProperties, Mesh, MeshMeasure, find_close_pair};
+pub use mesh::{Aabb3, BoxedTriangle, InsideIndex, MassProperties, Mesh, MeshGeom, MeshMeasure, find_close_pair};
 pub use plane::PlaneGeom;
 pub use profile::{Loop2Geom, MAX_DERIVATIVE_ORDER, Region2Geom, Seg2Geom, Similarity2, bezier, regions_apart};
 pub use unit_vec3::UnitVec3;
@@ -65,8 +64,8 @@ pub use vec::{Vec2Geom, Vec3Geom};
 /// [`solidcore_record::Plane`], the profile types), in scope with `use solidcraft_geom::prelude::*`.
 pub mod prelude {
     pub use crate::{
-        Loop2ArcFit as _, Loop2Geom as _, PlaneGeom as _, Region2ArcFit as _, Region2Geom as _, Seg2ArcFit as _, Seg2Geom as _, Vec2Geom as _,
-        Vec3Geom as _,
+        Loop2ArcFit as _, Loop2Geom as _, MeshGeom as _, PlaneGeom as _, Region2ArcFit as _, Region2Geom as _, Seg2ArcFit as _, Seg2Geom as _,
+        Vec2Geom as _, Vec3Geom as _,
     };
 }
 

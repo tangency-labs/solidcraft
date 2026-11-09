@@ -2,7 +2,9 @@ use super::*;
 use solidcore_record::Vec3;
 use solidcraft_doc::{Document, FeatureKind, MeshData};
 
-fn imported_box() -> Session {
+/// A design whose only feature imports a 10 x 20 x 30 mm box as the mesh body `Mesh`. The
+/// schema tests (`schema/mesh_tests.rs`) convert it too.
+pub(crate) fn imported_box() -> Session {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
     let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     let mut doc = Document::default();
@@ -14,6 +16,7 @@ fn imported_box() -> Session {
                 positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
                 triangles: mesh.triangles.iter().flatten().copied().collect(),
                 color: Some([0.2, 0.5, 0.8]),
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),
@@ -39,9 +42,14 @@ fn edits_share_an_imported_meshs_triangles_with_undo() {
     run(&mut s, "edit.undo", json!({}));
     let (p, t) = arrays(&s);
     assert!(std::sync::Arc::ptr_eq(&p, &positions) && std::sync::Arc::ptr_eq(&t, &triangles), "shared after undo");
-    let saved =
-        serde_json::to_value(MeshData { name: "M".into(), positions: vec![1.5, 2.0, 3.0].into(), triangles: vec![0, 0, 0].into(), color: None })
-            .unwrap();
+    let saved = serde_json::to_value(MeshData {
+        name: "M".into(),
+        positions: vec![1.5, 2.0, 3.0].into(),
+        triangles: vec![0, 0, 0].into(),
+        color: None,
+        corner_normals: Default::default(),
+    })
+    .unwrap();
     assert_eq!(saved, json!({"name":"M","positions":[1.5,2.0,3.0],"triangles":[0,0,0]}));
     let back: MeshData = serde_json::from_value(saved).unwrap();
     assert_eq!(&back.positions[..], &[1.5, 2.0, 3.0]);
@@ -233,7 +241,7 @@ fn send_to_slicer_needs_a_slicer_and_bodies() {
 
 /// The chosen-programs list is process-wide: tests that set it take turns.
 #[cfg(unix)]
-static CHOSEN_PROGRAMS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static CHOSEN_PROGRAMS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// `file.save_mesh` with a `slicer` writes where the caller said and hands that file over, by the
 /// same steps as `file.send_to_slicer`.
@@ -269,7 +277,7 @@ fn save_mesh_with_a_chosen_program_writes_the_file_where_asked_and_sends_it_ther
 
 /// Puts back what the tests of the send commands make up, even when one fails.
 #[cfg(unix)]
-struct MadeUp;
+pub(crate) struct MadeUp;
 
 #[cfg(unix)]
 impl Drop for MadeUp {
@@ -561,6 +569,7 @@ fn open_in_easyprint_reports_a_host_that_cannot_start_and_a_model_over_the_limit
                 positions: vec![0., 0., 0., 1., 0., 0., 0., 1., 0.].into(),
                 triangles: [0u32, 1, 2].repeat(2_100_000).into(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),

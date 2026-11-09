@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::prelude::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use crate::link::{LinkGeom, LinkKind, LinkSource, sketch_axis_geom};
 use crate::union_find::{find, union};
@@ -53,6 +53,43 @@ pub enum SketchError {
 }
 
 pub(crate) type Result<T> = std::result::Result<T, SketchError>;
+
+/// Adds many points and curves to a sketch at once ([`Sketch::batch`]), for an import of a dense
+/// drawing. It keeps every id the sketch holds in a set, so a new id costs one lookup instead of a
+/// search of the whole sketch, and makes the same ids and checks as [`Sketch::add_point`] and
+/// [`Sketch::add_curve`]. It borrows the sketch for its whole life, so nothing else can change
+/// the ids it keeps.
+pub struct SketchBatch<'a> {
+    sketch: &'a mut Sketch,
+    taken: HashSet<String>,
+}
+
+impl SketchBatch<'_> {
+    /// [`Sketch::add_point`].
+    pub fn add_point(&mut self, p: Vec2, id: Option<&str>) -> Result<usize> {
+        let i = self.sketch.add_point_with(p, id, Some(&self.taken))?;
+        self.keep(|sk| sk.points.get(i).map(|p| p.id.clone()));
+        Ok(i)
+    }
+
+    /// [`Sketch::add_curve`].
+    pub fn add_curve(&mut self, kind: CurveKind, id: Option<&str>) -> Result<usize> {
+        let i = self.sketch.add_curve_with(kind, id, Some(&self.taken))?;
+        self.keep(|sk| sk.curves.get(i).map(|c| c.id.clone()));
+        Ok(i)
+    }
+
+    /// The sketch as the batch has left it so far.
+    pub fn sketch(&self) -> &Sketch {
+        self.sketch
+    }
+
+    fn keep(&mut self, id: impl FnOnce(&Sketch) -> Option<String>) {
+        if let Some(id) = id(self.sketch) {
+            self.taken.insert(id);
+        }
+    }
+}
 
 /// A sketch point. `fixed` points are constants for the solver.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -295,6 +332,16 @@ pub enum ConstraintKind {
     PointOnCurve {
         p: usize,
         c: usize,
+    },
+    /// Point `p` on curve `c` at `at`, its share (0 to 1) of the curve's length from the curve's
+    /// start: a line's first point, an arc's start (counter-clockwise), a circle's point on sketch
+    /// +X (counter-clockwise), an ellipse's major-axis end (counter-clockwise), a spline's or a
+    /// conic's first point. Divide Curve places its points with it, so they keep equal shares of
+    /// the curve's length as the curve changes. The length is measured along the exact curve.
+    PointAlong {
+        p: usize,
+        c: usize,
+        at: f64,
     },
     Horizontal {
         l: usize,
@@ -540,6 +587,7 @@ impl ConstraintKind {
         match self {
             PatternPoint { .. } | PatternRadius { .. } => "Pattern",
             Coincident { .. } | PointOnCurve { .. } => "Coincident",
+            PointAlong { .. } => "PointAlong",
             Horizontal { .. } | HorizontalPoints { .. } => "Horizontal",
             Vertical { .. } | VerticalPoints { .. } => "Vertical",
             Parallel { .. } => "Parallel",
@@ -584,7 +632,7 @@ impl ConstraintKind {
             PatternRadius { a, b } => (vec![], vec![a, b]),
             Coincident { p, q } | HorizontalPoints { p, q } | VerticalPoints { p, q } => (vec![p, q], vec![]),
             Distance { p, q, .. } | DistanceX { p, q, .. } | DistanceY { p, q, .. } => (vec![p, q], vec![]),
-            PointOnCurve { p, c } => (vec![p], vec![c]),
+            PointOnCurve { p, c } | PointAlong { p, c, .. } => (vec![p], vec![c]),
             Horizontal { l } | Vertical { l } | Length { l, .. } | LineAngle { l, .. } => (vec![], vec![l]),
             Radius { c, .. } | Diameter { c, .. } | ArcSweep { c, .. } => (vec![], vec![c]),
             Parallel { a, b } | Perpendicular { a, b } | Collinear { a, b } | Tangent { a, b } | Equal { a, b } | Concentric { a, b } => {
@@ -642,7 +690,7 @@ impl ConstraintKind {
                 fp(p);
                 fp(q);
             }
-            PointOnCurve { p, c } => {
+            PointOnCurve { p, c } | PointAlong { p, c, .. } => {
                 fp(p);
                 fc(c);
             }
@@ -814,10 +862,16 @@ impl Sketch {
 
     /// A new unused id with the given prefix (`l` → `l3`).
     pub fn fresh(&mut self, prefix: &str) -> Result<String> {
+        self.next_id(prefix, None)
+    }
+
+    /// [`Sketch::fresh`], asking `taken` (every id the sketch holds, kept by a [`SketchBatch`])
+    /// instead of searching the sketch when given: the same id either way.
+    fn next_id(&mut self, prefix: &str, taken: Option<&HashSet<String>>) -> Result<String> {
         let mut n = self.counters.get(prefix).copied().unwrap_or(0);
         n = n.checked_add(1).ok_or_else(|| SketchError::Invalid("sketch identity counter exhausted".into()))?;
         let first = format!("{prefix}{n}");
-        if !self.id_taken(&first) {
+        if !taken.map_or_else(|| self.id_taken(&first), |t| t.contains(&first)) {
             self.counters.insert(prefix.to_string(), n);
             return Ok(first);
         }
@@ -836,8 +890,29 @@ impl Sketch {
         // A damaged counter may start before a long occupied prefix. Index
         // reservations once so probing that prefix cannot rescan all geometry
         // for each candidate ID.
-        let mut taken: std::collections::BTreeSet<&str> = self
-            .points
+        let indexed;
+        let taken = match taken {
+            Some(t) => t,
+            None => {
+                indexed = self.all_ids().map(str::to_owned).collect::<HashSet<String>>();
+                &indexed
+            }
+        };
+        for _ in 0..budget.saturating_sub(1) {
+            n = n.checked_add(1).ok_or_else(|| SketchError::Invalid("sketch identity counter exhausted".into()))?;
+            let id = format!("{prefix}{n}");
+            if !taken.contains(&id) {
+                self.counters.insert(prefix.to_string(), n);
+                return Ok(id);
+            }
+        }
+        Err(SketchError::TooLarge)
+    }
+
+    /// Every id the sketch holds: its points, curves, constraints, patterns, links, wires and
+    /// offset topologies with their outputs (what [`Sketch::id_taken`] searches).
+    fn all_ids(&self) -> impl Iterator<Item = &str> {
+        self.points
             .iter()
             .map(|p| p.id.as_str())
             .chain(self.curves.iter().map(|c| c.id.as_str()))
@@ -845,22 +920,23 @@ impl Sketch {
             .chain(self.patterns.iter().map(|p| p.id.as_str()))
             .chain(self.links.iter().map(|l| l.id.as_str()))
             .chain(self.wires.iter().map(|w| w.id.as_str()))
-            .collect();
-        for topology in self.offsets.iter().filter_map(|r| r.topology.as_ref()) {
-            taken.insert(topology.id.as_str());
-            taken.extend(topology.roles.iter().map(|r| r.output.as_str()));
-        }
-        for _ in 0..budget.saturating_sub(1) {
-            n = n.checked_add(1).ok_or_else(|| SketchError::Invalid("sketch identity counter exhausted".into()))?;
-            let id = format!("{prefix}{n}");
-            if !taken.contains(id.as_str()) {
-                self.counters.insert(prefix.to_string(), n);
-                return Ok(id);
-            }
-        }
-        Err(SketchError::TooLarge)
+            .chain(
+                self.offsets
+                    .iter()
+                    .filter_map(|r| r.topology.as_ref())
+                    .flat_map(|t| std::iter::once(t.id.as_str()).chain(t.roles.iter().map(|r| r.output.as_str()))),
+            )
+    }
+
+    /// Adds many points and curves without searching the sketch for each new id: see
+    /// [`SketchBatch`].
+    pub fn batch(&mut self) -> SketchBatch<'_> {
+        let taken = self.all_ids().map(str::to_owned).collect();
+        SketchBatch { sketch: self, taken }
     }
     pub(crate) fn id_taken(&self, id: &str) -> bool {
+        #[cfg(test)]
+        crate::tests::count_id_scan();
         self.points.iter().any(|p| p.id == id)
             || self.curves.iter().any(|c| c.id == id)
             || self.constraints.iter().any(|c| c.id == id)
@@ -890,26 +966,32 @@ impl Sketch {
 
     /// Add a free point (or reuse an existing one within `merge_tol` of `p` when `merge_tol > 0`).
     pub fn add_point(&mut self, p: Vec2, id: Option<&str>) -> Result<usize> {
+        self.add_point_with(p, id, None)
+    }
+
+    /// [`Sketch::add_point`], with the ids a [`SketchBatch`] keeps when given.
+    fn add_point_with(&mut self, p: Vec2, id: Option<&str>, taken: Option<&HashSet<String>>) -> Result<usize> {
         let p = Self::check_pos(p)?;
         if self.points.len() >= MAX_POINTS {
             return Err(SketchError::TooLarge);
         }
-        let id = match id {
-            Some(i) if self.id_taken(i) => return Err(SketchError::Duplicate(i.into())),
-            Some("") => return Err(SketchError::Invalid("empty id".into())),
-            Some(i) => i.to_string(),
-            None => self.fresh("p")?,
-        };
+        let id = self.new_id(id, "p", taken)?;
         self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None });
         Ok(self.points.len() - 1)
     }
 
     pub(crate) fn curve_id(&mut self, id: Option<&str>, prefix: &str) -> Result<String> {
+        self.new_id(id, prefix, None)
+    }
+
+    /// The id a new entity gets: `id` if it is free, else a fresh one with `prefix`. `taken`, when
+    /// given, holds every id the sketch has (a [`SketchBatch`]'s).
+    fn new_id(&mut self, id: Option<&str>, prefix: &str, taken: Option<&HashSet<String>>) -> Result<String> {
         match id {
-            Some(i) if self.id_taken(i) => Err(SketchError::Duplicate(i.into())),
+            Some(i) if taken.map_or_else(|| self.id_taken(i), |t| t.contains(i)) => Err(SketchError::Duplicate(i.into())),
             Some("") => Err(SketchError::Invalid("empty id".into())),
             Some(i) => Ok(i.into()),
-            None => self.fresh(prefix),
+            None => self.next_id(prefix, taken),
         }
     }
 
@@ -1135,6 +1217,14 @@ impl Sketch {
             Parallel { a, b } | Perpendicular { a, b } | Collinear { a, b } | Angle { a, b, .. } => {
                 need_line(a)?;
                 need_line(b)?;
+            }
+            PointAlong { p, c, at } => {
+                if !(at.is_finite() && (0.0..=1.0).contains(&at)) {
+                    return Err(SketchError::Invalid("a point along a curve needs a share of its length from 0 to 1".into()));
+                }
+                if self.curves.get(c).is_some_and(|x| x.kind.uses(p)) {
+                    return Err(SketchError::Invalid("a curve's own point cannot be placed along it".into()));
+                }
             }
             // On an ellipse, a radius dimension holds its minor radius.
             Radius { c, .. } if matches!(self.curves.get(c).map(|x| &x.kind), Some(CurveKind::Ellipse { .. })) => {}
@@ -1777,6 +1867,11 @@ impl Sketch {
 
     /// Add a curve of any kind over existing points.
     pub fn add_curve(&mut self, kind: CurveKind, id: Option<&str>) -> Result<usize> {
+        self.add_curve_with(kind, id, None)
+    }
+
+    /// [`Sketch::add_curve`], with the ids a [`SketchBatch`] keeps when given.
+    fn add_curve_with(&mut self, kind: CurveKind, id: Option<&str>, taken: Option<&HashSet<String>>) -> Result<usize> {
         let ids = kind.point_ids();
         if ids.iter().any(|p| *p >= self.points.len()) {
             return Err(SketchError::Invalid("curve point out of range".into()));
@@ -1824,7 +1919,7 @@ impl Sketch {
                 "n"
             }
         };
-        let id = self.curve_id(id, prefix)?;
+        let id = self.new_id(id, prefix, taken)?;
         self.curves.push(Curve { id, kind, construction: false, reversed: false, link: None, centerline: false, fixed: false, infinite: false });
         Ok(self.curves.len() - 1)
     }
