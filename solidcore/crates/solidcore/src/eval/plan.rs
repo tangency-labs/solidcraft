@@ -131,8 +131,7 @@ impl EvalSurface {
     /// that still fails gives the origin and +Z rather than a NaN.
     pub fn eval(&self, u: f64, v: f64) -> (Vec3, Vec3) {
         let Some((p, du, dv)) = self.derivs(u, v) else { return (Vec3::ZERO, Vec3::Z) };
-        let n = self.oriented(du.cross(dv));
-        if let Some(n) = n.normalized().filter(|_| n.len2() > 1e-20 * (du.len2() * dv.len2()).max(1e-300)) {
+        if let Some(n) = self.regular_normal(du, dv) {
             return (p, n);
         }
         // Step into the parameter domain around the degenerate point: never past the end of an
@@ -148,6 +147,20 @@ impl EvalSurface {
             }
         }
         (p, Vec3::Z)
+    }
+
+    /// The unit normal from the first partials `du` and `dv`, oriented as the surface; `None` at
+    /// a degenerate point, where they are parallel or one vanishes.
+    fn regular_normal(&self, du: Vec3, dv: Vec3) -> Option<Vec3> {
+        let n = self.oriented(du.cross(dv));
+        n.normalized().filter(|_| n.len2() > 1e-20 * (du.len2() * dv.len2()).max(1e-300))
+    }
+
+    /// Point and unit normal at `(u, v)` where the first partials give one there; `None` at a
+    /// degenerate point (a cone's apex, a sphere's pole) or off the surface.
+    pub fn regular(&self, u: f64, v: f64) -> Option<(Vec3, Vec3)> {
+        let (p, du, dv) = self.derivs(u, v)?;
+        Some((p, self.regular_normal(du, dv)?))
     }
 
     /// The active parameter interval along `d` (0: u, 1: v) of a spline, or of a revolution's

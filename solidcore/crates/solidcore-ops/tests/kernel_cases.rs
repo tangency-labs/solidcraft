@@ -1206,19 +1206,40 @@ fn grade_seams(result: &[Slot], expected: &Value) -> Result<(), Stop> {
     Ok(())
 }
 
-/// With `KERNEL_CASES_SMB` set, writes `bodies` there as `<case>.smb`, `<case>-1.smb`, ...
+/// With `KERNEL_CASES_SMB` set, writes a corpus case's `bodies` there; a failed write is
+/// printed, not graded.
 fn write_smb(e: &Value, bodies: &[Slot]) {
     let Some(dir) = std::env::var_os("KERNEL_CASES_SMB") else {
         return;
     };
-    let case = e["case"].as_str().unwrap();
-    for (i, s) in bodies.iter().enumerate() {
-        let name = match i {
-            0 => format!("{case}.smb"),
-            _ => format!("{case}-{i}.smb"),
-        };
-        std::fs::write(Path::new(&dir).join(name), s.body.to_smb(true).unwrap()).unwrap();
+    if let Err(x) = write_smb_to(Path::new(&dir), e, bodies) {
+        println!("KERNEL_CASES_SMB: {x}");
     }
+}
+
+/// Writes `bodies` to `dir` as `<case>.smb`, `<case>-1.smb`, ..., and removes the numbered
+/// files a previous run left past them. A synthetic case (no `case`) writes nothing.
+fn write_smb_to(dir: &Path, e: &Value, bodies: &[Slot]) -> Result<(), String> {
+    let Some(case) = e["case"].as_str() else {
+        return Ok(());
+    };
+    let path = |i: usize| match i {
+        0 => dir.join(format!("{case}.smb")),
+        _ => dir.join(format!("{case}-{i}.smb")),
+    };
+    for (i, s) in bodies.iter().enumerate() {
+        let bytes = s
+            .body
+            .to_smb(true)
+            .map_err(|x| format!("{case}: to_smb: {x}"))?;
+        std::fs::write(path(i), bytes).map_err(|x| format!("{}: {x}", path(i).display()))?;
+    }
+    let mut i = bodies.len();
+    while path(i).exists() {
+        std::fs::remove_file(path(i)).map_err(|x| format!("{}: {x}", path(i).display()))?;
+        i += 1;
+    }
+    Ok(())
 }
 
 /// Runs a case's calls and grades the result against `rig` (or, for a hand-written case
@@ -1326,7 +1347,10 @@ fn run_case_with_records(
                 write_smb(e, &ins);
                 return Ok(None);
             }
-            (Err(x), None) => return Err(Stop::Fail(format!("call {i} ({op}) refused: {x}"))),
+            (Err(x), None) => {
+                write_smb(e, &ins);
+                return Err(Stop::Fail(format!("call {i} ({op}) refused: {x}")));
+            }
             (Ok(_), Some(want)) => {
                 return Err(Stop::Fail(format!(
                     "call {i} ({op}) ran where the rig's refused: {want}"
@@ -1933,6 +1957,32 @@ fn check_discarded_edit(record: Record, op: &str, params: &Value, made: &Value, 
     e["expected"] = retained;
     e["expected"]["tolerance"] = serde_json::json!({"rel": 1e-9});
     run_case_with_records(&e, || records.clone()).unwrap();
+}
+
+/// The render export replaces a case's whole file set, skips synthetic cases and returns a
+/// failed write instead of panicking.
+#[test]
+fn smb_export_replaces_the_case_files_and_reports_failures() {
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let slot = || Slot {
+        body: Arc::new(solidcore_ops::make_box([0.0; 3], [3.0, 2.0, 1.0]).unwrap()),
+        order: None,
+    };
+    let dir = std::env::temp_dir().join(format!("kernel-cases-smb-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let e = serde_json::json!({"case": "c"});
+    write_smb_to(&dir, &e, &[slot(), slot(), slot()]).unwrap();
+    assert!(dir.join("c-2.smb").exists());
+    write_smb_to(&dir, &e, &[slot()]).unwrap();
+    assert!(dir.join("c.smb").exists());
+    assert!(!dir.join("c-1.smb").exists() && !dir.join("c-2.smb").exists());
+    // a synthetic case has no name to write under
+    write_smb_to(&dir, &serde_json::json!({}), &[slot()]).unwrap();
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    let missing = dir.join("missing");
+    let err = write_smb_to(&missing, &e, &[slot()]).unwrap_err();
+    assert!(err.contains("missing"), "{err}");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -4155,6 +4205,13 @@ fn kernel_cases() {
             .collect()
     });
     let only = std::env::var("KERNEL_CASES_CASE").ok();
+    if let Some(d) = std::env::var_os("KERNEL_CASES_SMB") {
+        assert!(
+            Path::new(&d).is_dir(),
+            "KERNEL_CASES_SMB: {} is not a directory",
+            Path::new(&d).display()
+        );
+    }
     let timeout = Duration::from_secs(
         std::env::var("KERNEL_CASES_TIMEOUT_S")
             .ok()

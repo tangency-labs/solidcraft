@@ -2150,9 +2150,23 @@ pub fn local_extension_reach(
         classes.push((face, c));
         c.ok_or_else(uncertified)
     };
+    // A face with no neighbour (every edge a seam or a lamina edge) meets no other surface:
+    // nothing is bounded for it, whatever its class, so it is decided before any bound is
+    // asked (a torus offset whole has no certified class, and needs none).
+    let mut met = false;
+    for lu in eu::faceuse_loopuses(b, faceuse, false, None)? {
+        for edgeuse in loopuse::edgeuses(b, lu, None, None)? {
+            met |= match eu::radial(b, edgeuse)? {
+                Some(r) => r != edgeuse && eu::face(b, r)? != own_face,
+                None => false,
+            };
+        }
+    }
+    if !met {
+        return Ok(None);
+    }
     let own_moved = is_moved(own_face);
     let mut found = LocalReach::default();
-    let mut met = false;
     for lu in eu::faceuse_loopuses(b, faceuse, false, None)? {
         for edgeuse in loopuse::edgeuses(b, lu, None, None)? {
             let Some(e) = eu::edge(b, edgeuse)? else {
@@ -2188,7 +2202,6 @@ pub fn local_extension_reach(
                 Some(r) => eu::face(b, r)?,
                 None => None,
             };
-            met |= radial.is_some();
             let other_moved = radial.is_some() && is_moved(other_face);
             // where both surfaces stay they meet at the edge: nothing to reach
             if !(own_moved || other_moved) {
@@ -2265,7 +2278,7 @@ pub fn local_extension_reach(
             found.reach = found.reach.max(reach);
         }
     }
-    Ok(met.then_some(found))
+    Ok(Some(found))
 }
 
 /// A vertex of a face whose corner [`corner`] bounds, with the tolerances it decides by.

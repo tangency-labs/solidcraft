@@ -373,8 +373,8 @@ fn feature_row(
         // active before comes back when the editor ends (#12720).
         app.edit_feature_in(id, Some((component, path)));
     } else if r.clicked && !crate::timeline::pick_feature_into_dialog(app, id, ui.input(|i| i.modifiers)) {
-        // A dialog that takes features (the chat's picker, a pattern) took the click as the
-        // History does (#11318); otherwise the row is selected.
+        // An open dialog whose active input takes features (a pattern, the chat's picker) gets the
+        // row, as in the other History layouts (#13170).
         click_select(app, ui, order_key, Some(Sel::Feature { id }));
     }
     if let Some(at) = r.secondary {
