@@ -14,8 +14,8 @@ use crate::SolveApp;
 use crate::viewport::Proj;
 
 /// How near (screen points) the pointer reads a sketch point's exact place: the reach the
-/// viewport's picking gives sketch points.
-const POINT_REACH: f32 = 8.0;
+/// viewport's picking gives active-sketch points (8 plus their 2-point priority).
+const POINT_REACH: f32 = 10.0;
 
 /// The sketch coordinates where the view ray `origin + t·direction` meets `plane`: None when
 /// the ray runs along the plane or the numbers are not finite.
@@ -52,8 +52,11 @@ pub(crate) fn idle_point(app: &SolveApp, proj: &Proj, pointer: Pos2) -> Option<V
         .sketch
         .points
         .iter()
-        .filter(|p| visible.takes(p) && p.pos.is_finite())
-        .filter_map(|p| Some((proj.to_screen(ss.plane.to_world(p.pos))?.distance(pointer), p.pos)))
+        .enumerate()
+        .filter(|(i, p)| {
+            visible.takes(p) && !(ss.sketch.view.hide_points && *i != 0) && !(ss.sketch.view.hide_projected && p.link.is_some()) && p.pos.is_finite()
+        })
+        .filter_map(|(_, p)| Some((proj.to_screen(ss.plane.to_world(p.pos))?.distance(pointer), p.pos)))
         .filter(|(d, _)| d.is_finite() && *d < POINT_REACH)
         .min_by(|a, b| a.0.total_cmp(&b.0));
     if let Some((_, at)) = near {
@@ -72,8 +75,8 @@ pub(crate) fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, at: Opt
         at + crate::tool_cursor::READOUT,
         egui::Align2::LEFT_TOP,
         text(app, p),
-        egui::FontId::proportional(crate::theme::Tokens::get().font_small),
-        crate::theme::Tokens::view().text_dim,
+        egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small),
+        solidcraft_theme::Tokens::view().text_dim,
     );
     crate::scenario::publish_rect("viewport:cursor_readout", rect);
 }
@@ -171,6 +174,61 @@ mod tests {
             let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
             let p = idle_point(&h.app, &proj, at).expect("a point under the pointer");
             assert!((p.x - 10.04).abs() < 1e-9 && (p.y - 4.98).abs() < 1e-9, "filter off: {off}: {p:?}");
+        }
+    }
+
+    #[test]
+    fn the_readout_uses_the_active_sketch_points_full_picking_reach() {
+        let (mut h, _) = idle_sketch();
+        h.app.run("sketch.point", json!({"point":[10,5],"id":"target"})).unwrap();
+        h.frames(2);
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let point = Vec2::new(10.0, 5.0);
+        let screen = proj.to_screen(Vec3::new(10.0, 5.0, 0.0)).unwrap();
+        for distance in [7.5, 9.0, 9.75] {
+            let p = idle_point(&h.app, &proj, screen + egui::vec2(distance, 0.0)).unwrap();
+            assert!(p.dist(point) < 1e-9, "active-sketch point is still in reach at {distance} px: {p:?}");
+        }
+        let p = idle_point(&h.app, &proj, screen + egui::vec2(10.25, 0.0)).unwrap();
+        assert!(p.dist(point) > 0.1, "past the picking reach the readout follows the pointer: {p:?}");
+    }
+
+    #[test]
+    fn hiding_points_keeps_only_the_origins_exact_readout() {
+        let (mut h, _) = idle_sketch();
+        h.app.run("sketch.point", json!({"point":[10,5],"id":"target"})).unwrap();
+        for shown in [true, false] {
+            h.app.run("sketch.options", json!({"show_points":shown})).unwrap();
+            h.frames(2);
+            let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+            let point = Vec2::new(10.0, 5.0);
+            let screen = proj.to_screen(Vec3::new(10.0, 5.0, 0.0)).unwrap();
+            let p = idle_point(&h.app, &proj, screen + egui::vec2(5.0, 0.0)).unwrap();
+            assert_eq!(p.dist(point) < 1e-9, shown, "Show Points: {shown}, readout {p:?}");
+            let origin = proj.to_screen(Vec3::new(0.0, 0.0, 0.0)).unwrap();
+            let p = idle_point(&h.app, &proj, origin + egui::vec2(5.0, 0.0)).unwrap();
+            assert!(p.dist(Vec2::ZERO) < 1e-9, "the origin stays shown with Show Points off: {p:?}");
+        }
+    }
+
+    #[test]
+    fn hiding_projected_geometry_stops_its_points_taking_the_readout() {
+        let mut h = Harness::new();
+        let source = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.point", json!({"point":[10,5],"id":"target"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.project", json!({"refs":[{"sketch":source,"point":"target"}],"projection_link":true})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.frames(2);
+        for shown in [true, false] {
+            h.app.run("sketch.options", json!({"show_projected":shown})).unwrap();
+            h.frames(2);
+            let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+            let point = Vec2::new(10.0, 5.0);
+            let screen = proj.to_screen(Vec3::new(10.0, 5.0, 0.0)).unwrap();
+            let p = idle_point(&h.app, &proj, screen + egui::vec2(5.0, 0.0)).unwrap();
+            assert_eq!(p.dist(point) < 1e-9, shown, "Show Projected: {shown}, readout {p:?}");
         }
     }
 
