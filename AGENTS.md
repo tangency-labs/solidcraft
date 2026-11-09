@@ -3,7 +3,7 @@
 SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, feature timeline, B-rep kernel, an egui UI that agents drive). This file is a router: the hard rules, then the skill to read for your task. Humans: CONTRIBUTING.md.
 
 ## Start here
-Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`. Local `plan/` notes are optional.
+Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`.
 
 ## Hard rules (what enforces each)
 - Independent: never copy another product's code, icons, text or templates; never drive or take data from commercial CAD. `skills/solidcraft-ground-rules/SKILL.md`.
@@ -37,6 +37,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 | A command, a crate boundary | `skills/solidcraft-commands/SKILL.md` |
 | SolidCraft or solidcore, kernel, geometry | `skills/solidcraft-layers/SKILL.md` |
 | A dialog, panel, camera, icon, colour | `skills/solidcraft-ui/SKILL.md` |
+| Sheet metal | `skills/solidcraft-sheetmetal/SKILL.md` |
 | Labels, messages, translations | `skills/solidcraft-ui-text/SKILL.md` |
 | Saving something new in a design, import, export | `skills/solidcraft-file-formats/SKILL.md` |
 | Preferences, a changed default | `skills/solidcraft-preferences/SKILL.md` |
