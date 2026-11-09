@@ -114,17 +114,17 @@ The script can also be run from another working directory.
 | `-d`, `--debug` | Build using the debug profile |
 | `-r`, `--release` | Build using the release profile |
 | `-w`, `--web` | Enable the WebAssembly target |
-| `--no-gui` | Disable the GUI target |
-| `--no-cli` | Disable the CLI target |
+| `--BuildGui <bool>` | Enable/disable GUI build (default: true) |
+| `--BuildCli <bool>` | Enable/disable CLI build (default: true) |
 | `-b`, `--branch BRANCH` | Build a specified branch instead of the current branch's upstream |
 | `-h`, `--help` | Display help |
 
 ### Examples
 
-Build the current branch's configured upstream using the default settings:
+Build only the CLI in the current branch's configured upstream using the default settings:
 
 ```bash
-./scripts/update-solidcraft.sh
+./scripts/update-solidcraft.sh --BuildGui false --BuildCli true
 ```
 
 Build the latest `main` branch using the release profile, skipping tests:
@@ -142,7 +142,7 @@ Force a clean release rebuild:
 Build only the CLI:
 
 ```bash
-./scripts/update-solidcraft.sh --no-gui
+./scripts/update-solidcraft.sh --BuildGui false
 ```
 
 Enable the WebAssembly target:
@@ -227,8 +227,8 @@ Run from PowerShell:
 | `-DebugMode` | Build using the debug profile |
 | `-ReleaseMode` | Build using the release profile |
 | `-BuildWeb` | Enable the WebAssembly target |
-| `-NoGui` | Disable the GUI target |
-| `-NoCli` | Disable the CLI target |
+| `-BuildGui <bool>` | Enable/disable the GUI target (default: `$true`) |
+| `-BuildCli <bool>` | Enable/disable the CLI target (default: `$true`) |
 | `-Branch BRANCH` | Build a specified branch instead of the current branch's upstream |
 
 ### Examples
@@ -254,10 +254,10 @@ Force a clean release rebuild:
 Build only the CLI:
 
 ```powershell
-.\scripts\update-solidcraft.ps1 -NoGui
+.\scripts\update-solidcraft.ps1 -BuildGui $false
 ```
 
-Enable the WebAssembly target:
+Enable building the WebAssembly target:
 
 ```powershell
 .\scripts\update-solidcraft.ps1 -BuildWeb

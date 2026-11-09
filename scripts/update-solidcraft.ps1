@@ -11,7 +11,7 @@
 param (
     [Alias('g')][bool]$BuildGui = $true,
     [Alias('c')][bool]$BuildCli = $true,
-    [Alias('w')][bool]$BuildWeb = $false,
+    [Alias('w')][switch]$BuildWeb = $false,
     [Alias('f', 'force')][switch]$ForceBuild = $false,
     [Alias('s')][switch]$SkipTests = $false,
     [string]$Branch,
@@ -33,11 +33,11 @@ Usage: .\update-solidcraft.ps1 [options]
 
 Options:
     -f, -ForceBuild          Force a clean rebuild even if Git commits match.
-    -s, -SkipTests           Skip running workspace tests before building.
+    -s, -SkipTests           Skip workspace tests before building.
     -Branch <NAME>           Build a remote branch (default: current branch upstream).
     -j, -Jobs <N>            Set number of parallel compilation jobs (default: all cores).
-    -d, -Debug               Build using debug profile.
-    -r, -Release             Build using release profile (default).
+    -d, -DebugMode           Build using debug profile.
+    -r, -ReleaseMode         Build using release profile (default).
     -w, -BuildWeb            Build and deploy WebAssembly target.
     -g, -BuildGui <bool>     Enable/disable GUI build (default: true).
     -c, -BuildCli <bool>     Enable/disable CLI build (default: true).
@@ -194,7 +194,7 @@ try {
         Write-Host "$SourceLabel ($SourceCommit) is already built with this configuration. No build needed."
         Write-Host 'Use -ForceBuild (-f) to force a clean rebuild.'
         return
-}
+    }
     if ($ForceBuild) {
         Write-Host "Force build requested: a clean rebuild of $SourceLabel will be performed."
     }
@@ -211,64 +211,95 @@ try {
 
     $TargetDir = Join-Path $RepoRoot (Join-Path 'target' $Profile)
     $BackupDir = Join-Path $TargetDir 'backup'
-if ($ForceBuild) {
+    if ($ForceBuild) {
         Write-Host '[STEP 2A] Cleaning Cargo artifacts while preserving deployed-binary backups...'
         Clear-ProfileBuildArtifactsPreservingBackups -TargetDirectory $TargetDir -BackupDirectory $BackupDir
-}
+    }
 
     $JobsArg = @()
     if ($Jobs -gt 0) { $JobsArg = @('--jobs', "$Jobs") }
-if ($SkipTests) {
+
+    $targetFailed = $false
+
+    if ($SkipTests) {
         Write-Host '[STEP 3] Skipping workspace tests (-SkipTests active).'
     }
     else {
-    Write-Host "[STEP 3] Running workspace tests ($Profile mode)..."
-        Invoke-Native -Command 'cargo' -Arguments (@('test', '--workspace') + $CargoProfileFlag + $JobsArg)
-}
+        Write-Host "[STEP 3] Running workspace tests ($Profile mode)..."
+        try {
+            Invoke-Native -Command 'cargo' -Arguments (@('test', '--workspace') + $CargoProfileFlag + $JobsArg)
+        }
+        catch {
+            Write-Host "ERROR: Workspace tests failed: $_" -ForegroundColor Red
+            $targetFailed = $true
+        }
+    }
 
     New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
 
-if ($BuildGui) {
-    Write-Host "[STEP 4] Building native GUI binary ($Profile)..."
-        Invoke-Native -Command 'cargo' -Arguments (@('build') + $CargoProfileFlag + @('--bin', 'solidcraft') + $JobsArg)
-        Deploy-Binary -Source (Join-Path $TargetDir 'solidcraft.exe') -Destination (Join-Path $RepoRoot 'solidcraft.exe') -Label 'GUI' -BackupDirectory $BackupDir
-}
-
-if ($BuildCli) {
-    Write-Host "[STEP 5] Building CLI binary ($Profile)..."
-        Invoke-Native -Command 'cargo' -Arguments (@('build') + $CargoProfileFlag + @('--bin', 'solidcraft-cli') + $JobsArg)
-        Deploy-Binary -Source (Join-Path $TargetDir 'solidcraft-cli.exe') -Destination (Join-Path $RepoRoot 'solidcraft-cli.exe') -Label 'CLI' -BackupDirectory $BackupDir
-}
-
-if ($BuildWeb) {
-    Write-Host "[STEP 6] Building WebAssembly target ($Profile)..."
-        Invoke-Native -Command 'cargo' -Arguments (@('build') + $CargoProfileFlag + @('--target', 'wasm32-unknown-unknown', '--bin', 'solidcraft-web') + $JobsArg)
-        $SourceWeb = Join-Path $RepoRoot (Join-Path 'target' (Join-Path 'wasm32-unknown-unknown' (Join-Path $Profile 'solidcraft-web.wasm')))
-        if (-not (Test-Path -LiteralPath $SourceWeb -PathType Leaf)) { throw "WebAssembly build succeeded but expected artifact is missing: $SourceWeb" }
-        $WebInstallDir = if ($env:WEB_INSTALL_DIR) { $env:WEB_INSTALL_DIR } else { 'C:\inetpub\wwwroot\solidcraft' }
-        New-Item -ItemType Directory -Path $WebInstallDir -Force | Out-Null
-        $WebStaged = Join-Path $WebInstallDir "solidcraft.wasm.new.$PID"
-    try {
-            Copy-Item -LiteralPath $SourceWeb -Destination $WebStaged -Force
-            Move-Item -LiteralPath $WebStaged -Destination (Join-Path $WebInstallDir 'solidcraft.wasm') -Force
+    if ($BuildGui) {
+        Write-Host "[STEP 4] Building native GUI binary ($Profile)..."
+        try {
+            Invoke-Native -Command 'cargo' -Arguments (@('build') + $CargoProfileFlag + @('--bin', 'solidcraft') + $JobsArg)
+            Deploy-Binary -Source (Join-Path $TargetDir 'solidcraft.exe') -Destination (Join-Path $RepoRoot 'solidcraft.exe') -Label 'GUI' -BackupDirectory $BackupDir
         }
-        finally {
-            if (Test-Path -LiteralPath $WebStaged) { Remove-Item -LiteralPath $WebStaged -Force -ErrorAction SilentlyContinue }
+        catch {
+            Write-Host "ERROR: GUI build or deployment failed: $_" -ForegroundColor Red
+            $targetFailed = $true
+        }
+    }
+
+    if ($BuildCli) {
+        Write-Host "[STEP 5] Building CLI binary ($Profile)..."
+        try {
+            Invoke-Native -Command 'cargo' -Arguments (@('build') + $CargoProfileFlag + @('--bin', 'solidcraft-cli') + $JobsArg)
+            Deploy-Binary -Source (Join-Path $TargetDir 'solidcraft-cli.exe') -Destination (Join-Path $RepoRoot 'solidcraft-cli.exe') -Label 'CLI' -BackupDirectory $BackupDir
+        }
+        catch {
+            Write-Host "ERROR: CLI build or deployment failed: $_" -ForegroundColor Red
+            $targetFailed = $true
+        }
+    }
+
+    if ($BuildWeb) {
+        Write-Host "[STEP 6] Building WebAssembly target ($Profile)..."
+        try {
+            Invoke-Native -Command 'cargo' -Arguments (@('build') + $CargoProfileFlag + @('--target', 'wasm32-unknown-unknown', '--bin', 'solidcraft-web') + $JobsArg)
+            $SourceWeb = Join-Path $RepoRoot (Join-Path 'target' (Join-Path 'wasm32-unknown-unknown' (Join-Path $Profile 'solidcraft-web.wasm')))
+            if (-not (Test-Path -LiteralPath $SourceWeb -PathType Leaf)) { throw "WebAssembly build succeeded but expected artifact is missing: $SourceWeb" }
+            $WebInstallDir = if ($env:WEB_INSTALL_DIR) { $env:WEB_INSTALL_DIR } else { 'C:\inetpub\wwwroot\solidcraft' }
+            New-Item -ItemType Directory -Path $WebInstallDir -Force | Out-Null
+            $WebStaged = Join-Path $WebInstallDir "solidcraft.wasm.new.$PID"
+            try {
+                Copy-Item -LiteralPath $SourceWeb -Destination $WebStaged -Force
+                Move-Item -LiteralPath $WebStaged -Destination (Join-Path $WebInstallDir 'solidcraft.wasm') -Force
             }
-        Write-Host "Web deployment successful to $WebInstallDir."
+            finally {
+                if (Test-Path -LiteralPath $WebStaged) { Remove-Item -LiteralPath $WebStaged -Force -ErrorAction SilentlyContinue }
+            }
+            Write-Host "Web deployment successful to $WebInstallDir."
         }
+        catch {
+            Write-Host "ERROR: Web build or deployment failed: $_" -ForegroundColor Red
+            $targetFailed = $true
+        }
+    }
+
+    if ($targetFailed) {
+        throw "One or more build/deployment targets failed. State file update skipped."
+    }
 
     $StateTemp = "$StateFile.new.$PID"
     Set-Content -LiteralPath $StateTemp -Value $BuildState -NoNewline
     Move-Item -LiteralPath $StateTemp -Destination $StateFile -Force
 
     Write-Host '=================================================='
-    Write-Host "Update sequence complete: $(Get-Date)"
+    Write-Host "Update sequence completed: $(Get-Date)"
     Write-Host '=================================================='
-    }
+}
 catch {
-    Write-Error "Update failed: $($_.Exception.Message)"
-    exit 1
+    Write-Host "ERROR: Update failed: $($_.Exception.Message)" -ForegroundColor Red
+    exit $(if ($_.Exception.Message -match 'targets failed') { 2 } else { 1 })
 }
 finally {
     Set-Location -LiteralPath $RepoRoot
