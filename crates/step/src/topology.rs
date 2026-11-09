@@ -1638,13 +1638,16 @@ fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2]; 2]> {
             // natural range (all of it for a plane, or along a cylinder's axis), and SMLib
             // refuses a surface whose opposite sides lie within its tolerance of each other
             // (`SmSurface` test #6, "partially coincident boundaries"), so a sliver face's box
-            // is at least `OPEN_DOMAIN_SPAN` across where its range has room.
+            // is at least `OPEN_DOMAIN_SPAN` across where its range has room: widened about its
+            // middle, and shifted off a bound it would cross. Pcurves wholly outside the range
+            // stay an empty box.
             Some(Natural::Range(n0, n1)) => {
                 x = x.max(*n0);
                 y = y.min(*n1);
-                if y - x < OPEN_DOMAIN_SPAN {
-                    let c = 0.5 * (x + y);
-                    (x, y) = ((c - 0.5 * OPEN_DOMAIN_SPAN).max(*n0), (c + 0.5 * OPEN_DOMAIN_SPAN).min(*n1));
+                if x < y && y - x < OPEN_DOMAIN_SPAN {
+                    let span = OPEN_DOMAIN_SPAN.min(*n1 - *n0);
+                    let lo = (0.5 * (x + y) - 0.5 * span).clamp(*n0, *n1 - span);
+                    (x, y) = (lo, (lo + span).min(*n1));
                 }
             }
             None => {}
