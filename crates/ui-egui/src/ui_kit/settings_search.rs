@@ -1711,6 +1711,12 @@ mod tests {
         }
     }
 
+    // These tests check navigation and scrolling, independent of machine load and the
+    // highlight's wall-clock deadline. Keep the real reveal alive while frames settle.
+    fn keep_reveal_visible(h: &mut crate::scenario::Harness) {
+        assert!(crate::prefs::keep_search_reveal_visible(&mut h.app));
+    }
+
     #[test]
     fn collapsed_shortcut_results_enter_reveals_the_command_despite_an_old_page_filter() {
         use serde_json::json;
@@ -1733,6 +1739,7 @@ mod tests {
             set_cursor(&h.ctx, matches[0].0);
             h.frames(2);
             h.step(&json!({"key":"Enter"})).unwrap();
+            keep_reveal_visible(&mut h);
             h.frames(30);
             assert!(h.app.prefs_window.shell.filter.is_empty());
             assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_SHORTCUTS);
@@ -1769,6 +1776,7 @@ mod tests {
                 set_cursor(&h.ctx, matches[0].0);
                 h.frames(2);
                 h.step(&json!({"key":"Enter"})).unwrap();
+                keep_reveal_visible(&mut h);
                 h.frames(30);
                 assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_ASSISTANT);
                 let rect = crate::scenario::rect_of(target).unwrap();
