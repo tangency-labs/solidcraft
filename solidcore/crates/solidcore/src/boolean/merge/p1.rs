@@ -278,7 +278,7 @@ pub fn faces_coincide(
         brep.face(face)?.surface.as_ref(),
         other.face(other_face)?.surface.as_ref(),
     ) else {
-        return Err(SolidError::null_pointer(OP));
+        return Err(SolidError::entity_missing(OP, "a face has no surface"));
     };
     let tol = crate::topology::face::p2::tolerance(brep, face)?
         .max(crate::topology::face::p2::tolerance(other, other_face)?);
@@ -316,7 +316,8 @@ pub fn find_brep_region_of_other_face(
     }
     let edges = eu::faceuse_edgeuses(other, other_faceuse, false, None)?;
     for &other_eu in &edges {
-        let e = eu::edge(other, other_eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let e = eu::edge(other, other_eu)?
+            .ok_or_else(|| SolidError::entity_missing(OP, "an edge use has no edge"))?;
         let Some(&mate) = brep_mates.get(&e) else {
             continue;
         };
@@ -335,15 +336,17 @@ pub fn find_brep_region_of_other_face(
         };
         // a face found coincident here is coincident only when its surface is (WR-755)
         if let (Some(fu), false) = (sector.coincident_faceuse, sector.zero_sector) {
-            let face = eu::faceuse_face(brep, fu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
-            let other_face =
-                eu::face(other, other_eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let face = eu::faceuse_face(brep, fu)?
+                .ok_or_else(|| SolidError::entity_missing(OP, "the face use has no face"))?;
+            let other_face = eu::face(other, other_eu)?
+                .ok_or_else(|| SolidError::entity_missing(OP, "the edge use has no face"))?;
             if !faces_coincide(k, brep, face, other, other_face)? {
                 continue;
             }
         }
         let region = if let Some(eu_id) = sector.radial_edgeuse {
-            let shell = eu::shell(brep, eu_id)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let shell = eu::shell(brep, eu_id)?
+                .ok_or_else(|| SolidError::entity_missing(OP, "the edge use has no shell"))?;
             eu::shell_region(brep, shell)?
         } else if let Some(fu) = sector.coincident_faceuse {
             eu::faceuse_region(brep, fu)?
@@ -356,7 +359,8 @@ pub fn find_brep_region_of_other_face(
         break;
     }
     for other_eu in edges {
-        let e = eu::edge(other, other_eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let e = eu::edge(other, other_eu)?
+            .ok_or_else(|| SolidError::entity_missing(OP, "an edge use has no edge"))?;
         if brep_mates.contains_key(&e) {
             continue;
         }
@@ -364,7 +368,7 @@ pub fn find_brep_region_of_other_face(
         let curve = edge
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::entity_missing(OP, "the edge has no curve"))?;
         let Some(point) =
             ignore_failure(curve.evaluate_point(k, edge.interval.evaluate(0.456789)))?
         else {
@@ -389,7 +393,10 @@ pub fn find_brep_region_of_other_face(
         // use the point's classified region as the input face's Brep region
         return match pc.object() {
             Some(EntityRef::Region(r)) => Ok(Some(r)),
-            _ => Err(SolidError::null_pointer(OP)),
+            _ => Err(SolidError::entity_missing(
+                OP,
+                "the classified point lies in no region",
+            )),
         };
     }
     Ok(None)
@@ -431,7 +438,8 @@ pub fn edge_borders_solid(b: &Brep, e: EdgeId) -> Result<Option<ShellId>> {
         let Some(shell) = eu::shell(b, edgeuse)? else {
             continue;
         };
-        let region = eu::shell_region(b, shell)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let region = eu::shell_region(b, shell)?
+            .ok_or_else(|| SolidError::entity_missing(OP, "the shell lies in no region"))?;
         if !region_is_void(b, region)? {
             return Ok(Some(shell));
         }
@@ -666,25 +674,27 @@ pub(crate) fn boolean_post_process_with_notifications(
         }
         let keep = topological
             .surf_to_keep
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::entity_missing(OP, "the edge has no surface to keep"))?;
         let edgeuses = edge::edgeuses(brep, e, None, None)?;
         let first = edgeuses
             .first()
             .copied()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::entity_missing(OP, "the edge has no first edge use"))?;
         let third = edgeuses
             .get(2)
             .copied()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let f0 = eu::face(brep, first)?.ok_or_else(|| SolidError::null_pointer(OP))?;
-        let f1 = eu::face(brep, third)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::entity_missing(OP, "the edge has no third edge use"))?;
+        let f0 = eu::face(brep, first)?
+            .ok_or_else(|| SolidError::entity_missing(OP, "the edge use has no face"))?;
+        let f1 = eu::face(brep, third)?
+            .ok_or_else(|| SolidError::entity_missing(OP, "the edge use has no face"))?;
         // Surface identity is represented by its owning face in this arena model.
         if f0 != f1 {
             let domain = brep
                 .face(keep)?
                 .surface
                 .as_ref()
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::entity_missing(OP, "the face to keep has no surface"))?
                 .natural_uv_domain_with_nurb(k)?;
             crate::topology::face::p2::set_uv_domain(brep, keep, &domain)?;
             let tolerance = crate::topology::face::p2::tolerance(brep, keep)?;
@@ -834,10 +844,9 @@ pub(crate) fn boolean_post_process_with_notifications(
             // If Brep and Other share a vertex then combine shells
             if common {
                 // Transfer the wire shell to the face shell
-                let wire_region = brep
-                    .shell(wire_shell)?
-                    .region
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                let wire_region = brep.shell(wire_shell)?.region.ok_or_else(|| {
+                    SolidError::entity_missing(OP, "the wire shell lies in no region")
+                })?;
                 // `pWShell->TransferChildrenTo(pFShell, NULL)` and
                 // `pWR->Remove(pWShell)`: both statuses are ignored upstream (fork e7ebc8d
                 // passes them on: `SER`).
@@ -1008,9 +1017,12 @@ pub fn propagate_other_src_region_attribs(
         let merge = attributes.find_attribute(region.key, ids::OTHER_REGION_ID);
         if is_void {
             for h in attrs {
-                let attribute = attributes
-                    .get(h)
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                let attribute = attributes.get(h).ok_or_else(|| {
+                    SolidError::entity_missing(
+                        OP,
+                        "an attribute handle is not in the attribute table",
+                    )
+                })?;
                 if attribute.is_propagated_through_booleans() {
                     attributes.remove_attribute(region.key, h, false)?;
                 }

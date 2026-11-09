@@ -386,16 +386,26 @@ fn written(
 /// A call the kernel answers with a status, any status but success standing for no answer: an
 /// error that is exactly a kernel status ([`SolidError::sm_status`]) is `None`. Every other
 /// error (unported code, invalid input to an adapter, a missing record...) fails the call
-/// instead of hiding as a skipped entity.
+/// instead of hiding as a skipped entity. So does a status error whose cause chain
+/// ([`SolidError::cause`]) holds a solidcore-side failure ([`SolidError::is_port_failure`]) or a
+/// cancellation: a stage that failed because a call was unported, or because the caller cancelled,
+/// is no answer of the operation on its input.
 ///
 /// # Errors
-/// The kernel's error when it stands for no status.
+/// The kernel's error when it stands for no status, or when its cause chain holds a port
+/// failure or a cancellation.
 pub(crate) fn answer<T>(r: solidcore::Result<T>) -> solidcore::Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.sm_status().is_some() => Ok(None),
+        Err(e) if e.sm_status().is_some() && !stops_a_skip(&e) => Ok(None),
         Err(e) => Err(e),
     }
+}
+
+/// True when `e`, or an error in its cause chain, is a solidcore-side failure or a cancellation.
+fn stops_a_skip(e: &SolidError) -> bool {
+    e.is_port_failure()
+        || std::iter::successors(Some(e), |e| e.cause()).any(SolidError::is_cancelled)
 }
 
 /// Runs `f`, which edits `body`, on the kernel. A refused, failed or panicking edit leaves the

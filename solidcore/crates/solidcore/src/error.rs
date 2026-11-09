@@ -27,6 +27,7 @@
 //! | [`SolidError::Failed`], [`Failure`], [`Reason`] | none: a failure in solidcore's own terms (#2615) |
 //! | [`ErrorKind`], [`SolidError::kind`] | none: solidcore's stable error codes (#2615) |
 //! | [`offset::OffsetFailure`]   | none: the offset subsystem's refusals (#2615)    |
+//! | [`boolean::BooleanFailure`] | none: the Boolean operation's failures           |
 //! | [`nurbs::NurbsFailure`]     | `NL_*_ERR` numbers, in solidcore's terms         |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
@@ -47,7 +48,8 @@
 //!   (`"offset::offset_executive::crossing_loops::resolve_crossing_loops"`);
 //! - `reason`: a typed [`Reason`] naming what failed, on which entity, with the key
 //!   values (a size, a distance, a gap, a tolerance). Each subsystem's reasons are one
-//!   enum in a submodule of this module ([`offset::OffsetFailure`]), so the taxonomy
+//!   enum in a submodule of this module ([`offset::OffsetFailure`],
+//!   [`boolean::BooleanFailure`]), so the taxonomy
 //!   stays in one place;
 //! - `entity`: the entity the failure is about, in the caller's B-rep where there is one;
 //! - `cause`: the error of the stage this failure comes from. Where a caller turns a
@@ -73,6 +75,7 @@
 //! `sm_status` and the status numbers here move to a comparison-only module (or to
 //! difftest and the FFI), since nothing but the comparison needs them.
 
+pub mod boolean;
 pub mod nurbs;
 pub mod offset;
 
@@ -661,6 +664,14 @@ impl Failure {
         self
     }
 
+    /// The same failure, with `status` as the one the pinned C++ reports for it (a
+    /// comparison detail, for a failure whose phrase is not a typed reason).
+    #[must_use]
+    pub(crate) fn with_status(mut self, status: i32) -> Self {
+        self.status = status;
+        self
+    }
+
     /// The failure's stable [`ErrorKind`].
     #[must_use]
     pub fn kind(&self) -> ErrorKind {
@@ -709,6 +720,8 @@ pub enum Reason {
     Offset(offset::OffsetFailure),
     /// A NURBS routine failed.
     Nurbs(nurbs::NurbsFailure),
+    /// A Boolean operation failed.
+    Boolean(boolean::BooleanFailure),
 }
 
 impl Reason {
@@ -718,6 +731,7 @@ impl Reason {
         match self {
             Self::Failed(_) | Self::Nurbs(_) => None,
             Self::Offset(o) => o.entity(),
+            Self::Boolean(b) => b.entity(),
         }
     }
 
@@ -728,6 +742,7 @@ impl Reason {
             Self::Failed(_) => SM_ERR,
             Self::Offset(o) => o.comparison_status(),
             Self::Nurbs(_) => nurbs::NurbsFailure::COMPARISON_STATUS,
+            Self::Boolean(b) => b.comparison_status(),
         }
     }
 
@@ -738,6 +753,7 @@ impl Reason {
             Self::Failed(_) => ErrorKind::of_status(status),
             Self::Offset(o) => o.kind(),
             Self::Nurbs(n) => n.kind(),
+            Self::Boolean(b) => b.kind(),
         }
     }
 }
@@ -748,7 +764,14 @@ impl core::fmt::Display for Reason {
             Self::Failed(what) => f.write_str(what),
             Self::Offset(o) => o.fmt(f),
             Self::Nurbs(n) => n.fmt(f),
+            Self::Boolean(b) => b.fmt(f),
         }
+    }
+}
+
+impl From<boolean::BooleanFailure> for Reason {
+    fn from(b: boolean::BooleanFailure) -> Self {
+        Self::Boolean(b)
     }
 }
 
@@ -1068,10 +1091,23 @@ impl SolidError {
     }
 
     /// True for a solidcore-side failure rather than a failure of the operation on its
-    /// input ([`ErrorKind::is_port_failure`], #1452).
+    /// input ([`ErrorKind::is_port_failure`], #1452). It follows the cause chain: a
+    /// failure whose kept cause ([`SolidError::cause`], down to
+    /// [`SolidError::root_cause`]) is a solidcore-side failure is one too, so a caller that
+    /// skips an entity where the operation fails on it does not skip when the stage that
+    /// failed was an unported call or a missing preparation.
     #[must_use]
     pub fn is_port_failure(&self) -> bool {
-        self.kind().is_port_failure()
+        let mut e = self;
+        loop {
+            if e.kind().is_port_failure() {
+                return true;
+            }
+            match e.cause() {
+                Some(cause) => e = cause,
+                None => return false,
+            }
+        }
     }
 
     /// The failure in solidcore's terms, for a [`SolidError::Failed`].
@@ -1110,6 +1146,21 @@ impl SolidError {
     ) -> Self {
         Failure::new(operation, Reason::Failed(what))
             .caused_by(cause)
+            .into_error()
+    }
+
+    /// [`SolidError::Failed`] for a stage that failed, as the phrase says, with status
+    /// [`SM_ERR`] (upstream `return SE(SM_ERR)`).
+    pub(crate) fn stage_failed(operation: &'static str, what: &'static str) -> Self {
+        Failure::new(operation, Reason::Failed(what)).into_error()
+    }
+
+    /// [`SolidError::Failed`] for an entity a stage needs that is not there, as the phrase
+    /// says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a `NULL`
+    /// pointer); its kind is [`ErrorKind::Missing`].
+    pub(crate) fn entity_missing(operation: &'static str, what: &'static str) -> Self {
+        Failure::new(operation, Reason::Failed(what))
+            .with_status(SM_ERR_NULL_POINTER)
             .into_error()
     }
 
@@ -1378,6 +1429,102 @@ mod tests {
         assert_eq!(at.kind(), ErrorKind::NotConverged);
         assert_eq!(at.sm_status(), Some(SM_ERR_NOT_CONVERGING));
         assert_eq!(at.entity(), Some(EntityRef::Edge(EdgeId::from_index(12))));
+    }
+
+    #[test]
+    fn is_port_failure_follows_the_cause_chain() {
+        let unported =
+            SolidError::unported("topology::brep::p1::update_vertex_edge_intervals", "u");
+        assert!(unported.is_port_failure());
+        // a stage that failed because a call was not ported is not a failure of the
+        // operation on its input, though the error on top is a generic one
+        let wrapped = SolidError::failed_after("op", "a stage failed", unported.clone());
+        assert_eq!(wrapped.kind(), ErrorKind::Failed);
+        assert!(wrapped.is_port_failure());
+        let deeper = SolidError::failed_after("outer", "the operation failed", wrapped);
+        assert!(deeper.is_port_failure());
+        assert_eq!(deeper.root_cause(), &unported);
+        // a chain of ordinary failures is not one, and neither is a cancellation
+        let ordinary = SolidError::failed_after(
+            "outer",
+            "the operation failed",
+            SolidError::failed_after("op", "a stage failed", SolidError::sm_err("inner")),
+        );
+        assert!(!ordinary.is_port_failure());
+        let cancelled =
+            SolidError::failed_after("op", "a stage failed", SolidError::cancelled("c"));
+        assert!(!cancelled.is_port_failure());
+        // the port-failure kinds on top still count
+        assert!(SolidError::port_invariant("op", "broken").is_port_failure());
+        assert!(!SolidError::sm_err("op").is_port_failure());
+    }
+
+    #[test]
+    fn boolean_failures_describe_the_stage_in_solidcore_terms() {
+        use boolean::{BooleanFailure, BooleanStage};
+
+        let face = FaceId::from_index(7);
+        let cases = [
+            (
+                SolidError::boolean_stage_failed(
+                    "boolean::topology_intersector::p1::relate",
+                    BooleanStage::Relate,
+                    "another entity is already related to the other one",
+                ),
+                "boolean::topology_intersector::p1::relate: relating the operands' entities \
+                 failed: another entity is already related to the other one",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                SolidError::boolean_entity_missing(
+                    "boolean::topology_intersector::p2::close_intersection_loop",
+                    BooleanStage::CloseLoop,
+                    "a vertex to close the loop at",
+                ),
+                "boolean::topology_intersector::p2::close_intersection_loop: closing an \
+                 intersection loop needs a vertex to close the loop at, which the B-rep does \
+                 not have",
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                Failure::new(
+                    "boolean::merge::p4::manifold_boolean",
+                    BooleanFailure::SolidLeaks { face },
+                )
+                .into_error(),
+                "boolean::merge::p4::manifold_boolean: the union would delete face 7 and merge \
+                 the solid it bounds into the outside",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                SolidError::stage_failed("boolean::merge::p3", "the Boolean tree has no result"),
+                "boolean::merge::p3: the Boolean tree has no result",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                SolidError::entity_missing("boolean::merge::p1", "the shell lies in no region"),
+                "boolean::merge::p1: the shell lies in no region",
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ),
+        ];
+        for (error, message, kind, status) in cases {
+            assert_eq!(error.to_string(), message);
+            assert_eq!(error.kind(), kind, "{error}");
+            // the comparison status is unchanged, and never part of the message
+            assert_eq!(error.sm_status(), Some(status), "{error}");
+            let text = error.to_string();
+            for forbidden in ["Sm", "NL_", "SM_ERR", "1001", "1006", "status"] {
+                assert!(!text.contains(forbidden), "{forbidden} in {text}");
+            }
+            assert!(!error.is_port_failure());
+        }
+        let leak = Failure::new("op", BooleanFailure::SolidLeaks { face }).into_error();
+        assert_eq!(leak.entity(), Some(EntityRef::Face(face)));
     }
 
     #[test]
