@@ -2559,6 +2559,263 @@ fn loft_pairs_a_point_with_the_middle_of_a_round_end() {
     assert!((m.centroid.y - 7.5).abs() < 1e-6, "reversed: centre of mass y {}", m.centroid.y);
 }
 
+/// The loft's sections as its walls are built through them ([`crate::build::loft_numbered_loops`]):
+/// in the order given, each cut to the vertices it shares with the others.
+fn matched_sections(secs: &[(Plane, Loop2)]) -> Vec<Loop2> {
+    let numbered: Vec<_> = secs.iter().map(|(p, _)| *p).zip(crate::numbered::number_loops(secs.iter().map(|(_, l)| l))).collect();
+    let reversed = crate::build::loft_reversed(secs).unwrap();
+    let mut out: Vec<Loop2> = crate::build::loft_numbered_loops(&numbered, reversed).unwrap().into_iter().map(|(_, l)| l.lp).collect();
+    if reversed {
+        out.reverse();
+    }
+    out
+}
+
+/// The two ends of every edge of `body`.
+fn edge_ends(body: &Body) -> Vec<(Vec3, Vec3)> {
+    let r = body.record();
+    let point = |k: u32| r.vertices.get(k as usize).map(|v| Vec3::from(v.point));
+    r.edges.iter().filter_map(|e| Some((point(e.vertices[0])?, point(e.vertices[1])?))).collect()
+}
+
+/// Whether an edge of `body` runs from `p` to `q` (either way).
+fn joins(body: &Body, p: Vec3, q: Vec3) -> bool {
+    edge_ends(body).iter().any(|&(a, b)| (a.dist(p) < 1e-6 && b.dist(q) < 1e-6) || (a.dist(q) < 1e-6 && b.dist(p) < 1e-6))
+}
+
+/// The ends of the edges of `body` that run from `p` to a point with `x` = `to_x`.
+fn joined_to(body: &Body, p: Vec3, to_x: f64) -> Vec<Vec3> {
+    edge_ends(body)
+        .into_iter()
+        .filter_map(|(a, b)| {
+            if a.dist(p) < 1e-6 {
+                Some(b)
+            } else if b.dist(p) < 1e-6 {
+                Some(a)
+            } else {
+                None
+            }
+        })
+        .filter(|q| (q.x - to_x).abs() < 1e-6)
+        .collect()
+}
+
+/// Two hood profiles (a thin band with a hooked lip at each end) on the planes x = 29 and x = 50:
+/// 17 and 18 vertices, and each has a vertex the other lacks, on a straight side or nearly so (the
+/// second's right side has a point on it at (27.6, 40.8), its left side one at (-22.8, 41.25); the
+/// first's arch one at (-11.25, 48.47)). Splitting the one with fewer vertices to 18 shifted one
+/// of the lips by a vertex, so its seams ran diagonally across it (and an earlier rule sheared the
+/// whole top band). Each corner now pairs with the corner it lines up with, and each of the three
+/// extra vertices splits the other profile's side where it lands: 19 vertices in each section.
+const HOOD_A: [(f64, f64); 17] = [
+    (22.275732672046672, 42.4194875370215),
+    (24.15373450104431, 42.5852135407361),
+    (24.15373450104431, 46.40321410660799),
+    (13.601185077757782, 48.265425651573544),
+    (-7.956143139645345, 49.24551439515723),
+    (-11.252079715296125, 48.4718337596306),
+    (-18.555464567800477, 45.80523471830436),
+    (-18.50202907367915, 43.007831671402265),
+    (-17.2, 42.906809746055835),
+    (-17.2, 41.46),
+    (-18.723959594727756, 41.251188115959096),
+    (-22.8, 41.251188115959096),
+    (-22.8, 52.6),
+    (27.600000000000005, 52.6),
+    (27.600000000000005, 40.800000000000004),
+    (24.1, 40.800000000000004),
+    (22.31070331305888, 40.957898711557526),
+];
+
+/// The second hood profile ([`HOOD_A`]).
+const HOOD_B: [(f64, f64); 18] = [
+    (-22.8, 41.251188115959096),
+    (-22.8, 52.6),
+    (27.600000000000005, 52.6),
+    (27.600000000000005, 40.800000000000004),
+    (27.600000000000005, 38.0),
+    (24.0, 38.0),
+    (22.405477280919964, 38.20705014188878),
+    (22.405477280919964, 39.550000000000004),
+    (24.924192673472707, 39.772267172447684),
+    (24.924192673472707, 42.84813511542108),
+    (15.250770475114546, 45.97354789328374),
+    (-9.315605172301247, 47.10818298471791),
+    (-19.42968353817282, 42.3110290048853),
+    (-19.42968353817282, 40.25972628736644),
+    (-17.525020629683333, 40.10220901755372),
+    (-17.525020629683333, 38.64960388282376),
+    (-19.327507117348198, 38.51668382378396),
+    (-22.398563727493077, 38.51668382378396),
+];
+
+/// A hood profile on the plane x = `x` (sketch x along Y, sketch y along Z).
+fn hood_section(x: f64, points: &[(f64, f64)]) -> (Plane, Loop2) {
+    let plane = Plane::new(Vec3::new(x, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+    (plane, Loop2::polygon(&points.iter().map(|&(u, v)| Vec2::new(u, v)).collect::<Vec<_>>()))
+}
+
+#[test]
+fn loft_pairs_the_corners_of_two_profiles_that_each_have_a_vertex_the_other_lacks() {
+    let secs = [hood_section(29.0, &HOOD_A), hood_section(50.0, &HOOD_B)];
+    let counts: Vec<usize> = matched_sections(&secs).iter().map(|l| l.segs.len()).collect();
+    assert_eq!(counts, [19, 19], "19 vertices in each section");
+    let body = loft(&secs).unwrap();
+    let at = |x: f64, p: (f64, f64)| Vec3::new(x, p.0, p.1);
+    // Each corner of the first profile joins the corner of the second it lines up with.
+    let pairs = [
+        (0, 7),
+        (1, 8),
+        (2, 9),
+        (3, 10),
+        (4, 11),
+        (6, 12),
+        (7, 13),
+        (8, 14),
+        (9, 15),
+        (10, 16),
+        (11, 17),
+        (12, 1),
+        (13, 2),
+        (14, 4),
+        (15, 5),
+        (16, 6),
+    ];
+    for (i, j) in pairs {
+        assert!(joins(&body, at(29.0, HOOD_A[i]), at(50.0, HOOD_B[j])), "{:?} joins {:?}", HOOD_A[i], HOOD_B[j]);
+    }
+    // The second profile's point on its left side splits the first's left side: the wall there
+    // stays in the plane y = -22.8. (Its point on the right side, where both right sides are
+    // straight, leaves the right wall one flat face in y = 27.6, between the corner pairs.)
+    let ends = joined_to(&body, at(50.0, HOOD_B[0]), 29.0);
+    assert!(ends.len() == 1 && ends.iter().all(|q| (q.y + 22.8).abs() < 1e-9 && q.z > 41.25 && q.z < 52.6), "{:?} joins {ends:?}", HOOD_B[0]);
+    let right = matched_sections(&secs);
+    let lone = right[1].segs.iter().position(|s| s.start().dist(Vec2::new(HOOD_B[3].0, HOOD_B[3].1)) < 1e-9).unwrap();
+    let partner = right[0].segs[lone].start();
+    assert!((partner.x - 27.6).abs() < 1e-9 && partner.y > 40.8 && partner.y < 52.6, "the right side's point pairs with {partner:?}");
+    // The first profile's vertex on its arch splits the second's arch between the corners
+    // either side of it.
+    let ends = joined_to(&body, at(29.0, HOOD_A[5]), 50.0);
+    let (p, q) = (Vec2::new(HOOD_B[11].0, HOOD_B[11].1), Vec2::new(HOOD_B[12].0, HOOD_B[12].1));
+    assert_eq!(ends.len(), 1);
+    assert!(
+        ends.iter().all(|e| {
+            let r = Vec2::new(e.y, e.z);
+            (r - p).cross(q - p).abs() < 1e-9 * (q - p).len2() && (r - p).dot(q - p) > 0.0 && (r - q).dot(p - q) > 0.0
+        }),
+        "the arch vertex joins {ends:?}"
+    );
+    // The sections given the other way round build the same body.
+    let v = measure(&body).unwrap().volume;
+    let back = measure(&loft(&[secs[1].clone(), secs[0].clone()]).unwrap()).unwrap().volume;
+    assert!(rel(back, v) < 1e-9, "{back} vs {v}");
+}
+
+/// A 40 x 20 rectangle with a point in the middle of its left side lofted 30 up to one with a
+/// point in the middle of its right side. Both have five vertices, so nothing was split: the
+/// vertices were paired in turn from the best start, which twisted two side faces (the left
+/// side's point joined a corner). Each point now splits the other rectangle's side: six vertices
+/// each, every side face flat, and the loft is the 40 x 20 x 30 box.
+#[test]
+fn loft_splits_a_straight_side_at_a_point_only_the_other_section_has() {
+    let poly = |p: &[(f64, f64)]| Loop2::polygon(&p.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>());
+    let left = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0), (0.0, 10.0)]);
+    let right = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 10.0), (40.0, 20.0), (0.0, 20.0)]);
+    let secs = [(Plane::XY, left), (Plane::XY.offset(30.0), right)];
+    let matched = matched_sections(&secs);
+    let points = |l: &Loop2| l.segs.iter().map(|s| s.start()).collect::<Vec<_>>();
+    assert_eq!(points(&matched[0]), points(&matched[1]), "each vertex runs straight up");
+    assert_eq!(matched[0].segs.len(), 6);
+    let body = loft(&secs).unwrap();
+    let m = measure(&body).unwrap();
+    assert!(rel(m.volume, 24_000.0) < 1e-9, "{}", m.volume);
+    for (x, y) in [(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)] {
+        assert!(joins(&body, Vec3::new(x, y, 0.0), Vec3::new(x, y, 30.0)), "({x}, {y}) runs straight up");
+    }
+}
+
+/// A 40 x 20 rectangle lofted 20 up to the same rectangle with its corners rounded (radius 4).
+/// Each corner joins a point near the middle of its rounded corner, and the rounded corners' ends
+/// split the rectangle's sides next to the corners: the loft is symmetric about both middle
+/// planes. Pairing a corner with one end of its rounded corner made it lopsided.
+#[test]
+fn loft_joins_a_corner_to_the_middle_of_a_rounded_corner() {
+    let (w, h, r) = (40.0, 20.0, 4.0);
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) };
+    let corner = |c: (f64, f64), start: f64| Seg2::Arc { center: Vec2::new(c.0, c.1), radius: r, start, sweep: PI / 2.0 };
+    let rounded = Loop2 {
+        segs: vec![
+            line((r, 0.0), (w - r, 0.0)),
+            corner((w - r, r), -PI / 2.0),
+            line((w, r), (w, h - r)),
+            corner((w - r, h - r), 0.0),
+            line((w - r, h), (r, h)),
+            corner((r, h - r), PI / 2.0),
+            line((0.0, h - r), (0.0, r)),
+            corner((r, r), PI),
+        ],
+    };
+    let square = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(w, 0.0), Vec2::new(w, h), Vec2::new(0.0, h)]);
+    for secs in [
+        [(Plane::XY, square.clone()), (Plane::XY.offset(20.0), rounded.clone())],
+        [(Plane::XY, rounded.clone()), (Plane::XY.offset(20.0), square.clone())],
+    ] {
+        assert!(matched_sections(&secs).iter().all(|l| l.segs.len() == 12), "12 vertices in each section");
+        let body = loft(&secs).unwrap();
+        let m = measure(&body).unwrap();
+        assert!((m.centroid.x - w / 2.0).abs() < 1e-9 && (m.centroid.y - h / 2.0).abs() < 1e-9, "centre of mass {:?}", m.centroid);
+        let z = if secs[0].1.segs.len() == 4 { 0.0 } else { 20.0 };
+        for (x, y, cx, cy) in [(0.0, 0.0, r, r), (w, 0.0, w - r, r), (w, h, w - r, h - r), (0.0, h, r, h - r)] {
+            let ends = edge_ends(&body)
+                .into_iter()
+                .filter_map(|(a, b)| {
+                    if a.dist(Vec3::new(x, y, z)) < 1e-6 {
+                        Some(b)
+                    } else if b.dist(Vec3::new(x, y, z)) < 1e-6 {
+                        Some(a)
+                    } else {
+                        None
+                    }
+                })
+                .filter(|q| (q.z - 20.0 + z).abs() < 1e-6)
+                .collect::<Vec<_>>();
+            // On the rounded corner, within 10 degrees of its middle.
+            let (c, diagonal) = (Vec2::new(cx, cy), Vec2::new(x - cx, y - cy));
+            let near_middle = |q: &Vec3| {
+                let d = Vec2::new(q.x, q.y) - c;
+                (d.len() - r).abs() < 1e-9 && d.dot(diagonal) / (d.len() * diagonal.len()) > (10.0f64).to_radians().cos()
+            };
+            assert!(ends.len() == 1 && ends.iter().all(near_middle), "corner ({x}, {y}) joins {ends:?}");
+        }
+    }
+}
+
+/// Three sections, the first hood profile, the second, then the first again ([`HOOD_A`]): the
+/// middle one gains the vertex only the outer ones have, and that vertex pairs with theirs, so all
+/// three get the same 19 vertices and the outer two are cut alike.
+#[test]
+fn loft_through_three_sections_pairs_each_with_the_next() {
+    let secs = [hood_section(29.0, &HOOD_A), hood_section(50.0, &HOOD_B), hood_section(71.0, &HOOD_A)];
+    let matched = matched_sections(&secs);
+    let counts: Vec<usize> = matched.iter().map(|l| l.segs.len()).collect();
+    assert_eq!(counts, [19, 19, 19]);
+    let (first, last) = (&matched[0].segs, &matched[2].segs);
+    for (a, b) in first.iter().zip(last) {
+        assert!(a.start().dist(b.start()) < 1e-9, "{:?} vs {:?}", a.start(), b.start());
+    }
+    // Vertex for vertex, the middle section's are the second profile's corners where the outer
+    // ones have the first's.
+    let middle: Vec<Vec2> = matched[1].segs.iter().map(|s| s.start()).collect();
+    for (i, j) in [(15, 5), (10, 16), (14, 4)] {
+        let a = Vec2::new(HOOD_A[i].0, HOOD_A[i].1);
+        let k = first.iter().position(|s| s.start().dist(a) < 1e-9).unwrap();
+        assert!(middle[k].dist(Vec2::new(HOOD_B[j].0, HOOD_B[j].1)) < 1e-9, "{a:?} pairs with {:?}", middle[k]);
+    }
+    // The loft through them is symmetric about the middle section's plane.
+    let m = measure(&loft(&secs).unwrap()).unwrap();
+    assert!((m.centroid.x - 50.0).abs() < 1e-6, "centre of mass {:?}", m.centroid);
+}
+
 /// A plate 3 m long and 2 mm thick with ten holes of radius `r` along a diagonal, turned by
 /// `tilt` about the X axis and read back from STEP (each rim is then two half circles).
 fn long_plate_with_small_holes(r: f64, tilt: f64) -> (Body, Vec<Vec3>) {

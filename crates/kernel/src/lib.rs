@@ -80,6 +80,7 @@ mod issue_871_tests;
 mod join_between_caps_tests;
 mod lip;
 pub mod loft_blend;
+mod loft_pairing;
 mod loft_rails;
 #[cfg(test)]
 mod loft_rails_tests;
