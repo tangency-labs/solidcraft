@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """STEP reader bake-off: run one or more readers over the corpus fetch.sh built.
 
-Each reader is LABEL=COMMAND, a command that takes a STEP file as its last argument and prints
-JSON with `bodies`: a list of objects with `volume_mm3`, `faces` and `closed` (as
-`solidcraft-cli eval FILE` does). A `.p21` file is passed as a `.step` copy.
+Each reader is LABEL=COMMAND, run as `COMMAND eval FILE --json-out OUT` and read as
+`solidcraft-cli eval` writes it (`bodies`: objects with `volume_mm3`, `faces` and `closed`), or
+LABEL=probe:COMMAND, run as `COMMAND FILE` and printing one JSON object with `status`
+("opened"/"refused"), `bodies`, `solids`, `faces` and `volume` (a reader without SolidCraft's
+CLI, such as a probe over another library). A `.p21` file is passed as a `.step` copy.
 
     bench/step/run.py --corpus bench/step/corpus --out /tmp/bake \\
         --reader base=/path/to/old/solidcraft-cli --reader new=/path/to/new/solidcraft-cli
@@ -29,6 +31,22 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def run_probe(command, local, tmp, timeout):
+    start = time.monotonic()
+    try:
+        p = subprocess.run(command + [local], capture_output=True, timeout=timeout, cwd=tmp)
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout", "wall_s": timeout}
+    wall = time.monotonic() - start
+    try:
+        data = json.loads(p.stdout.decode("utf-8", "replace").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return {"status": "crashed", "wall_s": wall, "error": p.stderr.decode("utf-8", "replace")[-200:]}
+    if data.get("status") != "opened" or not data.get("bodies"):
+        return {"status": "refused", "wall_s": wall, "error": str(data.get("error", "no bodies"))[:200]}
+    return {"status": "opened", "bodies": data["bodies"], "closed": data.get("solids", 0), "faces": data.get("faces", 0), "volume": float(data.get("volume", 0.0)), "wall_s": wall}
+
+
 def run_one(label, command, path, timeout):
     with tempfile.TemporaryDirectory() as tmp:
         name = os.path.basename(path)
@@ -36,6 +54,8 @@ def run_one(label, command, path, timeout):
             name = name[:-4] + ".step"
         local = os.path.join(tmp, name)
         shutil.copyfile(path, local)
+        if command and command[0].startswith("probe:"):
+            return run_probe([command[0][len("probe:"):]] + command[1:], local, tmp, timeout)
         out = os.path.join(tmp, "out.json")
         start = time.monotonic()
         try:
@@ -86,7 +106,8 @@ def main():
     refs = references()
     results = {}
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
-        futs = {pool.submit(run_one, label, cmd, os.path.join(a.corpus, rel), a.timeout): (label, rel) for label, cmd in readers for _, _, rel, _ in files}
+        # File by file, every reader on a file together, so that each meets the same load.
+        futs = {pool.submit(run_one, label, cmd, os.path.join(a.corpus, rel), a.timeout): (label, rel) for _, _, rel, _ in files for label, cmd in readers}
         for fut in concurrent.futures.as_completed(futs):
             results[futs[fut]] = fut.result()
     os.makedirs(a.out, exist_ok=True)

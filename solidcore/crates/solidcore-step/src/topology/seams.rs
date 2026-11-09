@@ -8,8 +8,10 @@
 //! the seam back. A face on a B-spline surface that closes on itself around u (its first and
 //! last control columns the same) gets a seam the same way, along the surface's own boundary
 //! column (u at the start of its knots), the loops split there where they have no vertex on it;
-//! the period is the width of its knots. A torus face winding without a seam, and a spline
-//! closed in v or both ways, are refused for now.
+//! the period is the width of its knots. A torus face winding around its axis (a band between
+//! two circles about it, a half torus bounded by its rims) gets a seam round the tube at a
+//! vertex's angle, on the face's side of the tube. A torus face winding round its tube, and a
+//! spline closed in v or both ways, are refused for now.
 //!
 //! A face bounded by a slit alone (a loop out along edges and straight back, of no (u, v) area)
 //! on a closed surface is all of that surface less a cut of none: its slit is made its seams
@@ -72,6 +74,12 @@ struct Axis {
 enum Kind {
     Ruled,
     Sphere(f64),
+    /// A torus, its ring's and tube's radii: a face winding around its axis (a band between two
+    /// circles about it) gets a seam round the tube.
+    Torus {
+        major: f64,
+        minor: f64,
+    },
     /// A placed revolution with u the angle: its profile.
     Revolved(BCurve),
     /// A B-spline surface closed on itself around u: its boundary column at u = `u0` (the start
@@ -101,6 +109,10 @@ fn axis(s: &BSurface) -> Option<Axis> {
         BSurface::Sphere { frame: f, radius } => {
             let (origin, z) = frame(f);
             Some(Axis { origin, z, kind: Kind::Sphere(*radius), poles: [Some(origin - z * *radius), Some(origin + z * *radius)], period: TAU })
+        }
+        BSurface::Torus { frame: f, major_radius, minor_radius, .. } => {
+            let (origin, z) = frame(f);
+            Some(Axis { origin, z, kind: Kind::Torus { major: *major_radius, minor: *minor_radius }, poles: [None, None], period: TAU })
         }
         BSurface::PlacedRevolution { profile, origin, axis, matrix, forward: false } if *matrix == IDENTITY => {
             let (origin, z) = (Vec3::from(*origin), Vec3::from(*axis));
@@ -489,6 +501,25 @@ impl Builder<'_, '_> {
                     if along { [ta, tb] } else { [tb, ta] },
                     along,
                 )
+            }
+            Kind::Torus { major, minor } => {
+                // The tube circle at `a`'s angle about the axis: centred on the ring there, angle
+                // 0 outward and π/2 up the axis, so its angle is the surface's tube angle. The
+                // seam runs from the loop the face lies above (`a`'s, running +u) up the tube to
+                // `b`: the face's side of the circle, whichever half that is.
+                let da = pa - ax.origin;
+                let x = (da - ax.z * da.dot(ax.z)).normalized().ok_or("a torus seam on its axis")?;
+                let centre = ax.origin + x * *major;
+                let tube = |p: Vec3| {
+                    let d = p - centre;
+                    d.dot(ax.z).atan2(d.dot(x))
+                };
+                let (ta, tb) = (tube(pa), tube(pb));
+                let up = (tb - ta).rem_euclid(TAU);
+                if !(up > 1e-9) {
+                    return Err("a seam of no length".into());
+                }
+                (BCurve::Circle { frame: Frame { origin: arr(centre), x_axis: arr(x), y_axis: arr(ax.z) }, radius: *minor }, [ta, ta + up], true)
             }
             Kind::Iso { column, .. } => {
                 // Each vertex's v on the surface (a pole's from its end of the v range).
