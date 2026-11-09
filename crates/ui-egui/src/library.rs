@@ -16,8 +16,8 @@ use solidcraft_engine::geom::Vec3Geom as _;
 
 use crate::SolveApp;
 use crate::prefs::LibrarySize;
-use solidcraft_theme::{TabAccent, Tokens};
 use crate::ui_kit::{Container, PartCard, PartCardSize, PartFace, Surface};
+use solidcraft_theme::{TabAccent, Tokens};
 
 /// Most entries listed from one folder (a share can hold thousands).
 const MAX_ENTRIES: usize = 2000;
@@ -1361,7 +1361,7 @@ mod tests {
         let tree = h.app.shell.browser.expect("the Browser");
         let card = h.app.library.shown.expect("the card");
         assert!((card.left() - tree.right() - gap).abs() < 1.5, "{tree:?} {card:?}");
-        assert!(crate::prefs::Prefs::default().library_after_browser == false, "the library first by default");
+        assert!(!crate::prefs::Prefs::default().library_after_browser, "the library first by default");
     }
 
     /// A search that leaves nothing says so and clears with one click; the count follows it.
