@@ -5,6 +5,8 @@
 //! its homogeneous Bézier form, a loop's signed area with a proved bound on its rounding, the
 //! even–odd hold of a point decided exactly or refused, the checks a profile must pass, the split
 //! of a loop where it passes a point twice, and a segment made the kernel's curve on a frame.
+//! For drawing sheets: a figure placed at its size, a regular outline's corners, and the tallest
+//! label box inside a convex outline.
 //!
 //! Not upstream (SolidCraft's planar regions, moved into the kernel so the layers above compute
 //! no geometry, docs/layers.md §1).
@@ -34,6 +36,9 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData
 
 const OP_CURVE: &str = "prism::profile::curve_on_frame";
 const OP_AREA: &str = "prism::profile::Loop2::signed_area";
+const OP_FIGURE: &str = "prism::profile::place_figure_2d";
+const OP_POLYGON: &str = "prism::profile::regular_polygon_2d";
+const OP_FIT: &str = "prism::profile::box_fit_in_convex_polygon";
 
 /// Highest degree of a [`Seg2::Bezier`].
 pub const MAX_BEZIER_DEGREE: usize = 9;
@@ -43,6 +48,16 @@ pub const MAX_BEZIER_CTRL: usize = MAX_BEZIER_DEGREE + 1;
 
 /// The most segments one call takes over all its loops.
 pub const MAX_SEGMENTS: usize = 8192;
+
+/// The largest coordinate a profile's point may have ([`check_regions`]), and so the largest a
+/// sheet figure's corner or a fitted box's value may be: far inside `f64`, so sums and products
+/// of two stay finite.
+pub const MAX_PROFILE_COORD: f64 = 1e9;
+
+/// Whether `p` is finite and within [`MAX_PROFILE_COORD`] on both axes.
+fn within_profile(p: Point2) -> bool {
+    finite2(p) && p.x.abs() < MAX_PROFILE_COORD && p.y.abs() < MAX_PROFILE_COORD
+}
 
 /// One boundary segment, in a frame's coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -666,7 +681,7 @@ pub enum ProfileRefusal {
 /// The loops of `regions` checked: each closed within ten times `tol`, the segments within
 /// [`MAX_SEGMENTS`], each segment finite and of some length (a line's ends apart, an arc of a
 /// positive radius turning at most once, a conic's weight positive, a Bézier's ends apart), its
-/// coordinates within 1e9.
+/// coordinates within [`MAX_PROFILE_COORD`].
 ///
 /// # Errors
 ///
@@ -676,7 +691,7 @@ pub fn check_regions<'a>(
     tol: f64,
 ) -> std::result::Result<(), ProfileRefusal> {
     let mut count = 0usize;
-    let finite = |p: Point2| finite2(p) && p.x.abs() < 1e9 && p.y.abs() < 1e9;
+    let finite = within_profile;
     let apart = |a: Point2, b: Point2| a.distance(b) > 1e-12;
     for lp in regions.flat_map(Region2::loops) {
         count = count.saturating_add(lp.segs.len());
@@ -1050,4 +1065,89 @@ pub fn rational_curve(knots: &[f64], homogeneous: &[[f64; 4]]) -> Result<Curve> 
         trim: None,
     };
     Ok(Curve::from(BSplineCurve::create_canonical(&data)?))
+}
+
+// Figures on a drawing sheet: a figure placed at its size, a regular outline's corners, and the
+// tallest label box inside a convex outline.
+
+/// `figure` scaled by `scale` about its own origin and moved to `origin`: each point `p` goes to
+/// `origin + scale p`; an arc's centre moves, its radius scales and its start and sweep stay; a
+/// conic keeps its weight. A drawing symbol is a table of segments in units of its size, placed
+/// by this one call.
+///
+/// A mirror is out of scope: a negative scale would also turn each arc's sweep, so it is refused.
+///
+/// # Errors
+///
+/// `InvalidInput` for a scale not above 0 or not finite, an origin not finite, more than
+/// [`MAX_SEGMENTS`] segments, a Bézier degree outside `1 ..=` [`MAX_BEZIER_DEGREE`], or a segment
+/// not finite before or after it is placed.
+pub fn place_figure_2d(figure: &[Seg2], scale: f64, origin: Point2) -> Result<Vec<Seg2>> {
+    let _ = (figure, scale, origin);
+    Err(SolidError::invalid_input(OP_FIGURE, "not built yet"))
+}
+
+/// The corners of the regular polygon with `sides` sides, each `side` long, about `centre`:
+/// counter-clockwise, the first at the angle `first_angle` from `+x` (a triangle point up has
+/// `first_angle = π/2`). The circumradius is `side / (2 sin(π / sides))`, and the centroid is
+/// `centre`.
+///
+/// # Errors
+///
+/// `InvalidInput` for fewer than 3 sides or more than [`MAX_SEGMENTS`], a side not above 0, a
+/// centre, side or angle not finite, or a corner that comes out not finite or beyond
+/// [`MAX_PROFILE_COORD`] (the coordinates [`check_regions`] allows).
+pub fn regular_polygon_2d(
+    centre: Point2,
+    sides: usize,
+    side: f64,
+    first_angle: f64,
+) -> Result<Vec<Point2>> {
+    let _ = (centre, sides, side, first_angle);
+    Err(SolidError::invalid_input(OP_POLYGON, "not built yet"))
+}
+
+/// A box fitted inside a convex outline ([`box_fit_in_convex_polygon`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BoxFit {
+    /// Its height (its width is the height times the aspect asked for).
+    pub height: f64,
+    /// Its lower-left corner.
+    pub min: Point2,
+}
+
+/// The tallest box `width_per_height` times as wide as it is tall, centred across on the line
+/// `x = centre_x`, kept `margin` clear of every edge of `polygon` (measured square to the edge)
+/// and no taller than `max_height`; of the boxes of that height, the one with the lowest bottom.
+/// `None` when no box fits, not even one of no height.
+///
+/// `polygon` is convex with its corners counter-clockwise. A box of height `h` with its bottom at
+/// `y0` has its corners at `(centre_x ± width_per_height h / 2, y0)` and `(.., y0 + h)`. An edge
+/// from `P` with inward unit normal `n` holds a corner `c` when `n · (c - P) ≥ margin`, and the
+/// corner nearest the edge gives one condition, linear in `h` and `y0`:
+/// `A h + B y0 ≥ C`, with `A = min(n.y, 0) - |n.x| width_per_height / 2`, `B = n.y` and
+/// `C = margin + n · P - n.x centre_x`. As `A ≤ 0`, a box that fits still fits made shorter on the
+/// same bottom, so the heights that fit run from 0 to the answer. Upright edges (`B = 0`) bound
+/// the height alone; the others bound `y0` from below (`B > 0`) or above (`B < 0`) by lines in
+/// `h`. From the tallest height allowed, each step goes down to where the highest lower line
+/// meets the lowest upper line (the gap between the bounds is concave in `h`, so each step lands
+/// on the next piece of it), until the lowest bottom meets every condition. The conditions are
+/// distances, so they are met within a rounding allowance of `gamma(16)` times the problem's size
+/// (Higham §3.1).
+///
+/// # Errors
+///
+/// `InvalidInput` for fewer than 3 corners or more than [`MAX_SEGMENTS`], an edge of no length,
+/// an outline not convex and counter-clockwise, a negative aspect, margin or height, a value not
+/// finite, or a bound that overflows (an edge too near upright to compare). `SM_ERR` if the steps
+/// do not settle within one per edge (rounding only).
+pub fn box_fit_in_convex_polygon(
+    polygon: &[Point2],
+    centre_x: f64,
+    width_per_height: f64,
+    margin: f64,
+    max_height: f64,
+) -> Result<Option<BoxFit>> {
+    let _ = (polygon, centre_x, width_per_height, margin, max_height);
+    Err(SolidError::invalid_input(OP_FIT, "not built yet"))
 }
