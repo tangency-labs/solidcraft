@@ -380,7 +380,7 @@ mod tests {
                                         .job
                                         .sections
                                         .iter()
-                                        .all(|section| section.format.font_id == crate::fonts::semibold(t.font_button));
+                                        .all(|section| section.format.font_id == crate::ui_kit::type_face::semibold(t.font_button));
                                 }
                                 _ => {}
                             });

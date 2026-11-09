@@ -113,7 +113,7 @@ impl<'a> Confirm<'a> {
                                 vec2(t.form_close_size, t.form_close_size),
                             );
                             let title = egui::Rect::from_min_max(heading.min, egui::pos2(close.left(), heading.bottom()));
-                            paint_text(ui, title, self.title, crate::fonts::semibold(t.font_subtitle), t.form_ink, false);
+                            paint_text(ui, title, self.title, crate::ui_kit::type_face::semibold(t.font_subtitle), t.form_ink, false);
                             ui.interact(title, ui.scope_id().with("title"), egui::Sense::hover())
                                 .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), self.title));
                             let response = super::icon_button_at(ui, close, "close", "Close");
