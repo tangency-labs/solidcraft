@@ -2392,6 +2392,10 @@ mod card_tests {
 
         h.step(&json!({"click":{"handle":"ai_add:preset"}})).unwrap();
         h.frames(3);
+        // The presets outgrow the popup's height: scroll its list to the end, where OpenRouter is.
+        let top = scenario::handle_at("ai_add:preset:Ollama").unwrap();
+        h.call("ui.scroll", json!({"x":top.x,"y":top.y,"delta":-1000}));
+        h.frames(10);
         h.step(&json!({"click":{"handle":"ai_add:preset:OpenRouter"}})).unwrap();
         list_settled(&mut h);
         assert_eq!(requests().last().cloned(), Some(("https://openrouter.ai/api/v1/models".to_string(), false)));
