@@ -1,8 +1,8 @@
 //! CPU rasterizer for headless snapshots: z-buffered, smooth-shaded triangles and depth-tested
 //! lines, rendered at 2× and downsampled for anti-aliasing.
 
+use crate::vec::Vec3Ops;
 use solidcore_record::Vec3;
-use solidcraft_geom::prelude::*;
 
 use crate::Camera;
 use crate::scene::{Rgb, SECTION_CAP, Scene, png};

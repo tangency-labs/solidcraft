@@ -31,6 +31,7 @@ pub mod texture_interpolation;
 pub mod texture_lod;
 pub mod texture_sampling;
 pub mod transmission;
+pub mod vec;
 
 pub use analysis::{AnalysisMode, SceneAnalysis};
 pub use backend::{

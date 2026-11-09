@@ -7,7 +7,7 @@
 //! renderer that drew it (`gpu`, `gpu-software` or `cpu`); `hardware` and `software` fail with an
 //! error that names the policy.
 
-use solidcraft_geom::prelude::*;
+use solidcraft_render::vec::Vec3Ops;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

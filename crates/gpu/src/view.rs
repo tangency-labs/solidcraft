@@ -9,7 +9,7 @@
 //! evaluated on the GPU into the vertex buffer the pass draws (see [`PlannedBody`]), with nothing
 //! built or read back on the CPU.
 
-use solidcraft_geom::prelude::*;
+use solidcraft_render::vec::Vec3Ops;
 use std::sync::{Arc, Mutex};
 
 use solidcore_record::Vec3;

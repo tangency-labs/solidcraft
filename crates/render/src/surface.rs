@@ -1,7 +1,7 @@
 //! Bounded opaque metallic/roughness surfaces in linear sRGB.
 //! This numerical contract does not enable a renderer or persist appearances.
 
-use solidcraft_geom::prelude::*;
+use crate::vec::Vec3Ops;
 use std::f64::consts::PI;
 
 use solidcore_record::Vec3;
