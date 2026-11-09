@@ -1054,7 +1054,12 @@ impl SolveApp {
     fn set_wgpu_targets(&mut self, rs: &egui_wgpu::RenderState, scene: crate::gpu::GpuTarget, window: crate::gpu::GpuTarget) {
         self.blur.install(rs, scene.depth.is_some() && window.depth.is_none() && window.samples == 1);
         #[allow(unused_mut)] // Only native hosts can wait for the startup readback.
-        let (mut installed, stats, tess_ready) = gpu::install(rs, scene, window, !self.cpu_meshing);
+        #[cfg(not(target_arch = "wasm32"))]
+        let force_cpu = solidcraft_gpu::env::force_cpu_tessellation();
+        #[cfg(target_arch = "wasm32")]
+        let force_cpu = false;
+        let (mut installed, stats, tess_ready) =
+            solidcraft_viewport::egui::install(rs, scene, window, !self.cpu_meshing, force_cpu, gpu::report_gpu_error);
         #[cfg(not(target_arch = "wasm32"))]
         if scene.depth.is_some() && window.depth.is_none() && window.samples == 1 {
             let mut renderer = rs.renderer.write();

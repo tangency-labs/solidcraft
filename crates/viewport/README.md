@@ -7,7 +7,8 @@ lines) and knows no app's geometry or document types. Its only workspace depende
 
 It holds the view maths, the description of a picture and its CPU rasterizer, the surface
 shading models and the section hatches, and the GPU work ([`gpu`]): the viewport's wgpu pipelines,
-offscreen pictures, adapter selection and display plans evaluated in a compute shader. Product
+offscreen pictures, adapter selection and display plans evaluated in a compute shader, and the
+egui glue ([`egui`]) that draws the viewport in a window's paint callbacks. Product
 rendering (render jobs, the path tracer, studio, film, textures) stays in the app.
 
 The crate reads no environment of an app's: the host chooses the adapter policy and whether bodies
@@ -37,3 +38,5 @@ they fail. CI sets `VIEWPORT_TEST_GPU=software` and `VIEWPORT_TEST_REQUIRE_GPU=1
 | `gpu::select` (`Policy`, `pick`, `survey`, `Tier`) | Adapter selection for headless devices under a policy the host passes |
 | `gpu::TessGpu`, `gpu::GpuMesh`, `gpu::PackedPlans`, `gpu::SHADER` | Display plans (solidcore-tess's) evaluated in a compute shader, and the shader's input as data |
 | `gpu::open_headless`, `gpu::depth_features`, `gpu::depth_format`, `gpu::instance_descriptor_from_env`, `gpu::GpuError` | Devices, depth formats, wgpu instance settings and errors |
+| `egui::install`, `egui::ViewportCallback`, `egui::ProductHighlightCallback`, `egui::TessReady` | The viewport in an egui window: the pipelines put in egui-wgpu's callback resources, and the paint callbacks that draw a frame and its product highlights |
+| `egui::paint_background`, `egui::log_uncaptured_errors` | The view's background gradient from the host's colours, and GPU errors logged and reported to the host instead of panicking |

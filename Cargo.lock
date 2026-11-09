@@ -4625,6 +4625,8 @@ dependencies = [
 name = "solidcraft-viewport"
 version = "0.40.0-rc.3"
 dependencies = [
+ "egui",
+ "egui-wgpu",
  "image",
  "log",
  "naga",

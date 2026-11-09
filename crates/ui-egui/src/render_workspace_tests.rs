@@ -8764,8 +8764,8 @@ fn current_live_pixels_use_only_the_depth_correct_feedback_callback_and_stale_pi
             if let egui::Shape::Callback(callback) = &shape.shape
                 && let Some(callback) = callback.callback.downcast_ref::<egui_wgpu::Callback>()
             {
-                feedback += usize::from(callback.downcast_ref::<crate::gpu::ProductHighlightCallback>().is_some());
-                model += usize::from(callback.downcast_ref::<crate::gpu::ViewportCallback>().is_some());
+                feedback += usize::from(callback.downcast_ref::<solidcraft_viewport::egui::ProductHighlightCallback>().is_some());
+                model += usize::from(callback.downcast_ref::<solidcraft_viewport::egui::ViewportCallback>().is_some());
             }
         }
         (feedback, model)
@@ -8785,7 +8785,7 @@ fn current_live_pixels_use_only_the_depth_correct_feedback_callback_and_stale_pi
                 callback
                     .callback
                     .downcast_ref::<egui_wgpu::Callback>()
-                    .and_then(|callback| callback.downcast_ref::<crate::gpu::ProductHighlightCallback>())
+                    .and_then(|callback| callback.downcast_ref::<solidcraft_viewport::egui::ProductHighlightCallback>())
             } else {
                 None
             }

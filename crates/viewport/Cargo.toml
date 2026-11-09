@@ -9,6 +9,8 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
 image = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }

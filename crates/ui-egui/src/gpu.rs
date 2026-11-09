@@ -13,26 +13,6 @@ pub use solidcraft_viewport::gpu::view::{
     SceneSlot, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width, placement_scale, runs_within, supersampled_size,
 };
 
-/// A frame of the viewport as an egui paint callback.
-pub struct ViewportCallback(pub Frame);
-/// A transparent, depth-correct selection/hover layer over live product pixels.
-pub(crate) struct ProductHighlightCallback(pub Frame);
-
-/// The view's background: a vertical gradient from `top` at the top edge to `bottom` at the
-/// bottom edge. The viewport callback composites transparently onto this egui mesh, so the host
-/// passes the colours it shows (SolidCraft: the published, animated viewport tokens); no
-/// background colour belongs to a cached model scene or GPU upload.
-pub(crate) fn paint_background(painter: &egui::Painter, rect: egui::Rect, top: egui::Color32, bottom: egui::Color32) {
-    let mut mesh = egui::Mesh::default();
-    mesh.colored_vertex(rect.left_top(), top);
-    mesh.colored_vertex(rect.right_top(), top);
-    mesh.colored_vertex(rect.right_bottom(), bottom);
-    mesh.colored_vertex(rect.left_bottom(), bottom);
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(0, 2, 3);
-    painter.add(egui::Shape::mesh(mesh));
-}
-
 /// The part of a picture (as texture coordinates) that `rect` shows in a window `window`: the
 /// picture covers the window from its centre, so a narrower window keeps the middle of it, and
 /// panels and the view's own size don't move it.
@@ -94,62 +74,8 @@ pub(crate) fn paint_background_picture(app: &mut crate::SolveApp, painter: &egui
     ctx.data_mut(|d| d.insert_temp(id, picture));
 }
 
-/// The GPU plan evaluation compiling beside the window: there once it is ready ([`tick_tessellation`]).
-pub type TessReady = std::sync::Arc<std::sync::OnceLock<solidcraft_viewport::gpu::TessGpu>>;
-
-/// Create the pipelines. Call once with the app's render state, the scene target's depth/stencil/
-/// MSAA settings, and the target of the pass the picture is shown in. Without a stencil the
-/// section cap does not hide the inside of cut bodies. Without `gpu_meshing` (safe mode) bodies
-/// are meshed on the CPU. When the two targets differ, the scene is drawn offscreen and blitted.
-/// Also returns the handle to what each frame drew, and the GPU plan evaluation still compiling
-/// (native: the target says `tess: false` until it is ready).
-pub fn install(
-    rs: &egui_wgpu::RenderState,
-    scene: GpuTarget,
-    window: GpuTarget,
-    gpu_meshing: bool,
-) -> (GpuTarget, DrawStatsHandle, Option<TessReady>) {
-    log_uncaptured_errors(&rs.device);
-    // The evaluation shader compiles beside the window, which does not wait for it: on D3D12 it
-    // takes seconds, most of the start (#4860). Bodies are built on the CPU until it is ready.
-    #[cfg(not(target_arch = "wasm32"))]
-    let later = gpu_meshing.then(|| {
-        solidcraft_viewport::gpu::view::TessLater::start(
-            &rs.adapter,
-            &rs.device,
-            &rs.queue,
-            solidcraft_viewport::gpu::SHADER,
-            solidcraft_gpu::env::force_cpu_tessellation(),
-        )
-    });
-    #[cfg(target_arch = "wasm32")]
-    let tess = if gpu_meshing {
-        solidcraft_viewport::gpu::view::tessellation(&rs.adapter, &rs.device, &rs.queue, solidcraft_viewport::gpu::SHADER, false)
-    } else {
-        None
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    let tess = None;
-    let (scene, window) = (GpuTarget { tess: tess.is_some(), ..scene }, GpuTarget { tess: tess.is_some(), ..window });
-    #[allow(unused_mut)] // Only native hosts hand the renderer a later evaluation.
-    let mut res = Renderer::with_window_target(&rs.device, scene, window, tess);
-    #[cfg(not(target_arch = "wasm32"))]
-    let ready = later.map(|later| {
-        let ready = later.ready();
-        res.tessellate_later(later);
-        ready
-    });
-    #[cfg(target_arch = "wasm32")]
-    let ready = None;
-    // What the renderer can do (order-independent transparency), not only what was asked for.
-    let scene = res.target();
-    let stats = res.stats();
-    rs.renderer.write().callback_resources.insert(res);
-    (scene, stats, ready)
-}
-
 /// Draw bodies from their plans on the GPU from the frame the evaluation shader has compiled
-/// ([`install`]); until then, and where it never does, they are built on the CPU.
+/// ([`solidcraft_viewport::egui::install`]); until then, and where it never does, they are built on the CPU.
 pub(crate) fn tick_tessellation(app: &mut crate::SolveApp) {
     if app.viewport.tess_ready.as_ref().is_some_and(|ready| ready.get().is_some()) {
         app.viewport.tess_ready = None;
@@ -161,24 +87,14 @@ pub(crate) fn tick_tessellation(app: &mut crate::SolveApp) {
     }
 }
 
-/// A GPU error no error scope caught is reported, never a panic: a device's default handler
-/// panics with "wgpu error: ...", which would close the app with the open design (#5486 reported
-/// "wgpu error: Out of Memory" from such a panic). The headless picture devices do the same
-/// (`Capturer::headless`). Errors the code expects are caught under error scopes where they
-/// happen, and those take priority over this handler. Errors before [`install`] (egui's own
-/// pipelines at startup) still reach the default handler, so a startup failure stays a crash
-/// report with its startup step.
-pub fn log_uncaptured_errors(device: &wgpu::Device) {
-    use std::sync::atomic::{AtomicU32, Ordering};
-    let reported = std::sync::Arc::new(AtomicU32::new(0));
-    device.on_uncaptured_error(std::sync::Arc::new(move |e: wgpu::Error| {
-        // The first few only: an invalid resource repeats its error on every frame.
-        if reported.fetch_add(1, Ordering::Relaxed) < 8 {
-            log::error!("GPU: {e}");
-            #[cfg(not(target_arch = "wasm32"))]
-            solidcraft_engine::note!("SolidCraft graphics: {e}");
-        }
-    }));
+/// SolidCraft's report of a GPU error no error scope caught
+/// ([`solidcraft_viewport::egui::log_uncaptured_errors`] logs it too): a line on stderr, which a
+/// terminal or crash report shows beside the app's own lines.
+pub(crate) fn report_gpu_error(e: &wgpu::Error) {
+    #[cfg(not(target_arch = "wasm32"))]
+    solidcraft_engine::note!("SolidCraft graphics: {e}");
+    #[cfg(target_arch = "wasm32")]
+    let _ = e;
 }
 
 /// Draw this process's headless pictures (`ui.render`, the agent's view image, thumbnails of
@@ -298,8 +214,9 @@ mod test_support {
                     if let egui::Shape::Callback(callback) = shape
                         && let Some(callback) = callback.callback.downcast_ref::<egui_wgpu::Callback>()
                     {
-                        self.product_highlight_callbacks += usize::from(callback.downcast_ref::<super::ProductHighlightCallback>().is_some());
-                        self.viewport_callbacks += usize::from(callback.downcast_ref::<super::ViewportCallback>().is_some());
+                        self.product_highlight_callbacks +=
+                            usize::from(callback.downcast_ref::<solidcraft_viewport::egui::ProductHighlightCallback>().is_some());
+                        self.viewport_callbacks += usize::from(callback.downcast_ref::<solidcraft_viewport::egui::ViewportCallback>().is_some());
                     }
                 });
             }
@@ -417,53 +334,6 @@ mod test_support {
 }
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) use test_support::{EguiFixture, test_picture_renderer};
-
-impl egui_wgpu::CallbackTrait for ViewportCallback {
-    fn prepare(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        _screen: &egui_wgpu::ScreenDescriptor,
-        encoder: &mut wgpu::CommandEncoder,
-        resources: &mut egui_wgpu::CallbackResources,
-    ) -> Vec<wgpu::CommandBuffer> {
-        if let Some(res) = resources.get_mut::<Renderer>() {
-            res.prepare(device, queue, encoder, &self.0);
-        }
-        Vec::new()
-    }
-
-    fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
-        let Some(res) = resources.get::<Renderer>() else { return };
-        let vp = info.viewport_in_pixels();
-        res.paint(&self.0, pass, [vp.left_px as f32, vp.top_px as f32, vp.width_px as f32, vp.height_px as f32]);
-    }
-}
-
-impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
-    fn prepare(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        _screen: &egui_wgpu::ScreenDescriptor,
-        encoder: &mut wgpu::CommandEncoder,
-        resources: &mut egui_wgpu::CallbackResources,
-    ) -> Vec<wgpu::CommandBuffer> {
-        if let Some(renderer) = resources.get_mut::<Renderer>() {
-            renderer.prepare_product_highlights(device, queue, encoder, &self.0);
-        }
-        Vec::new()
-    }
-    fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
-        let Some(renderer) = resources.get::<Renderer>() else { return };
-        let viewport = info.viewport_in_pixels();
-        renderer.paint_product_highlights(
-            &self.0,
-            pass,
-            [viewport.left_px as f32, viewport.top_px as f32, viewport.width_px as f32, viewport.height_px as f32],
-        );
-    }
-}
 
 /// The shader's analysis colours and flags for the theme's colours.
 pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
@@ -771,7 +641,7 @@ fn offscreen(
     let mut resources = egui_wgpu::CallbackResources::default();
     resources.insert(Renderer::new(&device, target, compute));
     let none = || Arc::new(Mutex::new(None));
-    let cb = ViewportCallback(Frame {
+    let cb = solidcraft_viewport::egui::ViewportCallback(Frame {
         product_lights,
         product,
         upload_error: None,
@@ -944,7 +814,7 @@ impl OffscreenFrames {
     pub(crate) fn frame_parts(&mut self, frame: Frame) -> [f64; 3] {
         let ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1000.0;
         let started = std::time::Instant::now();
-        let cb = ViewportCallback(frame);
+        let cb = solidcraft_viewport::egui::ViewportCallback(frame);
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: [self.size, self.size], pixels_per_point: 1.0 };
         let extra = egui_wgpu::CallbackTrait::prepare(&cb, &self.device, &self.queue, &screen, &mut encoder, &mut self.resources);
@@ -1680,7 +1550,7 @@ mod tests {
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
         app.viewport.gpu =
             Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
-        let ready = super::TessReady::default();
+        let ready = solidcraft_viewport::egui::TessReady::default();
         app.viewport.tess_ready = Some(ready.clone());
         super::tick_tessellation(&mut app);
         assert!(app.viewport.gpu.is_some_and(|g| !g.tess), "still compiling: built on the CPU");
@@ -1868,30 +1738,5 @@ mod background_picture_tests {
         let mut png = std::io::Cursor::new(Vec::new());
         image::RgbaImage::new(40, 20).write_to(&mut png, image::ImageFormat::Png).unwrap();
         assert_eq!(super::decode_background(png.get_ref(), 10).unwrap().size, [10, 5]);
-    }
-
-    /// The background is drawn from the two colours it is given, top edge then bottom edge, on a
-    /// bare context: no theme is published or read.
-    #[test]
-    fn the_background_is_a_gradient_of_the_colours_given() {
-        let (top, bottom) = (egui::Color32::from_rgb(10, 20, 30), egui::Color32::from_rgb(200, 150, 100));
-        let rect = Rect::from_min_size(pos2(5.0, 7.0), vec2(300.0, 200.0));
-        let ctx = egui::Context::default();
-        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::paint_background(ui.painter(), rect, top, bottom));
-        // The first frame of a bare context uploads the font atlas; nothing displays it here.
-        out.textures_delta.clear();
-        let meshes: Vec<_> = out
-            .shapes
-            .iter()
-            .filter_map(|shape| match &shape.shape {
-                egui::Shape::Mesh(mesh) => Some(mesh),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(meshes.len(), 1);
-        let corners: Vec<_> = meshes[0].vertices.iter().map(|v| (v.pos, v.color)).collect();
-        let want = [(rect.left_top(), top), (rect.right_top(), top), (rect.right_bottom(), bottom), (rect.left_bottom(), bottom)];
-        assert_eq!(corners, want);
-        assert_eq!(meshes[0].indices, [0, 1, 2, 0, 2, 3]);
     }
 }

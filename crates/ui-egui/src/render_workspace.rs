@@ -18,8 +18,9 @@ use solidcraft_engine::render::{
 use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
-use crate::gpu::{Frame, GpuScene, SceneSlot, ViewportCallback};
+use crate::gpu::{Frame, GpuScene, SceneSlot};
 use solidcraft_theme::Tokens;
+use solidcraft_viewport::egui::ViewportCallback;
 
 // Vertex payload only, not an OS/GPU peak-memory promise. Native viewport
 // uploads are already chunked by the installed device's buffer limit.
@@ -3147,7 +3148,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.viewport.hover = None;
     }
     let background = preview_background(app);
-    crate::gpu::paint_background(ui.painter(), viewport, background.viewport_top, background.viewport_bottom);
+    solidcraft_viewport::egui::paint_background(ui.painter(), viewport, background.viewport_top, background.viewport_bottom);
     if live::has_picture(app) {
         live::paint(app, ui, rect);
         if live::picking_current(app) {
@@ -3182,7 +3183,7 @@ fn paint_product_feedback(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rec
 fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera: Camera, image: Option<egui::Rect>, feedback: bool) {
     let background = preview_background(app);
     if !feedback {
-        crate::gpu::paint_background(ui.painter(), rect, background.viewport_top, background.viewport_bottom);
+        solidcraft_viewport::egui::paint_background(ui.painter(), rect, background.viewport_top, background.viewport_bottom);
     }
     let result = (|| -> Result<(), String> {
         if app.viewport.gpu.is_none() {
@@ -3289,7 +3290,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             moving: None,
         };
         if feedback {
-            ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, crate::gpu::ProductHighlightCallback(frame)));
+            ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, solidcraft_viewport::egui::ProductHighlightCallback(frame)));
         } else {
             crate::blur::viewport(ui.painter(), rect, ViewportCallback(frame), rect, [background.viewport_top, background.viewport_bottom]);
         }

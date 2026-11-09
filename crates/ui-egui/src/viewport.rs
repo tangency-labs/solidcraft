@@ -13,11 +13,12 @@ use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_ext, grid_lines,
 use solidcraft_viewport::{Camera, Mat4, Rgb};
 use std::hash::{Hash, Hasher};
 
-use crate::gpu::{Frame, GpuScene, GpuTarget, SceneSlot, ViewportCallback};
+use crate::gpu::{Frame, GpuScene, GpuTarget, SceneSlot};
 use crate::navigation::{CameraInput, NavCaps, orbit_drag};
 use crate::selection::{BoxSel, origin_quads, origin_size, ray_quad};
 use crate::{SolveApp, icons};
 use solidcraft_theme::Tokens;
+use solidcraft_viewport::egui::ViewportCallback;
 
 #[cfg(test)]
 #[path = "viewport_appearance_tests.rs"]
@@ -148,7 +149,7 @@ pub struct ViewportState {
     pub(crate) corner_ok: bool,
     pub gpu: Option<GpuTarget>,
     /// The GPU plan evaluation still compiling: `gpu.tess` once it is ready (#4860).
-    pub(crate) tess_ready: Option<crate::gpu::TessReady>,
+    pub(crate) tess_ready: Option<solidcraft_viewport::egui::TessReady>,
     /// What the GPU drew last frame, shared with the renderer (the frame-rate details, #2548).
     pub(crate) draw_stats: Option<crate::gpu::DrawStatsHandle>,
     /// The status line has said the view is drawn at a lower quality ([`DrawStats::lowered`]).
@@ -4896,7 +4897,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::select_other::hover_override(app);
     list_hover(app);
     let painter = ui.painter_at(rect);
-    crate::gpu::paint_background(&painter, rect, t.viewport_top, t.viewport_bottom);
+    solidcraft_viewport::egui::paint_background(&painter, rect, t.viewport_top, t.viewport_bottom);
     crate::gpu::paint_background_picture(app, &painter, rect);
 
     // ---- model ----
