@@ -173,7 +173,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_torus_span_from_start_section",
     "fillet_trace_from_tangent_point_toward_next",
     "fillet_trace_reaches_rails",
-    "fillet_trace_rejects_short_step",
     "fillet_trim_inside_by_best_dot",
     "fillet_trim_status",
     "fillet_variable_span_follows_fillet",

@@ -1,3 +1,4 @@
+use solidcraft_geom::MeshGeom;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};

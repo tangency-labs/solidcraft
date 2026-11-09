@@ -2,11 +2,12 @@ use super::super::{Executor, JobOptions, Task, open_headless};
 use super::*;
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
+use solidcraft_geom::MeshGeom;
 use solidcraft_render::{
-    Camera, ProductMesh, ProductScene, StandardView,
+    ProductMesh, ProductScene,
     job::{CancelToken, ImageRequest, ImageWork, TaskPoll},
-    surface::OpaqueSurface,
 };
+use solidcraft_viewport::{Camera, StandardView, surface::OpaqueSurface};
 use std::sync::Arc;
 
 type Guide = [[f64; 4]; 6];
@@ -191,7 +192,7 @@ fn context() -> Option<Arc<Context>> {
         Err(e) => {
             // The path tracer runs on Vulkan or Metal only: where the backends in use leave both out
             // (`WGPU_BACKEND=dx12`), it is unavailable by design, not missing.
-            let available = !crate::select::path_backends().is_empty();
+            let available = !solidcraft_viewport_gpu::select::path_backends().is_empty();
             assert!(!available || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable: {e}");
             return None;
         }

@@ -255,7 +255,6 @@
   "ssi_split_curves_at_singular_points",
   "dupin_bottom_hyperbola_axis",
   "point_class_gap_3d_propagates_no_drop_error",
-  "fillet_trace_rejects_short_step",
   "fillet_variable_span_follows_fillet",
   "curve_tight_box_interval_knots",
   "face_tight_box_searches_trim",
