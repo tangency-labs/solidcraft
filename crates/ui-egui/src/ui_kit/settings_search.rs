@@ -297,6 +297,10 @@ pub(crate) struct BlockGate {
     key: String,
     discover: bool,
     pub show: bool,
+    /// The block is a result in its own right: its label or hint, its section or a forced pass
+    /// matches. Such a block counts as a hit even when the control inside it (a plain number
+    /// field) does not report one.
+    pub matched: bool,
 }
 
 /// `Some` while a search is active. `show` draws the block; otherwise the caller runs it hidden
@@ -313,8 +317,14 @@ pub(crate) fn block_gate(ui: &Ui, label: &str, hint: Option<&str>) -> Option<Blo
         let discover = !state.seen_blocks.contains(&key);
         let show = state.section_matches || state.force > 0 || label_hit || state.open_blocks.contains(&key);
         state.block_matches = state.section_matches || state.force > 0 || label_hit;
-        BlockGate { key, discover, show }
+        BlockGate { key, discover, show, matched: state.block_matches }
     })
+}
+
+/// How many keyboard stops this pass has painted so far, to tell whether a block's controls
+/// registered one of their own.
+pub(crate) fn nav_len(ui: &Ui) -> usize {
+    with(ui, |state| state.nav.len()).unwrap_or(0)
 }
 
 pub(crate) fn block_finish(ui: &Ui, gate: &BlockGate, showed: bool, hits_before: u32) {
@@ -784,7 +794,13 @@ pub(crate) fn store_nav(ui: &Ui) {
 
 /// A row whose own words matched. Section titles and controls both call this once they have a rect.
 pub(crate) fn remember(ui: &mut Ui, label: &str, rect: Rect) {
-    if !ui.is_visible() || !querying(ui) || label.is_empty() || !text_hit(ui, label) {
+    remember_matched(ui, label, None, rect);
+}
+
+/// [`remember`] for a row whose hint can match too: a row found only by its hint is still a
+/// stop for the arrow keys, and its label stays the target Enter opens.
+pub(crate) fn remember_matched(ui: &mut Ui, label: &str, hint: Option<&str>, rect: Rect) {
+    if !ui.is_visible() || !querying(ui) || label.is_empty() || !(text_hit(ui, label) || hint.is_some_and(|hint| text_hit(ui, hint))) {
         return;
     }
     if with(ui, |state| state.hiding > 0).unwrap_or(true) {
@@ -1147,6 +1163,71 @@ mod tests {
             let text = solidcraft_ui_text::tr(id).to_lowercase();
             assert!(text.contains(&name), "`{text}` should name the window `{name}`");
         }
+    }
+
+    /// A labelled row whose control reports no match of its own (a plain number field, as
+    /// Sketch › Window steps has) drew when its label matched, but never counted as a result: the
+    /// page heading stayed away and the window said "No matching preferences". It is a result now,
+    /// with one stop for the arrow keys.
+    #[test]
+    fn a_matching_row_with_a_plain_number_field_is_a_result() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_SKETCH);
+        for (query, label) in [("window steps", "Window steps"), ("dimension values", "Dimension values")] {
+            h.app.prefs_window.shell.filter = query.into();
+            h.frames(4);
+            assert!(h.widget(h.app.tr("prefs.search_empty")).is_none(), "{query} has a result instead of the empty-results message");
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let at = h.widget(label).unwrap_or_else(|| panic!("{label} must match {query}"));
+            assert!(body.contains(egui::pos2(at[0] as f32, at[1] as f32)), "{label} is drawn in the results");
+            assert!(h.widget("Sketch").is_some(), "{query}: the page heading names where it is");
+            // The Drawing section's hidden checkbox columns leave no gap between heading and row.
+            let heading = h.widget("DRAWING").unwrap_or_else(|| panic!("{query}: the section heading is drawn"));
+            assert!(at[1] - heading[1] < 80.0, "{label} sits under its section heading, not {} points below", at[1] - heading[1]);
+            let (_, _, hits) = nav(&h.ctx);
+            let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
+            assert_eq!(matching.len(), 1, "{label} must have one stop for the arrow keys: {:?}", hits.iter().map(|h| &h.label).collect::<Vec<_>>());
+            assert_eq!(matching[0].page, crate::prefs::PAGE_SKETCH);
+        }
+    }
+
+    /// Enter on such a row opens its page, scrolls to the row and outlines it.
+    #[test]
+    fn enter_on_a_matching_row_with_a_plain_number_field_reveals_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_SKETCH);
+        h.app.prefs_window.shell.filter = "window steps".into();
+        h.frames(4);
+        let (_, _, hits) = nav(&h.ctx);
+        let at = hits.iter().position(|hit| hit.label == "Window steps").expect("Window steps is a stop");
+        set_cursor(&h.ctx, at);
+        h.frames(2);
+        h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+        h.frames(30);
+        assert!(h.app.prefs_window.shell.filter.is_empty(), "Enter clears the search");
+        let row = crate::scenario::rect_of("dialog:row:Window steps").expect("the row is drawn");
+        let revealed = crate::scenario::handle_at("prefs:revealed").expect("Enter outlines the row");
+        assert!(revealed.distance(row.center()) <= 1.0, "the outline is on Window steps");
+    }
+
+    /// A row found only by its hint is a stop for the arrow keys too, named by its label.
+    #[test]
+    fn a_row_found_only_by_its_hint_has_a_stop() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_SKETCH);
+        // Only Dimension values' hint says this; its label and options do not.
+        h.app.prefs_window.shell.filter = "arrows that step".into();
+        h.frames(4);
+        let (_, _, hits) = nav(&h.ctx);
+        let matching: Vec<_> = hits.iter().filter(|hit| hit.label == "Dimension values").collect();
+        assert_eq!(matching.len(), 1, "one stop: {:?}", hits.iter().map(|h| &h.label).collect::<Vec<_>>());
+        assert_eq!(matching[0].page, crate::prefs::PAGE_SKETCH);
     }
 
     #[test]

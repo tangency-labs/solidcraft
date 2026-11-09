@@ -1371,7 +1371,7 @@ fn view_analysis_buttons_are_one_toggle_group() {
 /// through `view.apply`, without touching the design or its history.
 #[test]
 fn view_angles_readout_shows_only_when_on_and_applies_typed_angles() {
-    use solidcraft_engine::render::ViewAngles;
+    use solidcraft_viewport::ViewAngles;
     for style in ["axes", "cube"] {
         let mut h = Harness::new();
         h.call("ui.prefs", json!({"navigator_style": style}));
@@ -1438,7 +1438,7 @@ fn view_angles_readout_shows_only_when_on_and_applies_typed_angles() {
 /// while only the pitch is adjusted.
 #[test]
 fn view_angles_card_zero_buttons_and_axis_locks() {
-    use solidcraft_engine::render::ViewAngles;
+    use solidcraft_viewport::ViewAngles;
     let mut h = Harness::new();
     h.app.preferences.look_at_anim = false;
     h.call("engine.execute", json!({"command": "view.angle_readout", "params": {"enabled": true}}));

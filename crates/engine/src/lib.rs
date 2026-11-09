@@ -618,7 +618,7 @@ pub struct Session {
     /// The camera `view.apply` asked the view to use (view state, not saved). The desktop app
     /// moves its viewport there and takes it; headless renders keep using it until a standard
     /// view is chosen.
-    pub camera: Option<render::Camera>,
+    pub camera: Option<solidcraft_viewport::Camera>,
     /// Host-owned viewport metadata, never saved or included in history.
     render_viewport: Option<Arc<render::ExecutorDescriptor>>,
     render_jobs: render_jobs::Jobs,
@@ -742,8 +742,8 @@ pub enum CombPick {
 
 impl SurfaceAnalysis {
     /// How a picture shades the faces for this analysis.
-    pub fn mode(self) -> render::AnalysisMode {
-        use render::AnalysisMode as M;
+    pub fn mode(self) -> solidcraft_viewport::AnalysisMode {
+        use solidcraft_viewport::AnalysisMode as M;
         match self {
             SurfaceAnalysis::Zebra { stripes } => M::Zebra { stripes },
             SurfaceAnalysis::Draft { pull, angle } => M::Draft { pull, angle },

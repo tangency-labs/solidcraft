@@ -174,7 +174,8 @@ fn sketch_of<'a>(
 fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
     use solidcraft_sketch::CurveKind;
     let sk = &ss.sketch;
-    let c = sk.curves.get(sk.curve_index(id)?)?;
+    let Some(index) = sk.curve_index(id) else { return sketch_wire(sk, id) };
+    let c = sk.curves.get(index)?;
     let at = |i: usize| sk.points.get(i).map(|p| ss.plane.to_world(p.pos));
     let normal = ss.plane.normal().unit()?;
     let (shape, pts) = match c.kind {
@@ -214,6 +215,38 @@ fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
         }
     };
     Some(Item { geo: Geo::Points(pts), dir, json, shape, slot: None })
+}
+
+/// A curve drawn in a 3D sketch, or a linked 3D curve (a wire, #14051), whose points are in world
+/// coordinates: a line measures as a line, an exact arc as its circle, and any other curve along
+/// its points. A single point is not a curve.
+fn sketch_wire(sk: &solidcraft_sketch::Sketch, id: &str) -> Option<Item> {
+    let w = sk.wires.get(sk.wire_index(id)?)?;
+    let mut json = json!({"type": "sketch_curve", "id": id});
+    if let Some(arc) = w.arc {
+        let axis = arc.normal.unit()?;
+        let (x, y) = ((arc.start - arc.center).normalized()?, axis.cross((arc.start - arc.center).normalized()?));
+        let mut angle = (arc.end - arc.center).dot(y).atan2((arc.end - arc.center).dot(x));
+        if angle <= 0.0 {
+            angle += std::f64::consts::TAU;
+        }
+        let shape = Shape::Round { center: arc.center, axis, radius: arc.radius, angle, planar: true, lo: 0.0, hi: 0.0 };
+        json["length_mm"] = json!(curve_len(&shape, true, 0.0));
+        add_round(&mut json, &shape);
+        let pts = arc_points(arc.center, axis, arc.start, angle);
+        return Some(Item { geo: Geo::Points(pts), dir: None, json, shape, slot: None });
+    }
+    match w.pts.as_slice() {
+        [] | [_] => None,
+        [a, b] => {
+            json["length_mm"] = json!(a.dist(*b));
+            Some(Item { geo: Geo::Points(densify(&[*a, *b])), dir: (*b - *a).normalized(), json, shape: Shape::Line { a: *a, b: *b }, slot: None })
+        }
+        pts => {
+            json["length_mm"] = json!(polyline_len(pts));
+            Some(Item { geo: Geo::Points(pts.to_vec()), dir: None, json, shape: Shape::Other, slot: None })
+        }
+    }
 }
 
 /// A profile (closed region of a sketch): its area, and when it is a circle or a slot, its
@@ -393,7 +426,9 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             };
             plain(Geo::Tris(tris), None, json!({"type": "body", "name": name, "closed": closed, "volume_mm3": closed.then_some(v)}))
         }
-        Sel::SketchCurve { id, sketch } => sketch_curve(sketch_of(s, st, *sketch, |sk| sk.curve_index(id).is_some())?, id),
+        Sel::SketchCurve { id, sketch } => {
+            sketch_curve(sketch_of(s, st, *sketch, |sk| sk.curve_index(id).is_some() || sk.wire_index(id).is_some())?, id)
+        }
         Sel::ExternalSketchCurve { sketch, id } => sketch_curve(sketch_of(s, st, Some(*sketch), |_| true)?, id),
         Sel::SketchPoint { id } | Sel::ExternalSketchPoint { id, .. } => {
             let given = match sel {

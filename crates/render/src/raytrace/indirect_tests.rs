@@ -1,5 +1,5 @@
 use super::*;
-use crate::clear_coat::ClearCoat;
+use solidcraft_viewport::clear_coat::ClearCoat;
 
 fn white() -> OpaqueSurface {
     OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 0.0, 1.0, 1.0).unwrap()
@@ -13,6 +13,50 @@ fn rectangle() -> Rectangle {
         intensity: 1.0,
     })
     .unwrap()
+}
+
+#[test]
+fn guided_photon_mixture_integrates_point_and_one_sided_rectangle_power() {
+    let count = 4096;
+    let width: f64 = 0.125;
+    let distance = 4.0;
+    let radius = distance * (width * (2.0 - width)).sqrt();
+    let cone = PhotonGuide { center: Vec3::Z * distance, radius }.cone(Vec3::ZERO, 2.0).unwrap();
+    let mut point_power = 0.0;
+    for i in 0..count {
+        let u = (f64::from(i) + 0.5) / f64::from(count);
+        let z = 1.0 - 2.0 * u;
+        let baseline = Vec3::new((1.0 - z * z).sqrt(), 0.0, z);
+        let guided = cone.sample([u, 0.0]).unwrap();
+        let density = 1.0 / (4.0 * PI);
+        point_power +=
+            (1.0 - PhotonCone::MIX) / cone.mixture_pdf(baseline, density, false) + PhotonCone::MIX / cone.mixture_pdf(guided, density, true);
+    }
+    assert!((point_power / f64::from(count) - 4.0 * PI).abs() < 1e-11);
+
+    let light = rectangle();
+    // The chosen width gives an exact partition of this stratified cosine
+    // domain. A guide behind the emitter must contribute null samples.
+    for sign in [1.0, -1.0] {
+        let guide = PhotonGuide { center: light.center + light.normal * (sign * distance), radius };
+        let mut power = 0.0;
+        for i in 0..count {
+            let u = (f64::from(i) + 0.5) / f64::from(count);
+            for (selector, probability) in [(0.0, PhotonCone::MIX), (0.9, 1.0 - PhotonCone::MIX)] {
+                let (_, _, flux) = light.emit_photon([0.5, 0.5], [u, 0.25], Some((guide, selector))).unwrap();
+                power += probability * flux.x;
+            }
+        }
+        assert!((power / f64::from(count) - PI * light.area * light.radiance.x).abs() < 1e-6);
+    }
+    let baseline = light.emit_photon([0.5, 0.5], [0.1, 0.25], None).unwrap();
+    for guide in [
+        PhotonGuide { center: light.center, radius },
+        PhotonGuide { center: light.center + light.normal * radius, radius },
+        PhotonGuide { center: light.center + light.normal * 1e6, radius },
+    ] {
+        assert_eq!(light.emit_photon([0.5, 0.5], [0.1, 0.25], Some((guide, 0.0))).unwrap(), baseline);
+    }
 }
 
 #[test]
@@ -122,6 +166,8 @@ fn opaque_path_oblique_and_grazing_coated_response_and_null_mass_match_independe
             let mut density = 0.0;
             let mut sampled = Vec3::ZERO;
             let mut mass = 0.0;
+            let mut sampled_second_moment = 0.0;
+            let mut ndf_second_moment = 0.0;
             for row in 0..side {
                 let u = (f64::from(row) + 0.5) / f64::from(side);
                 for col in 0..side {
@@ -131,28 +177,43 @@ fn opaque_path_oblique_and_grazing_coated_response_and_null_mass_match_independe
                     let phi = TAU * v;
                     let l = Vec3::new((1.0 - u * u).sqrt() * phi.cos(), (1.0 - u * u).sqrt() * phi.sin(), u);
                     let half = unit_direction(view + l).unwrap();
-                    let vh = view.dot(half);
+                    let vndf = |roughness: f64| {
+                        let a2 = roughness.powi(4);
+                        let denominator = 1.0 - half.z * half.z + half.z * half.z * a2;
+                        let lambda = 0.5 * ((1.0 + a2 * (1.0 - cosine * cosine) / (cosine * cosine)).sqrt() - 1.0);
+                        a2 / (PI * denominator * denominator * (1.0 + lambda) * 4.0 * cosine)
+                    };
+                    let independent_pdf = 0.6 * (0.5 * u / PI + 0.5 * vndf(0.6)) + 0.4 * vndf(0.5);
+                    density += independent_pdf * TAU / cells;
+                    let integrand = surface.brdf(Vec3::Z, view, l).unwrap() * u;
+                    quadrature += integrand * (TAU / cells);
                     let ndf = |roughness: f64| {
                         let a2 = roughness.powi(4);
                         let denominator = 1.0 - half.z * half.z + half.z * half.z * a2;
-                        a2 * half.z / (PI * denominator * denominator * 4.0 * vh)
+                        a2 * half.z / (PI * denominator * denominator * 4.0 * view.dot(half))
                     };
-                    let independent_pdf = 0.6 * (0.5 * u / PI + 0.5 * ndf(0.6)) + 0.4 * ndf(0.5);
-                    density += independent_pdf * TAU / cells;
-                    quadrature += surface.brdf(Vec3::Z, view, l).unwrap() * (u * TAU / cells);
+                    let ndf_pdf = 0.6 * (0.5 * u / PI + 0.5 * ndf(0.6)) + 0.4 * ndf(0.5);
+                    ndf_second_moment += integrand.x.powi(2) * TAU / (cells * ndf_pdf);
                     // Enumerate mixture components with their original probability.
-                    // Rejected NDF directions contribute zero mass and zero radiance;
+                    // Rejected directions contribute zero mass and zero radiance;
                     // no retry and no division by the number of accepted samples.
                     for (component, probability) in [(0.2, 0.4), (0.55, 0.3), (0.85, 0.3)] {
                         if let Some(s) = sample(surface, Vec3::Z, Vec3::Z, view, [component, u, v]).unwrap() {
                             mass += probability / cells;
                             sampled += s.weight * (probability / cells);
+                            sampled_second_moment += s.weight.x.powi(2) * (probability / cells);
                             assert!((s.pdf - surface_pdf(surface, Vec3::Z, view, s.direction).unwrap()).abs() < 1e-12 * s.pdf.max(1.0));
                         }
                     }
                 }
             }
-            assert!(mass < 0.99, "grazing NDF null samples must remain in the estimator");
+            assert!(mass < 1.0, "grazing null samples must remain in the estimator");
+            if cosine == 0.02 && metallic == 1.0 {
+                assert!(
+                    sampled_second_moment < 0.8 * ndf_second_moment,
+                    "visible normals second moment {sampled_second_moment}, full NDF {ndf_second_moment}"
+                );
+            }
             assert!((mass - density).abs() < 0.005, "nv={cosine}, metal={metallic}: accepted mass{mass}, independent PDF mass{density}");
             for (actual, expected) in [sampled.x, sampled.y, sampled.z].into_iter().zip([quadrature.x, quadrature.y, quadrature.z]) {
                 assert!((actual - expected).abs() < 0.005, "nv={cosine}, metal={metallic}: sampled{actual}, independent hemisphere{expected}");
@@ -190,7 +251,7 @@ fn opaque_path_source_strata_are_open_at_both_floating_point_endpoints() {
     for _ in 0..8 {
         bytes.extend_from_slice(&[128, 64, 32, 129]);
     }
-    let mut input = EnvironmentInput::new(HdrSource::new(bytes).unwrap(), 0.0, 1.0, 64).unwrap().begin().unwrap();
+    let mut input = EnvironmentInput::new(HdrSource::new(bytes).unwrap(), 0.0, 1.0, 64).unwrap().begin(false, false).unwrap();
     for _ in 0..10000 {
         if input.ready() {
             break;
@@ -219,7 +280,7 @@ fn authored_point_zero_two_base_and_coated_path_pdf_use_the_exact_unclamped_fini
     let original = white();
     let finish = original.with_authored_finish(Vec3::new(1.0, 1.0, 1.0), 1.0, 0.02).unwrap();
     for coat_weight in [0.0, 0.6] {
-        let coat = crate::clear_coat::ClearCoat::new(coat_weight, 0.2, 1.5).unwrap();
+        let coat = solidcraft_viewport::clear_coat::ClearCoat::new(coat_weight, 0.2, 1.5).unwrap();
         let surface = finish.with_clear_coat(coat);
         let a2 = 0.02_f64.powi(4);
         let ca2 = 0.2_f64.powi(4);

@@ -71,7 +71,7 @@ pub(crate) fn progress_text(work: Option<(&str, usize, usize)>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_engine::render::StandardView;
+    use solidcraft_viewport::StandardView;
 
     #[test]
     fn view_dxf_file_menu_exports_with_the_current_camera_and_remembers_hidden_choice() {
