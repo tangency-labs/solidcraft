@@ -4,8 +4,9 @@ use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::params::bad;
+use crate::schema::component::PasteNewResult;
 use crate::{Result, Sel, Session};
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_doc::{Document, Feature, FeatureKind, Mat, Occurrence};
 
 const CMD: &str = "component.paste_new";
@@ -793,7 +794,16 @@ pub(super) fn build(
         }
     }
     scratch.selection = vec![Sel::Occurrence { path: clone_path }];
-    let out = json!({"component":root,"occurrence":root_occurrence,"features":new_ids,"components":components.len(),"bodies":expected_count,"frozen_bodies":frozen,"notices":notices});
+    let out = super::component::reply(PasteNewResult {
+        component: root,
+        occurrence: root_occurrence,
+        features: new_ids,
+        components: components.len(),
+        bodies: expected_count,
+        frozen_bodies: frozen,
+        notices,
+        param_warnings: Vec::new(),
+    })?;
     Ok((scratch, out))
 }
 

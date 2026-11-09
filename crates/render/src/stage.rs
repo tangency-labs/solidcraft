@@ -111,7 +111,7 @@ impl StagePanel {
         mesh.tri_face.extend([0, 0]);
         // The surface carries exact linear reflectance. This display colour is not
         // used as an additional multiplier by PBR consumers.
-        let color = self.reflectance_linear.map(solidcraft_geom::srgb::encode8);
+        let color = self.reflectance_linear.map(solidcraft_color::srgb::encode8);
         Ok(ProductMesh {
             name: format!("__render_stage__/{}", self.id),
             mesh: Arc::new(mesh),

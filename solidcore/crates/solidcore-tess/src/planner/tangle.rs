@@ -1,0 +1,214 @@
+//! Where a face's sampled boundary crosses itself: chords of its loops, in the face's
+//! parameters, that cross another chord of the face although the curves they stand for do not
+//! (two curves running closer together than their chords sag).
+
+use std::cmp::Ordering;
+
+use solidcore::eval::EvalSurface;
+
+use super::seam;
+
+/// Two chords cross only where each one's ends lie strictly either side of the other, by more
+/// than this fraction of the product of their lengths (a chord ending on another, as at a
+/// shared vertex or along a seam's two uses a period apart, is not a crossing).
+const STRADDLE: f64 = 1e-10;
+
+/// One chord of a loop, or a copy of it whole periods along.
+struct Chord {
+    /// The chord's place in the face: its loop and its first node.
+    at: (usize, usize),
+    a: [f64; 2],
+    b: [f64; 2],
+}
+
+impl Chord {
+    /// The low corner of the chord's parameter box.
+    fn lo(&self) -> [f64; 2] {
+        [self.a[0].min(self.b[0]), self.a[1].min(self.b[1])]
+    }
+    /// The high corner of the chord's parameter box.
+    fn hi(&self) -> [f64; 2] {
+        [self.a[0].max(self.b[0]), self.a[1].max(self.b[1])]
+    }
+}
+
+/// `q` moved by `by` along parameter direction `d` (0: u, otherwise v).
+fn shifted(q: [f64; 2], d: usize, by: f64) -> [f64; 2] {
+    if d == 0 {
+        [q[0] + by, q[1]]
+    } else {
+        [q[0], q[1] + by]
+    }
+}
+
+/// The chords (loop, first node) of `loops` that cross another chord of the face, in its loop or
+/// another, each once and in order. On a closed surface the boundary crosses itself where any
+/// copies of two chords, whole periods apart, cross; chords ending on a pole, where the
+/// parameter along the pole is free, are left out. Adjacent chords of a loop share a node and
+/// never cross. `reach`: how near a pole a node is taken as one (see
+/// [`solidcore::eval::uv::degenerate_within`]); a node whose poles the kernel's classifier
+/// cannot tell is the error.
+pub(crate) fn crossing(
+    s: &EvalSurface,
+    reach: f64,
+    loops: &[seam::Loop],
+) -> Result<Vec<(usize, usize)>, super::Unclassified> {
+    let dom = solidcore::eval::uv::domain(s);
+    let pole = |q: [f64; 2]| super::pole_dir(s, q, reach).map(|d| d.is_some());
+    let mut chords: Vec<Chord> = Vec::new();
+    for (li, l) in loops.iter().enumerate() {
+        let n = l.uv.len();
+        if n < 3 {
+            continue;
+        }
+        // Each node is on a pole or not whichever two chords it ends: asked once.
+        let mut on_pole: Vec<Option<bool>> = vec![None; n];
+        let mut node_pole = |k: usize, q: [f64; 2]| -> Result<bool, super::Unclassified> {
+            if let Some(p) = on_pole.get(k).copied().flatten() {
+                return Ok(p);
+            }
+            let p = pole(q)?;
+            if let Some(slot) = on_pole.get_mut(k) {
+                *slot = Some(p);
+            }
+            Ok(p)
+        };
+        for k in 0..n {
+            // Proven: n = l.uv.len() >= 3, checked above
+            let next = (k + 1) % n;
+            let (Some(&a), Some(&b)) = (l.uv.get(k), l.uv.get(next)) else {
+                continue;
+            };
+            if !(a.iter().chain(&b).all(|x| x.is_finite()))
+                || node_pole(k, a)?
+                || node_pole(next, b)?
+            {
+                continue;
+            }
+            // The loop's closing chord of a loop that winds round the surface ends at the copy of
+            // its first node nearest its last; every chord then starts in one period.
+            let (mut a, mut b) = (a, b);
+            for ((x, y), per) in a.iter_mut().zip(&mut b).zip(dom.period) {
+                let Some(per) = per else { continue };
+                *y = solidcore::eval::uv::unwrap(*y, *x, Some(per));
+                let back = (x.min(*y) / per).floor() * per;
+                *x -= back;
+                *y -= back;
+            }
+            chords.push(Chord { at: (li, k), a, b });
+        }
+    }
+    // With every chord starting in one period, two chords' copies can only cross where one of
+    // them is moved a period along at most: each chord also as its copies a period along.
+    for (d, per) in dom.period.into_iter().enumerate() {
+        let Some(per) = per else { continue };
+        let along: Vec<Chord> = chords
+            .iter()
+            .map(|c| Chord {
+                at: c.at,
+                a: shifted(c.a, d, per),
+                b: shifted(c.b, d, per),
+            })
+            .collect();
+        chords.extend(along);
+    }
+    let adjacent = |p: (usize, usize), q: (usize, usize)| {
+        let n = loops.get(p.0).map_or(0, |l| l.uv.len());
+        // Proven: p and q are chords' places, whose loops have n >= 3 nodes (no others make chords)
+        p == q || (p.0 == q.0 && ((p.1 + 1) % n == q.1 || (q.1 + 1) % n == p.1))
+    };
+    // Sweep along u: only chords whose u ranges overlap can cross.
+    chords.sort_by(|x, y| x.lo()[0].total_cmp(&y.lo()[0]));
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    for (i, x) in chords.iter().enumerate() {
+        for y in chords.iter().skip(i + 1) {
+            if y.lo()[0] > x.hi()[0] {
+                break;
+            }
+            if y.lo()[1] > x.hi()[1] || x.lo()[1] > y.hi()[1] || adjacent(x.at, y.at) {
+                continue;
+            }
+            if cross(x.a, x.b, y.a, y.b) {
+                out.push(x.at);
+                out.push(y.at);
+            }
+            // A node of one chord lying on the other (inside it, not at its ends) is no crossing,
+            // but no triangulation can keep both as constraints either: where two curves leave a
+            // vertex they touch at along one tangent (a circle touching another from inside), the
+            // inner one's node can fall on the outer one's chord (with the outer chord twice the
+            // inner, exactly so but for the next order). The chord the node lies on is halved.
+            // (Not where the two chords run along one line: a seam's two uses, a period apart,
+            // lie on each other as copies.)
+            if !along(x.a, x.b, y.a, y.b) && [y.a, y.b].iter().any(|q| on(x.a, x.b, *q)) {
+                out.push(x.at);
+            }
+            if !along(y.a, y.b, x.a, x.b) && [x.a, x.b].iter().any(|q| on(y.a, y.b, *q)) {
+                out.push(y.at);
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    Ok(out)
+}
+
+/// Whether `q` lies on the segment `ab` within [`STRADDLE`] (of the segment's squared length,
+/// off its line) strictly between its ends (not at either, by the same measure along it).
+fn on(a: [f64; 2], b: [f64; 2], q: [f64; 2]) -> bool {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let len2 = dx * dx + dy * dy;
+    if len2.partial_cmp(&0.0) != Some(Ordering::Greater) {
+        return false;
+    }
+    let (qx, qy) = (q[0] - a[0], q[1] - a[1]);
+    let off = (dx * qy - dy * qx).abs();
+    let along = (dx * qx + dy * qy) / len2;
+    off <= 1e3 * STRADDLE * len2 && along > 1e-6 && along < 1.0 - 1e-6
+}
+
+/// Whether `c` and `d` both lie on the line of `ab` (within [`on`]'s measure).
+fn along(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let len2 = dx * dx + dy * dy;
+    let off = |q: [f64; 2]| (dx * (q[1] - a[1]) - dy * (q[0] - a[0])).abs();
+    len2 > 0.0 && off(c) <= 1e3 * STRADDLE * len2 && off(d) <= 1e3 * STRADDLE * len2
+}
+
+/// Whether the segments `ab` and `cd` cross: each one's ends strictly either side of the other.
+fn cross(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
+    let orient = |p: [f64; 2], q: [f64; 2], r: [f64; 2]| {
+        (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+    };
+    let len = |p: [f64; 2], q: [f64; 2]| (q[0] - p[0]).hypot(q[1] - p[1]);
+    let eps = STRADDLE * len(a, b) * len(c, d);
+    let side = |o: f64| {
+        if o > eps {
+            1
+        } else if o < -eps {
+            -1
+        } else {
+            0
+        }
+    };
+    let (s1, s2, s3, s4) = (
+        side(orient(a, b, c)),
+        side(orient(a, b, d)),
+        side(orient(c, d, a)),
+        side(orient(c, d, b)),
+    );
+    s1 * s2 < 0 && s3 * s4 < 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crossing_chords_are_found_and_touching_ones_are_not() {
+        assert!(cross([0.0, 0.0], [2.0, 2.0], [0.0, 2.0], [2.0, 0.0]));
+        // Ending on the other, sharing an end, collinear: no crossing.
+        assert!(!cross([0.0, 0.0], [2.0, 0.0], [1.0, 0.0], [1.0, 1.0]));
+        assert!(!cross([0.0, 0.0], [2.0, 0.0], [2.0, 0.0], [3.0, 1.0]));
+        assert!(!cross([0.0, 0.0], [2.0, 0.0], [1.0, 0.0], [3.0, 0.0]));
+    }
+}

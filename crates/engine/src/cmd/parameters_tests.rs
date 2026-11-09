@@ -350,6 +350,17 @@ fn completion_matches_parameters_anywhere_in_their_name() {
     let c = run(&mut s, "parameters.complete", json!({"prefix": "THICK"}));
     assert_eq!(texts(&c), ["cab_side_thickness"], "any case: {c}");
     assert!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "xyz"}))).is_empty());
+    // #11978: the starts of the name's words, in order, find it; out of order they don't.
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "2 * cabthi"}));
+    assert_eq!(texts(&c), ["cab_side_thickness"], "{c}");
+    assert_eq!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "doowid"}))), ["door_width"]);
+    assert!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "thicab"}))).is_empty());
+    // A match by word starts alone comes after every name that contains the word, even a
+    // favourite: `inner_diameter` has no `id` in it.
+    run(&mut s, "parameters.add", json!({"name": "inner_diameter", "expression": "6 mm"}));
+    run(&mut s, "parameters.favorite", json!({"name": "inner_diameter", "favorite": true}));
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "id"}));
+    assert_eq!(texts(&c), ["cab_side_thickness", "side", "door_width", "inner_diameter"], "{c}");
     // Functions keep matching from the start: `in` is not `sin(`.
     let c = run(&mut s, "parameters.complete", json!({"prefix": "in"}));
     assert!(!c["suggestions"].as_array().unwrap().iter().any(|x| x["text"] == "sin("), "{c}");
@@ -387,6 +398,27 @@ fn csv_and_json_round_trip() {
     run(&mut v, "parameters.import", json!({"path": path.to_string_lossy()}));
     assert_eq!(v.doc.param("len").map(|p| p.expr.as_str()), Some("80 mm"));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A value a spreadsheet would run as a formula is exported as text, with a `'` first, and
+/// imports back as it was (#12728). A plain number keeps its sign, and `;` makes a field quoted.
+#[test]
+fn csv_keeps_formulas_as_text_and_imports_them_back() {
+    let mut s = Session::default();
+    let rows = [("d3", "4", "plain"), ("a", "=d3", "+2 for the fit"), ("b", "=5", "'=kept"), ("c", "-5 mm", "@x"), ("e", "6", "one; two")];
+    for (name, expression, comment) in rows {
+        run(&mut s, "parameters.add", json!({"name": name, "expression": expression, "comment": comment}));
+    }
+    let csv = run(&mut s, "parameters.export", json!({"format": "csv"}))["text"].as_str().unwrap_or_default().to_string();
+    for written in [",'=d3,", ",'+2 for the fit,", ",'=5,", ",''=kept,", ",'-5 mm,-5,'@x,", ",\"one; two\","] {
+        assert!(csv.contains(written), "{written}: {csv}");
+    }
+    let mut t = Session::default();
+    run(&mut t, "parameters.import", json!({"text": csv}));
+    for (name, _, comment) in rows {
+        let (before, after) = (s.doc.param(name), t.doc.param(name));
+        assert_eq!(after.map(|p| (p.expr.as_str(), p.comment.as_str())), before.map(|p| (p.expr.as_str(), comment)), "{name}: {csv}");
+    }
 }
 
 #[test]
