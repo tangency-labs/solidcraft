@@ -11,9 +11,10 @@ use solidcraft_engine::vibration::{COMMAND, Shape, Support, SweepResult};
 #[cfg(not(target_arch = "wasm32"))]
 use solidcraft_engine::vibration::{Progress, SweepParams, with_progress};
 
+use solidcraft_theme::Tokens;
+use solidcraft_ui_text::tr;
+
 use crate::SolveApp;
-use crate::i18n::tr;
-use crate::theme::Tokens;
 use crate::ui_kit as kit;
 use crate::viewport::Proj;
 
@@ -407,7 +408,7 @@ fn undeformed_outline(r: &SweepResult, painter: &egui::Painter, proj: &Proj) {
         if count == 1 {
             let to_screen = |i| proj.to_screen(vector(*r.vertices_mm.get(i)?));
             if let Some((a, b)) = to_screen(a).zip(to_screen(b)) {
-                painter.extend(crate::viewport::dashed_line(&[a, b], painter.clip_rect(), stroke, 4.0, 4.0));
+                painter.extend(kit::dashed_line(&[a, b], painter.clip_rect(), stroke, 4.0, 4.0));
             }
         }
     }
