@@ -2590,21 +2590,6 @@ impl Model {
                     out.push(FeatureResult { state: state.clone(), unkept: false, ..r.clone() });
                     continue;
                 }
-                // Where a refusal of this feature's check, running beside the features after it, takes
-                // the evaluation back to.
-                let saved = overlap::Saved {
-                    state: state.clone(),
-                    reserved: reserved.clone(),
-                    out_len: out.len(),
-                    reuse: reuse_in,
-                    prev_fp: prev_fp_in,
-                    recomputed,
-                    restored,
-                    poses: poses.clone(),
-                    moved: moved.clone(),
-                    failed: failed.clone(),
-                    rolled_results: rolled_results.clone(),
-                };
                 recomputed += 1;
                 // Each feature computed is a profiler span named after its kind.
                 let _feature_span = solidcraft_profile::span("feature", f.kind.type_name());
@@ -2678,6 +2663,21 @@ impl Model {
                 if r.is_ok()
                     && let Some(after) = apart.take()
                 {
+                    // Where a refusal of this feature's check, running beside the features after
+                    // it, takes the evaluation back to: the loop's state before this feature.
+                    let saved = overlap::Saved {
+                        state: state.clone(),
+                        reserved: reserved.clone(),
+                        out_len: out.len(),
+                        reuse: reuse_in,
+                        prev_fp: prev_fp_in,
+                        recomputed: recomputed - 1,
+                        restored,
+                        poses: poses.clone(),
+                        moved: moved.clone(),
+                        failed: failed.clone(),
+                        rolled_results: rolled_results.clone(),
+                    };
                     let failure = overlap::Failure {
                         error: kernel::KernelError::Failed(String::new()),
                         warning: warning.clone(),
