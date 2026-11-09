@@ -5736,3 +5736,27 @@ fn split_failures_name_the_public_command() {
     assert!(!text.contains("invalid parameters for `split`"), "{text}");
     assert!(!text.contains("sketch.modify"), "{text}");
 }
+
+/// #12294: a spline offset together with a line is trimmed and unlinked, so a distance that names a
+/// parameter drives nothing. The reply says so; a linked offset of the same parameter does not.
+#[test]
+fn an_unlinked_offset_says_its_parameter_drives_nothing() {
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "wall", "expression": "1 mm"}));
+    let sp = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[-20, 0], [-10, 15], [10, 15], [20, 0]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [[20, 0], [-20, 0]]}));
+    let r = run(&mut s, "sketch.offset", json!({"curves": [sp], "distance": "wall", "side": [0, 5], "param": "w_in"}));
+    assert!(r["param"].is_null(), "{r}");
+    let warning = r["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("not linked to its source"), "{r}");
+    // A rectangle's offset is linked: its parameter drives it and nothing is said.
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "wall", "expression": "1 mm"}));
+    let lines: Vec<String> = [[[0, 0], [20, 0]], [[20, 0], [20, 10]], [[20, 10], [0, 10]], [[0, 10], [0, 0]]]
+        .iter()
+        .map(|p| ids(&run(&mut s, "sketch.line", json!({"points": p}))["curves"])[0].clone())
+        .collect();
+    let r = run(&mut s, "sketch.offset", json!({"curves": lines, "distance": "wall", "side": [10, 5]}));
+    assert!(r["param"].is_string(), "{r}");
+    assert!(r.get("warning").is_none(), "{r}");
+}
