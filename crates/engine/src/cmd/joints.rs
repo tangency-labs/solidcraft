@@ -47,6 +47,9 @@ const CAM_CONTRACT: TypedContract<CamParams> = TypedContract::new();
 #[path = "joints_inspect.rs"]
 mod inspect;
 
+#[path = "assembly_constraint.rs"]
+pub(crate) mod constraint;
+
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("joint.origin", "Joint Origin", crate::checked!("joint.origin", joint_origin))
         .at("SOLID", "CREATE")
@@ -236,9 +239,12 @@ pub fn place(s: &mut Session) -> joints::Solution {
 
 /// Work out the offsets, angles and values joints were given as expressions again (a parameter
 /// may have changed). One that can't be worked out (its parameter gone) keeps its numbers; the
-/// solve leaves that joint out and says why.
+/// solve leaves that joint out and says why. A tangent constraint's offset is its gap plus the
+/// radius of its round face as the face is now, so the part keeps resting on the plane when the
+/// radius changes; a face that can't be found keeps the numbers it has.
 fn reexpress(s: &mut Session) {
     let params = joints::Params::new(&s.doc);
+    let st = s.model.state();
     let changed: Vec<(usize, (f64, f64, Vec<f64>))> = s
         .doc
         .assembly
@@ -247,7 +253,10 @@ fn reexpress(s: &mut Session) {
         .enumerate()
         .filter(|(_, j)| !j.exprs.is_empty())
         .filter_map(|(i, j)| {
-            let (o, a, mut q) = joints::expressed(&params, j).ok()?;
+            let (mut o, a, mut q) = joints::expressed(&params, j).ok()?;
+            if j.constraint == Some(joints::Constraint::Tangent) {
+                o += s.doc.origin_radius(&st, &j.b).ok()?;
+            }
             joints::clamp(j, &mut q);
             ((o, a) != (j.offset, j.angle) || q != j.values).then_some((i, (o, a, q)))
         })
@@ -1152,14 +1161,14 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
         return Err(EngineError::Other("too many joints".into()));
     }
     check_sides(&j.a, &j.b, "joint.create")?;
-    // Relations and loop-closing typed joints start where their parts are. A typed joint in
+    // Relations, constraints and loop-closing typed joints start where their parts are. A typed joint in
     // an open chain keeps its usual initial values; explicitly supplied values also keep theirs.
     // A joint on a plane or axis side anchors its part to that geometry: it starts where its
     // parts are too, so the part keeps its place on the plane (or along the axis) instead of
     // jumping to the geometry's origin.
     if p.get("values").is_none()
         && p.get("value").is_none()
-        && (j.kind.is_relation() || closes_loop(s, &j) || datum_sided(&j))
+        && (j.starts_where_it_is() || closes_loop(s, &j) || datum_sided(&j))
         && let Some(q) = joints::relation_values(&s.doc, &s.model.state(), &j)
     {
         j.values = q;
@@ -1345,6 +1354,13 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     let kind = kind_param(p, cmd)?;
     let a = origin_param(s, p.get("a"), cmd)?;
     let b = origin_param(s, p.get("b"), cmd)?;
+    let j = new_joint(s, p, kind, a, b, cmd)?;
+    add_joint(s, j, p)
+}
+
+/// A joint of `kind` between origins `a` and `b`, with the values, limits, flip, offset, angle and
+/// name `p` gives (as joint.create reads them), not yet added.
+fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: JointOrigin, cmd: &str) -> Result<Joint> {
     let id = s.doc_mut().allocate_id()?;
     let name = new_joint_name(s, p, kind);
     let offset = match p.get("offset") {
@@ -1369,13 +1385,14 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
         suppressed: false,
         exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
         captured: None,
+        constraint: None,
     };
     // No angle given: B keeps its turn about the joint's axis where a half turn would otherwise
     // come only from how its origin's x was chosen. (An angle relation's angle is its tilt.)
     if angle.is_none() && !j.kind.is_relation() {
         j.angle = joints::least_turn_angle(&s.doc, &s.model.state(), &j);
     }
-    add_joint(s, j, p)
+    Ok(j)
 }
 
 fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1415,6 +1432,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         suppressed: false,
         exprs: Default::default(),
         captured: None,
+        constraint: None,
     };
     add_joint(s, j, p)
 }
@@ -2083,6 +2101,10 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(o) = offset {
         j.offset = o;
         j.exprs.offset = typed(p.get("offset"));
+        // A tangent constraint's offset is its gap: the radius is added when it is solved.
+        if j.constraint == Some(joints::Constraint::Tangent) {
+            j.exprs.offset.get_or_insert_with(|| format!("{o} mm"));
+        }
     }
     if let Some(a) = angle {
         j.angle = a;
@@ -2120,11 +2142,11 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         && kind.is_none_or(|k| k == was_kind)
         && offset.is_none_or(|o| (o - was_offset).abs() <= 1e-9)
         && bool_(p, "flip").is_none_or(|f| f == was_flip);
-    // Otherwise a relation whose type, offset, tilt or flip changes, or whose sides move, starts
-    // again from where its parts are.
+    // Otherwise a relation or a constraint whose type, offset, tilt or flip changes, or whose
+    // sides move, starts again from where its parts are.
     let reseat = !tilt_only && (kind.is_some() || offset.is_some() || angle.is_some() || p.get("flip").is_some() || sides);
     if reseat {
-        let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| j.kind.is_relation()).cloned();
+        let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| j.starts_where_it_is()).cloned();
         if let Some(q) = edited.and_then(|j| joints::relation_values(&s.doc, &s.model.state(), &j))
             && let Some(j) = s.doc_mut().assembly.joints.iter_mut().find(|j| j.id == id)
         {
@@ -2218,6 +2240,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
                 frame_a: world(&j.a),
                 frame_b: world(&j.b),
                 expressions: (!j.exprs.is_empty()).then(|| j.exprs.clone()),
+                constraint: j.constraint,
             }
         })
         .collect();

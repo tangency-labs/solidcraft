@@ -94,6 +94,7 @@ mod tests {
             suppressed: false,
             exprs: Default::default(),
             captured: None,
+            constraint: None,
         }
     }
 
