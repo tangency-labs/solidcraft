@@ -2366,6 +2366,7 @@ fn native_worker(shared: Arc<Shared>) {
 #[cfg(test)]
 mod retained_request_tests {
     use super::*;
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
     use solidcraft_geom::MeshGeom;
 
     #[test]
