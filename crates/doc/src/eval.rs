@@ -8235,58 +8235,149 @@ pub fn pattern_matrices(doc: &Document, st: &ModelState, p: &crate::PatternKind)
     pattern_transforms(doc, &vals, st, 0, p)
 }
 
-/// Keep each Pattern of components' occurrences in step with its count and spacing (#12116):
-/// add or remove copies when the count changes, update transforms when the source or spacing
-/// moves, and drop copies of a suppressed or rolled-back Pattern. Surviving copies keep their
-/// occurrence ids.
-pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Result<()> {
+/// True when the document owns at least one Pattern that manages component
+/// occurrences. Session::refresh uses this so designs without component
+/// patterns never take a `doc_mut()` write path for reconcile (Arc sharing /
+/// undo checkpoints stay intact).
+pub fn has_component_patterns(doc: &Document) -> bool {
+    doc.features.iter().any(|f| {
+        matches!(
+            &f.kind,
+            FeatureKind::Pattern { components, .. } if !components.is_empty()
+        )
+    })
+}
+
+#[derive(Clone)]
+struct ComponentPatternPlan {
+    feature_id: u64,
+    /// When false, clear previous managed occurrences (suppressed / rolled back).
+    active: bool,
+    components: Vec<u64>,
+    pattern: crate::PatternKind,
+    feature_component: u64,
+    previous: Vec<u64>,
+}
+
+fn component_pattern_plans(doc: &Document) -> Vec<ComponentPatternPlan> {
     let marker = doc.marker.unwrap_or(doc.features.len());
-    let (vals, _) = doc.param_values();
-    // Snapshot what each Pattern of components wants, then mutate. Features after the marker
-    // are rolled back: their copies go, like bodies of a rolled-back Pattern.
-    let plans: Vec<(u64, bool, Vec<u64>, crate::PatternKind, u64)> = doc
-        .features
+    doc.features
         .iter()
         .enumerate()
         .filter_map(|(i, f)| match &f.kind {
-            FeatureKind::Pattern { pattern, components, .. } if !components.is_empty() => {
-                Some((f.id, f.suppressed || i >= marker, components.clone(), pattern.clone(), f.component))
-            }
+            FeatureKind::Pattern { pattern, components, occurrences, .. } if !components.is_empty() => Some(ComponentPatternPlan {
+                feature_id: f.id,
+                active: !(f.suppressed || i >= marker),
+                components: components.clone(),
+                pattern: pattern.clone(),
+                feature_component: f.component,
+                previous: occurrences.clone(),
+            }),
             _ => None,
         })
-        .collect();
-    for (feature_id, inactive, components, pattern, feature_component) in plans {
-        if inactive {
-            clear_pattern_occurrences(doc, feature_id)?;
+        .collect()
+}
+
+fn placement_unchanged(doc: &Document, id: u64, component: u64, parent: u64, transform: Mat) -> bool {
+    doc.occurrences.iter().any(|o| o.id == id && o.component == component && o.parent == parent && o.transform == transform)
+}
+
+/// True when reconcile would add, remove, or rewrite at least one managed
+/// occurrence. Safe with a shared `&Document` so refresh can skip `doc_mut()`
+/// when patterns are already aligned.
+pub fn component_patterns_need_update(doc: &Document, st: &ModelState) -> bool {
+    let (vals, _) = doc.param_values();
+    for plan in component_pattern_plans(doc) {
+        if !plan.active {
+            if !plan.previous.is_empty() {
+                return true;
+            }
             continue;
         }
-        let mats = pattern_transforms(doc, &vals, st, feature_component, &pattern)?;
-        let mut made = Vec::with_capacity(components.len().saturating_mul(mats.len()));
-        let previous = match &doc.feature(feature_id).map(|f| &f.kind) {
-            Some(FeatureKind::Pattern { occurrences, .. }) => occurrences.clone(),
-            _ => Vec::new(),
+        let Ok(mats) = pattern_transforms(doc, &vals, st, plan.feature_component, &plan.pattern) else {
+            // Bad transforms are already reported by evaluate; leave copies alone.
+            continue;
         };
-        // Occurrences are stored per component, then per matrix. Shrink/grow each component's
-        // block on its own so survivors keep their ids when the count changes.
-        let old_per = match components.len() {
+        let old_per = match plan.components.len() {
             0 => 0,
-            n => previous.len() / n,
+            n => plan.previous.len() / n,
         };
-        let mut leftover = std::collections::BTreeSet::new();
-        for (ci, component) in components.into_iter().enumerate() {
-            let src = doc.occurrence_of(component).cloned().ok_or_else(|| DocError::Unknown(format!("component {component}")))?;
-            // The first placement is the pattern's seed; keep it by id so later adds of this
-            // reconcile do not change which occurrence we read as the source.
-            let seed = src.id;
-            let src = doc.occurrences.iter().find(|o| o.id == seed).cloned().unwrap_or(src);
+        let mut made_len = 0usize;
+        for (ci, component) in plan.components.iter().copied().enumerate() {
+            let Some(src) = doc.occurrence_of(component).cloned() else {
+                // Missing seed: drop any leftover managed copies for this pattern.
+                return !plan.previous.is_empty();
+            };
             let start = ci.saturating_mul(old_per);
-            let block = previous.get(start..start.saturating_add(old_per)).unwrap_or(&[]);
+            let block = plan.previous.get(start..start.saturating_add(old_per)).unwrap_or(&[]);
             let mut old = block.iter().copied();
             for m in &mats {
                 let transform = crate::mat_mul(m, &src.transform);
                 match old.next() {
+                    Some(id) if placement_unchanged(doc, id, component, src.parent, transform) => {
+                        made_len += 1;
+                    }
+                    Some(_) | None => return true,
+                }
+            }
+            if old.next().is_some() {
+                return true;
+            }
+        }
+        if made_len != plan.previous.len() {
+            return true;
+        }
+    }
+    false
+}
+
+/// Keep each Pattern of components' occurrences in step with its count and spacing (#12116):
+/// add or remove copies when the count changes, update transforms when the source or spacing
+/// moves, and drop copies of a suppressed or rolled-back Pattern. Surviving copies keep their
+/// occurrence ids. Per-pattern failures (missing component, bad transforms, add errors) skip
+/// that pattern after recording whatever copies were made, and do not abort the rest.
+pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Result<()> {
+    let (vals, _) = doc.param_values();
+    // Snapshot what each Pattern of components wants, then mutate. Features after the marker
+    // are rolled back: their copies go, like bodies of a rolled-back Pattern.
+    let plans = component_pattern_plans(doc);
+    for plan in plans {
+        if !plan.active {
+            clear_pattern_occurrences(doc, plan.feature_id)?;
+            continue;
+        }
+        let Ok(mats) = pattern_transforms(doc, &vals, st, plan.feature_component, &plan.pattern) else {
+            continue;
+        };
+        let mut made = Vec::with_capacity(plan.components.len().saturating_mul(mats.len()));
+        // Occurrences are stored per component, then per matrix. Shrink/grow each component's
+        // block on its own so survivors keep their ids when the count changes.
+        let old_per = match plan.components.len() {
+            0 => 0,
+            n => plan.previous.len() / n,
+        };
+        let mut leftover = std::collections::BTreeSet::new();
+        for (ci, component) in plan.components.iter().copied().enumerate() {
+            let start = ci.saturating_mul(old_per);
+            let block = plan.previous.get(start..start.saturating_add(old_per)).unwrap_or(&[]);
+            let mut old = block.iter().copied();
+            let Some(src) = doc.occurrence_of(component).cloned() else {
+                // Missing seed: drop this component's previous copies; keep going so a later
+                // Pattern still reconciles.
+                leftover.extend(old);
+                continue;
+            };
+            // The first placement is the pattern's seed; keep it by id so later adds of this
+            // reconcile do not change which occurrence we read as the source.
+            let seed = src.id;
+            let src = doc.occurrences.iter().find(|o| o.id == seed).cloned().unwrap_or(src);
+            for m in &mats {
+                let transform = crate::mat_mul(m, &src.transform);
+                match old.next() {
                     Some(id) if doc.occurrences.iter().any(|o| o.id == id && o.component == component) => {
-                        if let Some(o) = doc.occurrences.iter_mut().find(|o| o.id == id) {
+                        if let Some(o) = doc.occurrences.iter_mut().find(|o| o.id == id)
+                            && (o.parent != src.parent || o.transform != transform)
+                        {
                             o.parent = src.parent;
                             o.transform = transform;
                         }
@@ -8294,11 +8385,15 @@ pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Resu
                     }
                     Some(id) => {
                         leftover.insert(id);
-                        made.push(doc.add_occurrence(component, src.parent, transform)?);
+                        match doc.add_occurrence(component, src.parent, transform) {
+                            Ok(new_id) => made.push(new_id),
+                            Err(_) => continue,
+                        }
                     }
-                    None => {
-                        made.push(doc.add_occurrence(component, src.parent, transform)?);
-                    }
+                    None => match doc.add_occurrence(component, src.parent, transform) {
+                        Ok(new_id) => made.push(new_id),
+                        Err(_) => continue,
+                    },
                 }
             }
             leftover.extend(old);
@@ -8306,7 +8401,9 @@ pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Resu
         if !leftover.is_empty() {
             doc.remove_occurrences(&leftover);
         }
-        if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(feature_id).map(|f| &mut f.kind) {
+        if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(plan.feature_id).map(|f| &mut f.kind)
+            && *occurrences != made
+        {
             *occurrences = made;
         }
     }
@@ -8317,10 +8414,11 @@ fn clear_pattern_occurrences(doc: &mut Document, feature_id: u64) -> Result<()> 
     let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature(feature_id).map(|f| &f.kind) else {
         return Ok(());
     };
-    let gone: std::collections::BTreeSet<u64> = occurrences.iter().copied().collect();
-    if !gone.is_empty() {
-        doc.remove_occurrences(&gone);
+    if occurrences.is_empty() {
+        return Ok(());
     }
+    let gone: std::collections::BTreeSet<u64> = occurrences.iter().copied().collect();
+    doc.remove_occurrences(&gone);
     if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(feature_id).map(|f| &mut f.kind) {
         occurrences.clear();
     }

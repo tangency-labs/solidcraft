@@ -1364,8 +1364,15 @@ impl Session {
         }
         // Component Pattern features keep their count/spacing expressions; place their copies
         // after the model rebuild so a parameter change updates the placements (#12116).
-        let state = self.model.state();
-        let _ = solidcraft_doc::reconcile_component_patterns(self.doc_mut(), &state);
+        // Only take doc_mut when a Pattern of components exists and its copies are out of date:
+        // otherwise every refresh would Arc::make_mut the design and break undo / drag / Save As
+        // checks that compare document addresses (see #12116 review).
+        if solidcraft_doc::has_component_patterns(&self.doc) {
+            let state = self.model.state();
+            if solidcraft_doc::component_patterns_need_update(&self.doc, &state) {
+                let _ = solidcraft_doc::reconcile_component_patterns(self.doc_mut(), &state);
+            }
+        }
         self.revision += 1;
         self.prune_occurrence_state();
         // Looked at only when what the groups can name has changed, not on every refresh.
