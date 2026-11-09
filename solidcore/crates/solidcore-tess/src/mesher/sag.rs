@@ -7,23 +7,22 @@
 //! conforming. Sides on the face's boundary are never split: they are the edges' own nodes,
 //! which the neighbouring face shares.
 
-use solidcraft_geom::prelude::*;
+use crate::vec::VecExt as _;
 use std::collections::HashMap;
 
-use solidcore_record::Vec3;
-use solidcraft_geom::tess::EvalSurface;
+use solidcore::Vec3;
+use solidcore::eval::plan::EvalSurface;
 
 /// Split the triangles `tris` of a face (indices into `uv`; the first `fixed.len()` points sit
 /// at `fixed`, the rest on the surface at their parameters) until none of them lies farther
-/// than `tol` from the surface `s`, adding at most `max_points` points to `uv`. `reach`: how near
-/// a pole a point is taken as one (see [`super::uv::degenerate_within`]).
-pub(crate) fn refine(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: &mut Vec<[f64; 2]>, tris: &mut Vec<[u32; 3]>, max_points: usize) {
+/// than `tol` from the surface `s`, adding at most `max_points` points to `uv`. `poles`: which
+/// nodes are poles, asked once per node ([`Poles`]).
+pub(crate) fn refine(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], uv: &mut Vec<[f64; 2]>, tris: &mut Vec<[u32; 3]>, max_points: usize) {
     if !(tol.is_finite() && tol > 0.0) || tris.is_empty() {
         return;
     }
     let at = |q: [f64; 2]| s.eval(q[0], q[1]).0;
-    let dom = super::uv::domain(s);
-    let mean = |qs: &[[f64; 2]]| mean(s, &dom, reach, qs);
+    let mean = |qs: &[[f64; 2]]| poles.mean(qs);
     // How far the flat point `c` lies from the surface, measured along the normal at the surface
     // point of the same parameters: those parameters need not be the nearest (a straight line in
     // the parameters is no geodesic near a pole), and only the departure across the surface
@@ -112,17 +111,52 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: 
     }
 }
 
-/// The mean of parameter points, as the surface point between them: at a pole the parameter
-/// along the degenerate direction is free (the pole copy carries a neighbour's), so there the
-/// mean takes it from the other points alone.
-fn mean(s: &EvalSurface, dom: &super::uv::Domain, reach: f64, qs: &[[f64; 2]]) -> [f64; 2] {
-    let mut out = [0.0; 2];
-    for (d, slot) in out.iter_mut().enumerate() {
-        let free: Vec<f64> = qs.iter().filter(|q| !super::uv::degenerate_within(s, dom, **q, d, reach)).map(|q| q[d]).collect();
-        let pick: Vec<f64> = if free.is_empty() { qs.iter().map(|q| q[d]).collect() } else { free };
-        *slot = pick.iter().sum::<f64>() / pick.len().max(1) as f64;
+/// Which parameter directions the surface is collapsed along at each node of a face's
+/// triangulation (within `reach`): a property of the node's parameters, so it is asked once per
+/// node however many triangles, sides and rounds of refinement and flipping look at it. Ported
+/// from #13559, which did the same for solidcore-tess's own planner.
+pub(crate) struct Poles<'a> {
+    s: &'a EvalSurface,
+    dom: super::uv::Domain,
+    reach: f64,
+    /// The answers so far, by the node's parameters bit for bit.
+    flags: std::cell::RefCell<HashMap<[u64; 2], [bool; 2]>>,
+    /// Pole questions asked of the surface, for the tests.
+    #[cfg(test)]
+    pub(crate) asked: std::cell::Cell<usize>,
+}
+
+impl<'a> Poles<'a> {
+    /// The poles of `s`, a node within `reach` mm of one taken as one.
+    pub(crate) fn new(s: &'a EvalSurface, reach: f64) -> Self {
+        Poles { s, dom: super::uv::domain(s), reach, flags: std::cell::RefCell::new(HashMap::new()), #[cfg(test)] asked: std::cell::Cell::new(0) }
     }
-    out
+
+    /// Whether each direction is collapsed at the node of parameters `q`.
+    fn at(&self, q: [f64; 2]) -> [bool; 2] {
+        let key = [q[0].to_bits(), q[1].to_bits()];
+        if let Some(f) = self.flags.borrow().get(&key) {
+            return *f;
+        }
+        #[cfg(test)]
+        self.asked.set(self.asked.get() + 2);
+        let f = [0, 1].map(|d| super::uv::degenerate_within(self.s, &self.dom, q, d, self.reach));
+        self.flags.borrow_mut().insert(key, f);
+        f
+    }
+
+    /// The mean of parameter points, as the surface point between them: at a pole the parameter
+    /// along the degenerate direction is free (the pole copy carries a neighbour's), so there the
+    /// mean takes it from the other points alone.
+    fn mean(&self, qs: &[[f64; 2]]) -> [f64; 2] {
+        let mut out = [0.0; 2];
+        for (d, slot) in out.iter_mut().enumerate() {
+            let free: Vec<f64> = qs.iter().filter(|q| !self.at(**q)[d]).map(|q| q[d]).collect();
+            let pick: Vec<f64> = if free.is_empty() { qs.iter().map(|q| q[d]).collect() } else { free };
+            *slot = pick.iter().sum::<f64>() / pick.len().max(1) as f64;
+        }
+        out
+    }
 }
 
 /// The longest side of triangle `t` when the angle opposite it is past `degrees` and the side lies
@@ -190,12 +224,11 @@ const MIN_FLIP_ANGLE: f64 = 1e-3;
 /// in (u, v) and against the surface normal (nothing folds), and the new side and the new
 /// triangles' middles stay within `tol` of the surface, or no farther than the old side's middle.
 /// Sides with one triangle (the face's boundary) are never flipped.
-pub(crate) fn flip(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: &[[f64; 2]], tris: &mut [[u32; 3]]) {
+pub(crate) fn flip(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], uv: &[[f64; 2]], tris: &mut [[u32; 3]]) {
     if !(tol.is_finite() && tol > 0.0) || tris.len() < 2 {
         return;
     }
-    let dom = super::uv::domain(s);
-    let mean = |qs: &[[f64; 2]]| mean(s, &dom, reach, qs);
+    let mean = |qs: &[[f64; 2]]| poles.mean(qs);
     let pos: Vec<Vec3> = uv.iter().enumerate().map(|(i, q)| fixed.get(i).copied().unwrap_or_else(|| s.eval(q[0], q[1]).0)).collect();
     let p = |i: u32| pos.get(i as usize).copied();
     let q = |i: u32| uv.get(i as usize).copied();
@@ -322,5 +355,48 @@ pub(crate) fn flip(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: &[
         retag(&mut sides, a, d, t2, t1);
         retag(&mut sides, b, c, t1, t2);
         queue.extend([key(a, d), key(d, b), key(b, c), key(c, a)].into_iter().filter(|s| sides.get(s).is_some_and(|ts| ts.len() == 2)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Refining and flipping a coarse patch of a cylinder (every sag over the tolerance, so the
+    /// nodes are looked at by many triangles, sides and rounds) asks the pole question once per
+    /// node and direction, not once per look. Ported from #13559.
+    #[test]
+    fn the_pole_question_is_asked_once_per_node() {
+        use solidcore::eval::plan::EvalCurve;
+        let s = EvalSurface::Revolved {
+            profile: EvalCurve { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], ctrl: vec![[3.0, 0.0, 0.0, 1.0], [3.0, 0.0, 4.0, 1.0]] },
+            origin: Vec3::ZERO,
+            axis: Vec3::Z,
+            transform: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]],
+            swap: false,
+        };
+        let n = 6u32;
+        let mut uv: Vec<[f64; 2]> = Vec::new();
+        for i in 0..=n {
+            for j in 0..=n {
+                uv.push([f64::from(i) / f64::from(n), 3.0 * f64::from(j) / f64::from(n)]);
+            }
+        }
+        let mut tris: Vec<[u32; 3]> = Vec::new();
+        for i in 0..n {
+            for j in 0..n {
+                let a = i * (n + 1) + j;
+                let (b, c, d) = (a + 1, a + n + 1, a + n + 2);
+                tris.push([a, c, d]);
+                tris.push([a, d, b]);
+            }
+        }
+        let poles = Poles::new(&s, 1e-9);
+        let start = uv.len();
+        refine(&s, 5e-2, &poles, &[], &mut uv, &mut tris, 300);
+        flip(&s, 5e-2, &poles, &[], &uv, &mut tris);
+        assert!(uv.len() > 2 * start, "{} nodes: not refined", uv.len());
+        assert!(poles.asked.get() > 0);
+        assert!(poles.asked.get() <= 2 * uv.len(), "{} questions for {} nodes", poles.asked.get(), uv.len());
     }
 }

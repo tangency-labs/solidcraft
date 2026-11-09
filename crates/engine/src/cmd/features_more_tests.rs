@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::tess::EvaluateMesh as _;
 
 use crate::Session;
 
@@ -1883,7 +1884,12 @@ fn knife_edge_part() -> Session {
 /// the concave arc). It holds to about 1e-3 of what a blend removes here; the bounds below are
 /// about twice what each test reads.
 fn planned(s: &Session) -> f64 {
-    s.model.state().bodies.iter().map(|b| b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).unwrap().evaluate().measure().volume).sum()
+    s.model
+        .state()
+        .bodies
+        .iter()
+        .map(|b| b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).unwrap().evaluate_mesh().measure().volume)
+        .sum()
 }
 
 /// The middle of the part's arc.

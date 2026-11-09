@@ -1,5 +1,6 @@
 use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::tess::EvaluateMesh as _;
 
 use super::*;
 use crate::{BoolOp, boolean, box_solid, cylinder, extrude, fillet, measure, revolve, sphere, step_export, torus};
@@ -2048,7 +2049,7 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
             assert_eq!(imported.bodies[0].file_faces, 1);
             let plan = body.mesh_plan(&crate::MeshTolerance::chord(0.01)).unwrap();
             for mesh in [
-                plan.evaluate(),
+                plan.evaluate_mesh(),
                 body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
                 body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
                 body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(),

@@ -23,6 +23,28 @@
 //!    meshed; there is no other mesher to fall back to. A face whose pcurves do not lie on its edges is an error naming the face and
 //!    the edge, as is a body none of whose faces can be planned.
 
+// SolidCraft's mesher, moved here as it is (RFC 0003, item 1.1) so it stays the same text as its
+// history. Its slice indexing is within bounds the code checks before it, and a panic in planning
+// is caught at [`crate::plan`]; checked access (with no catch) and the rest of solidcore's lints
+// come in the next step of the item.
+#![allow(
+    clippy::indexing_slicing,
+    clippy::neg_cmp_op_on_partial_ord,
+    clippy::type_complexity,
+    clippy::single_match_else,
+    clippy::items_after_statements,
+    clippy::redundant_closure_for_method_calls,
+    clippy::doc_markdown,
+    clippy::needless_for_each,
+    clippy::nonminimal_bool,
+    clippy::semicolon_if_nothing_returned,
+    clippy::explicit_iter_loop,
+    clippy::if_not_else,
+    clippy::needless_pass_by_value,
+    clippy::cast_lossless,
+    clippy::map_unwrap_or
+)]
+
 pub(crate) mod cdt;
 pub(crate) mod collar;
 pub(crate) mod coons;
@@ -38,14 +60,20 @@ pub(crate) mod surface;
 pub(crate) mod tangle;
 pub(crate) mod uv;
 
-use solidcraft_geom::prelude::*;
+pub use size::MAX_ANGLE_BOUNDARY;
+pub use crate::stats::{PlanStats, RefusedFace};
+
+use crate::vec::VecExt as _;
 use std::collections::HashMap;
 
-use solidcore_record::Vec3;
-use solidcore_record::brep::{self, Curve, Loop, Shell};
-use solidcraft_geom::tess::{EvalSurface, FacePlan, TessPlan};
+use solidcore_convert as kernel;
 
-use crate::{KernelError, Result};
+use solidcore::Vec3;
+use solidcore_record::brep::{self, Curve, Loop, Shell};
+use solidcore::eval::plan::EvalSurface;
+use crate::{FacePlan, TessPlan};
+
+use crate::{Result, TessError};
 
 /// Whether [`plan_face`] may leave out of its constrained Delaunay the boundary sides that cross
 /// a side already kept, and not hold the triangles to every side: the last resort for a face
@@ -56,27 +84,6 @@ use crate::{KernelError, Result};
 enum Lenient {
     No,
     Yes,
-}
-
-/// How the faces of a plan were meshed.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct PlanStats {
-    pub planar: usize,
-    pub structured: usize,
-    pub delaunay: usize,
-    /// Faces every method refused, filled leniently in (u, v) (see [`Lenient`]) so the display
-    /// has no hole: each still a defect upstream, in its pcurves or seams.
-    pub lenient: Vec<RefusedFace>,
-    /// Faces even the lenient fill refused: left out of the plan (no triangles), so the rest of
-    /// the body is still meshed, each with why it could not be planned.
-    pub unmeshed: Vec<RefusedFace>,
-}
-
-/// A face a method refused: its index in the record and why.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RefusedFace {
-    pub face: usize,
-    pub reason: String,
 }
 
 /// Curved faces from which their sizes are worked out on the worker pool.
@@ -99,8 +106,8 @@ const MAX_REFINE: usize = 20_000;
 /// each round halves them, so their chords sag a quarter as far.
 const MAX_UNTANGLE: u32 = 16;
 
-fn unsupported(what: impl std::fmt::Display) -> KernelError {
-    KernelError::Failed(format!("not supported yet: tessellation: {what}"))
+fn unsupported(what: impl std::fmt::Display) -> TessError {
+    TessError::Failed(format!("not supported yet: tessellation: {what}"))
 }
 
 /// The surface kind of a face, for an error that names it.
@@ -142,10 +149,18 @@ fn face_edges(f: &brep::Face) -> impl Iterator<Item = &brep::OrientedEdge> {
     })
 }
 
+/// Plan the display tessellation of `b`, a body of size `size` (its box diagonal), at the
+/// tolerance `t` ([`crate::MeshTolerance`]): faces and edges are the record's, in its order. A
+/// panic in planning is caught and returned as [`TessError::Internal`].
+pub fn plan(b: &brep::Brep, t: &crate::MeshTolerance, size: f64) -> Result<(TessPlan, PlanStats)> {
+    let (tol, turn) = t.rules(size);
+    crate::par::guard("mesh", || plan_at(b, tol, turn))
+}
+
 /// Plan the tessellation of `b` with chord tolerance `tol` and, when given, a facet angle no
 /// facet may turn more than (where it sags above the angle's floor). Faces and edges are the
 /// record's, in its order.
-pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<(TessPlan, PlanStats)> {
+pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<(TessPlan, PlanStats)> {
     let faces = &b.faces;
     let forward = forward_faces(b);
     // The faces each edge bounds, each once, in the order of the edge's uses.
@@ -217,7 +232,7 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
     let mut stats = PlanStats::default();
     // A face no method plans is left out, named in the stats, and the rest of the body is
     // meshed; a body none of whose faces plan is the first face's error.
-    let mut first_error: Option<KernelError> = None;
+    let mut first_error: Option<TessError> = None;
     for (fi, (r, eval)) in planned.into_iter().zip(evals).enumerate() {
         let surface = u32::try_from(plan.surfaces.len()).map_err(|_| unsupported("too many faces"))?;
         plan.surfaces.push(eval);
@@ -240,7 +255,7 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
     {
         return Err(e);
     }
-    plan.edges = nodes.into_iter().map(|n| n.points).collect();
+    plan.edges = nodes.into_iter().map(|n| n.points.into_iter().map(kernel::record_vec3).collect()).collect();
     plan.edge_faces = edge_faces.into_iter().map(|fs| fs.into_iter().map(|f| u32::try_from(f).unwrap_or(u32::MAX)).collect()).collect();
     Ok((plan, stats))
 }
@@ -284,7 +299,7 @@ fn boundary(
     for oe in face_edges(face) {
         let (Some(edge), Some([p0, p1])) = (b.edges.get(oe.edge as usize), oe.pcurve.interval()) else { continue };
         let tol = edge.vertices.get(usize::from(!oe.forward)).and_then(|v| b.vertices.get(*v as usize)).map_or(0.0, |v| v.tolerance.min(rules.tol));
-        let Some(q) = solidcraft_geom::brep::pcurve::eval(&oe.pcurve, if oe.forward { p0 } else { p1 }).map(|q| map.to_eval(q)) else { continue };
+        let Some(q) = solidcore_convert::curve2(&oe.pcurve).eval(if oe.forward { p0 } else { p1 }).map(|q| map.to_eval(q)) else { continue };
         if tol.is_finite() && tol > reach && (0..2).any(|d| uv::degenerate_within(s, &dom, q, d, tol)) {
             reach = tol;
         }
@@ -292,7 +307,7 @@ fn boundary(
     let pole_along = |q: [f64; 2], d: usize| uv::degenerate_within(s, &dom, q, d, reach);
     let mut out = Boundary { loops: Vec::with_capacity(face.loops.len()), segments: Vec::with_capacity(face.loops.len()), reach };
     // Each vertex's parameters, from the first edge use of the face to start there.
-    let mut at_vertex: std::collections::HashMap<u32, [f64; 2]> = std::collections::HashMap::new();
+    let mut at_vertex: HashMap<u32, [f64; 2]> = HashMap::new();
     // The vertex pairs an edge of the face joins.
     let joined: std::collections::HashSet<(u32, u32)> = face_edges(face)
         .filter_map(|oe| b.edges.get(oe.edge as usize))
@@ -323,7 +338,7 @@ fn boundary(
             let mut es: Vec<bool> = n.params.iter().map(|t| n.snapped.contains(t)).collect();
             let mut eq: Vec<[f64; 2]> = Vec::with_capacity(ep.len());
             for (k, (t, p)) in n.params.iter().zip(&n.points).enumerate() {
-                let q = solidcraft_geom::brep::pcurve::eval(&oe.pcurve, t.clamp(p0, p1))
+                let q = solidcore_convert::curve2(&oe.pcurve).eval(t.clamp(p0, p1))
                     .ok_or_else(|| fail(oe.edge, format!("its pcurve does not evaluate at t = {t}")))?;
                 let q = map.to_eval(q);
                 let on =
@@ -699,7 +714,7 @@ const MIN_LOOP_SEGMENTS: usize = 3;
 fn split_thin_loops(b: &brep::Brep, nodes: &mut [edges::Nodes]) -> Result<()> {
     for f in &b.faces {
         for l in &f.loops {
-            let brep::Loop::Edges { edges: uses } = l else { continue };
+            let Loop::Edges { edges: uses } = l else { continue };
             let mut es: Vec<usize> = uses.iter().map(|u| u.edge as usize).collect();
             es.sort_unstable();
             es.dedup();
@@ -732,7 +747,7 @@ fn relax_crowded_faces(b: &brep::Brep, jobs: &[(usize, f64)], rules: &size::Rule
         let segments = |e: &usize| nodes.get(*e).map_or(0, |n| n.points.len().saturating_sub(1));
         let mut crowded: Vec<usize> = boundaries
             .iter()
-            .filter(|es| es.iter().map(segments).sum::<usize>() > size::MAX_ANGLE_BOUNDARY)
+            .filter(|es| es.iter().map(segments).sum::<usize>() > MAX_ANGLE_BOUNDARY)
             .flatten()
             .filter(|e| level.get(**e).copied().unwrap_or(0) < l && curved(**e))
             .copied()
@@ -1151,14 +1166,16 @@ fn plan_face(
     all.extend(extra);
     // Whatever the layout, no triangle leaves the surface by more than the tolerance.
     if !planar {
-        sag::refine(s, tol, reach, &fixed, &mut all, &mut triangles, MAX_REFINE);
-        sag::flip(s, tol, reach, &fixed, &all, &mut triangles);
+        // Which nodes are poles, asked once per node over both passes.
+        let poles = sag::Poles::new(s, reach);
+        sag::refine(s, tol, &poles, &fixed, &mut all, &mut triangles, MAX_REFINE);
+        sag::flip(s, tol, &poles, &fixed, &all, &mut triangles);
     }
     // Both evaluators take a closed spline's parameters inside its active interval.
     for q in &mut all {
         *q = s.wrap(*q);
     }
-    Ok(FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), surface: None, uv: all, fixed, normals: Vec::new(), flip: false, triangles })
+    Ok(FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), surface: None, uv: all, fixed: fixed.into_iter().map(kernel::record_vec3).collect(), normals: Vec::new(), flip: false, triangles, poles: Vec::new() })
 }
 
 /// A face's (u, v) region and what meshing it needs.
