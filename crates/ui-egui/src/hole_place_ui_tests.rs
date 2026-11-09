@@ -183,7 +183,7 @@ struct Painted {
 
 fn painted(h: &Harness, c: egui::Pos2) -> Painted {
     use egui::epaint::{ColorMode, Shape};
-    let core = crate::theme::Tokens::get().icons.highlight;
+    let core = solidcraft_theme::Tokens::get().icons.highlight;
     let mut p = Painted { dots: Vec::new(), lines: Vec::new(), tips: Vec::new(), circles: 0 };
     for clipped in &h.shapes {
         crate::test_support::each_shape(&clipped.shape, &mut |s| match s {

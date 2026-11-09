@@ -1,0 +1,12 @@
+#### UB-65. `CreateCornerBlend` and patch builders dereference NULL or leave dangling inputs
+- **Severity:** Crash / undefined behaviour
+- **Area:** Surfaces and volumes
+- **Location:** `SmBSplineSurfaceNLib.cpp:3008` `CreateCornerBlend`; `:4296` `CreateCoonsPatch` (also `CreateNSidedPatch`, `JoinSurface`).
+- **What happens:**
+  - `CreateCornerBlend` dereferences NULL for a surface without a UV curve, for a rational 3D curve with a surface, and for n-sided bilinear blends with missing UV curves or surfaces. Its `NER` check fires only where the null count first exceeds the limit.
+  - The patch builders hand their inputs' NURBs to NLib, which reallocates them on the method's local stack. The caller's objects dangle after the call.
+- **Trigger:** `CreateCornerBlend` with a surface but a NULL UV curve.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** crash/UB.
+- **Rust port:** Returns `InvalidInput`, and stores the changed NURBs back.

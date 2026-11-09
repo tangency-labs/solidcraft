@@ -687,6 +687,25 @@ fn motion_study_plays_and_exports() {
     assert_eq!(run(&mut s, "motion.list", json!({}))["studies"].as_array().map(Vec::len), Some(0));
 }
 
+/// A placement's name in a motion CSV is one field, whatever it holds (#12728). A comma is kept in
+/// quotes, where it used to become a space; a quote or a line break no longer splits the row; and a
+/// name that a spreadsheet would run as a formula opens as text.
+#[test]
+fn a_motion_csv_keeps_each_placement_name_in_its_field() {
+    let mut s = rail();
+    run(&mut s, "motion.study", json!({"name": "Push", "steps": 100, "keys": [{"joint": "Rail", "points": [[0, 10], [100, -5]]}]}));
+    run(&mut s, "component.rename", json!({"component": "B", "name": "=B, \"x\"\ny"}));
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-motion-names-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let csv = dir.join("names.csv");
+    run(&mut s, "motion.export", json!({"study": "Push", "samples": 2, "path": csv.to_string_lossy()}));
+    let text = std::fs::read_to_string(&csv).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(text.contains(",A:1,") && text.contains(",\"'=B, \"\"x\"\"\ny:1\","), "{text}");
+    // A header, a row for each placement at each of the two samples, and the line break in each of B's rows.
+    assert_eq!(text.matches('\n').count(), 1 + 2 * 2 + 2, "{text}");
+}
+
 /// Regression (#9741): `motion.study` takes degrees for angle keys, so `motion.list` must give
 /// the keys back in those same units — feeding a listed study straight back to `motion.study`
 /// must not turn a 90° key into 1.57°.

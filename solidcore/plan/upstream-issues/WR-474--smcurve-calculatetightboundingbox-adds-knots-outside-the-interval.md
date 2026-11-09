@@ -1,0 +1,10 @@
+#### WR-474. `SmCurve::CalculateTightBoundingBox` adds tangent-discontinuous and last knots outside the queried interval (#1054)
+- **Severity:** Wrong result
+- **Area:** Curves
+- **Location:** `source/SMLib/src/SmCurve.cpp:10276`-`:10281` (at 3fd5b95), `SmCurve::CalculateTightBoundingBox` (def. `:10248`).
+- **What happens:** after adding the interval's end points, the B-spline branch adds every knot with `i == sKnots.GetSize()-1 || sContinuities[i] <= SM_CT_C1`, whether or not the knot lies inside `crInterval`. A knot outside the interval is a point the curve never reaches over it, so the box of an edge on part of a NURBS curve (or an ellipse, which is a B-spline kind) is enlarged. The callers `SmEdge::CalculateTightBoundingBox`, the face and B-rep tight boxes, and so `smlib_brep_bounds`, inherit the enlarged box.
+- **Trigger:** an imported sphere cap (R 50, cap from the pole to polar angle 30 deg): its seam is 30 deg of a quarter-circle NURBS, knots {0, 1}, interval [0, 0.341]. The box takes in knot 1, (-43.30, 0, 25), so the bounds come out min (-43.30, -25, 25) where (-25, -25, 43.30) is right.
+- **How found:** SolidCraft's rig (import/3806), reported as tangency-labs/solidcore#1054; the Rust fix and its first regression test are PapaEcho13's (#1561).
+- **Confirmed:** yes. Forcing the fix on in the port makes difftest disagree with the pinned C++ in exactly the knot-outside-interval cases (`curve.curve_p9`, `query.edge`, `query.face_p1`, `query.face_p3`, `query.brep`), with the C++ box the larger one.
+- **Fix:** the fork commit "SMLib: a curve's tight box holds the knots inside its interval only": add a knot only when `crInterval.GetMin() < knot < crInterval.GetMax()` and it is tangent discontinuous (the interval's ends are in the box already).
+- **Rust port:** `Curve::calculate_tight_bounding_box` behaves as upstream by default. With `Kernel::fixes.curve_tight_box_interval_knots` it adds only the tangent-discontinuous knots strictly inside the interval; `crates/solidcore/tests/issue_1054_tight_box_interval_knots.rs` checks both settings (a half quarter-circle, and the issue's sphere-cap seam).

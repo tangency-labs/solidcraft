@@ -1,0 +1,256 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                20.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                20.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                20.0,
+                10.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                10.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                40.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                30.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                40.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                30.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                10.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                30.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                30.0,
+                10.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-mass-properties-rigid-pair-of-boxes",
+  "expected": {
+    "body_count": 2,
+    "method": "material 2 g/cm3; A: box 20x10x10 from the origin, V 2000, m 0.004 kg, centre (10,5,5); B: box 10x10x10 from (30,0,0), V 1000, m 0.002 kg, centre (35,5,5); the rigid group: m = 0.006 kg, centre x = (0.004*10 + 0.002*35)/0.006 = 18.333333, y = z = 5; about it, each box's own m/12 (b^2 + c^2) plus m d^2 along x (parallel axes): Ixx = 0.004/12*200 + 0.002/12*200 = 0.100000, Iyy = Izz = 0.004/12*500 + 0.002/12*200 + 0.004*(10 - x)^2 + 0.002*(35 - x)^2 = 1.033333 kg mm^2, no products of inertia (both boxes symmetric about y = 5 and z = 5). Groups: the design's own (no bodies), then A with B",
+    "results": [
+      {
+        "json": [
+          35.0,
+          5.0,
+          5.0
+        ],
+        "pointer": "/occurrences/2/mass/center_of_mass_mm",
+        "step": 10
+      },
+      {
+        "json": {
+          "center_of_mass_mm": [
+            18.333333,
+            5.0,
+            5.0
+          ],
+          "mass_kg": 0.006
+        },
+        "pointer": "/groups/1/mass",
+        "step": 10
+      },
+      {
+        "abs_mm": 1e-6,
+        "json": [
+          [
+            0.1,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.033333,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.033333
+          ]
+        ],
+        "pointer": "/groups/1/mass/inertia_world_kg_mm2",
+        "step": 10
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 3000.0,
+    "what": "assembly.mass_properties of two boxes in one rigid group"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16
+    }
+  },
+  "result": [
+    {
+      "body": "BlockA",
+      "made": "b1"
+    },
+    {
+      "body": "BlockB",
+      "made": "b2"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1600.0,
+      "body_count": 2,
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16,
+      "volume_mm3": 3000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "assembly.mass_properties of two boxes in one rigid group",
+  "why_not": []
+}

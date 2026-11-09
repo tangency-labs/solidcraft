@@ -14,6 +14,7 @@ The contributor skills (everything except modeling, editing, checking and mechan
 | [`solidcraft-ground-rules`](solidcraft-ground-rules/SKILL.md) | adds a dependency, asset or wording: independence, licences, attribution, the product name |
 | [`solidcraft-crash-safety`](solidcraft-crash-safety/SKILL.md) | writes non-test Rust, handles hostile input or investigates a crash report |
 | [`solidcraft-commands`](solidcraft-commands/SKILL.md) | adds a command or decides which crate code belongs in |
+| [`solidcraft-layers`](solidcraft-layers/SKILL.md) | decides whether code goes in SolidCraft or solidcore (kernel, ops), or works on kernel or geometry code |
 | [`solidcraft-ui`](solidcraft-ui/SKILL.md) | adds a dialog, panel, camera input, icon or colour |
 | [`solidcraft-ui-text`](solidcraft-ui-text/SKILL.md) | adds a label, message or translation |
 | [`solidcraft-file-formats`](solidcraft-file-formats/SKILL.md) | changes what a design saves, or touches import and export |
