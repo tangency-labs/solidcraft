@@ -8,6 +8,8 @@
     "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.5": "tangency-labs/solidcore#3053: with every fix off the round builds a body that is not closed (29 vertices, 44 edges, 9 faces, mass status 1007), where it was refused with status 1001"
   },
   "intersect.topology_solver_p2": {
+    "analytic_face_torus_x_6_15": "#13678: the projected maximum reports the fitted-silhouette scalar 1.6642154866673036, but its returned native point measures 1.6642135459403802",
+    "analytic_face_torus_x_7_15": "#13678: the projected maximum reports the fitted-silhouette scalar 1.6642154866673036, but its returned native point measures 1.6642135459403802",
     "subdivided_1_14_1_12_11_2_1": "tangency-labs/solidcore#3147: the All projected minimum returns 7 of the 21 answers within tolerance; the 14 missing are line endpoints (t = 0 or 1), leaving 5 of 12 vertices without an answer",
     "subdivided_1_14_1_12_11_2_3": "tangency-labs/solidcore#3147: the All projected minimum returns 7 of the 21 answers within tolerance; the 14 missing are line endpoints (t = 0 or 1), leaving 5 of 12 vertices without an answer",
     "subdivided_1_14_1_12_11_50_1": "tangency-labs/solidcore#3147: the All projected minimum returns 7 of the 26 answers within tolerance; the 19 missing are line endpoints (t = 0 or 1), leaving 5 of 12 vertices without an answer",

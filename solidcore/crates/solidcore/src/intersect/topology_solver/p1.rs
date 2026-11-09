@@ -1876,7 +1876,13 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                     } else {
                         Some(&s.opt_vectors)
                     },
-                    requested: SolutionRequested::All,
+                    requested: if op == SolverOperation::ProjectedMaximize
+                        && s.solution_requested == SolutionRequested::Single
+                    {
+                        SolutionRequested::Single
+                    } else {
+                        SolutionRequested::All
+                    },
                 },
             )?
         };
