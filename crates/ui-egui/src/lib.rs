@@ -2859,8 +2859,13 @@ impl SolveApp {
     }
 
     /// A dropped CAD, mesh, drawing or point cloud (PLY, XYZ, PTS) file joins a design that has
-    /// features or point clouds; otherwise it opens.
+    /// features or point clouds; otherwise it opens. A dropped PNG or JPEG is a canvas to place,
+    /// not a design to open: it starts the Canvas tool with that image chosen (#13926).
     pub fn drop_path(&mut self, path: &str) {
+        if sketch_tools::is_canvas_image(path) {
+            sketch_tools::start_image_placement(self, "canvas.insert", path.to_string());
+            return;
+        }
         let import = solidcraft_engine::io::is_step_path(path)
             || solidcraft_engine::io::is_mesh_path(path)
             || solidcraft_engine::io::is_point_cloud_path(path)
