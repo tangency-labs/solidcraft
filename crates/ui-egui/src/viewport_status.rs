@@ -149,7 +149,8 @@ pub(crate) fn reconcile(app: &mut SolveApp, ctx: &egui::Context) {
         app.viewport_status.focus_field = None;
     }
     app.viewport_status.live_details = app.preferences.viewport_status_details;
-    let items: Vec<_> = app.session.status_items().iter().filter_map(|effect| presentation(app, effect)).collect();
+    let mut items: Vec<_> = app.session.status_items().iter().filter_map(|effect| presentation(app, effect)).collect();
+    items.extend(crate::dialogs_insert_drawing::integrity(app).as_ref().map(svg_item));
     if app.viewport_status.open_key.as_ref().is_some_and(|open| !items.iter().any(|item| item.has_key && &item.id == open)) {
         ui_kit::dismiss_details_popups(ctx);
         if ui_kit::details_field_owns_focus(ctx) || ui_kit::details_control_owns_focus(ctx) {
@@ -167,25 +168,72 @@ pub(crate) fn reconcile(app: &mut SolveApp, ctx: &egui::Context) {
     app.viewport_status.reconcile_summary(ctx, members);
     // The popup is a separate foreground host: the badge's Background layer cannot
     // shield it. Tools deliberately remain eligible for their existing row actions.
+    // The SVG import panel owns this row's integrity item, so its own dialog does not dismiss it.
+    let svg_dialog = matches!(app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::InsertDrawing(p)) if p.command.ends_with("svg"));
     let higher_owner = app.prefs_window.shell.open
-        || app.dialog.is_some()
+        || (app.dialog.is_some() && !svg_dialog)
         || app.keymap.open
         || app.ui.palette_open
         || ctx.memory(|memory| memory.top_modal_layer().is_some());
     app.viewport_status.suspend_summary(ctx, higher_owner);
 }
 
+/// SVG import shows one status item for all of its integrity facts, whatever the status preferences.
+fn svg_item(integrity: &crate::dialogs_insert_drawing::Integrity) -> ui_kit::StatusItem {
+    ui_kit::StatusItem {
+        id: crate::dialogs_insert_drawing::INTEGRITY_ID.into(),
+        kind: if integrity.attention { ui_kit::StatusKind::Attention } else { ui_kit::StatusKind::Result },
+        name: solidcraft_ui_text::tr("ui.svg_integrity").into(),
+        setting: integrity.setting.clone(),
+        has_key: true,
+        editable: false,
+    }
+}
+
+fn svg_card(ui: &mut egui::Ui, integrity: &crate::dialogs_insert_drawing::Integrity) {
+    use crate::ui_kit::AssistantTone as Tone;
+    let t = solidcraft_theme::Tokens::get();
+    ui.set_min_width(t.space_24 * 12.0);
+    ui.set_max_width(t.space_24 * 12.0);
+    ui.label(egui::RichText::new(solidcraft_ui_text::tr("ui.svg_integrity")).font(crate::ui_kit::type_face::semibold(t.font_label)));
+    for (label, value, tone) in &integrity.rows {
+        let (glyph, ink) = match tone {
+            Tone::Success => ("✓", t.form_success),
+            Tone::Warning => ("!", t.warning),
+            Tone::Error => ("×", t.form_error),
+            Tone::Working => ("…", t.selected_ink),
+            Tone::Neutral => ("—", t.form_dim),
+        };
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(glyph).color(ink));
+            ui.label(label);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new(value).monospace().size(t.font_small));
+            });
+        });
+    }
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.label(solidcraft_ui_text::tr("ui.svg_integrity_view"));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(egui::RichText::new(&integrity.view).monospace().size(t.font_small));
+        });
+    });
+}
+
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, viewport: egui::Rect) {
     reconcile(app, ctx);
-    if !enabled(app) {
+    let svg = crate::dialogs_insert_drawing::integrity(app);
+    if !enabled(app) && svg.is_none() {
         app.viewport_status.open_key = None;
         return;
     }
-    let effects = app.session.status_items();
-    if !app.preferences.viewport_analysis_status && !app.preferences.viewport_section_status {
+    let effects = if enabled(app) { app.session.status_items() } else { Vec::new() };
+    if !app.preferences.viewport_analysis_status && !app.preferences.viewport_section_status && svg.is_none() {
         app.viewport_status.open_key = None;
     }
-    let items: Vec<_> = effects.iter().filter_map(|effect| presentation(app, effect)).collect();
+    let mut items: Vec<_> = effects.iter().filter_map(|effect| presentation(app, effect)).collect();
+    items.extend(svg.as_ref().map(svg_item));
     if items.is_empty() {
         app.viewport_status = Default::default();
         return;
@@ -200,6 +248,11 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, viewport: egui::Rect
     }
     if let Some(layout) = &app.viewport.layout {
         free.max.x = free.right().min(layout.axis_view.left()).max(free.left());
+    }
+    if svg.is_some() {
+        // The import panel floats at the right edge; the status row centres on what is left.
+        let t = solidcraft_theme::Tokens::get();
+        free.max.x = free.right().min(free.right() - t.svg_panel_width - t.space_16 * 2.0 - t.space_4).max(free.left());
     }
     if !free.is_finite() || !free.is_positive() {
         return;
@@ -227,7 +280,9 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, viewport: egui::Rect
     let session_uid = app.session.uid;
     let mut edits = Vec::new();
     let key_contents = |ui: &mut egui::Ui, id: &str| {
-        if let Some((_, description)) = descriptions.iter().find(|(owner, _)| owner == id) {
+        if let (Some(integrity), true) = (svg.as_ref(), id == crate::dialogs_insert_drawing::INTEGRITY_ID) {
+            svg_card(ui, integrity);
+        } else if let Some((_, description)) = descriptions.iter().find(|(owner, _)| owner == id) {
             ui.push_id(session_uid, |ui| {
                 edits.extend(
                     ui_kit::details(ui, id, description, free.height() * 0.6, focus.as_deref()).into_iter().map(|event| (id.to_owned(), event)),
@@ -250,6 +305,11 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, viewport: egui::Rect
 /// Resolve requests against current represented effects, never a menu-open snapshot.
 pub(crate) fn dispatch(app: &mut SolveApp, actions: Vec<StatusAction>) {
     for action in actions {
+        if matches!(&action, StatusAction::Clear(id) if id == crate::dialogs_insert_drawing::INTEGRITY_ID) {
+            crate::dialogs_insert_drawing::hide_integrity(app);
+            app.viewport_status.open_key = None;
+            continue;
+        }
         let effects: Vec<_> = app.session.status_items().into_iter().filter(|effect| presentation(app, effect).is_some()).collect();
         match action {
             StatusAction::ClearAll => {

@@ -12,13 +12,14 @@ use super::CommandSpec;
 use super::sketch::{Left, edit_solved, ids_of};
 use super::sketch_store;
 use crate::params::{bad, num, str_, vec2};
-use crate::schema::sketch_import::{DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams, SketchSolve};
+use crate::schema::sketch_import::{DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams, InsertSvgResult, SketchSolve, SvgDiagnostic, SvgDiagnosticsParams, SvgDiagnosticsResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const INSERT_DXF_CONTRACT: TypedContract<InsertDxfParams> = TypedContract::new();
 const INSERT_SVG_CONTRACT: TypedContract<InsertSvgParams> = TypedContract::new();
 const EXPORT_DXF_CONTRACT: TypedContract<ExportDxfParams> = TypedContract::new();
+const SVG_DIAGNOSTICS_CONTRACT: TypedContract<SvgDiagnosticsParams> = TypedContract::new();
 
 /// A command's reply as JSON, built from the type its output schema describes so the two can't
 /// drift apart.
@@ -37,8 +38,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "INSERT")
         .icon("svg")
         .contract(&INSERT_SVG_CONTRACT)
-        .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .output(output_schema_for::<InsertSvgResult>)
+        .params(concat!("path | text: SVG; repair_tolerance?: maximum repair deviation in placed mm (0.000000001..10; omitted preserves geometry); at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.drawing_bounds", "Drawing Size", drawing_bounds)
         .icon("svg")
         .noundo()
@@ -49,6 +50,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPORT_DXF_CONTRACT)
         .output(output_schema_for::<ExportDxfResult>)
         .params("sketch?: id|name (default active); path?: file to write (else the DXF text is returned); units?: \"design\" | \"in\" | \"inch\" | \"mm\" | \"cm\" | \"m\" | \"ft\" (default mm); layer?: profile layer name (default \"0\"); layers?: \"single\" | \"roles\" (default \"single\": all on `layer`; \"roles\": outer on \"OUTLINE\", holes on \"CUT\"); join?: bool (default false: R12 LINE/ARC; true: closed loops as LWPOLYLINE with arc bulges)"),
+    CommandSpec::new("sketch.svg_diagnostics", "SVG Diagnostics", crate::checked!("sketch.svg_diagnostics", svg_diagnostics))
+        .icon("svg")
+        .noundo()
+        .contract(&SVG_DIAGNOSTICS_CONTRACT)
+        .output(output_schema_for::<SvgDiagnosticsResult>)
+        .params("path | text: SVG; at?, scale? | width? | height?, angle?, align?: as Insert SVG; repair_tolerance?: maximum deviation in placed millimetres, between 0.000000001 and 10 (default: no repair). Returns source path, subpath and segment numbers, locations and display highlights, repair bounds and remaining diagnostics. Does not change the design."),
 ];
 
 /// The sketch import command for a drawing file name, regardless of extension case.
@@ -92,6 +99,20 @@ fn drawing_error(p: &Value, svg: bool, msg: String) -> EngineError {
 /// Adds the geometry; end points closer than `q` (mm) become one point, so drawings whose
 /// ends almost meet still make closed profiles.
 pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64, q: f64) -> Result<(Vec<usize>, Vec<Geom2>)> {
+    add_geometry_with_controls(sk, geom, f, k, q, false, false)
+}
+
+/// SVG control points are coefficients, not vertices to weld or deduplicate. In particular,
+/// an endpoint repeated as a control is part of the cubic's parameterisation.
+fn add_geometry_with_controls(
+    sk: &mut Sketch,
+    geom: &[Geom2],
+    f: &dyn Fn(Vec2) -> Vec2,
+    k: f64,
+    q: f64,
+    exact_controls: bool,
+    exact_points: bool,
+) -> Result<(Vec<usize>, Vec<Geom2>)> {
     // A dense drawing adds tens of thousands of points and curves: a batch finds each new id
     // without searching the whole sketch, so the insert takes time in proportion to its size.
     let sk = &mut sk.batch();
@@ -101,8 +122,8 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
         let key = ((p.x / q).floor() as i64, (p.y / q).floor() as i64);
         for dx in -1..=1 {
             for dy in -1..=1 {
-                if let Some(v) = map.get(&(key.0 + dx, key.1 + dy))
-                    && let Some((_, i)) = v.iter().find(|(o, _)| o.dist(p) <= q)
+                if let Some(v) = map.get(&(key.0.saturating_add(dx), key.1.saturating_add(dy)))
+                    && let Some((_, i)) = v.iter().find(|(o, _)| if exact_points { *o == p } else { o.dist(p) <= q })
                 {
                     return Ok(*i);
                 }
@@ -132,9 +153,9 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
             Geom2::Ellipse { c, major, minor } => Some(CurveKind::Ellipse { c: pt(sk, *c)?, m: pt(sk, *major)?, r: minor * k }),
             Geom2::Spline { pts, control, degree } => {
                 let mut idx = Vec::new();
-                for p in pts.iter().take(solidcraft_sketch::MAX_SPLINE_POINTS) {
-                    let i = pt(sk, *p)?;
-                    if idx.last() != Some(&i) {
+                for (j, p) in pts.iter().take(solidcraft_sketch::MAX_SPLINE_POINTS).enumerate() {
+                    let i = if exact_controls && *control && j != 0 && j + 1 != pts.len() { sk.add_point(f(*p), None)? } else { pt(sk, *p)? };
+                    if exact_controls || idx.last() != Some(&i) {
                         idx.push(i);
                     }
                 }
@@ -228,8 +249,32 @@ fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"min": [lo.x, lo.y], "max": [hi.x, hi.y], "width": hi.x - lo.x, "height": hi.y - lo.y}))
 }
 
-fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
-    let (geom, (lo, hi)) = read_drawing(p, cmd, svg)?;
+/// One placement shared by diagnostics, preview and insertion. Its bounds always come from
+/// the original drawing, so opting into repair never moves or resizes the remaining artwork.
+#[derive(Clone, Copy)]
+struct DrawingPlacement {
+    scale: f64,
+    angle: f64,
+    pivot: Vec2,
+    offset: Vec2,
+}
+
+impl DrawingPlacement {
+    fn point(self, p: Vec2) -> Vec2 {
+        let (sin, cos) = self.angle.sin_cos();
+        let v = (p - self.pivot) * self.scale;
+        Vec2::new(v.x * cos - v.y * sin, v.x * sin + v.y * cos) + self.offset
+    }
+
+    /// Conservative reserve for subtraction, rotation and translation of repaired points.
+    /// A requested bound below coordinate precision must not be reported as achievable.
+    fn roundoff(self, lo: Vec2, hi: Vec2) -> f64 {
+        let magnitude = [lo.x, lo.y, hi.x, hi.y, self.pivot.x, self.pivot.y].iter().map(|v| v.abs()).fold(0.0, f64::max);
+        (magnitude * self.scale + self.offset.x.abs().max(self.offset.y.abs())) * f64::EPSILON * 256.0 + f64::MIN_POSITIVE * 256.0
+    }
+}
+
+fn placement(p: &Value, cmd: &str, lo: Vec2, hi: Vec2) -> Result<DrawingPlacement> {
     // A size in millimetres wins over a factor; the aspect ratio is always kept.
     let natural = (hi.x - lo.x, hi.y - lo.y);
     let sized = |key: &str, of: fn(&(f64, f64)) -> f64| -> Result<Option<f64>> {
@@ -247,15 +292,117 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         Some(v) => v.as_f64().filter(|a| a.is_finite()).ok_or_else(|| bad(cmd, "`angle` must be a number (degrees)"))?.to_radians(),
         None => 0.0,
     };
-    let (sin, cos) = angle.sin_cos();
     let pivot = match str_(p, "align") {
         None | Some("origin") => Vec2::ZERO,
         Some("center") => (lo + hi) * 0.5,
         Some(_) => return Err(bad(cmd, "`align` must be \"origin\" or \"center\"")),
     };
     let off = p.get("at").and_then(vec2).unwrap_or(Vec2::ZERO);
+    let placement = DrawingPlacement { scale: k, angle, pivot, offset: off };
+    if [lo, hi, Vec2::new(lo.x, hi.y), Vec2::new(hi.x, lo.y)].iter().any(|q| !placement.point(*q).is_finite()) {
+        return Err(bad(cmd, "the drawing's placed coordinates are out of range"));
+    }
+    Ok(placement)
+}
+
+fn repair_tolerance(p: &Value, cmd: &str) -> Result<Option<f64>> {
+    p.get("repair_tolerance")
+        .map(|v| {
+            v.as_f64()
+                .filter(|t| t.is_finite() && (1e-9..=10.0).contains(t))
+                .ok_or_else(|| bad(cmd, "`repair_tolerance` must be a number between 0.000000001 and 10 mm"))
+        })
+        .transpose()
+}
+
+fn join_tolerance(p: &Value) -> f64 {
+    num(p, "tolerance").filter(|t| t.is_finite() && *t > 0.0).unwrap_or(1e-4).clamp(1e-9, 10.0)
+}
+
+struct PreparedSvg {
+    geometry: Vec<Geom2>,
+    placement: DrawingPlacement,
+    report: SvgDiagnosticsResult,
+    join: f64,
+}
+
+fn prepare_svg(p: &Value, cmd: &str) -> Result<PreparedSvg> {
+    let repair = repair_tolerance(p, cmd)?;
+    let text = source_text(p, cmd, true)?;
+    let mut drawing = solidcraft_io::read_svg_diagnosed(&text, None).map_err(|e| drawing_error(p, true, e.to_string()))?;
+    let (lo, hi) = bounds_of(&drawing.geometry).ok_or_else(|| drawing_error(p, true, solidcraft_io::svg_nothing_to_import(&text)))?;
+    let placement = placement(p, cmd, lo, hi)?;
+    let join = if cmd == "sketch.svg_diagnostics" { 1e-4 } else { join_tolerance(p) };
+    let roundoff = placement.roundoff(lo, hi);
+    if let Some(t) = repair {
+        if !roundoff.is_finite() || t <= roundoff {
+            return Err(bad(
+                cmd,
+                "the repair tolerance is below the drawing's coordinate precision; increase the tolerance or move the drawing closer to the origin",
+            ));
+        }
+        drawing =
+            solidcraft_io::read_svg_diagnosed(&text, Some((t - roundoff) / placement.scale)).map_err(|e| drawing_error(p, true, e.to_string()))?;
+    }
+    let diagnostics = drawing
+        .diagnostics
+        .into_iter()
+        .map(|d| {
+            let at = placement.point(d.at);
+            let highlight = d
+                .highlight
+                .into_iter()
+                .map(|q| {
+                    let p = placement.point(q);
+                    [p.x, p.y]
+                })
+                .collect();
+            SvgDiagnostic {
+                path: d.path,
+                subpath: d.subpath,
+                segment: d.segment,
+                kind: d.kind,
+                at: [at.x, at.y],
+                highlight,
+                replacement_highlight: d
+                    .replacement_highlight
+                    .into_iter()
+                    .map(|chain| {
+                        chain
+                            .into_iter()
+                            .map(|q| {
+                                let p = placement.point(q);
+                                [p.x, p.y]
+                            })
+                            .collect()
+                    })
+                    .collect(),
+                repaired: d.repaired,
+                max_deviation_mm: d.max_deviation_mm.map(|bound| bound * placement.scale + roundoff),
+            }
+        })
+        .collect::<Vec<_>>();
+    let repaired = diagnostics.iter().filter(|d| d.repaired).count();
+    let report = SvgDiagnosticsResult { remaining: diagnostics.len() - repaired, repaired, diagnostics, param_warnings: Vec::new() };
+    Ok(PreparedSvg { geometry: drawing.geometry, placement, report, join })
+}
+
+fn svg_diagnostics(_s: &mut Session, p: &Value) -> Result<Value> {
+    serde_json::to_value(prepare_svg(p, "sketch.svg_diagnostics")?.report).map_err(|e| bad("sketch.svg_diagnostics", e.to_string()))
+}
+
+fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
+    let (geom, placement, report, tol) = if svg {
+        let prepared = prepare_svg(p, cmd)?;
+        (prepared.geometry, prepared.placement, Some(prepared.report), prepared.join)
+    } else {
+        let (geom, (lo, hi)) = read_drawing(p, cmd, false)?;
+        (geom, placement(p, cmd, lo, hi)?, None, join_tolerance(p))
+    };
+    let k = placement.scale;
+    let angle = placement.angle;
     let mut created = None;
-    if s.active_sketch.is_none() {
+    if s.active_sketch.is_none() && p.get("sketch").is_none_or(Value::is_null) {
         let mut cp = json!({"plane": p.get("plane").cloned().unwrap_or(json!("XY")), "project_edges": false});
         if let Some(n) = str_(p, "name") {
             cp["name"] = json!(n);
@@ -263,11 +410,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         let r = (super::find_command("sketch.create").ok_or_else(|| bad(cmd, "sketch.create"))?.run)(s, &cp)?;
         created = r.get("sketch").and_then(Value::as_u64);
     }
-    let tol = num(p, "tolerance").filter(|t| t.is_finite() && *t > 0.0).unwrap_or(1e-4).clamp(1e-9, 10.0);
-    let f = move |q: Vec2| {
-        let v = (q - pivot) * k;
-        Vec2::new(v.x * cos - v.y * sin, v.x * sin + v.y * cos) + off
-    };
+    let f = move |q: Vec2| placement.point(q);
     // A dense SVG/DXF (a floorplan) can yield far more entities than a sketch takes; refuse
     // before adding so the message names the cap (#10874). Scale alone does not shrink the count.
     if geom.len() > solidcraft_sketch::MAX_POINTS {
@@ -275,13 +418,14 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
     }
     // `sketch::edit`, but keeping the solve as a typed value for the reply.
     let target = sketch_store::target(s, p, cmd)?;
-    let ((curves, texts), report) = edit_solved(s, target, false, Analysis::Freedom, |sk, _| {
-        let (cs, texts) = add_geometry(sk, &geom, &f, k, tol)?;
+    let ((curves, texts), solve) = edit_solved(s, target, false, Analysis::Freedom, |sk, _| {
+        let repair = svg && p.get("repair_tolerance").is_some();
+        let (cs, texts) = add_geometry_with_controls(sk, &geom, &f, k, tol, repair, repair)?;
         Ok(((ids_of(sk, &cs), texts), Left::Unsolved))
     })?;
-    let info = report.map(|rep| SketchSolve { solved: rep.keeps_orientation(), dof: rep.dof });
+    let info = solve.map(|rep| SketchSolve { solved: rep.keeps_orientation(), dof: rep.dof });
     // Text becomes sketch text.
-    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch"))?;
+    let id = sketch_store::target(s, p, cmd)?;
     let mut n_text = 0;
     for t in texts {
         if let Geom2::Text { text, at, height, angle: own } = t {
@@ -304,7 +448,25 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             }
         }
     }
-    reply(cmd, DrawingInserted { sketch: id, created_sketch: created, curves: curves.len(), texts: n_text, info, param_warnings: Vec::new() })
+    if let Some(report) = report {
+        reply(
+            cmd,
+            InsertSvgResult {
+                sketch: id,
+                created_sketch: created,
+                curves: curves.len(),
+                texts: n_text,
+                info,
+                diagnostics: report.diagnostics,
+                remaining: report.remaining,
+                repaired: report.repaired,
+                created: None,
+                param_warnings: Vec::new(),
+            },
+        )
+    } else {
+        reply(cmd, DrawingInserted { sketch: id, created_sketch: created, curves: curves.len(), texts: n_text, info, param_warnings: Vec::new() })
+    }
 }
 
 fn insert_dxf(s: &mut Session, p: &Value) -> Result<Value> {
@@ -728,6 +890,143 @@ mod tests {
             let mut p = json!({"text": PLATE});
             p.as_object_mut().unwrap().extend(bad.as_object().unwrap().clone());
             assert!(s.execute("sketch.insert_svg", &p).is_err(), "{bad}");
+        }
+    }
+
+    const SVG_DEFECTS: &str = r#"<svg width="20mm" height="20mm" viewBox="0 0 20 20"><path d="M0 0L10 0L10 10L0 10L0 0C-.003 -.003 -.005 -.003 -.005 0Z M12 0C11.99 -.01 14 2 15 3L12 3Z"/></svg>"#;
+
+    #[test]
+    fn svg_diagnostics_are_read_only_and_use_the_insert_placement() {
+        let mut s = Session::default();
+        let before = s.execute("document.inspect", &json!({})).unwrap();
+        let p = json!({"text": SVG_DEFECTS, "scale": 2, "angle": 90, "at": [4, 5], "align": "center"});
+        let report = s.execute("sketch.svg_diagnostics", &p).unwrap();
+        assert!(report["remaining"].as_u64().unwrap() >= 2, "{report}");
+        assert_eq!(before, s.execute("document.inspect", &json!({})).unwrap());
+        let inserted = s.execute("sketch.insert_svg", &p).unwrap();
+        assert_eq!(report["diagnostics"], inserted["diagnostics"]);
+        assert_eq!(inserted["repaired"], 0);
+    }
+
+    #[test]
+    fn svg_repair_is_opt_in_bounded_after_scaling_and_undoable() {
+        for size in [json!({"scale": 3}), json!({"width": 45}), json!({"height": 30})] {
+            let mut s = Session::default();
+            let mut p = json!({"text": SVG_DEFECTS, "repair_tolerance": 0.1, "angle": 23, "at": [4, 7], "align": "center"});
+            p.as_object_mut().unwrap().extend(size.as_object().unwrap().clone());
+            let report = s.execute("sketch.svg_diagnostics", &p).unwrap();
+            assert!(report["repaired"].as_u64().unwrap() >= 2, "{report}");
+            assert_eq!(report["remaining"], 0, "{report}");
+            for issue in report["diagnostics"].as_array().unwrap() {
+                assert!(issue["max_deviation_mm"].as_f64().unwrap() <= 0.1, "{issue}");
+            }
+            let inserted = s.execute("sketch.insert_svg", &p).unwrap();
+            assert_eq!(report["diagnostics"], inserted["diagnostics"]);
+            s.execute("edit.undo", &json!({})).unwrap();
+            assert!(s.doc.features.is_empty(), "one undo removes the import");
+            let inserted = s.execute("sketch.insert_svg", &p).unwrap();
+            s.execute("sketch.finish", &json!({})).unwrap();
+            let id = inserted["sketch"].as_u64().unwrap();
+            let world = s.world_state().unwrap();
+            assert_eq!(world.sketch(id).unwrap().profiles.len(), 2);
+            drop(world);
+            s.execute("solid.extrude", &json!({"distance": 2, "operation": "new"})).unwrap();
+            let measure = s.execute("inspect.measure", &json!({})).unwrap();
+            assert!(!measure.to_string().contains("error"), "{measure}");
+            let bodies = measure["bodies"].as_array().unwrap();
+            assert!(!bodies.is_empty(), "{measure}");
+            assert!(bodies.iter().all(|b| b["volume_mm3"].as_f64().is_some_and(|v| v > 0.0)), "{measure}");
+        }
+    }
+
+    #[test]
+    fn plain_svg_import_still_welds_a_cubics_repeated_control_to_its_endpoint() {
+        let mut s = Session::default();
+        let text = r#"<svg width="10mm" height="10mm" viewBox="0 0 10 10"><path d="M0 0C0 0 5 5 5 5L0 5Z"/></svg>"#;
+        let inserted = s.execute("sketch.insert_svg", &json!({"text": text})).unwrap();
+        let world = s.world_state().unwrap();
+        let sketch = &world.sketch(inserted["sketch"].as_u64().unwrap()).unwrap().sketch;
+        let solidcraft_sketch::CurveKind::Spline { pts, degree, .. } = &sketch.curves[0].kind else { panic!("expected cubic") };
+        assert_eq!(*degree, 3);
+        assert!(pts.len() < 4, "without repair the repeated controls fold into their endpoints, as before");
+    }
+
+    #[test]
+    fn invalid_svg_repair_tolerance_never_changes_the_design() {
+        for tolerance in [json!(null), json!(0), json!(-1), json!(11), json!("0.1"), json!([])] {
+            let mut s = Session::default();
+            let before = s.execute("document.inspect", &json!({})).unwrap();
+            for command in ["sketch.svg_diagnostics", "sketch.insert_svg"] {
+                let p = json!({"text": SVG_DEFECTS, "repair_tolerance": tolerance});
+                assert!(s.execute(command, &p).is_err(), "{p}");
+                assert_eq!(before, s.execute("document.inspect", &json!({})).unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn svg_repair_refuses_a_bound_below_placed_coordinate_precision() {
+        let mut s = Session::default();
+        for command in ["sketch.svg_diagnostics", "sketch.insert_svg"] {
+            let p = json!({"text": SVG_DEFECTS, "at": [100000000, 100000000], "repair_tolerance": 1e-9});
+            let error = s.execute(command, &p).unwrap_err().to_string();
+            assert!(error.contains("coordinate precision"), "{error}");
+            assert!(s.doc.features.is_empty());
+        }
+    }
+
+    /// Two closed paths share the same left boundary with different segmentation and rounded
+    /// controls. The left body's area is 100 + integral(x dy) = 100 + 10.2 square mm.
+    #[test]
+    fn svg_shared_boundary_repair_restores_the_missing_body_region() {
+        let text = r#"<svg width="30mm" height="20mm" viewBox="0 0 30 20"><path d="M0 0C3 0 7 0 10 0L20 0L20 10L0 10C-2 7 -2 3 0 0Z"/><path d="M0 0C3 0 7 0 10 0L10 10L0 10C-.7400 8.8900 -1.2062 7.6431 -1.3986 6.3606C-1.7262 4.1769 -1.2600 1.8900 0 0Z"/></svg>"#;
+        let mut s = Session::default();
+        let r = s.execute("sketch.insert_svg", &json!({"text": text, "repair_tolerance": 0.01})).unwrap();
+        assert!(r["diagnostics"].as_array().unwrap().iter().any(|d| d["kind"] == "shared_boundary" && d["repaired"] == true), "{r}");
+        assert!(r["diagnostics"].as_array().unwrap().iter().all(|d| d["max_deviation_mm"].as_f64().is_none_or(|v| v <= 0.01)), "{r}");
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let report = s.execute("sketch.inspect", &json!({"sketch": r["sketch"]})).unwrap();
+        let body = report["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["area_mm2"].as_f64().is_some_and(|a| (a - 110.2).abs() < 0.3))
+            .unwrap_or_else(|| panic!("the central body is missing: {}", report["profiles"]));
+        s.execute(
+            "solid.extrude",
+            &json!({"sketch": r["sketch"], "profiles": [body["index"]], "exact_regions": true, "distance": 2, "operation": "new"}),
+        )
+        .unwrap();
+        let measure = s.execute("inspect.measure", &json!({})).unwrap();
+        assert_eq!(measure["body_count"], 1);
+        assert!((measure["total"]["volume_mm3"].as_f64().unwrap() - 220.4).abs() < 0.6, "{measure}");
+        assert_eq!(measure["bodies"][0]["closed"], true, "{measure}");
+    }
+    /// This symmetric cubic removes exactly 10 square mm from a 10 by 10 square.
+    /// Preparing its ordinary closed outline must remain valid after scaling and centring.
+    #[test]
+    fn svg_closed_outline_approximation_extrudes_after_centred_placement() {
+        let text = r#"<svg width="10mm" height="10mm" viewBox="0 0 10 10"><path d="M0 0C3 0 7 2 10 2L10 10L0 10Z"/></svg>"#;
+        for at in [[0.0, 0.0], [123.4, -234.5]] {
+            let mut s = Session::default();
+            let result =
+                s.execute("sketch.insert_svg", &json!({"text": text, "repair_tolerance": 0.01, "scale": 2, "align": "center", "at": at})).unwrap();
+            assert!(result["diagnostics"].as_array().unwrap().iter().any(|d| d["kind"] == "outline_approximation" && d["repaired"] == true));
+            assert!(result["diagnostics"].as_array().unwrap().iter().all(|d| d["max_deviation_mm"].as_f64().is_none_or(|bound| bound <= 0.01)));
+            s.execute("sketch.finish", &json!({})).unwrap();
+            let report = s.execute("sketch.inspect", &json!({"sketch": result["sketch"]})).unwrap();
+            assert!(report["curves"].as_array().unwrap().iter().all(|c| c["type"] == "line"));
+            let body =
+                report["profiles"].as_array().unwrap().iter().find(|p| p["area_mm2"].as_f64().is_some_and(|a| (a - 360.0).abs() < 0.8)).unwrap();
+            s.execute(
+                "solid.extrude",
+                &json!({"sketch": result["sketch"], "profiles": [body["index"]], "exact_regions": true, "distance": 2, "operation": "new"}),
+            )
+            .unwrap();
+            let measure = s.execute("inspect.measure", &json!({})).unwrap();
+            assert_eq!(measure["body_count"], 1);
+            assert_eq!(measure["bodies"][0]["closed"], true);
+            assert!((measure["total"]["volume_mm3"].as_f64().unwrap() - 720.0).abs() < 1.6, "{measure}");
         }
     }
 

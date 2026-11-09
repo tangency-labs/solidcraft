@@ -91,16 +91,23 @@ pub fn curve_parts(sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj, pp
     curve_with_budget(sketch, index, plane, proj, ppp, &mut SamplingBudget::new(4096, 65_536)).parts
 }
 
+// One profile can contain thousands of source spans and holes. It shares the sketch's global
+// budget, but must not inherit the much smaller per-curve cap or its entire fill disappears.
+const REGION_VERTICES: usize = 65_536;
+const REGION_NODES: usize = 262_144;
+const FILL_EDGES: usize = 20_000;
+const FILL_CROSSINGS: usize = 1_000_000;
+
 /// A closed display region made from complete, unclipped adaptive boundaries. Near-plane
 /// clipping or an exhausted budget suppresses the fill instead of inventing closing edges.
 #[cfg(test)]
 pub fn display_region(region: &Region2, plane: &Plane, proj: &Proj, ppp: f32) -> Option<Region2> {
-    let mut budget = SamplingBudget::new(4096, 65_536);
-    display_region_with_budget(region, plane, proj, ppp, &mut budget)
+    let mut budget = SamplingBudget::new(REGION_VERTICES, REGION_NODES);
+    display_region_with_budget(region, plane, proj, ppp, &mut budget, false)
 }
 
-fn display_region_with_budget(region: &Region2, plane: &Plane, proj: &Proj, ppp: f32, shared: &mut SamplingBudget) -> Option<Region2> {
-    let mut budget = SamplingBudget::new(shared.remaining_vertices.min(4096), shared.remaining_nodes.min(65_536));
+fn display_region_with_budget(region: &Region2, plane: &Plane, proj: &Proj, ppp: f32, shared: &mut SamplingBudget, thin: bool) -> Option<Region2> {
+    let mut budget = SamplingBudget::new(shared.remaining_vertices.min(REGION_VERTICES), shared.remaining_nodes.min(REGION_NODES));
     let initial = budget.clone();
     let result = (|| {
         let mut boundary = |loop_: &Loop2| -> Option<Loop2> {
@@ -126,6 +133,15 @@ fn display_region_with_budget(region: &Region2, plane: &Plane, proj: &Proj, ppp:
                 return None;
             }
             points.pop();
+            // A repaired drawing is thousands of sub-pixel spans per outline. Sub-pixel detail is
+            // invisible in a fill but costs a triangle each, so drawn fills are thinned first
+            // (display only: the sketch and its regions keep their exact geometry).
+            if let Some(per_point) = points.first().filter(|_| thin).and_then(|at| points_per_unit(plane, proj, *at)) {
+                let thinned = simplify_closed(&points, FILL_TOLERANCE_POINTS / per_point);
+                if thinned.len() >= 3 {
+                    points = thinned;
+                }
+            }
             Some(Loop2::polygon(&points))
         };
         let outer = boundary(&region.outer)?;
@@ -137,36 +153,162 @@ fn display_region_with_budget(region: &Region2, plane: &Plane, proj: &Proj, ppp:
     result
 }
 
+/// How far, in screen points, a drawn fill may sit from its exact boundary.
+const FILL_TOLERANCE_POINTS: f64 = 0.35;
+
+/// Screen points per sketch unit around `at`, or `None` where the view cannot say.
+fn points_per_unit(plane: &Plane, proj: &Proj, at: Vec2) -> Option<f64> {
+    let a = proj.to_screen(plane.to_world(at))?;
+    let b = proj.to_screen(plane.to_world(Vec2::new(at.x + 1.0, at.y)))?;
+    let c = proj.to_screen(plane.to_world(Vec2::new(at.x, at.y + 1.0)))?;
+    let scale = f64::from(a.distance(b)).max(f64::from(a.distance(c)));
+    (scale.is_finite() && scale > 1e-9).then_some(scale)
+}
+
+fn distance_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let length = dx * dx + dy * dy;
+    let t = if length > 0.0 { (((p.x - a.x) * dx + (p.y - a.y) * dy) / length).clamp(0.0, 1.0) } else { 0.0 };
+    ((p.x - a.x - t * dx).powi(2) + (p.y - a.y - t * dy).powi(2)).sqrt()
+}
+
+/// Douglas-Peucker for a closed loop: drops points within `tolerance` of the chord they sit on.
+/// Anchored at the first point and the one farthest from it, so the loop never collapses.
+fn simplify_closed(points: &[Vec2], tolerance: f64) -> Vec<Vec2> {
+    let n = points.len();
+    if n < 8 || !tolerance.is_finite() || tolerance <= 0.0 {
+        return points.to_vec();
+    }
+    let Some(first) = points.first() else { return Vec::new() };
+    let Some(far) = (1..n).max_by(|a, b| first.dist(points[*a]).total_cmp(&first.dist(points[*b]))) else { return points.to_vec() };
+    let mut keep = vec![false; n];
+    keep[0] = true;
+    keep[far] = true;
+    let mut stack = vec![(0usize, far), (far, n)];
+    while let Some((a, b)) = stack.pop() {
+        if b <= a + 1 {
+            continue;
+        }
+        let (pa, pb) = (points[a], points[b % n]);
+        let farthest = (a + 1..b).map(|i| (distance_to_segment(points[i], pa, pb), i)).max_by(|x, y| x.0.total_cmp(&y.0));
+        if let Some((distance, index)) = farthest
+            && distance > tolerance
+        {
+            keep[index] = true;
+            stack.push((a, index));
+            stack.push((index, b));
+        }
+    }
+    points.iter().zip(keep).filter_map(|(p, k)| k.then_some(*p)).collect()
+}
+
 #[cfg(test)]
 pub fn region_triangles(region: &Region2, plane: &Plane, proj: &Proj, ppp: f32) -> Vec<[Vec2; 3]> {
     display_region(region, plane, proj, ppp).map_or_else(Vec::new, |display| fill_triangles(&display, &mut 65_536))
 }
 
-/// Bound the slab triangulator's allocation before calling it. Every slab emits one
-/// triangle per edge crossing it; complex fills are omitted rather than cut into holes.
+/// Keep fills bounded without charging one output trapezoid for every unrelated vertex height.
+/// A finely subdivided outline or many disjoint holes can share a long-lived pair of slab edges.
 pub fn fill_triangles(display: &Region2, budget: &mut usize) -> Vec<[Vec2; 3]> {
-    let mut spans = Vec::new();
+    let mut edges = Vec::new();
     for loop_ in std::iter::once(&display.outer).chain(&display.holes) {
         for segment in &loop_.segs {
             let (a, b) = (segment.start(), segment.end());
+            if !(a.is_finite() && b.is_finite()) {
+                return Vec::new();
+            }
             if (a.y - b.y).abs() > 1e-12 {
-                spans.push((a.y.min(b.y), a.y.max(b.y)));
+                if edges.len() >= FILL_EDGES {
+                    return Vec::new();
+                }
+                edges.push(if a.y < b.y { [a, b] } else { [b, a] });
             }
         }
     }
-    let mut heights: Vec<f64> = spans.iter().flat_map(|&(lo, hi)| [lo, hi]).collect();
+    let mut heights: Vec<f64> = edges.iter().flat_map(|edge| [edge[0].y, edge[1].y]).collect();
     heights.sort_by(f64::total_cmp);
     heights.dedup_by(|a, b| (*a - *b).abs() < 1e-12);
-    // An edge crosses the slabs between its end heights. Counting every edge in every slab
-    // overestimated a zoomed-in ring a hundredfold and dropped its hover fill (#164).
     let slab = |y: f64| heights.partition_point(|h| *h < y - 1e-12);
-    let crossings = spans.iter().fold(0usize, |n, &(lo, hi)| n.saturating_add(slab(hi).saturating_sub(slab(lo))));
-    if crossings > *budget {
+    let crossings = edges.iter().fold(0usize, |n, edge| n.saturating_add(slab(edge[1].y).saturating_sub(slab(edge[0].y))));
+    let triangles = if crossings <= *budget {
+        display.triangulate(1.0)
+    } else if crossings <= FILL_CROSSINGS {
+        match coalesced_fill(edges, &heights, *budget) {
+            Some(triangles) => triangles,
+            None => return Vec::new(),
+        }
+    } else {
+        return Vec::new();
+    };
+    if triangles.len() > *budget {
         return Vec::new();
     }
-    let triangles = display.triangulate(1.0);
     *budget = budget.saturating_sub(triangles.len());
     triangles
+}
+
+fn edge_x(edge: &[Vec2; 2], y: f64) -> Option<f64> {
+    let value = edge[0].x + (y - edge[0].y) / (edge[1].y - edge[0].y) * (edge[1].x - edge[0].x);
+    value.is_finite().then_some(value)
+}
+
+/// Adjacent slabs with the same left and right source edges form one trapezoid exactly. An
+/// edge pair ends at every changed boundary, so no extension crosses a hole or joins islands.
+fn coalesced_fill(mut edges: Vec<[Vec2; 2]>, heights: &[f64], budget: usize) -> Option<Vec<[Vec2; 3]>> {
+    edges.sort_by(|a, b| a[0].y.total_cmp(&b[0].y));
+    let mut next_edge = 0;
+    let mut active: Vec<usize> = Vec::new();
+    let mut pending: HashMap<(usize, usize), (f64, f64)> = HashMap::new();
+    let mut triangles = Vec::new();
+    let mut visited = 0usize;
+    for pair in heights.windows(2) {
+        let [y0, y1] = pair else { continue };
+        let middle = y0 * 0.5 + y1 * 0.5;
+        while let Some(edge) = edges.get(next_edge)
+            && edge[0].y <= middle
+        {
+            active.push(next_edge);
+            next_edge += 1;
+        }
+        active.retain(|index| edges.get(*index).is_some_and(|edge| edge[1].y >= middle));
+        visited = visited.saturating_add(active.len());
+        if visited > FILL_CROSSINGS {
+            return None;
+        }
+        let mut ordered = active.iter().map(|index| Some((*index, edge_x(edges.get(*index)?, middle)?))).collect::<Option<Vec<_>>>()?;
+        ordered.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        if !ordered.len().is_multiple_of(2) {
+            return None;
+        }
+        let mut current = HashMap::new();
+        for pair in ordered.chunks(2) {
+            let [left, right] = pair else { return None };
+            let key = (left.0, right.0);
+            let start = pending.remove(&key).map(|run| run.0).unwrap_or(*y0);
+            current.insert(key, (start, *y1));
+        }
+        for (key, (start, end)) in pending.drain() {
+            append_trapezoid(&edges, key, start, end, budget, &mut triangles)?;
+        }
+        pending = current;
+    }
+    for (key, (start, end)) in pending {
+        append_trapezoid(&edges, key, start, end, budget, &mut triangles)?;
+    }
+    Some(triangles)
+}
+
+fn append_trapezoid(edges: &[[Vec2; 2]], key: (usize, usize), y0: f64, y1: f64, budget: usize, triangles: &mut Vec<[Vec2; 3]>) -> Option<()> {
+    if triangles.len().checked_add(2)? > budget {
+        return None;
+    }
+    let left = edges.get(key.0)?;
+    let right = edges.get(key.1)?;
+    let [a, b, c, d] =
+        [Vec2::new(edge_x(left, y0)?, y0), Vec2::new(edge_x(right, y0)?, y0), Vec2::new(edge_x(right, y1)?, y1), Vec2::new(edge_x(left, y1)?, y1)];
+    triangles.push([a, b, c]);
+    triangles.push([a, c, d]);
+    Some(())
 }
 
 pub fn boundary_parts(loop_: &Loop2, plane: &Plane, proj: &Proj, ppp: f32) -> Vec<Vec<Vec3>> {
@@ -240,12 +382,21 @@ impl Uncached {
             return None;
         }
         self.0.profiles += 1;
-        display_region_with_budget(region, plane, proj, ppp, &mut self.0.sampling)
+        display_region_with_budget(region, plane, proj, ppp, &mut self.0.sampling, false)
+    }
+
+    /// Like [`Self::profile`], thinned to what a drawn fill can show, never what is picked.
+    pub(crate) fn fill_profile(&mut self, region: &Region2, plane: &Plane, proj: &Proj, ppp: f32) -> Option<Region2> {
+        if !self.0.room_for_profile() {
+            return None;
+        }
+        self.0.profiles += 1;
+        display_region_with_budget(region, plane, proj, ppp, &mut self.0.sampling, true)
     }
 }
 
 /// The most curves and profiles one sketch caches per model state and view.
-const SKETCH_CURVES: usize = 4096;
+const SKETCH_CURVES: usize = solidcraft_engine::sketch::MAX_POINTS;
 const SKETCH_PROFILES: usize = 1024;
 /// The most curves (and profiles) cached for every sketch together: a bound on memory however
 /// many sketches are shown.
@@ -319,7 +470,7 @@ impl DisplayCache {
             state
                 .sketch(sketch)
                 .and_then(|ss| ss.profiles.get(index))
-                .and_then(|profile| display_region_with_budget(&profile.region, plane, proj, ppp, &mut budget.sampling)),
+                .and_then(|profile| display_region_with_budget(&profile.region, plane, proj, ppp, &mut budget.sampling, false)),
         );
         budget.profiles += 1;
         self.profiles.insert(key, region.clone());

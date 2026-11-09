@@ -479,7 +479,7 @@ macro_rules! theme_keys {
                 font_caption: _, font_body: _, font_label: _, font_button: _, font_heading: _, font_triad: _,
                 font_compass: _, font_subtitle: _, font_intro: _, font_page_heading: _, font_article_heading: _, font_title: _, font_display: _,
                 control_height: _,  control_radius: _, form_label_width: _, form_gap_y: _, form_footer_height: _, form_header_height: _,
-                form_card_width: _, form_icon_size: _, form_close_size: _, form_inset: _, form_icon_inset: _, form_section_icon_size: _,
+                form_card_width: _, svg_panel_width: _, form_icon_size: _, form_close_size: _, form_content_inset: _, form_inset: _, form_icon_inset: _, form_section_icon_size: _,
                 form_checkbox_height: _, form_button_height: _, sketch_palette_width: _, sketch_mode_size: _, sketch_mode_radius: _, sketch_mode_border: _,
                 sketch_palette_alpha: _, sketch_mode_tint: _, sketch_footer_icon_size: _, font_section_tracking: _,
                 figure_ground: _, figure_line: _, figure_highlight: _, figure_shadow: _, figure_face_top: _, figure_face_left: _, figure_face_right: _, figure_card: _, figure_white: _, figure_black: _, figure_accent: _, figure_reference: _, figure_axis_x: _, figure_axis_y: _, figure_axis_z: _, figure_ok: _, figure_warn: _, figure_conflict: _, pref_well: _, pref_note: _, pref_note_fill: _, pref_on_accent: _, pref_ok: _, pref_ok_fill: _, pref_disabled: _,
@@ -501,7 +501,7 @@ theme_keys! {
         preview_add, preview_new, preview_sketch, preview_cut, cube_face, cube_border, cube_text, cube_hover, viewport_top,
         viewport_bottom, grid, grid_major, body_selected, sketch, sketch_fixed, sketch_halo, sketch_locked, sketch_conflict, dimension, dimension_driven,
         sketch_point, sketch_point_free, dialog_bg, dialog_border, chip, section_cap,
-        profile_fill, glyph_bg, glyph_edge, glyph_text, overlay, rubber_band, app_bar_text, app_bar_hover, timeline_item,
+        profile_fill, svg_region_fill, svg_region_fill_nested, svg_curve, svg_repair_segment, svg_original_segment, glyph_bg, glyph_edge, glyph_text, overlay, rubber_band, app_bar_text, app_bar_hover, timeline_item,
         timeline_item_error, timeline_marker, field, box_window, box_crossing, sketch_projected, sketch_lost,
         sketch_construction, sketch_centerline, bend_up, bend_down, interference, comb_envelope, comb_teeth,
         sketch_ink, sketch_soft, surface_fill, surface_ink, surface_soft, mesh_fill, mesh_ink, mesh_soft, form_fill, form_tab_ink, form_soft, sheet_fill, sheet_ink, sheet_soft, render_fill, render_ink, render_soft, tab_on_fill_dark,
@@ -1199,8 +1199,47 @@ fn resolve_base(theme: &ThemeFile) -> Tokens {
     // A file that sets no colours is its base palette, exactly.
     if !theme.colors.is_empty() {
         file_view_from_theme(&mut t, theme.base.is_dark(), |k| theme.colors.contains_key(k));
+        svg_view_from_theme(&mut t, theme.base.is_dark(), |k| theme.colors.contains_key(k));
     }
     t
+}
+
+/// New SVG roles in an older custom theme inherit that theme's geometry, accent and muted
+/// inks. Explicit SVG declarations remain authored values; only derived inks gain contrast.
+fn svg_view_from_theme(t: &mut Tokens, dark: bool, set: impl Fn(&str) -> bool) {
+    if !set("svg_curve") {
+        t.svg_curve = t.sketch_fixed;
+    }
+    let region = t.sketch_ink.lerp_to_gamma(t.accent, 0.4).to_opaque();
+    if !set("svg_region_fill") {
+        t.svg_region_fill = region.gamma_multiply(f32::from(t.svg_region_fill.a()) / 255.0);
+    }
+    if !set("svg_region_fill_nested") {
+        let nested = region.lerp_to_gamma(if dark { t.figure_white } else { t.figure_black }, 0.15);
+        t.svg_region_fill_nested = nested.gamma_multiply(f32::from(t.svg_region_fill_nested.a()) / 255.0);
+    }
+    let readable = |ink: Color32| {
+        let backgrounds = [t.viewport_top, t.viewport_bottom];
+        for amount in [0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0] {
+            let candidate = ink.lerp_to_gamma(t.svg_curve, amount);
+            if backgrounds.into_iter().all(|background| {
+                [background, solidcraft_theme::composite(t.svg_region_fill, background), solidcraft_theme::composite(t.svg_region_fill_nested, background)]
+                    .into_iter()
+                    .all(|fill| solidcraft_theme::contrast_ratio(candidate, fill) >= 3.0)
+            }) {
+                return candidate;
+            }
+        }
+        t.svg_curve
+    };
+    let repair = readable(t.accent);
+    let original = readable(t.text_dim);
+    if !set("svg_repair_segment") {
+        t.svg_repair_segment = repair;
+    }
+    if !set("svg_original_segment") {
+        t.svg_original_segment = original;
+    }
 }
 
 /// The File view's colours a theme leaves unset follow the theme's own panel, border, accent and

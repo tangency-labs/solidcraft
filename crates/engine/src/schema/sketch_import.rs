@@ -139,13 +139,27 @@ const INSERT_DXF: &str = "Insert an ASCII DXF drawing into a sketch as curves: t
 
 /// Insert an SVG drawing into a sketch as curves: the active sketch, or a new one when none is
 /// being edited. Give the drawing as `path` or as `text`. It can be sized, turned and placed.
-/// Text in the drawing becomes sketch text. One undo step.
+/// Text in the drawing becomes sketch text. One undo step. `repair_tolerance` opts in to repair.
 #[derive(Debug)]
-pub struct InsertSvgParams(pub InsertDrawingKeys);
+pub struct InsertSvgParams {
+    pub keys: InsertDrawingKeys,
+    /// Maximum deviation of a repair in placed mm; absent keeps repair off.
+    pub repair_tolerance: Option<f64>,
+}
 
 impl<'de> Deserialize<'de> for InsertSvgParams {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        read_keys(d).map(InsertSvgParams)
+        let mut value = Value::deserialize(d)?;
+        let repair_tolerance = match value.as_object_mut().and_then(|keys| keys.remove("repair_tolerance")) {
+            Some(v) => Some(
+                v.as_f64()
+                    .filter(|v| v.is_finite() && (1e-9..=10.0).contains(v))
+                    .ok_or_else(|| D::Error::custom(whole("`repair_tolerance` must be a number between 0.000000001 and 10 mm")))?,
+            ),
+            None => None,
+        };
+        let keys = read_keys(value).map_err(|e| D::Error::custom(e.to_string()))?;
+        Ok(InsertSvgParams { keys, repair_tolerance })
     }
 }
 
@@ -156,6 +170,17 @@ impl JsonSchema for InsertSvgParams {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let mut schema = InsertDrawingKeys::json_schema(generator);
         schema.insert("description".into(), INSERT_SVG.into());
+        if let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+            props.insert(
+                "repair_tolerance".into(),
+                serde_json::json!({
+                    "type": "number",
+                    "minimum": 0.000000001,
+                    "maximum": 10.0,
+                    "description": "Opt in to repair with this maximum deviation in the final placed drawing, in mm. Enabling repair also approximates cubic segments of exactly closed source paths for CAD preparation, including otherwise unflagged ones. Omission keeps repair off. Repair does not automatically close open paths."
+                }),
+            );
+        }
         schema
     }
 }
@@ -299,6 +324,127 @@ impl<'de> Deserialize<'de> for DrawingAlign {
             _ => Err(D::Error::custom("must be \"origin\" or \"center\"")),
         }
     }
+}
+
+/// Source and placement used both by SVG insertion and its diagnostic preview.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SvgPlacementParams {
+    /// A plain SVG file. Used when `text` is absent.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// SVG document text. Takes precedence over `path`.
+    #[serde(default)]
+    pub text: Option<String>,
+    /// Position of the origin, or of the drawing's centre with `align: center`, in sketch mm.
+    #[serde(default)]
+    pub at: Option<Point2>,
+    /// Uniform size factor. Default: 1. Ignored when `width` or `height` is given.
+    #[serde(default)]
+    pub scale: Option<f64>,
+    /// Drawing width in mm, preserving aspect ratio. Takes precedence over `height` and `scale`.
+    #[serde(default)]
+    pub width: Option<f64>,
+    /// Drawing height in mm, preserving aspect ratio. Used when `width` is absent.
+    #[serde(default)]
+    pub height: Option<f64>,
+    /// Rotation counter-clockwise about the origin or drawing centre, in degrees. Default: 0.
+    #[serde(default)]
+    pub angle: Option<f64>,
+    /// Placement pivot: `origin` (default) or `center`.
+    #[serde(default)]
+    pub align: Option<SvgAlignment>,
+    /// Opt in to repair with this maximum deviation in the final placed drawing, in mm.
+    /// Must be between 0.000000001 and 10. Enabling repair also approximates cubic segments
+    /// of exactly closed source paths for CAD preparation, including otherwise unflagged ones.
+    /// Omission keeps repair off. Repair does not automatically close open paths.
+    #[serde(default, deserialize_with = "repair_tolerance", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "f64", range(min = 0.000000001, max = 10.0))]
+    pub repair_tolerance: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SvgAlignment {
+    Origin,
+    Center,
+}
+
+fn repair_tolerance<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    let v = Value::deserialize(d)?;
+    v.as_f64()
+        .filter(|v| v.is_finite() && (1e-9..=10.0).contains(v))
+        .map(Some)
+        .ok_or_else(|| D::Error::custom(whole("`repair_tolerance` must be a number between 0.000000001 and 10 mm")))
+}
+
+/// Find SVG path defects and preview optional repairs without changing the design.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SvgDiagnosticsParams {
+    #[serde(flatten)]
+    pub drawing: SvgPlacementParams,
+}
+
+/// A source segment to highlight in the placed sketch, and the outcome of optional adjustment.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SvgDiagnostic {
+    /// One-based path element number in the SVG document.
+    pub path: usize,
+    /// One-based subpath number within the path.
+    pub subpath: usize,
+    /// One-based source drawing segment number within the subpath.
+    pub segment: usize,
+    /// Stable diagnostic code: `attached_loop`, `backtracking_curve`, `closed_cubic`,
+    /// `outline_approximation`, `shared_boundary`, `short_tangent` or `unpainted_boundary`.
+    /// `outline_approximation` appears only in repair proposals and does not imply a source defect.
+    pub kind: String,
+    /// Location in placed sketch millimetres.
+    pub at: [f64; 2],
+    /// Display samples of the source segment, in placed sketch millimetres.
+    /// These samples are for highlighting, never for repair decisions.
+    pub highlight: Vec<[f64; 2]>,
+    /// Display chains of the replacement geometry, in placed sketch millimetres.
+    /// Empty when the source is unrepaired or an attached loop was removed. These points
+    /// support original-versus-repaired overlays and never drive modelling decisions.
+    pub replacement_highlight: Vec<Vec<[f64; 2]>>,
+    /// Whether a source-segment adjustment was made within the requested bound.
+    pub repaired: bool,
+    /// Certified maximum deviation of the repaired source geometry, in final sketch mm;
+    /// null when the source geometry was left unchanged.
+    pub max_deviation_mm: Option<f64>,
+}
+
+/// SVG diagnostic preview: recognised warnings and optional closed-outline approximations.
+/// A later solid operation still performs its own validation.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SvgDiagnosticsResult {
+    pub diagnostics: Vec<SvgDiagnostic>,
+    /// Diagnostic entries which remain unadjusted.
+    pub remaining: usize,
+    /// Source-segment adjustments made within the requested tolerance, including CAD preparation.
+    /// This is not a count of proven defects in the source.
+    pub repaired: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// SVG insertion result, including source warnings and the bounded adjustment report.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct InsertSvgResult {
+    pub sketch: u64,
+    pub created_sketch: Option<u64>,
+    pub curves: usize,
+    pub texts: usize,
+    /// Sketch solve report (`solved`, `dof`), or null when no solve report is needed.
+    pub info: Option<SketchSolve>,
+    pub diagnostics: Vec<SvgDiagnostic>,
+    pub remaining: usize,
+    pub repaired: usize,
+    /// Entity ids added by the command, populated by the session's command wrapper.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What `sketch.insert_dxf` and `sketch.insert_svg` return.

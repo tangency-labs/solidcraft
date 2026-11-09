@@ -54,7 +54,7 @@ fn header_actions(
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), header_height()), egui::Sense::hover());
     // Shared card chrome: 12 pt left inset, 19 pt icon, 8 pt gap and 26 pt close target.
     let icon_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + t.space_12 + t.form_icon_size / 2.0, rect.center().y),
+        egui::pos2(rect.left() + t.form_content_inset + t.form_icon_size / 2.0, rect.center().y),
         vec2(t.form_icon_size, t.form_icon_size),
     );
     if icon.0.is_empty() {
@@ -71,6 +71,7 @@ fn header_actions(
     if closeable {
         let close = icon_button_at(ui, close_rect, "close", "Close");
         solidcraft_ui_registry::publish_handle("dialog:close", close.rect.center());
+        solidcraft_ui_registry::publish_rect("dialog:close", close.rect);
         if close.clicked() {
             on_close();
         }
@@ -158,7 +159,7 @@ impl<'a> TopHeader<'a> {
         let t = Tokens::get();
         let (band, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), header_height()), egui::Sense::hover());
         let icon = egui::Rect::from_center_size(
-            egui::pos2(band.left() + t.space_12 + t.form_icon_size / 2.0, band.center().y),
+            egui::pos2(band.left() + t.form_content_inset + t.form_icon_size / 2.0, band.center().y),
             vec2(t.form_icon_size, t.form_icon_size),
         );
         // The buttons end where the fields below do.
@@ -304,6 +305,8 @@ pub(crate) struct Panel<'a> {
     width: f32,
     body_rows: Option<f32>,
     body_height: Option<f32>,
+    fill_height: bool,
+    cancel_left: bool,
     ok: &'a str,
     cancel: &'a str,
     reset_scroll: bool,
@@ -634,6 +637,8 @@ impl<'a> Panel<'a> {
             width: Tokens::get().form_card_width,
             body_rows: None,
             body_height: None,
+            fill_height: false,
+            cancel_left: false,
             ok: "OK",
             cancel: "Cancel",
             reset_scroll: false,
@@ -657,6 +662,18 @@ impl<'a> Panel<'a> {
 
     pub(crate) fn width(mut self, width: f32) -> Self {
         self.width = width;
+        self
+    }
+
+    /// Reserve the available body height while keeping the action footer visible.
+    pub(crate) fn fill_height(mut self, fill: bool) -> Self {
+        self.fill_height = fill;
+        self
+    }
+
+    /// Place Cancel at the leading edge of the footer, opposite the primary action.
+    pub(crate) fn cancel_left(mut self, left: bool) -> Self {
+        self.cancel_left = left;
         self
     }
 
@@ -871,15 +888,15 @@ impl<'a> Panel<'a> {
                         .id_salt("feature_fields")
                         .min_scrolled_height(0.0)
                         .max_height(fields_height)
-                        .auto_shrink([true, self.body_height.is_none()])
+                        .auto_shrink([true, self.body_height.is_none() && !self.fill_height])
                         .show(ui, |ui| {
                             if disabled {
                                 ui.disable();
                             }
                             egui::Frame::NONE
                                 .inner_margin(egui::Margin {
-                                    left: t.space_12 as i8,
-                                    right: t.space_12 as i8,
+                                    left: t.form_content_inset as i8,
+                                    right: t.form_content_inset as i8,
                                     top: t.space_12 as i8,
                                     bottom: t.space_12 as i8,
                                 })
@@ -911,7 +928,14 @@ impl<'a> Panel<'a> {
                 self.ok,
                 self.cancel,
                 valid && !state.applying,
-                super::Footer { apply: heading.apply_label, status: state.text.as_deref(), corners: Some(corners), ..Default::default() },
+                super::Footer {
+                    apply: heading.apply_label,
+                    status: state.text.as_deref(),
+                    corners: Some(corners),
+                    cancel_left: self.cancel_left,
+                    compact_actions: self.cancel_left,
+                    ..Default::default()
+                },
                 |ui| {
                     if state.busy {
                         let (rect, _) = ui.allocate_exact_size(vec2(t.space_16, ui.available_height()), egui::Sense::hover());

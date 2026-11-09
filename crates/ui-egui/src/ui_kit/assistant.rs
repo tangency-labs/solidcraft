@@ -25,11 +25,44 @@ impl AssistantTone {
     }
 }
 
+/// Optional geometry for state pills; existing callers retain the standard assistant sizing.
+#[derive(Clone, Copy)]
+pub(crate) struct BadgeMetrics {
+    pub height: f32,
+    pub font_size: f32,
+    pub horizontal_padding: f32,
+    pub radius: u8,
+    pub semibold: bool,
+}
+
+impl BadgeMetrics {
+    pub fn compact(t: &Tokens) -> Self {
+        let height = t.space_16 + t.space_4;
+        Self { height, font_size: t.font_small, horizontal_padding: t.space_6 + t.space_2 * 0.5, radius: (height * 0.5) as u8, semibold: true }
+    }
+
+    fn standard(t: &Tokens) -> Self {
+        Self {
+            height: t.form_close_size - t.space_4,
+            font_size: t.font_caption,
+            horizontal_padding: t.space_12 * 0.5,
+            radius: t.radius_xl,
+            semibold: false,
+        }
+    }
+}
+
 /// A compact state pill. Tokens: font_small, space_6/12, radius_xl and semantic state colours.
 pub(crate) fn assistant_badge(ui: &mut Ui, label: &str, tone: AssistantTone) -> Response {
     let t = Tokens::get();
     let (ink, fill) = tone.colors(&t);
     badge(ui, label, ink, fill)
+}
+
+/// A state pill with explicit token-derived geometry; semantic colors remain shared.
+pub(crate) fn assistant_badge_with_metrics(ui: &mut Ui, label: &str, tone: AssistantTone, metrics: BadgeMetrics) -> Response {
+    let (ink, fill) = tone.colors(&Tokens::get());
+    badge_with_metrics(ui, label, ink, fill, metrics)
 }
 
 /// A compact informational chip in the active workspace colours.
@@ -39,11 +72,17 @@ pub(crate) fn workspace_chip(ui: &mut Ui, label: &str) -> Response {
 }
 
 fn badge(ui: &mut Ui, label: &str, ink: egui::Color32, fill: egui::Color32) -> Response {
+    badge_with_metrics(ui, label, ink, fill, BadgeMetrics::standard(&Tokens::get()))
+}
+
+fn badge_with_metrics(ui: &mut Ui, label: &str, ink: egui::Color32, fill: egui::Color32, metrics: BadgeMetrics) -> Response {
     let t = Tokens::get();
-    let font = egui::FontId::proportional(t.font_caption);
-    let width = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), ink).size().x + t.space_12;
-    let (rect, response) = ui.allocate_exact_size(vec2(width, t.form_close_size - t.space_4), egui::Sense::hover());
-    ui.painter().rect_filled(rect, t.radius_xl, fill);
+    let size = if metrics.font_size.is_finite() && metrics.font_size > 0.0 { metrics.font_size } else { t.font_caption };
+    let font = if metrics.semibold { crate::ui_kit::type_face::semibold(size) } else { egui::FontId::proportional(size) };
+    let width =
+        ui.painter().layout_no_wrap(label.to_owned(), font.clone(), ink).size().x + super::metrics::dimension(metrics.horizontal_padding) * 2.0;
+    let (rect, response) = ui.allocate_exact_size(vec2(width, super::metrics::dimension(metrics.height)), egui::Sense::hover());
+    ui.painter().rect_filled(rect, metrics.radius, fill);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, font, ink);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
     response
@@ -483,6 +522,19 @@ mod tests {
             assert!((header.response.rect.height() - t.form_header_height).abs() < 1.0);
             let badge = assistant_badge(ui, "Ready", AssistantTone::Success);
             assert!((badge.rect.height() - (t.form_close_size - t.space_4)).abs() < 1.0);
+        });
+    }
+    #[test]
+    fn compact_badges_match_the_reference_without_changing_standard_badges() {
+        let ctx = crate::fonts::test_context();
+        super::super::test_support::frame(&ctx, vec![], |ui| {
+            let t = Tokens::get();
+            let compact = assistant_badge_with_metrics(ui, "Ready", AssistantTone::Success, BadgeMetrics::compact(&t));
+            let regular = assistant_badge(ui, "Ready", AssistantTone::Success);
+            assert_eq!(compact.rect.height(), 20.0);
+            assert_eq!(regular.rect.height(), t.form_close_size - t.space_4);
+            let label_width = ui.painter().layout_no_wrap("Ready".into(), crate::ui_kit::type_face::semibold(t.font_small), t.form_success).size().x;
+            assert!((compact.rect.width() - label_width - 14.0).abs() < 0.01);
         });
     }
 }

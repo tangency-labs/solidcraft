@@ -904,10 +904,14 @@ pub struct Tokens {
     pub form_header_height: f32,
     /// Outer width of a dense feature card.
     pub form_card_width: f32,
+    /// SVG import card width in logical UI points.
+    pub svg_panel_width: f32,
     /// Size of the icon in a dense form header.
     pub form_icon_size: f32,
     /// Size of the dense form close button.
     pub form_close_size: f32,
+    /// Horizontal content inset of feature headers and scrolling forms.
+    pub form_content_inset: f32,
     /// Text inset in controls and gap after the header icon.
     pub form_inset: f32,
     /// Inset of artwork inside a dense form icon button.
@@ -1072,6 +1076,13 @@ pub struct Tokens {
     pub section_hatch: [Color32; 2],
     /// Closed sketch profiles (translucent fill).
     pub profile_fill: Color32,
+    /// Detected SVG regions and nested regions, separate from sketch selection feedback.
+    pub svg_region_fill: Color32,
+    pub svg_region_fill_nested: Color32,
+    /// Neutral SVG geometry, proposed replacements, and dashed source geometry in the view.
+    pub svg_curve: Color32,
+    pub svg_repair_segment: Color32,
+    pub svg_original_segment: Color32,
     /// Constraint glyph boxes.
     pub glyph_bg: Color32,
     pub glyph_edge: Color32,
@@ -1343,6 +1354,18 @@ impl Tokens {
         }
     }
 
+    /// SVG artwork import uses its reference layout without changing other feature cards.
+    pub fn svg_import_layout(mut self) -> Self {
+        self.form_header_height = 48.0;
+        self.form_footer_height = 60.0;
+        self.form_content_inset = 16.0;
+        self.form_close_size = 28.0;
+        self.form_icon_size = 16.0;
+        self.font_button = self.font_label;
+        self.font_section_tracking = 0.07;
+        self
+    }
+
     /// These tokens with the 3D view's background one flat colour (#7688), or as they are for `None`.
     pub fn with_background(mut self, colour: Option<[u8; 3]>) -> Tokens {
         if let Some([r, g, b]) = colour {
@@ -1408,6 +1431,11 @@ impl Tokens {
             section_cap: view.section_cap,
             section_hatch: view.section_hatch,
             profile_fill: view.profile_fill,
+            svg_region_fill: view.svg_region_fill,
+            svg_region_fill_nested: view.svg_region_fill_nested,
+            svg_curve: view.svg_curve,
+            svg_repair_segment: view.svg_repair_segment,
+            svg_original_segment: view.svg_original_segment,
             glyph_bg: view.glyph_bg,
             glyph_edge: view.glyph_edge,
             glyph_text: view.glyph_text,
@@ -1454,6 +1482,12 @@ impl Tokens {
             ColorVision::Protan | ColorVision::Deutan => self.red_green(dark),
             ColorVision::Tritan => self.blue_yellow(dark),
         };
+        // Detected regions follow the existing mode-specific preview palette. Solid versus
+        // dashed strokes and opacity distinguish replacement/source and outer/nested regions.
+        let region = t.preview_sketch.to_opaque();
+        let nested = region.lerp_to_gamma(if dark { Color32::WHITE } else { Color32::BLACK }, 0.15);
+        t.svg_region_fill = Color32::from_rgba_unmultiplied(region.r(), region.g(), region.b(), 66);
+        t.svg_region_fill_nested = Color32::from_rgba_unmultiplied(nested.r(), nested.g(), nested.b(), 87);
         // Figure axes carry the same X/Y/Z meanings as the viewport and its navigation triad.
         t.figure_axis_x = t.axis_x;
         t.figure_axis_y = t.axis_y;
@@ -1803,6 +1837,25 @@ mod tests {
         });
     }
 
+    #[test]
+    fn svg_inks_remain_readable_over_detected_regions_in_each_view_theme() {
+        for dark in [false, true] {
+            for mode in super::ColorVision::ALL {
+                let t = super::Tokens::themed(dark, mode);
+                assert_eq!(t.svg_region_fill.a(), 66);
+                assert_eq!(t.svg_region_fill_nested.a(), 87);
+                for background in [t.viewport_top, t.viewport_bottom] {
+                    for fill in [background, super::composite(t.svg_region_fill, background), super::composite(t.svg_region_fill_nested, background)]
+                    {
+                        assert!(super::contrast_ratio(t.svg_curve, fill) >= 4.5, "curve {dark} {mode:?}");
+                        assert!(super::contrast_ratio(t.svg_repair_segment, fill) >= 3.0, "replacement {dark} {mode:?}");
+                        assert!(super::contrast_ratio(t.svg_original_segment, fill) >= 3.0, "original {dark} {mode:?}");
+                    }
+                }
+            }
+        }
+    }
+
     /// A 3D view set to the other side's colours (#4146): the view's colours come from the other
     /// side and everything else stays the window's, in every colour vision mode. A view as dark as
     /// the window gives the window's tokens unchanged.
@@ -1837,6 +1890,11 @@ mod tests {
                     (t.sketch, t.sketch_fixed, t.dimension, t.glyph_bg, t.glyph_text, t.profile_fill),
                     (v.sketch, v.sketch_fixed, v.dimension, v.glyph_bg, v.glyph_text, v.profile_fill)
                 );
+                assert_eq!(
+                    (t.svg_region_fill, t.svg_region_fill_nested, t.svg_curve, t.svg_repair_segment, t.svg_original_segment),
+                    (v.svg_region_fill, v.svg_region_fill_nested, v.svg_curve, v.svg_repair_segment, v.svg_original_segment)
+                );
+                assert_eq!(t.svg_panel_width, w.svg_panel_width, "the SVG card belongs to window layout");
                 assert_eq!(
                     (t.origin_plane, t.axis_x, t.cube_face, t.cube_text, t.axis_y, t.axis_z),
                     (v.origin_plane, v.axis_x, v.cube_face, v.cube_text, v.axis_y, v.axis_z)

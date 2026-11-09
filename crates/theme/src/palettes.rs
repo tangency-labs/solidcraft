@@ -108,8 +108,10 @@ impl Tokens {
             form_footer_height: 48.0,
             form_header_height: 40.0,
             form_card_width: 264.0,
+            svg_panel_width: 380.0,
             form_icon_size: 19.0,
             form_close_size: 26.0,
+            form_content_inset: 12.0,
             form_inset: 9.0,
             form_icon_inset: 4.5,
             form_section_icon_size: 11.0,
@@ -227,6 +229,11 @@ impl Tokens {
             dialog_border: Color32::from_rgb(213, 219, 227),
             chip: Color32::from_rgb(38, 120, 218),
             profile_fill: Color32::from_rgba_unmultiplied_const(255, 196, 120, 70),
+            svg_region_fill: Color32::from_rgba_unmultiplied_const(30, 150, 140, 66),
+            svg_region_fill_nested: Color32::from_rgba_unmultiplied_const(24, 128, 120, 87),
+            svg_curve: Color32::from_rgb(20, 20, 20),
+            svg_repair_segment: Color32::from_rgb(24, 88, 145),
+            svg_original_segment: Color32::from_rgb(74, 88, 104),
             glyph_bg: Color32::WHITE,
             glyph_edge: Color32::from_rgb(190, 110, 100),
             glyph_text: icon_primary(strokes::CONSTRAINT_PRIMARY[0]),
@@ -439,6 +446,11 @@ impl Tokens {
         t.dimension_driven = Color32::from_rgb(176, 104, 144);
         t.sketch_point_free = Color32::from_rgb(92, 150, 255);
         t.profile_fill = Color32::from_rgba_unmultiplied_const(120, 150, 200, 40);
+        t.svg_region_fill = Color32::from_rgba_unmultiplied_const(50, 190, 178, 66);
+        t.svg_region_fill_nested = Color32::from_rgba_unmultiplied_const(55, 205, 192, 87);
+        t.svg_curve = t.sketch_fixed;
+        t.svg_repair_segment = Color32::from_rgb(136, 192, 255);
+        t.svg_original_segment = Color32::from_rgb(190, 197, 209);
         t.dialog_bg = Color32::from_rgb(39, 43, 52);
         t.dialog_border = Color32::from_rgb(63, 69, 82);
         t.chip = Color32::from_rgb(59, 101, 168);

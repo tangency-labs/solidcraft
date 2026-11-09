@@ -78,10 +78,19 @@ impl Colors {
     }
 }
 
+#[derive(Default)]
+struct ProfileFill {
+    key: Option<u64>,
+    triangles: Vec<([solidcore_record::Vec2; 3], bool)>,
+    profiles: usize,
+}
+
 pub struct SketchPreview {
     pub sketch: std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
     pub curves: Vec<usize>,
     pub points: Vec<usize>,
+    fill: std::cell::RefCell<ProfileFill>,
+    nested: Vec<bool>,
 }
 
 /// A computed preview: the scene to draw and the bodies it stands in for.
@@ -133,6 +142,8 @@ pub struct PreviewState {
     /// Is a preview scene up?
     pub active: bool,
     pub sketches: Vec<SketchPreview>,
+    /// SVG setup retains its last successful drawing as muted feedback while a proposal changes.
+    retain_svg_sketches: bool,
     /// Why the current inputs don't make a feature (nothing is previewed then).
     pub error: Option<String>,
     /// A preview is being computed.
@@ -170,7 +181,7 @@ impl PreviewState {
         }
     }
 
-    fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.straight.clear();
         self.moving.clear();
         self.detach();
@@ -182,9 +193,17 @@ impl PreviewState {
         self.stopped = None;
         self.tapered.clear();
         self.sketches.clear();
+        self.retain_svg_sketches = false;
         self.busy = false;
         self.rolled_back = false;
         self.hide_scene();
+    }
+
+    /// Retry a proposal without hiding the last valid drawing.
+    pub(crate) fn retry_svg(&mut self) {
+        self.detach();
+        self.shown_key = None;
+        self.error = None;
     }
 
     /// Drop the preview of a design that leaves the window. Its scene goes too: the viewport
@@ -223,7 +242,9 @@ impl PreviewState {
             // them (a 1 mm extrusion still drawn at 0 mm), so nothing is drawn.
             Err(e) => {
                 self.hide_scene();
-                self.sketches.clear();
+                if !self.retain_svg_sketches {
+                    self.sketches.clear();
+                }
                 self.error = Some(e);
                 self.applied = None;
                 self.stopped = None;
@@ -236,7 +257,9 @@ impl PreviewState {
     /// computing new inputs, but never let an obsolete result block their Apply.
     fn poll(&mut self, key: u64, stream_key: Option<u64>) {
         if self.shown_key != Some(key) {
-            self.sketches.clear();
+            if !self.retain_svg_sketches {
+                self.sketches.clear();
+            }
             self.error = None;
         }
         if let Some((k, rx)) = &self.running {
@@ -369,9 +392,26 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
     Some(job_key(&setup, revision, colors))
 }
 
+/// Whether the visible preview was computed for these exact dialog inputs.
+/// SVG import uses this to avoid presenting or accepting stale region shading.
+pub(crate) fn matches_dialog(app: &SolveApp, dialog: &crate::dialogs::Dialog) -> bool {
+    let Ok(commands) = crate::dialogs::preview_commands(app, dialog) else { return false };
+    matches_commands(app, &commands)
+}
+
+/// Match the solved preview to a placement form before displaying its region count.
+pub(crate) fn matches_commands(app: &SolveApp, commands: &[(String, Value)]) -> bool {
+    let mut colors = Colors::for_tool(&Tokens::get(), &app.ui.tab, true);
+    colors.tint_new = app.preferences.preview_tint_new_faces;
+    colors.cut_tint = app.preferences.cut_preview_tint;
+    !app.preview.busy && app.preview.error.is_none() && app.preview.shown_key == Some(job_key(commands, app.session.revision, colors))
+}
+
 /// Keep the preview in step with the open dialog: start a computation when its inputs changed,
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
+    app.preview.retain_svg_sketches =
+        app.dialog.as_ref().is_some_and(|dialog| matches!(&dialog.kind, crate::dialogs::Kind::InsertDrawing(p) if p.command.ends_with("svg")));
     let cmds = match app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).map(|d| crate::dialogs::preview_commands(app, d)) {
         Some(Ok(c)) if !c.is_empty() => c,
         _ if crate::sketch_attachment_ui::commands(app).is_some() => crate::sketch_attachment_ui::commands(app).unwrap_or_default(),
@@ -488,6 +528,30 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
         let preview = s.preview_visible_world(cmds).map_err(|error| error.to_string())?;
         return std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut built = build(&preview.before, &preview.after, colors);
+            if cmds.iter().any(|(command, _)| command == "sketch.insert_svg") {
+                for preview in &mut built.sketches {
+                    // Nested tone is display metadata, computed beside the engine preview.
+                    // A bounded fallback keeps very large drawings in the base region tone.
+                    preview.nested = preview
+                        .sketch
+                        .profiles
+                        .iter()
+                        .take(1024)
+                        .enumerate()
+                        .map(|(index, profile)| {
+                            let inside = profile.region.interior_point();
+                            preview
+                                .sketch
+                                .profiles
+                                .iter()
+                                .take(1024)
+                                .enumerate()
+                                .any(|(other, candidate)| other != index && candidate.region.holes.iter().any(|hole| hole.contains(inside)))
+                        })
+                        .collect();
+                }
+            }
+
             built.bounds = state_bounds(&preview.after);
             built
         }))
@@ -821,7 +885,11 @@ pub(crate) fn sketch_changes(
         .enumerate()
         .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
         .collect::<Vec<_>>();
-    if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
+    if indices.is_empty() && points.is_empty() {
+        None
+    } else {
+        Some(SketchPreview { sketch: sketch.clone(), curves: indices, points, fill: Default::default(), nested: Vec::new() })
+    }
 }
 
 /// Which of the `nf` faces of `m` are new surface, i.e. not on the old mesh? Each is decided by
@@ -977,9 +1045,95 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     {
         return;
     }
+    let svg_import = app.dialog.as_ref().filter(|d| matches!(&d.kind, crate::dialogs::Kind::InsertDrawing(place) if place.command.ends_with("svg")));
+    let svg_place = svg_import.and_then(|dialog| match &dialog.kind {
+        crate::dialogs::Kind::InsertDrawing(p) => Some(p),
+        _ => None,
+    });
+    let faded = svg_place.is_some_and(|p| p.svg.review || crate::dialogs_insert_drawing::is_stale(p))
+        || svg_import.is_some_and(|dialog| !matches_dialog(app, dialog));
+    let opacity = if faded { 0.35 } else { 1.0 };
+    let faces = svg_place.is_some_and(|p| p.svg.show_faces);
+    let mut shaded = 0;
+    let mut triangles = 0;
+    if faces {
+        for preview in &app.preview.sketches {
+            let counts = paint_profile_fills(preview, painter, proj, app.viewport.pixels_per_point(), opacity);
+            shaded += counts.0;
+            triangles += counts.1;
+        }
+    }
+    solidcraft_ui_registry::publish_count("sketch_preview_shaded_profiles", shaded as f64);
+    solidcraft_ui_registry::publish_count("sketch_preview_fill_triangles", triangles as f64);
+    solidcraft_ui_registry::publish_count(
+        "sketch_preview_closed_profiles",
+        app.preview.sketches.iter().map(|p| p.sketch.profiles.len()).sum::<usize>() as f64,
+    );
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
-    let curves: usize = app.preview.sketches.iter().map(|preview| paint_sketch(preview, painter, proj, &mut budget)).sum();
-    crate::scenario::publish_count("sketch_preview_curves", curves as f64);
+    let stroke = svg_place.map(|_| egui::Stroke::new(Tokens::get().space_2, Tokens::get().svg_curve.gamma_multiply(opacity)));
+    let curves: usize = if svg_place.is_none_or(|p| p.svg.show_curves) {
+        app.preview.sketches.iter().map(|preview| paint_sketch_impl(preview, painter, proj, &mut budget, svg_import.is_none(), stroke)).sum()
+    } else {
+        0
+    };
+    solidcraft_ui_registry::publish_count("sketch_preview_curves", curves as f64);
+    let points = if svg_import.is_some() { 0 } else { app.preview.sketches.iter().map(|p| p.points.len()).sum::<usize>() };
+    solidcraft_ui_registry::publish_count("sketch_preview_point_markers", points as f64);
+}
+
+/// Shade only profiles the sketch solver actually resolved, including their holes. Sampling and
+/// triangulation are display-only and cached for this solved sketch and projection.
+/// The most triangles every shaded region of one sketch may use together.
+const FILL_TRIANGLES: usize = 65_536;
+
+fn paint_profile_fills(preview: &SketchPreview, painter: &egui::Painter, proj: &crate::viewport::Proj, ppp: f32, opacity: f32) -> (usize, usize) {
+    paint_profile_fills_within(preview, painter, proj, ppp, opacity, FILL_TRIANGLES)
+}
+
+fn paint_profile_fills_within(
+    preview: &SketchPreview,
+    painter: &egui::Painter,
+    proj: &crate::viewport::Proj,
+    ppp: f32,
+    opacity: f32,
+    triangle_budget: usize,
+) -> (usize, usize) {
+    let key = crate::sketch_display::projection_key(proj, ppp);
+    let Ok(mut fill) = preview.fill.try_borrow_mut() else { return (0, 0) };
+    if fill.key != Some(key) {
+        fill.key = Some(key);
+        fill.triangles.clear();
+        fill.profiles = 0;
+        let mut sampler = crate::sketch_display::Uncached::default();
+        let mut budget = triangle_budget;
+        for (index, profile) in preview.sketch.profiles.iter().enumerate() {
+            let Some(region) = sampler.fill_profile(&profile.region, &preview.sketch.plane, proj, ppp) else { continue };
+            let triangles = crate::sketch_display::fill_triangles(&region, &mut budget);
+            if !triangles.is_empty() {
+                fill.profiles += 1;
+                let nested = preview.nested.get(index).copied().unwrap_or(false);
+                fill.triangles.extend(triangles.into_iter().map(|triangle| (triangle, nested)));
+            }
+        }
+    }
+    let tokens = Tokens::get();
+    let mut mesh = egui::Mesh::default();
+    let mut painted = 0;
+    for (triangle, nested) in &fill.triangles {
+        let color = if *nested { tokens.svg_region_fill_nested } else { tokens.svg_region_fill }.gamma_multiply(opacity);
+        let projected = triangle.iter().map(|p| proj.to_screen(preview.sketch.plane.to_world(*p))).collect::<Option<Vec<_>>>();
+        let Some(projected) = projected else { continue };
+        let first = mesh.vertices.len() as u32;
+        for point in projected {
+            mesh.colored_vertex(point, color);
+        }
+        mesh.add_triangle(first, first + 1, first + 2);
+        painted += 1;
+    }
+    if !mesh.indices.is_empty() {
+        painter.add(egui::Shape::mesh(mesh));
+    }
+    (fill.profiles, painted)
 }
 
 /// Draw what a change moves in a sketch, its curves and points, in the preview colour; returns
@@ -990,12 +1144,23 @@ pub(crate) fn paint_sketch(
     proj: &crate::viewport::Proj,
     budget: &mut solidcraft_engine::render::SamplingBudget,
 ) -> usize {
-    let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
+    paint_sketch_impl(preview, painter, proj, budget, true, None)
+}
+
+fn paint_sketch_impl(
+    preview: &SketchPreview,
+    painter: &egui::Painter,
+    proj: &crate::viewport::Proj,
+    budget: &mut solidcraft_engine::render::SamplingBudget,
+    show_points: bool,
+    style: Option<egui::Stroke>,
+) -> usize {
+    let stroke = style.unwrap_or_else(|| egui::Stroke::new(2.5, Tokens::get().preview_sketch));
     let sketch = &preview.sketch;
     for index in &preview.curves {
         crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, budget);
     }
-    for index in &preview.points {
+    for index in preview.points.iter().filter(|_| show_points) {
         if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {
             painter.circle_filled(point, 3.0, stroke.color);
         }
@@ -1007,6 +1172,55 @@ pub(crate) fn paint_sketch(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A repaired drawing is thousands of sub-pixel spans per outline; thinning them keeps every
+    /// closed region inside the triangle budget, instead of shading only the first that fit.
+    #[test]
+    fn dense_repaired_style_drawings_shade_every_closed_region() {
+        let mut paths = String::new();
+        for k in 0..30 {
+            let (cx, cy) = (f64::from(k % 6) * 6.0, f64::from(k / 6) * 6.0);
+            for i in 0..100 {
+                let a = f64::from(i) * std::f64::consts::TAU / 100.0;
+                paths.push_str(&format!("{}{:.5} {:.5}", if i == 0 { "M" } else { "L" }, cx + 2.0 * a.cos(), cy + 2.0 * a.sin()));
+            }
+            paths.push('Z');
+        }
+        let svg = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="30mm" viewBox="0 0 40 30"><path d="{paths}"/></svg>"#);
+        let session = Session::default();
+        let built = compute(&session, &[("sketch.insert_svg".into(), json!({"text": svg}))], colors()).unwrap();
+        let camera = solidcraft_engine::render::Camera { distance: 60.0, ..Default::default() };
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let proj = crate::viewport::Proj { cam: camera, vp: camera.view_proj(800.0 / 600.0, 100.0), rect };
+        let ctx = crate::fonts::test_context();
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            for preview in &built.sketches {
+                let (shaded, _) = paint_profile_fills_within(preview, ui.painter(), &proj, 2.0, 1.0, 2_000);
+                assert_eq!(preview.sketch.profiles.len(), 30);
+                assert_eq!(shaded, 30, "every closed region is shaded within a small triangle budget");
+            }
+        });
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn svg_proposal_changes_and_failures_keep_the_last_valid_drawing() {
+        let session = Session::default();
+        let commands = vec![("sketch.insert_svg".into(), json!({"text": "<svg><path d='M0 0L10 0L10 10L0 10Z'/></svg>"}))];
+        let mut state = PreviewState { retain_svg_sketches: true, ..Default::default() };
+        state.apply(1, compute(&session, &commands, colors()));
+        assert_eq!(state.sketches.len(), 1);
+        state.poll(2, None);
+        assert_eq!(state.sketches.len(), 1, "a pending proposal keeps the previous drawing");
+        state.apply(2, Err("proposal failed".into()));
+        assert_eq!(state.sketches.len(), 1, "a failed proposal keeps the previous drawing");
+        assert!(state.error.is_some());
+        state.retry_svg();
+        assert!(state.error.is_none() && state.shown_key.is_none());
+        assert_eq!(state.sketches.len(), 1);
+        state.clear();
+        assert!(state.sketches.is_empty());
+    }
 
     #[test]
     fn tool_preview_follows_tab_without_recolouring_removal_or_idle_previews() {
