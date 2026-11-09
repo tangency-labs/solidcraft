@@ -1530,6 +1530,31 @@ mod tests {
         assert_eq!(app.docs.count(), 2, "the second took a tab of its own");
     }
 
+    /// Opened by command (`doc.open`, as agents and scripts open a design), a design with its own
+    /// orientation also starts at its own Home view.
+    #[test]
+    fn a_design_opened_by_command_starts_at_its_own_home_view() {
+        use solidcraft_engine::render::{Camera, StandardView};
+        let dir = std::env::temp_dir().join(format!("solidcraft-own-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a folder");
+        let path = dir.join("framed.solidcraft").to_string_lossy().into_owned();
+        let mut first = SolveApp::new(Session::default(), Default::default());
+        first.run("solid.box", json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        let seen = Camera { yaw: 1.1, pitch: 0.4, ..Camera::default() };
+        first.run("view.frame", json!({"set": "front", "camera": seen})).unwrap();
+        let frame = first.session.doc.view_frame;
+        assert!(frame.is_some(), "the design has its own orientation");
+        first.run("file.save_as", json!({"path": path})).unwrap();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.run("doc.open", json!({"path": path})).unwrap();
+        let mut home = Camera { frame, ..Camera::default() };
+        home.set_view(StandardView::Iso);
+        assert_eq!(app.cam.frame, frame, "the camera is in the design's orientation");
+        assert!(app.cam.back().dist(home.back()) < 1e-9, "at its own isometric view");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// An Open says which design it brought in, by the name its tab shows, and whether it took
     /// a tab of its own or replaced the blank design.
     #[test]

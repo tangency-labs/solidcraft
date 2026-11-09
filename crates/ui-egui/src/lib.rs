@@ -1655,7 +1655,8 @@ impl SolveApp {
                     self.cancel_computing();
                     self.tool = None;
                     self.preview.reset();
-                    self.cam = Camera::default();
+                    // In the design's own orientation, so it opens at its own Home view.
+                    self.cam = Camera { frame: self.session.doc.view_frame, ..Camera::default() };
                     self.fit_view();
                     history_folds::load(self);
                     timeline_scope::reset(self);
