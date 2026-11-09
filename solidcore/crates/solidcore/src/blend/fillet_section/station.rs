@@ -650,7 +650,7 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                 for (c, out) in cs.iter().zip(outs) {
                     let cv = [c.x, c.y, c.z];
                     for (o, &cj) in out.a.iter_mut().zip(&cv) {
-                        *o = o.add(&mono.scale(cj * sf, tr), tr);
+                        o.add_scaled_assign(&mono, cj * sf, tr);
                     }
                 }
             }

@@ -163,6 +163,21 @@ impl<T: GnScalar> Ser<T> {
         Self::from_fn(tr, |i, k| self.at(i, k) * f)
     }
 
+    /// `*self = self.add(&b.scale(f, tr), tr)` in place (not the fork's, #2690): each
+    /// kept coefficient is `self[i][k] + b[i][k] * f`, every other 0, bit for bit the
+    /// same, without the two whole series that composition builds and copies.
+    pub fn add_scaled_assign(&mut self, b: &Self, f: T, tr: Trunc) {
+        for (i, (row, brow)) in self.c.iter_mut().zip(&b.c).enumerate() {
+            for (k, (x, &y)) in row.iter_mut().zip(brow).enumerate() {
+                *x = if i <= tr.s && k <= tr.e {
+                    *x + y * f
+                } else {
+                    T::of(0.0)
+                };
+            }
+        }
+    }
+
     /// `sm_SerMul`: the truncated product (the sum over `i1 <= i`, then `k1 <= k`).
     #[must_use]
     pub fn mul(&self, b: &Self, tr: Trunc) -> Self {
@@ -195,7 +210,7 @@ impl<T: GnScalar> Ser<T> {
             // dBinom *= (-0.5 - (m - 1)) / m, m an int
             binom *= (-0.5 - (m - 1) as f64) / m as f64;
             pow = pow.mul(&z, tr);
-            sum = sum.add(&pow.scale(T::of(binom), tr), tr);
+            sum.add_scaled_assign(&pow, T::of(binom), tr);
         }
         Ok(sum.scale(T::of(1.0) / x0.sqrt(), tr))
     }
@@ -355,6 +370,53 @@ mod tests {
         x.set(1, 0, 2.0);
         x.set(0, 1, 3.0);
         x
+    }
+
+    /// A deterministic series with every coefficient set (`x` from a linear congruence).
+    fn filled<T: GnScalar>(seed: &mut u64, of: impl Fn(f64, f64) -> T) -> Ser<T> {
+        let mut x = Ser::constant(of(0.0, 0.0));
+        let mut next = || {
+            *seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (*seed >> 11) as f64 / (1u64 << 53) as f64 * 4.0 - 2.0
+        };
+        for i in 0..=MAX_S {
+            for k in 0..=STORE_E {
+                let (a, b) = (next(), next());
+                x.set(i, k, of(a.min(b), a.max(b)));
+            }
+        }
+        x
+    }
+
+    /// `add_scaled_assign` is `add(&b.scale(f))`, bit for bit, over every truncation, in
+    /// `f64` and in `Ivl`, from series whose every coefficient is set.
+    #[test]
+    fn add_scaled_assign_is_add_of_scale() {
+        let mut seed = 2690_u64;
+        for s in 0..=MAX_S {
+            for e in 0..=STORE_E {
+                let Ok(tr) = Trunc::new(s, e) else { continue };
+                let (a, b) = (filled(&mut seed, |x, _| x), filled(&mut seed, |x, _| x));
+                let f = 0.731_f64;
+                let mut got = a;
+                got.add_scaled_assign(&b, f, tr);
+                assert_eq!(
+                    format!("{got:?}"),
+                    format!("{:?}", a.add(&b.scale(f, tr), tr))
+                );
+                let iv = |lo: f64, hi: f64| Ivl::new(lo, hi);
+                let (a, b) = (filled(&mut seed, iv), filled(&mut seed, iv));
+                let f = Ivl::new(-0.25, 0.5);
+                let mut got = a;
+                got.add_scaled_assign(&b, f, tr);
+                assert_eq!(
+                    format!("{got:?}"),
+                    format!("{:?}", a.add(&b.scale(f, tr), tr))
+                );
+            }
+        }
     }
 
     #[test]
