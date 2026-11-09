@@ -608,6 +608,12 @@ fn a_twisted_side_round_is_its_definition() {
         let net = net_off_definition(&k, s);
         let net = net.unwrap_or_else(|| panic!("{f:?} is not its definition"));
         assert!(net <= 4e-5, "{f:?} net off its definition by {net:e}");
+        // and within its certified bound at every one of the 11011 samples
+        let bound = s.procedural_blend().unwrap().bound();
+        assert!(
+            net <= bound,
+            "{f:?} net off by {net:e}, over its bound {bound:e}"
+        );
     }
     let mut b = r.brep;
     let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)

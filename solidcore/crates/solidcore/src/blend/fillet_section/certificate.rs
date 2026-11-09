@@ -79,6 +79,8 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::surface::Surface;
 
 const OP: &str = "blend::fillet_section::certificate";
+/// The most Krawczyk steps that tighten a proved feet's box ([`gn_enclose_over`]).
+const TIGHTEN_STEPS: usize = 2;
 const OP_CERTIFY_SPAN: &str = "blend::fillet_section::certificate::gn_certify_span";
 
 /// `SM_GN_TRY(a)`: a failed evaluation proves nothing, the enclosing function returns
@@ -1113,6 +1115,84 @@ pub fn gn_enclose_over(
     }
     if !proved {
         return Ok(None);
+    }
+    // tighten the proved box (not the fork's): Krawczyk's operator again, about the box's
+    // own centre and with the Jacobian over the box, intersected with it, while that
+    // shrinks the box by a tenth or more. Every root in a box is in its K, so the box
+    // keeps the feet; its C (over a box that holds the final one) still bounds the
+    // coefficients' solve, and a narrower box is a smaller q, so the coefficients'
+    // enclosures (rho / (1 - q) at every order) are tighter
+    for _ in 0..TIGHTEN_STEPS {
+        let width = |b: &[Ivl; 4]| b.iter().map(|x| x.hi - x.lo).fold(0.0_f64, cmax);
+        let w0 = width(&bx_);
+        let xc = bx_.map(Ivl::mid);
+        let Ok(pc) = partials_over(xc, xc, 2) else {
+            break;
+        };
+        let sxc = xc.map(|x| Ser::constant(Ivl::from(x)));
+        let Ok((sgc, _)) =
+            gn_evaluate(&system(&pc, &leader, &tangent, r, side, law_r), &sxc, point)
+        else {
+            break;
+        };
+        let Ok(pb) = partials_over(bx_.map(|x| x.lo), bx_.map(|x| x.hi), 2) else {
+            break;
+        };
+        let sxb = bx_.map(Ser::constant);
+        let Ok(jac) = gn_jacobian(&system(&pb, &leader, &tangent, r, side, law_r), &sxb) else {
+            break;
+        };
+        let Ok(yc) = inverse4(&jac.map(|row| row.map(Ivl::mid))) else {
+            break;
+        };
+        let mut cc = [[IZ; 4]; 4];
+        let mut qc = 0.0_f64;
+        for (i, (yi, ci)) in yc.iter().zip(cc.iter_mut()).enumerate() {
+            let mut row = 0.0_f64;
+            for (j, cij) in ci.iter_mut().enumerate() {
+                let mut c = Ivl::from(if i == j { 1.0 } else { 0.0 });
+                for (&yik, jk) in yi.iter().zip(&jac) {
+                    c = c - Ivl::from(yik) * jk.get(j).copied().unwrap_or(IZ);
+                }
+                *cij = c;
+                row = round_up(row + c.mag());
+            }
+            qc = cmax(qc, row);
+        }
+        let contracts = qc < 1.0;
+        if !contracts {
+            break;
+        }
+        let mut next = bx_;
+        let mut empty = false;
+        for (i, ((yi, ci), xi)) in yc.iter().zip(&cc).zip(next.iter_mut()).enumerate() {
+            let mut kv = Ivl::from(f_at(&xc, i));
+            for (&yij, gj) in yi.iter().zip(&sgc) {
+                kv = kv - Ivl::from(yij) * gj.at(0, 0);
+            }
+            for (j, &cij) in ci.iter().enumerate() {
+                kv = kv + cij * (ivl_at(&bx_, j) - Ivl::from(f_at(&xc, j)));
+            }
+            let lo = cmax(xi.lo, kv.lo);
+            let hi = cmin(xi.hi, kv.hi);
+            let holds = lo <= hi;
+            if !holds {
+                empty = true;
+            }
+            *xi = Ivl::new(lo, hi);
+        }
+        if empty {
+            break;
+        }
+        // the C and q over the box just shrunk hold for the narrower one
+        y = yc;
+        cm = cc;
+        q = qc;
+        bx_ = next;
+        let shrank = width(&bx_) < 0.9 * w0;
+        if !shrank {
+            break;
+        }
     }
 
     // the feet's Taylor coefficients over the span, order by order: x = -Y R + C x,
@@ -2428,6 +2508,116 @@ mod tests {
     /// by order, and the Taylor form's remainder carries that). A span five times as long
     /// fails Krawczyk's test in one enclosure and is proved by the pieces, its bound again
     /// finite, below the target and above the closed form's.
+    /// A piece's enclosure holds every station sampled over the piece: the feet and their
+    /// Taylor coefficients in s and eps, as solved in floating point at 201 points, to 1e-8 (the
+    /// box tightened after Krawczyk's proof keeps the feet: every root in a box is in its
+    /// K). A ball rolled between a plane and a cylinder (as made a NURBS), a piece of 0.02.
+    #[test]
+    fn an_enclosure_holds_every_sampled_station() {
+        let k = Kernel::default();
+        let (big_r, r) = (3.0, 1.0);
+        let fp = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let mut cyl = Cone::new_cylinder_bounded(
+            Vec3::new(0.0, 0.0, -2.0),
+            Vec3::X,
+            Vec3::Y,
+            big_r,
+            0.0,
+            360.0,
+            10.0,
+            false,
+            false,
+            false,
+        );
+        cyl.make_nurb(&k).unwrap();
+        let fc = Surface::from(cyl);
+        let frame = Axis2Placement::new(Vec3::new(0.0, 0.0, r), Vec3::X, Vec3::Y);
+        let leader = BSplineCurve::create_circle_segment(
+            3,
+            &frame,
+            big_r + r,
+            10.0,
+            80.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let ln = NurbsCurve::of(&leader).unwrap();
+        let (np, nc) = (nurbs(&k, &fp), nurbs(&k, &fc));
+        let faces = [&fp, &fc];
+        let lpt = |s: f64| leader.evaluate_point(s).unwrap();
+        let foot_c = |s: f64| {
+            let l = lpt(s);
+            let q = big_r / (big_r + r);
+            Vec3::new(l.x * q, l.y * q, r)
+        };
+        let (cu, cv) = nearest_uv(&nc, foot_c(0.41));
+        let pc = nurbs_partials(
+            &nc,
+            span(&nc.u, nc.p, nc.nu, cu),
+            span(&nc.v, nc.q, nc.nv, cv),
+            cu,
+            cv,
+            1,
+        );
+        let nrm = vec3(pc.at(1, 0)).cross(vec3(pc.at(0, 1)));
+        let out = foot_c(0.41) - Vec3::new(0.0, 0.0, r);
+        let side_c = if nrm.dot(out) > 0.0 { 1.0 } else { -1.0 };
+        let (rr, side) = ([r, r], [1.0, side_c]);
+        let n = 2;
+        let order = 4 + TAYLOR;
+        let solve = |s: f64, tr: Trunc| {
+            let l = lpt(s);
+            let (u, v) = nearest_uv(&nc, foot_c(s));
+            super::super::station::gn_solve_station(
+                &k,
+                faces,
+                &leader,
+                s,
+                [l.x, l.y, u, v],
+                rr,
+                side,
+                tr,
+                1e-10,
+            )
+        };
+        let point = Trunc::new(0, 0).unwrap();
+        let (sa, sb) = (0.4, 0.42);
+        let (a, b) = (solve(sa, point).unwrap(), solve(sb, point).unwrap());
+        let e = gn_enclose(&k, [&np, &nc], &ln, &a, &b, rr, side, n, order, None, None)
+            .unwrap()
+            .expect("proved over the piece");
+        // the floating solve's jets go as far as the leader's evaluation does (a rational
+        // circle's derivatives are evaluated to a fixed order): every order it reaches
+        let top = (0..=order)
+            .rev()
+            .find(|&o| solve(sa, Trunc::new(o, n - 1).unwrap()).is_ok())
+            .unwrap();
+        assert!(top >= 3, "{top}");
+        let jets = Trunc::new(top, n - 1).unwrap();
+        let mut judged = 0;
+        for i in 0..=200 {
+            let s = sa + (sb - sa) * f64::from(i) / 200.0;
+            let st = solve(s, jets).unwrap();
+            for (xs, xe) in st.x.iter().zip(&e.x) {
+                for o in 0..=top {
+                    for kk in 0..n {
+                        let (x, iv) = (xs.c[o][kk], xe.c[o][kk]);
+                        // the floating solve's own error (its residual within 1e-10)
+                        let slack = 1e-8 * (1.0 + x.abs());
+                        assert!(
+                            iv.lo - slack <= x && x <= iv.hi + slack,
+                            "s {s}: c[{o}][{kk}] {x:e} outside [{:e}, {:e}]",
+                            iv.lo,
+                            iv.hi
+                        );
+                        judged += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(judged, 201 * 4 * (top + 1) * n);
+    }
+
     #[test]
     fn cylinder_plane_span_bound_is_the_closed_form() {
         let k = Kernel::default();
