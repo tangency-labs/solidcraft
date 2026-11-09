@@ -145,7 +145,7 @@ mod tests {
     fn an_export_thumbnail_has_a_transparent_background() {
         let mut session = Session::default();
         session.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
-        for body in &session.world_state().bodies {
+        for body in &session.world_state().unwrap().bodies {
             body.mesh();
         }
         let (mut scene, camera) = scene(&session, 1.0).unwrap();
