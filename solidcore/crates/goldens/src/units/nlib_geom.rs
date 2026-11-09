@@ -20,6 +20,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::nurbs::geom::{
     cpt_reflect, cpts_are_colinear, dist_cpolygon, dist_cpt_cpt, dist_cpt_cpt_homo,
     dist_perp_pt_line_seg, dist_polygon, dist_pt_inf_line, dist_pt_line_seg, dist_pt_pt,
@@ -231,7 +232,7 @@ fn nan(o: &mut Vec<f64>, k: usize) {
 fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => 0.0,
-        Err(SolidError::Nlib { code, .. }) => f64::from(code.code()),
+        Err(e) if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         Err(_) => -1.0,
     }
 }

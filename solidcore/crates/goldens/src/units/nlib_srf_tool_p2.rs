@@ -22,6 +22,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_basic::{Direction, Surface};
 use solidcore::nurbs::srf_tool::p1 as tool1;
@@ -213,7 +214,7 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 pub(crate) fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => 0.0,
-        Err(SolidError::Nlib { code, .. }) => f64::from(code.code()),
+        Err(e) if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         Err(_) => -1.0,
     }
 }
