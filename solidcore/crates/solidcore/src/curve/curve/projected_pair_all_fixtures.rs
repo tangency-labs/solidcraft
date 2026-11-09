@@ -123,16 +123,40 @@ fn original_affine_all_cases_have_complete_near_best_corner_sets() {
             (result.as_slice()[0].start.solution_value - expected).abs() <= tol,
             "{name}"
         );
+        let normal = vector(&input["vecs"][0]);
         for answer in result.as_slice() {
             let [s, t] = [answer.start.parameters[0], answer.start.parameters[1]];
             assert!(a.natural_interval().contains_value(s, 0.0));
             assert!(b.natural_interval().contains_value(t, 0.0));
             assert!(expected - answer.start.solution_value <= tol);
+            // The reported value is the native distance of the returned pair.
+            let d = a.evaluate_point(&k, s).unwrap() - b.evaluate_point(&k, t).unwrap();
+            let measured = normal.cross(d).cross(normal).length();
+            assert_eq!(answer.start.solution_value, measured, "{name}: ({s}, {t})");
         }
         if count == 2 {
             assert_ne!(
                 result.as_slice()[0].start.parameters,
                 result.as_slice()[1].start.parameters
+            );
+        }
+        // Both returned pairs, as recorded in projected_pair_native_witnesses_3060.jsonl.
+        let pairs: &[[f64; 2]] = match name {
+            "gen2050" => &[
+                [0.42689846142600174, 0.30573599521598394],
+                [0.30573599521598394, 0.42689846142600174],
+            ],
+            "gen2585" => &[
+                [0.6795950883084139, 1.0610357492278748],
+                [0.15819072816225468, 3.977500125051104],
+            ],
+            _ => &[],
+        };
+        for (answer, pair) in result.as_slice().iter().zip(pairs) {
+            assert_eq!(
+                [answer.start.parameters[0], answer.start.parameters[1]],
+                *pair,
+                "{name}"
             );
         }
     }
