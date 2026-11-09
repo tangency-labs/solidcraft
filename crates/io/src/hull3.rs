@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use solidcore_record::Vec3;
 use solidcraft_geom::inertia::principal;
-use solidcraft_geom::{Mesh, Vec3Geom};
+use solidcraft_geom::{Mesh, MeshGeom, Vec3Geom};
 
 /// The most points [`convex_hull`] takes.
 pub const MAX_HULL_POINTS: usize = 2_000_000;

@@ -1,7 +1,7 @@
 //! Tests of the convex hull and fitted shapes (`hull3.rs`).
 
 use solidcore_record::Vec3;
-use solidcraft_geom::{Mesh, Vec3Geom};
+use solidcraft_geom::{Mesh, MeshGeom, Vec3Geom};
 
 /// The eight corners of a box centred on the origin.
 fn box_corners(x: f64, y: f64, z: f64) -> Vec<Vec3> {
