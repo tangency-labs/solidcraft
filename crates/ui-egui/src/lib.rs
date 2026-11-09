@@ -234,6 +234,7 @@ pub mod resume_ui;
 mod revolve_edit_tests;
 #[cfg(test)]
 mod revolve_manipulator_tests;
+pub mod ribbon;
 #[cfg(test)]
 mod round_pick_tests;
 mod rule_editor;

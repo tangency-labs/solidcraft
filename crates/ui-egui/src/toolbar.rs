@@ -7,6 +7,10 @@ use crate::ui_kit::{self, Container, Edge, Surface};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
 
+use crate::ribbon::{
+    self, BUTTON_GAP, BUTTON_HEIGHT, BUTTON_LABEL_PADDING, BUTTON_MIN_WIDTH, ButtonSize, Fit, GALLERY_WIDTH, GROUP_HEIGHT, ICON_BUTTON_HEIGHT,
+    ICON_GROUP_HEIGHT, PANEL_GAP, PanelSize, Plan, SECTION_HEIGHT, fit,
+};
 use crate::{SolveApp, icons};
 use solidcraft_theme::Tokens;
 
@@ -31,162 +35,15 @@ pub fn panels(tab: &str) -> Vec<&'static str> {
     crate::workspace::panels(tab)
 }
 
-/// How a panel is drawn on a toolbar that may be too narrow for every button.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Fit {
-    /// Its first buttons (all of them, or the ones that fit); the panel's drop-down lists every
-    /// command.
-    Buttons,
-    /// One button that opens the panel's drop-down (which lists every command, pinned or not).
-    Collapsed,
-    /// In the » menu at the end of the toolbar.
-    More,
-}
-
-/// A ribbon button's preferred and minimum widths. The constraint gallery is a fixed-width
-/// block; ordinary buttons narrow as their labels wrap and truncate.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ButtonSize {
-    pub width: f32,
-    pub min_width: f32,
-}
-
-/// One panel as [`fit`] sees it, in button order (the gallery, if present, is last).
-#[derive(Clone, Debug, PartialEq)]
-pub struct PanelSize {
-    pub buttons: Vec<ButtonSize>,
-}
-
-/// Where [`fit`] put a panel: its first buttons and their individual fitted widths.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Plan {
-    pub fit: Fit,
-    pub shown: usize,
-    pub widths: Vec<f32>,
-}
-
-impl Plan {
-    fn full(panel: &PanelSize) -> Self {
-        Self { fit: Fit::Buttons, shown: panel.buttons.len(), widths: panel.buttons.iter().map(|b| b.width).collect() }
-    }
-
-    fn more() -> Self {
-        Self { fit: Fit::More, shown: 0, widths: Vec::new() }
-    }
-
-    /// The panel's width on the toolbar (0 in the » menu).
-    pub fn width(&self) -> f32 {
-        match self.fit {
-            Fit::More => 0.0,
-            Fit::Collapsed => COLLAPSED_WIDTH,
-            Fit::Buttons => panel_width(self.widths.get(..self.shown).unwrap_or_default()),
-        }
-    }
-}
-
-/// A panel's width with these individual button widths.
-pub fn panel_width(buttons: &[f32]) -> f32 {
-    (buttons.iter().sum::<f32>() + buttons.len().saturating_sub(1) as f32 * BUTTON_GAP + 8.0).max(COLLAPSED_WIDTH)
-}
-
-/// A collapsed panel's width: one button's panel.
-pub const COLLAPSED_WIDTH: f32 = 72.0;
-
-/// The gap after each panel (its separator).
-const PANEL_GAP: f32 = 1.0;
 pub const TAB_ROW_HEIGHT: f32 = 30.0;
 /// Distance from the ribbon card's edges to the first tab and the search field.
 const RIBBON_TAB_INSET: f32 = 4.0;
-pub const GROUP_HEIGHT: f32 = 86.0;
 pub const RIBBON_HEIGHT: f32 = TAB_ROW_HEIGHT + GROUP_HEIGHT + 1.0;
 pub(crate) const WORKSPACE_WIDTH: f32 = 88.0;
-const BUTTON_HEIGHT: f32 = 60.0;
-const ICON_BUTTON_HEIGHT: f32 = 36.0;
-const ICON_GROUP_HEIGHT: f32 = 62.0;
 
 /// The same height drives shell reservations and ribbon painting in either layout.
 pub(crate) fn ribbon_height(labels: bool) -> f32 {
     if labels { RIBBON_HEIGHT } else { TAB_ROW_HEIGHT + ICON_GROUP_HEIGHT + 1.0 }
-}
-const BUTTON_GAP: f32 = 3.0;
-const BUTTON_MIN_WIDTH: f32 = 54.0;
-const BUTTON_MAX_WIDTH: f32 = 76.0;
-const BUTTON_LABEL_PADDING: f32 = 10.0;
-/// Where a button's label starts below the button's top edge, under its icon.
-const BUTTON_LABEL_TOP: f32 = 32.0;
-/// Room kept below a button's label, inside its highlight.
-const BUTTON_LABEL_BOTTOM: f32 = 2.0;
-const SECTION_HEIGHT: f32 = 20.0;
-
-/// The » button's room at the end of the panels, kept only while some panel is in it.
-pub const MORE_ROOM: f32 = 40.0;
-
-/// Fit panels into `room`, giving up as little as it takes, one small step at a time:
-/// 1. buttons narrow from their measured label widths to their minimum, wrapping and truncating;
-/// 2. panels hand their last buttons to their drop-down one at a time, the panel showing the
-///    most buttons first (the rightmost of equals), down to one button (collapsed);
-/// 3. the last panels go into the » menu, and any room that frees goes back to buttons.
-///
-/// Each removal frees at most one button (or the fixed-width constraint gallery), so the toolbar
-/// never leaves a larger gap while something is hidden. The result depends only on `room`
-/// (no state from earlier frames), so it never flickers. Nothing is dropped.
-pub fn fit(panels: &[PanelSize], room: f32) -> Vec<Plan> {
-    let room = if room.is_finite() { room } else { 0.0 };
-    if let Some(plans) = shrink(panels, room) {
-        return plans;
-    }
-    // 3. The last panels into the » menu (which takes its own room), as few as it takes; the
-    // ones left keep as many buttons as fit.
-    for kept in (0..panels.len()).rev() {
-        if let Some(mut plans) = shrink(panels.get(..kept).unwrap_or_default(), room - MORE_ROOM) {
-            plans.extend(panels.iter().skip(kept).map(|_| Plan::more()));
-            return plans;
-        }
-    }
-    panels.iter().map(|_| Plan::more()).collect()
-}
-
-/// The room plans take on the toolbar (each panel and its separator).
-fn used(plans: &[Plan]) -> f32 {
-    plans.iter().filter(|p| p.fit != Fit::More).map(|p| p.width() + PANEL_GAP).sum()
-}
-
-/// Steps 1 and 2 of [`fit`]: every panel on the toolbar, or None when even one button each
-/// doesn't fit.
-fn shrink(panels: &[PanelSize], room: f32) -> Option<Vec<Plan>> {
-    let mut plans: Vec<Plan> = panels.iter().map(Plan::full).collect();
-    if used(&plans) <= room {
-        return Some(plans);
-    }
-    // 1. Narrow together in one-pixel steps, keeping each button's measured width until it
-    // reaches its minimum. The gallery's minimum equals its full width.
-    for reduction in 1..=((BUTTON_MAX_WIDTH - BUTTON_MIN_WIDTH) as usize) {
-        for (plan, panel) in plans.iter_mut().zip(panels) {
-            for (width, button) in plan.widths.iter_mut().zip(&panel.buttons) {
-                *width = (button.width - reduction as f32).max(button.min_width);
-            }
-        }
-        if used(&plans) <= room {
-            return Some(plans);
-        }
-    }
-    // 2. One button at a time into the drop-downs: from the panel showing the most (the
-    // rightmost of equals), down to one button each.
-    while used(&plans) > room {
-        let pick = plans
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| p.fit == Fit::Buttons && (p.shown > 1 || p.width() > COLLAPSED_WIDTH))
-            .max_by(|(i, a), (j, b)| a.shown.cmp(&b.shown).then(i.cmp(j)));
-        let (i, _) = pick?;
-        if let Some(p) = plans.get_mut(i) {
-            p.shown = p.shown.saturating_sub(1).max(1);
-            if p.shown == 1 {
-                p.fit = Fit::Collapsed;
-            }
-        }
-    }
-    Some(plans)
 }
 
 /// The commands a panel's drop-down (or its » submenu) lists: its own, then any button moved
@@ -1021,142 +878,6 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
     });
 }
 
-/// Choose at most two lines at spaces or after `/`, then truncate each line at
-/// Unicode character boundaries. An oversized word stays on one line with an ellipsis.
-fn ribbon_button_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<String> {
-    let mut lines = ribbon_label_lines(painter, label, width);
-    // Right-to-left labels come in display order (see `bidi`): a line reads from its right end,
-    // so a shortened line loses characters on the left, where the ellipsis then goes.
-    let rtl = solidcraft_ui_text::bidi::has_rtl(label);
-    for line in &mut lines {
-        if ribbon_label_width(painter, line) > width {
-            while !line.is_empty() {
-                if rtl {
-                    line.remove(0);
-                } else {
-                    line.pop();
-                }
-                let shortened = if rtl { format!("…{}", line.trim_start()) } else { format!("{}…", line.trim_end()) };
-                if ribbon_label_width(painter, &shortened) <= width {
-                    break;
-                }
-            }
-            *line = if rtl { format!("…{}", line.trim_start()) } else { format!("{}…", line.trim_end()) };
-        }
-    }
-    lines
-}
-
-fn ribbon_label_width(painter: &egui::Painter, text: &str) -> f32 {
-    let mut job = egui::text::LayoutJob::simple(
-        text.to_owned(),
-        FontId::proportional(solidcraft_theme::Tokens::get().font_body),
-        Color32::WHITE,
-        f32::INFINITY,
-    );
-    job.halign = egui::Align::Center;
-    painter.layout_job(job).size().x
-}
-
-fn ribbon_button_width(painter: &egui::Painter, label: &str) -> f32 {
-    let widest = ribbon_label_lines(painter, label, BUTTON_MAX_WIDTH - BUTTON_LABEL_PADDING)
-        .iter()
-        .map(|line| ribbon_label_width(painter, line))
-        .fold(0.0_f32, f32::max);
-    (widest + BUTTON_LABEL_PADDING).clamp(BUTTON_MIN_WIDTH, BUTTON_MAX_WIDTH)
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CjkScript {
-    Han,
-    Hiragana,
-    Katakana,
-    Other,
-}
-
-fn cjk_script(c: char) -> CjkScript {
-    match c {
-        '\u{3040}'..='\u{309F}' => CjkScript::Hiragana,
-        '\u{30A0}'..='\u{30FF}' | '\u{31F0}'..='\u{31FF}' | '\u{FF65}'..='\u{FF9F}' => CjkScript::Katakana,
-        '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}' => CjkScript::Han,
-        _ => CjkScript::Other,
-    }
-}
-
-/// Whether byte offset `end` sits at a word boundary in a spaceless Japanese ribbon label.
-fn cjk_word_break(label: &str, end: usize) -> bool {
-    let (Some(prev), Some(next)) = (label.get(..end).and_then(|s| s.chars().next_back()), label.get(end..).and_then(|s| s.chars().next())) else {
-        return false;
-    };
-    let (a, b) = (cjk_script(prev), cjk_script(next));
-    if a == CjkScript::Katakana && b == CjkScript::Katakana {
-        let before = label.get(..end).unwrap_or_default();
-        return before.ends_with("サーフェス") || before.ends_with("フラット");
-    }
-    match (a, b) {
-        (CjkScript::Han, CjkScript::Katakana)
-        | (CjkScript::Katakana, CjkScript::Han | CjkScript::Hiragana)
-        | (CjkScript::Hiragana, CjkScript::Han | CjkScript::Katakana) => true,
-        (CjkScript::Han, CjkScript::Hiragana) => next == 'を',
-        (CjkScript::Other, CjkScript::Katakana | CjkScript::Hiragana) => prev.is_ascii_alphabetic(),
-        (CjkScript::Katakana | CjkScript::Hiragana, CjkScript::Other) => next.is_ascii_alphabetic(),
-        _ => false,
-    }
-}
-
-fn ribbon_label_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<String> {
-    if let Some((first, second)) = label.split_once('\n') {
-        let first = first.trim();
-        let second = second.trim();
-        if !first.is_empty() && !second.is_empty() {
-            return vec![first.to_owned(), second.to_owned()];
-        }
-    }
-    let measure = |text: &str| ribbon_label_width(painter, text);
-    let normalized = label.split_whitespace().collect::<Vec<_>>().join(" ");
-    let label = normalized.as_str();
-    if solidcraft_ui_text::bidi::has_rtl(label) {
-        // Display-order right-to-left text reads from its end: the first line takes the words
-        // at the end of the string, the second line the words before them.
-        let breaks = label.char_indices().filter(|(_, c)| c.is_whitespace() || *c == '/').map(|(at, c)| at + c.len_utf8());
-        let mut start = label.len();
-        for cut in std::iter::once(0).chain(breaks).collect::<Vec<_>>().into_iter().rev() {
-            if cut >= start {
-                continue;
-            }
-            if start < label.len() && measure(label.get(cut..).unwrap_or_default().trim()) > width {
-                break;
-            }
-            start = cut;
-        }
-        let (rest, first) = label.split_at(start);
-        let mut lines = vec![first.trim().to_owned()];
-        if !rest.trim().is_empty() {
-            lines.push(rest.trim().to_owned());
-        }
-        return lines;
-    }
-    let has_delimiters = label.chars().any(|c| c.is_whitespace() || c == '/');
-    let mut end = 0;
-    for (at, ch) in label.char_indices() {
-        let next = at + ch.len_utf8();
-        let is_break = next == label.len() || ch.is_whitespace() || ch == '/' || (!has_delimiters && cjk_word_break(label, next));
-        if !is_break {
-            continue;
-        }
-        if end > 0 && measure(label.get(..next).unwrap_or_default().trim()) > width {
-            break;
-        }
-        end = next;
-    }
-    let (first, rest) = label.split_at(end);
-    let mut lines = vec![first.trim().to_owned()];
-    if !rest.trim().is_empty() {
-        lines.push(rest.trim().to_owned());
-    }
-    lines
-}
-
 /// Commands opt into persistent presentation; the engine status list remains the only truth.
 const PERSISTENT_COMMANDS: &[&str] = &[
     "inspect.accessibility",
@@ -1259,10 +980,10 @@ fn paint_persistent_ribbon(app: &SolveApp, ui: &egui::Ui, paints: Vec<Persistent
             crate::scenario::publish_target(&format!("{namespace}:focus:{}", paint.command.id), paint.rect);
         }
         if let Some(label) = paint.label {
-            let galley = ribbon_button_galley_weight(&paint.painter, &label, paint.rect.width() - BUTTON_LABEL_PADDING, ink, selected);
+            let galley = ribbon::button_galley_weight(&paint.painter, &label, paint.rect.width() - BUTTON_LABEL_PADDING, ink, selected);
             paint
                 .painter
-                .set(paint.label_slot, egui::Shape::galley(pos2(paint.rect.center().x, ribbon_label_top(paint.rect, galley.size().y)), galley, ink));
+                .set(paint.label_slot, egui::Shape::galley(pos2(paint.rect.center().x, ribbon::label_top(paint.rect, galley.size().y)), galley, ink));
         }
         paint.response.widget_info(|| {
             if app.preferences.persistent_ribbon_pressed && persistent_available(app, paint.command.id) {
@@ -1275,37 +996,6 @@ fn paint_persistent_ribbon(app: &SolveApp, ui: &egui::Ui, paints: Vec<Persistent
         let _ = ribbon_tooltip(app, paint.response, paint.command, paint.disabled.as_deref());
     }
     crate::scenario::publish_count(&format!("{namespace}:pressed"), count as f64);
-}
-
-fn ribbon_button_galley(painter: &egui::Painter, label: &str, width: f32, color: Color32) -> std::sync::Arc<egui::Galley> {
-    ribbon_button_galley_weight(painter, label, width, color, false)
-}
-
-fn ribbon_button_galley_weight(painter: &egui::Painter, label: &str, width: f32, color: Color32, selected: bool) -> std::sync::Arc<egui::Galley> {
-    let lines = ribbon_button_lines(painter, label, width);
-    // Explicit newlines only: egui must never split an oversized word.
-    let size = solidcraft_theme::Tokens::get().font_body;
-    let mut job = egui::text::LayoutJob::simple(
-        lines.join("\n"),
-        if selected { crate::ui_kit::type_face::semibold(size) } else { FontId::proportional(size) },
-        color,
-        f32::INFINITY,
-    );
-    job.halign = egui::Align::Center;
-    // Two lines sit closer than the font's own spacing, so they fit in the button under its
-    // icon (#8391).
-    if lines.len() > 1
-        && let Some(section) = job.sections.first_mut()
-    {
-        section.format.line_height = Some(size + 2.0);
-    }
-    painter.layout_job(job)
-}
-
-/// The top of a button's label, `height` tall, in the button `whole`: below the icon, raised
-/// when it would otherwise run past the button's bottom edge (#8391).
-fn ribbon_label_top(whole: Rect, height: f32) -> f32 {
-    (whole.top() + BUTTON_LABEL_TOP).min(whole.bottom() - BUTTON_LABEL_BOTTOM - height)
 }
 
 /// Ribbon headings use the translated labels, with normal word casing instead of registry caps.
@@ -1658,7 +1348,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
     let labels = app.preferences.ribbon_labels;
     let button_height = if labels { BUTTON_HEIGHT } else { ICON_BUTTON_HEIGHT };
     let group_height = if labels { GROUP_HEIGHT } else { ICON_GROUP_HEIGHT };
-    let gallery_width = if labels { CONSTRAINT_GRID_WIDTH } else { 6.0 * 27.0 };
+    let gallery_width = if labels { GALLERY_WIDTH } else { 6.0 * 27.0 };
     let RibbonShape { floating, cards, r, ws, folded } = shape;
     {
         let ribbon_left = if floating { cards.ribbon.left() } else { ws.right() };
@@ -1834,7 +1524,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             .filter(|f| tab == "SKETCH" && *panel == "CREATE" && f.commands.first().copied() == Some(c.id));
                         let label = family.map_or_else(|| crate::workspace::ribbon_button_label(c), crate::workspace::ribbon_family_label);
                         if labels {
-                            ButtonSize { width: ribbon_button_width(&painter, app.tr_label(label)), min_width: BUTTON_MIN_WIDTH }
+                            ButtonSize { width: ribbon::button_width(&painter, app.tr_label(label)), min_width: BUTTON_MIN_WIDTH }
                         } else {
                             let width = if family.is_some() { 50.0 } else { 40.0 };
                             ButtonSize { width, min_width: width }
@@ -1880,7 +1570,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             }
             // A panel left with no buttons (all removed from the toolbar, or saved buttons that no
             // longer exist) is drawn collapsed too: one button that opens its drop-down, so its
-            // commands never vanish from the toolbar (#7166). Both are COLLAPSED_WIDTH wide.
+            // commands never vanish from the toolbar (#7166). Both are ribbon::COLLAPSED_WIDTH wide.
             let collapsed = plan.fit == Fit::Collapsed || (shown.is_empty() && !cmds.is_empty());
             let trimmed = plan.shown < plan.widths.len();
             let finish = (tab == "SKETCH" && *panel == "FINISH SKETCH") || (tab == "MODEL" && *panel == "FINISH EDITING");
@@ -2069,7 +1759,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     if labels {
                         let title_y = whole.top() + 39.0;
                         let galley =
-                            ribbon_button_galley(&painter, app.tr_label(crate::workspace::ribbon_family_label(f)), ar.width() - 16.0, t.text);
+                            ribbon::button_galley(&painter, app.tr_label(crate::workspace::ribbon_family_label(f)), ar.width() - 16.0, t.text);
                         painter.galley(pos2(ar.center().x - 4.0, title_y - galley.size().y / 2.0), galley, t.text);
                         dropdown_arrow(&painter, pos2(ar.right() - 6.0, title_y + 0.5), t.text_dim);
                     } else {
@@ -2086,8 +1776,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     let button_label = crate::workspace::ribbon_button_label(selected);
                     let label = app.tr_label(if button_label == selected.label { info.label } else { button_label });
                     let color = if info.enabled { t.text } else { t.text_dim };
-                    let galley = ribbon_button_galley(&painter, label, whole.width() - BUTTON_LABEL_PADDING, color);
-                    painter.galley(pos2(whole.center().x, ribbon_label_top(whole, galley.size().y)), galley, t.text);
+                    let galley = ribbon::button_galley(&painter, label, whole.width() - BUTTON_LABEL_PADDING, color);
+                    painter.galley(pos2(whole.center().x, ribbon::label_top(whole, galley.size().y)), galley, t.text);
                 }
             }
             if !collapsed && drawn > large.len() {
@@ -2570,8 +2260,6 @@ enum RowAction {
 }
 
 const ROW_H: f32 = 30.0;
-
-const CONSTRAINT_GRID_WIDTH: f32 = 82.0;
 
 /// Registry parameter syntax is not a user-facing description. Reuse existing catalog prose
 /// where present; other commands intentionally show only their name and registered shortcut.
@@ -4186,137 +3874,6 @@ mod header_report_tests {
         assert!(h.widget("Save As…").is_some(), "the File menu has a Save As row");
     }
 
-    fn sizes(buttons: &[usize]) -> Vec<PanelSize> {
-        buttons.iter().map(|&b| PanelSize { buttons: vec![ButtonSize { width: BUTTON_MIN_WIDTH, min_width: BUTTON_MIN_WIDTH }; b] }).collect()
-    }
-
-    fn used_with_more(plans: &[Plan]) -> f32 {
-        used(plans) + if plans.iter().any(|p| p.fit == Fit::More) { MORE_ROOM } else { 0.0 }
-    }
-
-    #[test]
-    fn panels_give_up_one_button_at_a_time_then_move_to_more_and_none_is_dropped() {
-        // A panel with 14 buttons and three default ones.
-        let panels = sizes(&[14, 4, 2, 2]);
-        let full: f32 = [14, 4, 2, 2].iter().map(|&b| panel_width(&vec![BUTTON_MIN_WIDTH; b]) + PANEL_GAP).sum();
-        let all = |plans: &[Plan]| plans.iter().map(|p| (p.fit, p.shown)).collect::<Vec<_>>();
-        assert_eq!(all(&fit(&panels, full)), [(Fit::Buttons, 14), (Fit::Buttons, 4), (Fit::Buttons, 2), (Fit::Buttons, 2)]);
-        // A little short: the widest panel hands one button to its drop-down; the others keep all theirs.
-        assert_eq!(all(&fit(&panels, full - 10.0)), [(Fit::Buttons, 13), (Fit::Buttons, 4), (Fit::Buttons, 2), (Fit::Buttons, 2)]);
-        // Every panel down to one button (collapsed) fits.
-        let collapsed = 4.0 * (COLLAPSED_WIDTH + PANEL_GAP);
-        assert_eq!(all(&fit(&panels, collapsed)), [(Fit::Collapsed, 1); 4]);
-        // Narrower: the last one goes into the » menu, and the room it frees goes back to buttons.
-        let more = fit(&panels, collapsed - 1.0);
-        assert_eq!(more.iter().map(|p| p.fit).collect::<Vec<_>>(), [Fit::Collapsed, Fit::Collapsed, Fit::Collapsed, Fit::More]);
-        assert!(more.iter().take(3).all(|p| p.shown >= 1));
-        let more = fit(&sizes(&[14, 4, 2, 2, 2, 2]), 5.0 * (COLLAPSED_WIDTH + PANEL_GAP) + MORE_ROOM - 1.0);
-        assert_eq!(more.last().unwrap().fit, Fit::More);
-        assert!(more.iter().any(|p| p.fit == Fit::Buttons && p.shown > 1), "overflow room restores buttons");
-        // Then all of them.
-        assert!(fit(&panels, 0.0).iter().all(|p| p.fit == Fit::More));
-        assert_eq!(fit(&panels, f32::NAN).len(), 4);
-        // No cap: every additional button keeps its width and gap.
-        assert_eq!(panel_width(&[BUTTON_MIN_WIDTH; 30]) - panel_width(&[BUTTON_MIN_WIDTH; 20]), 10.0 * (BUTTON_MIN_WIDTH + BUTTON_GAP));
-    }
-
-    /// #2108: whatever the room, the toolbar uses it. It never leaves more than one button's width
-    /// blank while something is hidden, never runs past the room, and shrinks steadily as the
-    /// room does (so a few pixels never flip it back and forth).
-    #[test]
-    fn panels_fill_the_room_they_have_at_every_width() {
-        let layouts = [
-            // SOLID: CREATE, MODIFY, ASSEMBLE, CONFIGURE, CONSTRUCT, INSPECT, INSERT, SELECT.
-            vec![(4, false), (4, false), (3, false), (2, false), (2, false), (2, false), (2, false), (0, false)],
-            // SKETCH: labelled CREATE, then MODIFY … FINISH SKETCH.
-            vec![(8, true), (2, false), (3, false), (6, false), (2, false), (2, false), (0, false), (1, false)],
-            // Many pins on one panel.
-            vec![(14, false), (4, false), (2, false), (2, false)],
-        ];
-        for layout in layouts {
-            let panels: Vec<PanelSize> = layout
-                .iter()
-                .map(|&(buttons, labelled)| PanelSize {
-                    buttons: (0..buttons)
-                        .map(|i| ButtonSize {
-                            width: if labelled { BUTTON_MAX_WIDTH - (i % 3) as f32 * 5.0 } else { BUTTON_MIN_WIDTH },
-                            min_width: BUTTON_MIN_WIDTH,
-                        })
-                        .collect(),
-                })
-                .collect();
-            let mut last: Option<(f32, usize)> = None;
-            for room in (0..=2000).rev().map(|r| r as f32) {
-                let plans = fit(&panels, room);
-                let width = used_with_more(&plans);
-                let hidden = plans
-                    .iter()
-                    .zip(&panels)
-                    .any(|(p, s)| p.fit != Fit::Buttons || p.shown < s.buttons.len() || p.widths.iter().zip(&s.buttons).any(|(w, b)| *w < b.width));
-                let more = plans.iter().filter(|p| p.fit == Fit::More).count();
-                if more < panels.len() {
-                    assert!(width <= room + 0.01, "{layout:?} at {room}: {width} overruns");
-                }
-                // One button: an icon's stride, or a collapsed panel's when the next panel waits in the » menu.
-                let button = if more > 0 { COLLAPSED_WIDTH + PANEL_GAP } else { BUTTON_MIN_WIDTH + BUTTON_GAP };
-                if hidden && more < panels.len() {
-                    assert!(room - width < button, "{layout:?} at {room}: {} px blank while something is hidden", room - width);
-                }
-                // Fewer pixels never bring a panel back out of the » menu.
-                if let Some((_, prev_more)) = last {
-                    assert!(more >= prev_more, "{layout:?} at {room}: a panel came back out of the » menu");
-                }
-                last = Some((width, more));
-                // A panel shows its icons: one at the very least.
-                for (p, s) in plans.iter().zip(&panels) {
-                    if p.fit != Fit::More && !s.buttons.is_empty() {
-                        assert!(p.shown >= 1, "{layout:?} at {room}: a panel without icons");
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn variable_width_buttons_narrow_before_rightmost_equal_panels_lose_buttons() {
-        let panels = vec![PanelSize {
-            buttons: vec![
-                ButtonSize { width: 76.0, min_width: BUTTON_MIN_WIDTH },
-                ButtonSize { width: 63.0, min_width: BUTTON_MIN_WIDTH },
-                ButtonSize { width: 54.0, min_width: BUTTON_MIN_WIDTH },
-            ],
-        }];
-        let full = used(&panels.iter().map(Plan::full).collect::<Vec<_>>());
-        let narrow = fit(&panels, full - 1.0);
-        assert_eq!(narrow[0].shown, 3);
-        assert_eq!(narrow[0].widths, [75.0, 62.0, 54.0]);
-        let minimum = panel_width(&[BUTTON_MIN_WIDTH; 3]) + PANEL_GAP;
-        let narrow = fit(&panels, minimum);
-        assert_eq!(narrow[0].shown, 3);
-        assert_eq!(narrow[0].widths, [BUTTON_MIN_WIDTH; 3]);
-        assert_eq!(fit(&panels, minimum - 1.0)[0].shown, 2);
-
-        let equal = sizes(&[3, 3]);
-        let full = used(&equal.iter().map(Plan::full).collect::<Vec<_>>());
-        assert_eq!(fit(&equal, full - 1.0).iter().map(|p| p.shown).collect::<Vec<_>>(), [3, 2]);
-    }
-
-    #[test]
-    fn constraint_gallery_stays_fixed_and_hands_all_cells_to_the_menu_together() {
-        let panels = vec![PanelSize {
-            buttons: vec![
-                ButtonSize { width: BUTTON_MAX_WIDTH, min_width: BUTTON_MIN_WIDTH },
-                ButtonSize { width: CONSTRAINT_GRID_WIDTH, min_width: CONSTRAINT_GRID_WIDTH },
-            ],
-        }];
-        let minimum = panel_width(&[BUTTON_MIN_WIDTH, CONSTRAINT_GRID_WIDTH]) + PANEL_GAP;
-        let narrow = fit(&panels, minimum);
-        assert_eq!(narrow[0].shown, 2);
-        assert_eq!(narrow[0].widths, [BUTTON_MIN_WIDTH, CONSTRAINT_GRID_WIDTH]);
-        let collapsed = fit(&panels, minimum - 1.0);
-        assert_eq!((collapsed[0].fit, collapsed[0].shown), (Fit::Collapsed, 1));
-    }
-
     fn captured_frame(h: &mut crate::scenario::Harness) {
         let token = h.app.shots.token;
         crate::issue_report::receive(&mut h.app, token, std::sync::Arc::new(egui::ColorImage::new([2, 2], vec![Color32::GREEN; 4])));
@@ -5731,15 +5288,15 @@ mod ribbon_label_tests {
                     for catalog in crate::i18n::LOCALES {
                         let locale = solidcraft_ui_text::Locale::for_language(catalog.id);
                         let label = locale.label(crate::workspace::ribbon_button_label(command));
-                        let whole = Rect::from_min_size(pos2(40.0, 2.0), vec2(ribbon_button_width(&painter, label), BUTTON_HEIGHT));
-                        let galley = ribbon_button_galley(&painter, label, whole.width() - BUTTON_LABEL_PADDING, Color32::WHITE);
-                        let top = ribbon_label_top(whole, galley.size().y);
+                        let whole = Rect::from_min_size(pos2(40.0, 2.0), vec2(ribbon::button_width(&painter, label), BUTTON_HEIGHT));
+                        let galley = ribbon::button_galley(&painter, label, whole.width() - BUTTON_LABEL_PADDING, Color32::WHITE);
+                        let top = ribbon::label_top(whole, galley.size().y);
                         let at = format!("{} in {}: {label:?}", command.id, catalog.id);
                         // The icon is 26 points square, centred 16 points below the button's top.
                         assert!(top >= whole.top() + 16.0 + 13.0, "{at} starts at {top} over the icon");
-                        assert!(top + galley.size().y <= whole.bottom() - BUTTON_LABEL_BOTTOM + 0.01, "{at} runs past the button");
+                        assert!(top + galley.size().y <= whole.bottom() - ribbon::BUTTON_LABEL_BOTTOM + 0.01, "{at} runs past the button");
                         if galley.rows.len() == 1 {
-                            assert_eq!(top, whole.top() + BUTTON_LABEL_TOP, "{at}");
+                            assert_eq!(top, whole.top() + ribbon::BUTTON_LABEL_TOP, "{at}");
                         } else {
                             two_lines += 1;
                         }
@@ -5763,14 +5320,14 @@ mod ribbon_label_tests {
                     for catalog in crate::i18n::LOCALES {
                         let locale = solidcraft_ui_text::Locale::for_language(catalog.id);
                         let label = locale.label(crate::workspace::ribbon_button_label(command));
-                        let width = ribbon_button_width(&painter, label) - BUTTON_LABEL_PADDING;
-                        let galley = ribbon_button_galley(&painter, label, width, Color32::WHITE);
+                        let width = ribbon::button_width(&painter, label) - BUTTON_LABEL_PADDING;
+                        let galley = ribbon::button_galley(&painter, label, width, Color32::WHITE);
                         assert!(galley.rows.len() <= 2, "{}: {label}", command.id);
                         assert!(galley.size().x <= width + 0.01, "{}: {label}: {} > {width}", command.id, galley.size().x);
                         if solidcraft_ui_text::bidi::has_rtl(label) {
                             // epaint adds zero-width glyphs to right-to-left rows, so their text
                             // is not the source text: check the lines the galley is built from.
-                            let lines = ribbon_button_lines(&painter, label, width);
+                            let lines = ribbon::button_lines(&painter, label, width);
                             let first = lines[0].strip_prefix('…').unwrap_or(&lines[0]);
                             assert!(label.ends_with(first), "{}: {label} -> {lines:?}", command.id);
                             if let [first, second] = lines.as_slice()
@@ -5797,7 +5354,7 @@ mod ribbon_label_tests {
                             assert!(
                                 label.char_indices().any(|(at, ch)| {
                                     let end = at + ch.len_utf8();
-                                    (ch.is_whitespace() || ch == '/' || cjk_word_break(label, end))
+                                    (ch.is_whitespace() || ch == '/' || ribbon::cjk_word_break(label, end))
                                         && label[end..].trim_start().starts_with(next)
                                         && (first.ends_with('…') || label[..end].trim() == first)
                                 }),
@@ -5809,21 +5366,21 @@ mod ribbon_label_tests {
                 }
             }
             for label in ["Rectangular", "Dimension", "Coincident", "Chamfer", "Revolve"] {
-                let width = ribbon_button_width(&painter, label);
-                assert_eq!(ribbon_button_lines(&painter, label, width - BUTTON_LABEL_PADDING), vec![label]);
-                assert!((BUTTON_MIN_WIDTH..=BUTTON_MAX_WIDTH).contains(&width));
+                let width = ribbon::button_width(&painter, label);
+                assert_eq!(ribbon::button_lines(&painter, label, width - BUTTON_LABEL_PADDING), vec![label]);
+                assert!((BUTTON_MIN_WIDTH..=ribbon::BUTTON_MAX_WIDTH).contains(&width));
             }
             let finish = solidcraft_engine::find_command("sketch.finish").unwrap();
             let label = crate::workspace::ribbon_button_label(finish);
-            let width = ribbon_button_width(&painter, label);
-            assert_eq!(ribbon_button_lines(&painter, label, width - BUTTON_LABEL_PADDING), vec!["Finish", "Sketch"]);
+            let width = ribbon::button_width(&painter, label);
+            assert_eq!(ribbon::button_lines(&painter, label, width - BUTTON_LABEL_PADDING), vec!["Finish", "Sketch"]);
             // Exercise full labels and pinned commands too, not just compact defaults.
             for (label, width, expected) in [
                 ("Coincident", 50.0, vec!["Coincident"]),
                 ("Rectangular Pattern", 50.0, vec!["Rectangular", "Pattern"]),
                 ("Move/Copy", 40.0, vec!["Move/", "Copy"]),
             ] {
-                let lines = ribbon_button_lines(&painter, label, width);
+                let lines = ribbon::button_lines(&painter, label, width);
                 // Exact glyph widths depend on the bundled font: verify the source
                 // word stays on its own line, with only an optional suffix omitted.
                 assert_eq!(lines.len(), expected.len(), "{label}: {lines:?}");
@@ -5831,19 +5388,19 @@ mod ribbon_label_tests {
                     assert!(actual == word || actual.strip_suffix('…').is_some_and(|prefix| word.starts_with(prefix)), "{label}: {lines:?}");
                 }
             }
-            let lines = ribbon_button_lines(&painter, "one two three four five", 50.0);
+            let lines = ribbon::button_lines(&painter, "one two three four five", 50.0);
             assert_eq!(lines.len(), 2);
             assert!(lines[1].ends_with('…'));
-            let lines = ribbon_button_lines(&painter, "長い日本語のラベル 続き", 50.0);
+            let lines = ribbon::button_lines(&painter, "長い日本語のラベル 続き", 50.0);
             assert_eq!(lines.len(), 2);
             assert!(lines[0].ends_with('…'));
             // Hebrew comes in display order (`solidcraft_ui_text::bidi::visual`): the reader starts at the right end,
             // so "סקיצה חדשה" (New Sketch, stored as "חדשה סקיצה") puts סקיצה on the first line.
             let label = solidcraft_ui_text::bidi::visual("סקיצה חדשה").into_owned();
-            let width = ribbon_label_width(&painter, "סקיצה").max(ribbon_label_width(&painter, "חדשה")) + 1.0;
-            assert!(ribbon_label_width(&painter, &label) > width);
-            assert_eq!(ribbon_button_lines(&painter, &label, width), vec!["סקיצה", "חדשה"]);
-            let lines = ribbon_button_lines(&painter, &solidcraft_ui_text::bidi::visual("אחת שתיים שלוש ארבע חמש"), 50.0);
+            let width = ribbon::label_width(&painter, "סקיצה").max(ribbon::label_width(&painter, "חדשה")) + 1.0;
+            assert!(ribbon::label_width(&painter, &label) > width);
+            assert_eq!(ribbon::button_lines(&painter, &label, width), vec!["סקיצה", "חדשה"]);
+            let lines = ribbon::button_lines(&painter, &solidcraft_ui_text::bidi::visual("אחת שתיים שלוש ארבע חמש"), 50.0);
             assert_eq!(lines.len(), 2);
             assert!(lines[1].starts_with('…'), "{lines:?}");
         });
@@ -5869,8 +5426,8 @@ mod ribbon_label_tests {
             ] {
                 let command = solidcraft_engine::find_command(id).unwrap();
                 let label = ja.label(crate::workspace::ribbon_button_label(command));
-                let width = ribbon_button_width(&painter, label) - BUTTON_LABEL_PADDING;
-                assert_eq!(ribbon_button_lines(&painter, label, width), expected, "{id}");
+                let width = ribbon::button_width(&painter, label) - BUTTON_LABEL_PADDING;
+                assert_eq!(ribbon::button_lines(&painter, label, width), expected, "{id}");
             }
             let comp = solidcraft_engine::find_command("component.create").unwrap();
             assert_eq!(ja.label(comp.label), "新規コンポーネント");
@@ -6021,13 +5578,13 @@ mod fill_width_tests {
                 assert_eq!(on_bar + more as usize, lists.len(), "{at}: every panel is on the toolbar or in the » menu");
                 let overflow = crate::scenario::rect_of("toolbar:overflow");
                 assert_eq!(overflow.is_some(), more > 0.0, "{at}: the » menu shows exactly when a panel is in it");
-                let gap = right - end - if more > 0.0 { MORE_ROOM } else { 0.0 };
+                let gap = right - end - if more > 0.0 { ribbon::MORE_ROOM } else { 0.0 };
                 assert!(gap >= -0.5, "{at}: the panels run {} px past the room", -gap);
                 let hidden = collapsed + trimmed + more > 0.0;
                 let button = if more > 0.0 {
-                    COLLAPSED_WIDTH + PANEL_GAP
+                    ribbon::COLLAPSED_WIDTH + PANEL_GAP
                 } else if sketch {
-                    CONSTRAINT_GRID_WIDTH + BUTTON_GAP
+                    GALLERY_WIDTH + BUTTON_GAP
                 } else {
                     BUTTON_MIN_WIDTH + BUTTON_GAP
                 };
@@ -6096,7 +5653,7 @@ mod fill_width_tests {
         h.frames(3);
         assert!(crate::scenario::handle_at("button:sketch.create").is_none(), "New Sketch is no longer a full button");
         let panel = crate::scenario::rect_of("panel:MODEL:SKETCH").unwrap();
-        assert_eq!(panel.width(), COLLAPSED_WIDTH, "the panel takes a collapsed panel's room");
+        assert_eq!(panel.width(), ribbon::COLLAPSED_WIDTH, "the panel takes a collapsed panel's room");
         let button = crate::scenario::handle_at("collapsed:MODEL:SKETCH").expect("the Sketch panel keeps a button");
         assert!(panel.contains(button));
         h.step(&json!({"click":[button.x, button.y]})).unwrap();
@@ -6736,8 +6293,8 @@ mod persistent_ribbon_tests {
             }
         }
         let painter = h.ctx.layer_painter(egui::LayerId::background());
-        let plain = ribbon_button_galley_weight(&painter, "Zebra", 150.0, Tokens::get().text, false);
-        let heavy = ribbon_button_galley_weight(&painter, "Zebra", 150.0, Tokens::get().text, true);
+        let plain = ribbon::button_galley_weight(&painter, "Zebra", 150.0, Tokens::get().text, false);
+        let heavy = ribbon::button_galley_weight(&painter, "Zebra", 150.0, Tokens::get().text, true);
         assert!((plain.size().x - heavy.size().x).abs() > 0.1, "actual 600-weight face has different glyph metrics");
     }
 
