@@ -49,6 +49,11 @@
 //!   indices in use (`n`, `m`, `r`, `s`) are kept apart from the storage, which may be
 //!   larger; every index is checked against the storage, so the out-of-bounds accesses
 //!   upstream allows (e.g. `N_SrfSetSizeIndices` past the arrays) are `InvalidInput`.
+//! - `N_SrfFromCNetAndKnotVectors` takes any net; [`Surface::new`] and
+//!   [`Surface::with_indices`] refuse with `InvalidInput` control points in use that do
+//!   not all share the rationality of `Pw[0][0]`, so no path evaluates the non-rational
+//!   marker [`NOW`] as a weight. [`Surface::counts_are_valid`] still reports a net
+//!   mixed later through the mutable accessors.
 //! - The NULL surface of `N_SrfInitArrays` (null pointers, degrees `-1`) is `None`
 //!   in an `Option<Surface>`; partly NULL surfaces cannot be expressed. Storage that
 //!   upstream allocates uninitialised (`malloc`) is zero-filled.
@@ -95,6 +100,9 @@ pub const WEIGHT_MAX: f64 = 100.0;
 pub const WEIGHT_TOL: f64 = 1.0e-03;
 
 const OP_NEW: &str = "nurbs::srf_basic::Surface::new";
+/// Why [`Surface::new`] and [`Surface::with_indices`] refuse a net whose points mix
+/// weights with the non-rational marker [`NOW`].
+const MIXED_RATIONALITY: &str = "control points mix rational and non-rational";
 const OP_WITH_INDICES: &str = "nurbs::srf_basic::Surface::with_indices";
 const OP_CPT: &str = "nurbs::srf_basic::Surface::cpt";
 const OP_SET_CPTS: &str = "nurbs::srf_basic::Surface::set_cpts_and_knots";
@@ -216,6 +224,20 @@ fn net_holds(net: &[Vec<CPoint>], n: usize, m: usize) -> bool {
     }
 }
 
+/// `true` when every point of rows `0..=n`, columns `0..=m` shares the rationality
+/// of `Pw[0][0]` (all weighted, or all carrying the non-rational marker [`NOW`]).
+fn rationality_is_uniform(net: &[Vec<CPoint>], n: usize, m: usize) -> bool {
+    let mut points = net
+        .iter()
+        .take(n.saturating_add(1))
+        .flat_map(|row| row.iter().take(m.saturating_add(1)));
+    let Some(first) = points.next() else {
+        return true;
+    };
+    let rational = first.w != NOW;
+    points.all(|pw| (pw.w != NOW) == rational)
+}
+
 /// A zero-filled `(n+1) x (m+1)` net.
 fn zero_net(n: usize, m: usize) -> Vec<Vec<CPoint>> {
     vec![vec![CPoint::default(); m.saturating_add(1)]; n.saturating_add(1)]
@@ -226,8 +248,9 @@ impl Surface {
     /// (`n = net.len() - 1`, `m = net[0].len() - 1`, `r = u.len() - 1`,
     /// `s = v.len() - 1`).
     ///
-    /// Errors with `InvalidInput` for an empty net, rows of different lengths, or an
-    /// empty knot array. Nothing else is checked (see [`Surface::is_valid`]).
+    /// Errors with `InvalidInput` for an empty net, rows of different lengths, an empty
+    /// knot array, or control points that do not all share the rationality of
+    /// `Pw[0][0]`. Nothing else is checked (see [`Surface::is_valid`]).
     pub fn new(
         net: Vec<Vec<CPoint>>,
         p: usize,
@@ -254,6 +277,9 @@ impl Surface {
             .len()
             .checked_sub(1)
             .ok_or_else(|| invalid(OP_NEW, "empty v knot vector"))?;
+        if !rationality_is_uniform(&net, n, m) {
+            return Err(invalid(OP_NEW, MIXED_RATIONALITY));
+        }
         Ok(Self {
             net: Arc::new(net),
             n,
@@ -271,7 +297,8 @@ impl Surface {
     /// `r + 1` / `s + 1` knots of `u` / `v` (upstream `N_SrfFromCNetAndKnotVectors`
     /// with a net and knot vectors whose indices may be below their storage).
     ///
-    /// Errors with `InvalidInput` when the storage does not hold the indices.
+    /// Errors with `InvalidInput` when the storage does not hold the indices, or when
+    /// the control points in use do not all share the rationality of `Pw[0][0]`.
     pub fn with_indices(
         net: Vec<Vec<CPoint>>,
         u: Vec<f64>,
@@ -284,6 +311,9 @@ impl Surface {
         }
         if u.len() <= r || v.len() <= s {
             return Err(invalid(OP_WITH_INDICES, "knot array smaller than (r, s)"));
+        }
+        if !rationality_is_uniform(&net, n, m) {
+            return Err(invalid(OP_WITH_INDICES, MIXED_RATIONALITY));
         }
         Ok(Self {
             net: Arc::new(net),
@@ -640,17 +670,11 @@ impl Surface {
         }
 
         // Check for consistency.
-        let oldrat = self.cpt(0, 0)?.w != NOW;
-        for row in self.rows() {
-            for pw in row {
-                let newrat = pw.w != NOW;
-                if newrat != oldrat {
-                    return Err(SolidError::nurbs(
-                        OP_COUNTS,
-                        NurbsFailure::SurfaceDefinition,
-                    ));
-                }
-            }
+        if !rationality_is_uniform(&self.net, n, m) {
+            return Err(SolidError::nurbs(
+                OP_COUNTS,
+                NurbsFailure::SurfaceDefinition,
+            ));
         }
         Ok(())
     }
