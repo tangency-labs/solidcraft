@@ -71,6 +71,8 @@ pub(super) struct Upload {
     pub nodes: Vec<u8>,
     pub epsilon: f32,
     pub active_glass_model: bool,
+    pub photon_guide: Option<[f32; 4]>,
+    pub photon_bounds: Option<[f32; 6]>,
 }
 
 fn invalid(message: &str) -> JobError {
@@ -106,6 +108,8 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
     let mut vertices = reserved(vertex_count * 32)?;
     let mut vertex_offset = 0u32;
     let mut media_bounds = reserved::<super::media_hierarchy::Region>(solidcraft_render::job::MAX_GPU_DIELECTRICS)?;
+    let mut optical_lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut optical_hi = -optical_lo;
     for (body_index, body) in scene.meshes.iter().enumerate() {
         cancel.check()?;
         let body_start = triangles.len();
@@ -225,7 +229,7 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
         let body_triangles = &triangles[body_start..];
         if body_triangles.iter().any(|t| t.transmission.is_some()) {
             if media_bounds.len() >= solidcraft_render::job::MAX_GPU_DIELECTRICS {
-                return Err(invalid("at most 32 disjoint dielectric bodies are supported"));
+                return Err(invalid("at most 128 disjoint dielectric bodies are supported"));
             }
             let closed = body_triangles.iter().any(|t| t.transmission.is_some_and(|v| v.thin_wall_thickness_mm().is_none()));
             let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
@@ -234,6 +238,10 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
                 for p in t.p {
                     lo = lo.min(p);
                     hi = hi.max(p);
+                    if t.transmission.is_some() {
+                        optical_lo = optical_lo.min(p);
+                        optical_hi = optical_hi.max(p);
+                    }
                 }
             }
             media_bounds.push(super::media_hierarchy::Region {
@@ -242,6 +250,7 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
                 closed,
                 triangles: body_start..triangles.len(),
                 medium: body_index as u32 + 1,
+                name: &body.name,
             });
         }
         vertex_offset = vertex_offset.checked_add(mesh.positions.len() as u32).ok_or_else(|| invalid("vertex offset overflow"))?;
@@ -349,7 +358,28 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
         }
         node_bytes.extend_from_slice(&node.count.to_le_bytes());
     }
-    Ok(Upload { geometry, nodes: node_bytes, epsilon: (extent * 1e-7).max(1e-5), active_glass_model })
+    // Exact extrema of retained f32 optical vertices, including sheets. Unlike
+    // an emission proposal, this conservative origin certificate is always used.
+    let photon_bounds = (optical_lo.is_finite() && optical_hi.is_finite()).then_some([
+        optical_lo.x as f32,
+        optical_lo.y as f32,
+        optical_lo.z as f32,
+        optical_hi.x as f32,
+        optical_hi.y as f32,
+        optical_hi.z as f32,
+    ]);
+    let center = optical_lo * 0.5 + optical_hi * 0.5;
+    let radius = (optical_hi - optical_lo).len() * 0.5;
+    let photon_guide = if center.is_finite() && radius.is_finite() && radius > 0.0 {
+        // The union already contains retained f32 optical vertices. Cover the
+        // center's conversion and the shader's projected-basis arithmetic too.
+        let margin = 32.0 * f64::from(f32::EPSILON) * (center.len() + radius);
+        let radius = ((radius + margin) as f32).next_up();
+        radius.is_finite().then_some([center.x as f32, center.y as f32, center.z as f32, radius])
+    } else {
+        None
+    };
+    Ok(Upload { geometry, nodes: node_bytes, epsilon: (extent * 1e-7).max(1e-5), active_glass_model, photon_guide, photon_bounds })
 }
 
 fn uploaded_optical_positions(source: [Vec3; 3]) -> Result<[Vec3; 3]> {

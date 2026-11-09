@@ -81,7 +81,14 @@
 //! - **Length.** Spans of degree above 1 use the ported `SmIntegrator` (unit
 //!   `mass.integrator`; with `Kernel::fixes.integrator_propagates_failure`, WR-94,
 //!   failed span integrals propagate instead of contributing zero). `Length` needs the
-//!   kernel (the cache tessellation reads its tolerances).
+//!   kernel (the cache tessellation reads its tolerances). Not upstream: the accuracy
+//!   is held over the whole curve, not per span. Upstream integrates each span to
+//!   `dDesiredAccuracy / span count` relative to that span's integral so far, so each of
+//!   a span's steps may err by nearly that and the steps together by up to their number
+//!   times it; here each step is held to half the accuracy relative to its share of the
+//!   estimated length plus its own increment (`OdeOptions::rate`), shares that add up to
+//!   at most twice the length ([`Curve::length`];
+//!   `plan/findings/curve.curve_p5--curve-length-global-error-moves-cases-2026-11-08.md`).
 //! - **Out-params.** Flags with outputs are `Option`s (`IsLine`: point and vector;
 //!   `IsArc`: frame, radius, start and end angle; the guesses); `IsLinear`'s
 //!   optional outputs are the fields of [`Linearity`] (`want_deviation` stands for a
