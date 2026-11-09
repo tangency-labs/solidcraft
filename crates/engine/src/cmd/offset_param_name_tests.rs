@@ -66,6 +66,8 @@ fn a_bad_param_name_is_refused() {
         (json!({"param":"2x"}), "not a valid parameter name"),
         (json!({"param":"a","distance2":2,"param2":"a"}), "different"),
         (json!({"param2":"b"}), "distance2"),
+        (json!({"param":5}), "`param` must be a parameter name"),
+        (json!({"param2":["b"],"distance2":2}), "`param2` must be a parameter name"),
     ] {
         let mut s = rectangle();
         let before = s.doc.to_json();
@@ -75,4 +77,17 @@ fn a_bad_param_name_is_refused() {
         assert!(error.contains(says), "{p}: {error}");
         assert_eq!(s.doc.to_json(), before, "{p}");
     }
+}
+
+/// A chosen `param2` of `d1` is free in a fresh design: the unnamed first side takes the next
+/// generated name instead of `d1`.
+#[test]
+fn param2_may_take_the_first_generated_name() {
+    let mut s = rectangle();
+    let r = run(&mut s, "sketch.offset", json!({"curves":["l1"],"distance":1,"distance2":2,"param2":"d1"}));
+    assert_eq!(r["param2"], "d1");
+    assert_eq!(s.doc.param("d1").unwrap().expr, "2 mm");
+    let first = r["param"].as_str().unwrap();
+    assert_ne!(first, "d1");
+    assert_eq!(s.doc.param(first).unwrap().expr, "1 mm");
 }

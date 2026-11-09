@@ -3137,6 +3137,11 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`symmetric` offsets both sides, so `side` has no side left to pick: drop one of them"));
     }
     let instances = offset_instances(s, p, cmd)?;
+    for key in ["param", "param2"] {
+        if p.get(key).is_some_and(|value| !value.is_null() && !value.is_string()) {
+            return Err(bad(cmd, format!("`{key}` must be a parameter name (a string)")));
+        }
+    }
     let name = str_(p, "param");
     let name2 = str_(p, "param2");
     if name2.is_some() && expression2.is_none() {
@@ -3157,8 +3162,15 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
             Some(name) => doc.new_named_model_param(name, e, "mm").map_err(|error| bad(cmd, format!("param: {error}"))),
             None => Ok(doc.new_model_param(e, "mm")),
         };
-        let param = make(name, &expression)?;
-        let param2 = expression2.as_ref().map(|e| make(name2, e)).transpose()?;
+        // A chosen name is made before a generated one, so `param2: "d1"` is not taken by the
+        // `d1` generated for an unnamed first side.
+        let (param, param2) = if name.is_none() && name2.is_some() {
+            let param2 = expression2.as_ref().map(|e| make(name2, e)).transpose()?;
+            (make(name, &expression)?, param2)
+        } else {
+            let param = make(name, &expression)?;
+            (param, expression2.as_ref().map(|e| make(name2, e)).transpose()?)
+        };
         let made: Vec<String> = std::iter::once(param.clone()).chain(param2.clone()).collect();
         let mut pending = ids.clone();
         let mut sides = Vec::new();
