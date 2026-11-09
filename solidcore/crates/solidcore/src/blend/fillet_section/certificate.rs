@@ -309,6 +309,61 @@ pub fn nurbs_partials_over_piece(
     vb: f64,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None)
+}
+
+/// [`nurbs_partials_over_piece`] for a box inside the piece's closed knot span (not the
+/// fork's): there the weight is a convex combination of the piece's control weights, so it
+/// lies between their least and greatest, and its enclosure is cut to that range before
+/// the quotient. Where the Taylor enclosure of the weight alone holds 0 (a rational piece of
+/// high degree over a large box) this proves it positive. A box past the span is enclosed
+/// as [`nurbs_partials_over_piece`] encloses it.
+///
+/// # Errors
+///
+/// As [`nurbs_partials_over_piece`].
+#[allow(clippy::too_many_arguments)]
+pub fn nurbs_partials_within_span(
+    cn: &Nurbs,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    lk: usize,
+) -> Result<Partials<Ivl>> {
+    let inside = |u: &[f64], k: usize, a: f64, b: f64| {
+        knot(u, k as isize) <= a && b <= knot(u, k as isize + 1)
+    };
+    let hull = if inside(&cn.u, ku, ua, ub) && inside(&cn.v, kv, va, vb) {
+        let mut h: Option<Ivl> = None;
+        for i in (ku + 1).saturating_sub(cn.p + 1)..=ku {
+            for j in (kv + 1).saturating_sub(cn.q + 1)..=kv {
+                let w = Ivl::from(pw_at(&cn.pw, 4 * (i * cn.nv + j) + 3));
+                h = Some(h.map_or(w, |x| x.hull(w)));
+            }
+        }
+        h
+    } else {
+        None
+    };
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull)
+}
+
+/// [`nurbs_partials_over_piece`], the weight's enclosure cut to `weights` where given.
+#[allow(clippy::too_many_arguments)]
+fn partials_over_piece(
+    cn: &Nurbs,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    lk: usize,
+    weights: Option<Ivl>,
+) -> Result<Partials<Ivl>> {
     let um = 0.5 * (ua + ub);
     let vm = 0.5 * (va + vb);
     let nu = ders_basis(&cn.u, ku, cn.p, Ivl::from(um), cn.p);
@@ -377,6 +432,10 @@ pub fn nurbs_partials_over_piece(
         }
     }
     let w00 = at2(&wv, 0, 0, IZ);
+    let w00 = match weights {
+        Some(h) => Ivl::new(w00.lo.max(h.lo), w00.hi.min(h.hi)),
+        None => w00,
+    };
     let positive = w00.lo > 0.0;
     if !positive {
         // "SmGnSectionFSG: a face's weights are not positive over a box"
@@ -2160,6 +2219,23 @@ mod tests {
     /// A box across a knot line: the piecewise enclosure holds every partial of the face on
     /// both sides (the third u-partial jumps at the knot), which one piece continued over the
     /// box does not; a knot of too low a continuity, and a box past the knots, are refused.
+    #[test]
+    fn a_box_past_its_span_keeps_the_unclipped_weight() {
+        // the control weights bound the weight only inside the span: a box across the knot at
+        // u = 1 is enclosed as `nurbs_partials_over_piece` encloses it
+        let mut n = cubic_with_knot(1);
+        // weights from 1 to 4.5: the weight continued past the span leaves their range
+        for (i, w) in n.pw.chunks_mut(4).enumerate() {
+            let k = 1.0 + 0.5 * i as f64;
+            for c in w.iter_mut() {
+                *c *= k;
+            }
+        }
+        let a = nurbs_partials_within_span(&n, 3, 1, 0.9, 1.1, 0.2, 0.3, 3).unwrap();
+        let b = nurbs_partials_over_piece(&n, 3, 1, 0.9, 1.1, 0.2, 0.3, 3).unwrap();
+        assert_eq!(a, b);
+    }
+
     #[test]
     fn a_box_across_a_knot_line_is_enclosed_piece_by_piece() {
         let n = cubic_with_knot(1);

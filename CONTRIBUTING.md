@@ -25,8 +25,10 @@ solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.m
 `skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
 `crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
 
-A kernel-only pull request targets the `kernel` branch. A change that touches the kernel and the
-app goes to `main` as one pull request, with a code owner approving the `solidcore/` part.
+A kernel pull request targets `main` like any other, with a code owner (jyviko or me) approving the
+`solidcore/` part; a change that touches the kernel and the app is one pull request. The `kernel` branch
+is only for multi-step kernel work that isn't safe on `main` until every step has landed: send those
+steps to `kernel`, and it merges into `main` when the work is done.
 Crashes and data loss are still taken first.
 
 ### Updating a PR that was moved from solidcore

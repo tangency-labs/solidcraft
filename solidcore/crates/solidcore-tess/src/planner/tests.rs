@@ -1345,7 +1345,16 @@ fn sag_refinement_across_an_inflection_ends_without_slivers() {
     let fixed: Vec<Vec3> = Vec::new();
     let tol = 0.5;
     let start = uv.len();
-    sag::refine(&s, tol, 1e-9, &fixed, &mut uv, &mut tris, 20_000).unwrap();
+    sag::refine(
+        &s,
+        tol,
+        &mut sag::Poles::new(&s, 1e-9),
+        &fixed,
+        &mut uv,
+        &mut tris,
+        20_000,
+    )
+    .unwrap();
     assert!(
         uv.len() - start < 1_000,
         "{} points added: refinement ran to its budget",
@@ -1400,7 +1409,7 @@ fn triangles_standing_across_a_curved_sheet_are_flipped_along_it() {
             .sum()
     };
     let before = area(&tris);
-    sag::flip(&s, 0.1, 1e-9, &[], &uv, &mut tris).unwrap();
+    sag::flip(&s, 0.1, &mut sag::Poles::new(&s, 1e-9), &[], &uv, &mut tris).unwrap();
     let after = area(&tris);
     let sides: Vec<(u32, u32)> = tris
         .iter()
@@ -2137,4 +2146,20 @@ fn an_edge_stopped_at_its_depth_bound_is_named_within_its_tolerance() {
     assert_eq!((capped.edge, capped.cap), (2, EdgeCap::Depth), "{capped:?}");
     assert!(capped.within && capped.sag <= capped.tol, "{capped:?}");
     assert!(capped.excess > 1.0, "{capped:?}");
+}
+
+/// Refining a spline face moves no triangle count: the memo of the pole classifier only drops the
+/// repeated question (the coil took 1,089,434 / 1,091,452 calls at display / export before it).
+#[test]
+fn the_spline_coil_keeps_its_triangles() {
+    let name = "smlib_coil_lower_half";
+    let (b, size) = (fixture(name), size_of(name));
+    for (t, want) in [
+        (MeshTolerance::display_of(size), 30_776),
+        (MeshTolerance::export_of(size), 30_808),
+    ] {
+        let (p, _) = plan(&b, &t, size).unwrap();
+        let (m, _) = p.evaluate();
+        assert_eq!(m.triangles.len(), want);
+    }
 }

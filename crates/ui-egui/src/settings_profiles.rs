@@ -754,7 +754,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Run before the Preferences window so Escape belongs to this editor, including in a scrolled
 /// page. A separate popup container keeps the shared rename menu accessible and unclipped.
 pub(crate) fn rename_popup(app: &mut SolveApp, ctx: &egui::Context) {
-    if !app.prefs_window.open || app.prefs_window.section != prefs::PAGE_GENERAL || !app.prefs_window.filter.is_empty() {
+    if !app.prefs_window.shell.open || app.prefs_window.shell.section != prefs::PAGE_GENERAL || !app.prefs_window.shell.filter.is_empty() {
         app.settings_profiles.rename = None;
         return;
     }

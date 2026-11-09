@@ -53,6 +53,7 @@ fn request(orientation: AnisotropicOrientation, reflect: bool) -> ImageRequest {
         roughness_y: 0.55,
     };
     let options = RaytraceOptions {
+        threads: 1,
         anisotropic_faces: [Some(target), None],
         reflections: reflect.then(|| ReflectionOptions {
             bodies: vec![ReflectionBody { body: "explicit planar reflector".into(), mode: ReflectionMode::RoughSpecular }],
