@@ -404,7 +404,7 @@ fn check_form(command: &str, labels: &[&str]) {
         "joint.rack_pinion" | "joint.screw" => &["Reverse"],
         "joint.cam" => &["Other side"],
         "frame.member" => &["All Lines", "Mirror"],
-        "construct.plane.at_angle" => &["Use axis direction only"],
+        "construct.plane.at_angle" | "construct.plane.offset" => &["Use axis direction only"],
         _ => &[],
     };
     for label in checks {
@@ -617,18 +617,55 @@ fn a_dialog_takes_features_from_the_browser_history_rows() {
 
 form_case!(loft, "solid.loft", ["Operation"]);
 form_case!(sweep, "solid.sweep", ["Orientation"]);
-form_case!(offset_plane, "construct.plane.offset", ["Distance"]);
 form_case!(midplane, "construct.plane.midplane", []);
 form_case!(mesh_convert, "mesh.convert", ["Tolerance"]);
 form_case!(axis_two_planes, "construct.axis.two_planes", []);
 form_case!(point_along_path, "construct.point.along_path", ["Position (0 to 1)"]);
-form_case!(angle_plane, "construct.plane.at_angle", ["Offset", "Angle"]);
-
-/// Offset sits under Plane so the form matches offset-then-turn resolve order (#12038).
+/// Offset Plane and Plane at Angle share sections; defaults flip by command (#12038).
 #[test]
-fn angle_plane_offset_row_sits_under_plane() {
+fn offset_and_angle_plane_section_defaults() {
+    for (command, offset_open, angle_open) in [("construct.plane.offset", true, false), ("construct.plane.at_angle", false, true)] {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1400.0, "height": 1000.0}));
+        h.step(&json!({"start": command})).unwrap();
+        h.frames(4);
+        assert!(scenario::rect_of("dialog:row:Plane").is_some(), "{command}: Plane above sections");
+        assert!(scenario::handle_at("dialog:section:Offset").is_some(), "{command}: Offset section");
+        assert!(scenario::handle_at("dialog:section:Angle").is_some(), "{command}: Angle section");
+        assert_eq!(scenario::rect_of("dialog:row:Offset").is_some(), offset_open, "{command}: Offset open={offset_open}");
+        assert_eq!(scenario::rect_of("dialog:row:Through point").is_some(), offset_open, "{command}: Through with Offset");
+        assert_eq!(scenario::rect_of("dialog:row:Axis").is_some(), angle_open, "{command}: Axis open={angle_open}");
+        assert_eq!(scenario::rect_of("dialog:row:Angle").is_some(), angle_open, "{command}: Angle open={angle_open}");
+        let collapsed = if offset_open { "dialog:section:Angle" } else { "dialog:section:Offset" };
+        h.step(&json!({"click": {"handle": collapsed}})).unwrap();
+        h.frames(2);
+        let plane = scenario::rect_of("dialog:row:Plane").expect("Plane");
+        let offset = scenario::rect_of("dialog:row:Offset").expect("Offset");
+        let through = scenario::rect_of("dialog:row:Through point").expect("Through point");
+        let axis = scenario::rect_of("dialog:row:Axis").expect("Axis");
+        let angle = scenario::rect_of("dialog:row:Angle").expect("Angle");
+        assert!(plane.bottom() <= offset.top() + 0.5, "{command}: Offset under Plane");
+        assert!(offset.bottom() <= through.top() + 0.5, "{command}: Through under Offset");
+        assert!(through.bottom() <= axis.top() + 0.5, "{command}: Axis after Offset");
+        assert!(axis.bottom() <= angle.top() + 0.5, "{command}: Angle under Axis");
+    }
+}
+
+#[test]
+fn offset_plane() {
+    check_form_after_expanding_sections("construct.plane.offset", &["Offset"]);
+}
+
+#[test]
+fn angle_plane() {
+    check_form_after_expanding_sections("construct.plane.at_angle", &["Offset", "Angle"]);
+}
+
+/// Paint both Offset and Angle sections so every selection field is visible (#12038).
+fn check_form_after_expanding_sections(command: &str, labels: &[&str]) {
     let mut h = fixture();
-    let mut d = representative(&h, "construct.plane.at_angle");
+    let mut d = representative(&h, command);
+    assert_eq!(super::command(&d.kind), Some(command));
     for _ in 0..3 {
         scenario::clear_handles();
         let mut out = h.ctx.run_ui(
@@ -642,13 +679,64 @@ fn angle_plane_offset_row_sits_under_plane() {
         );
         out.textures_delta.clear();
     }
-    let plane = scenario::rect_of("dialog:row:Plane").expect("Plane");
-    let offset = scenario::rect_of("dialog:row:Offset").expect("Offset");
-    let axis = scenario::rect_of("dialog:row:Axis").expect("Axis");
-    let angle = scenario::rect_of("dialog:row:Angle").expect("Angle");
-    assert!(plane.bottom() <= offset.top() + 0.5, "Offset under Plane: {plane:?} {offset:?}");
-    assert!(offset.bottom() <= axis.top() + 0.5, "Axis under Offset: {offset:?} {axis:?}");
-    assert!(axis.bottom() <= angle.top() + 0.5, "Angle after Axis: {axis:?} {angle:?}");
+    for section in ["dialog:section:Offset", "dialog:section:Angle"] {
+        let Some(pos) = scenario::handle_at(section) else { continue };
+        let body_missing = match section {
+            "dialog:section:Offset" => scenario::rect_of("dialog:row:Offset").is_none(),
+            _ => scenario::rect_of("dialog:row:Angle").is_none(),
+        };
+        if !body_missing {
+            continue;
+        }
+        for press in [true, false] {
+            let mut out = h.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 1600.0))),
+                    events: vec![egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: press,
+                        modifiers: egui::Modifiers::default(),
+                    }],
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_width(264.0);
+                    ui_kit::scope(ui, |ui| {
+                        rows(&mut h.app, &h.ctx, &mut d, ui);
+                    });
+                },
+            );
+            out.textures_delta.clear();
+        }
+    }
+    for _ in 0..2 {
+        scenario::clear_handles();
+        let mut out = h.ctx.run_ui(
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 1600.0))), ..Default::default() },
+            |ui| {
+                ui.set_width(264.0);
+                ui_kit::scope(ui, |ui| {
+                    rows(&mut h.app, &h.ctx, &mut d, ui);
+                });
+            },
+        );
+        out.textures_delta.clear();
+        h.output = out.platform_output;
+    }
+    for input in &d.inputs {
+        assert!(scenario::rect_of(&format!("dialog:field:{}", input.label)).is_some(), "{command}: selection field {}", input.label);
+    }
+    for label in labels {
+        assert!(scenario::rect_of(&format!("dialog:row:{label}")).is_some(), "{command}: missing dense row {label}");
+    }
+    assert!(
+        h.output.accesskit_update.as_ref().is_some_and(|tree| {
+            tree.nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::CheckBox && n.label() == Some("Use axis direction only"))
+        }),
+        "{command}: direction-only option"
+    );
+    assert_eq!(apply_commands(&h.app, &d).unwrap_or_else(|e| panic!("{command}: {e}")).len(), 1);
 }
 form_case!(path_plane, "construct.plane.along_path", ["Position (0 to 1)"]);
 form_case!(split, "solid.split_body", []);
@@ -1766,7 +1854,7 @@ fn stored_bare_numbers_edit_with_their_units() {
             Kind::Draft { angle } => vec![angle.clone()],
             Kind::OffsetFaces { distance } => vec![distance.clone()],
             Kind::Stock { margin } => vec![margin.clone()],
-            Kind::OffsetPlane { offset } => vec![offset.clone()],
+            Kind::OffsetPlane { offset, .. } => vec![offset.clone()],
             Kind::Revolve { angle, .. } => vec![angle.clone()],
             other => panic!("{command}: {other:?}"),
         };

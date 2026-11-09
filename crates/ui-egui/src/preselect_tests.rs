@@ -2994,10 +2994,11 @@ fn offset_plane_through_a_picked_vertex() {
     h.app.start("construct.plane.offset");
     h.frames(1);
     let d = h.app.dialog.as_mut().unwrap();
-    assert_eq!(d.inputs.len(), 2);
+    assert!(d.inputs.iter().any(|i| i.label == "Axis"), "{:?}", d.inputs);
     d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
-    d.inputs[1].items = vec![Sel::Vertex { body: "Box".into(), point: Vec3::new(40.0, 30.0, 20.0) }];
-    assert!(d.primary().is_none(), "no distance to type or drag");
+    let through = d.inputs.iter_mut().find(|i| i.label == "Through point").unwrap();
+    through.items = vec![Sel::Vertex { body: "Box".into(), point: Vec3::new(40.0, 30.0, 20.0) }];
+    assert!(d.primary().is_none(), "no offset to type or drag when Through is set");
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands.first().map(|c| c.1.clone()), Some(json!({"base":"XY","through":{"vertex":[40.0,30.0,20.0]},"offset":null})));
     h.step(&json!({"key":"Enter"})).unwrap();
@@ -3008,7 +3009,8 @@ fn offset_plane_through_a_picked_vertex() {
     assert!(pl.normal().cross(Vec3::Z).len() < 1e-6 && (pl.origin.z - 20.0).abs() < 1e-6, "{pl:?}");
     let reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
     assert_eq!(reopened.inputs[0].items, vec![Sel::Plane { name: "XY".into() }]);
-    assert!(matches!(reopened.inputs[1].items.as_slice(), [Sel::Vertex { body, .. }] if body == "Box"), "{:?}", reopened.inputs[1].items);
+    let through = reopened.inputs.iter().find(|i| i.label == "Through point").unwrap();
+    assert!(matches!(through.items.as_slice(), [Sel::Vertex { body, .. }] if body == "Box"), "{:?}", through.items);
 }
 
 /// Plane at Angle's "Use axis direction only" option shows a Pivot pick and sends both parameters (#12041).
@@ -3092,7 +3094,7 @@ fn check_offset_plane_wire_point(index: usize, point: Vec3) {
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
-        d.active = 1;
+        d.active = d.inputs.iter().position(|i| i.label == "Through point").expect("Through point");
     }
     h.frames(2);
     let [x, y] = h.at(&json!({"world":[point.x,point.y,point.z]})).unwrap();
@@ -3111,7 +3113,11 @@ fn check_offset_plane_wire_point(index: usize, point: Vec3) {
     let hit = hits.iter().find(|hit| matches!(hit, crate::viewport::Hit::SketchPoint3d { .. })).expect("pickable 3D point");
     let picked = h.app.dialog.as_ref().unwrap().candidate(&h.app.session, hit).expect("accepted point reference");
     assert_eq!(picked, Sel::SketchPoint { id: format!("{sketch}:{wire}:{index}") });
-    h.app.dialog.as_mut().unwrap().inputs[1].items = vec![picked];
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        let through = d.inputs.iter_mut().find(|i| i.label == "Through point").expect("Through point");
+        through.items = vec![picked];
+    }
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands[0].1["through"], json!({"sketch":sketch,"point":format!("{wire}:{index}")}));
     axis_point_evidence(&mut h, &format!("3d-node-offset-plane-{index}"));
@@ -3119,7 +3125,8 @@ fn check_offset_plane_wire_point(index: usize, point: Vec3) {
     let (feature, _, plane) = solidcraft_engine::view::construction_planes(&h.app.session).into_iter().next().unwrap();
     assert!((plane.origin.z - point.z).abs() < 1e-9);
     let reopened = crate::dialogs::for_feature(&h.app, feature, None).unwrap();
-    assert_eq!(reopened.inputs[1].items, vec![Sel::SketchPoint { id: format!("{sketch}:{wire}:{index}") }]);
+    let through = reopened.inputs.iter().find(|i| i.label == "Through point").expect("Through point");
+    assert_eq!(through.items, vec![Sel::SketchPoint { id: format!("{sketch}:{wire}:{index}") }]);
     h.call("ui.prefs", json!({"select_3d_curve_points":false}));
     assert!(!crate::viewport::standalone_points(&h.app).contains(&point));
 }
@@ -3170,7 +3177,7 @@ fn hole_keeps_planar_point_when_a_3d_wire_point_is_nearer() {
     // Deliberately share a point mask to isolate the dialog policy in the pick cache.
     // Switching without moving the cursor must invalidate the construction hit.
     let mut construction = crate::dialogs::Dialog::for_command(&h.app, "construct.plane.offset").unwrap();
-    construction.active = 1;
+    construction.active = construction.inputs.iter().position(|i| i.label == "Through point").expect("Through point");
     let accept = construction.active_input().unwrap().accept;
     let mut hole = crate::dialogs::Dialog::for_command(&h.app, "solid.hole").unwrap();
     if let Kind::Hole { opts, .. } = &mut hole.kind {
@@ -3233,7 +3240,7 @@ fn plane_tool_opens_as_the_method_its_picks_call_for() {
     let d = h.app.dialog.as_ref().unwrap();
     assert!(matches!(d.kind, Kind::OffsetPlane { .. }) && d.auto.is_some(), "{d:?}");
     assert_eq!(d.items(), vec![Sel::Plane { name: "XY".into() }], "the selection is the first pick");
-    assert!(h.app.dialog.as_mut().unwrap().primary().is_some_and(|(label, ..)| label == "Distance"), "Offset Plane's own value and handle");
+    assert!(h.app.dialog.as_mut().unwrap().primary().is_some_and(|(label, ..)| label == "Offset"), "Offset Plane's own value and handle");
     h.app.dialog.as_mut().unwrap().pick(&h.app.session, Sel::Plane { name: "Shelf".into() });
     h.frames(2);
     let d = h.app.dialog.as_ref().unwrap();

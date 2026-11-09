@@ -712,7 +712,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         Sel::SketchPoint { id } => sketch_point_at(app, &crate::open_meshing::session_world(&app.session), id),
         _ => None,
     });
-    if let (Kind::OffsetPlane { offset }, Some(n)) = (&d.kind, dir)
+    if let (Kind::OffsetPlane { offset, .. }, Some(n)) = (&d.kind, dir)
         && let Some(off) = through.map(|p| (p - base).dot(n)).or_else(|| crate::length_input::eval(&app.session.doc, offset, ValueKind::Length).ok())
         && let Some(q) = offset_plane_quad(proj, base + n * off, n, half_height * 0.25)
     {
