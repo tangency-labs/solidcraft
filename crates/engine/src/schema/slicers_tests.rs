@@ -1,9 +1,9 @@
-use serde_json::{Value, json};
+use serde_json::json;
 
 use super::{SlicerInfo, SlicersParams, SlicersResult};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
-use crate::schema::{ParamCheck, input_schema_for, issues, output_schema_for};
+use crate::schema::{ParamCheck, input_schema_for, issues};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
@@ -43,12 +43,6 @@ fn the_check_names_an_unknown_key() {
     assert_eq!(issues("file.slicers", &json!({"slicer": "prusa"})).len(), 1);
 }
 
-fn matches(reply: &Value) {
-    let schema = output_schema_for::<SlicersResult>();
-    assert!(conforms(schema.as_value(), schema.as_value(), reply), "{reply} doesn't match {schema:?}");
-    assert!(reply.get("param_warnings").is_none(), "{reply}");
-}
-
 /// What the entries serialize to: every key is there, and a missing program or icon is null, as
 /// the handler has always answered.
 #[test]
@@ -70,8 +64,18 @@ fn an_entry_serializes_with_null_for_what_is_missing() {
 #[cfg(unix)]
 #[test]
 fn replies_match_the_output_schema() {
+    use serde_json::Value;
+
+    use crate::schema::output_schema_for;
     use crate::slicers::{IconSource, Slicer, TEST_DETECTED};
     use crate::tests::mesh_convert::{CHOSEN_PROGRAMS, MadeUp};
+
+    fn matches(reply: &Value) {
+        let schema = output_schema_for::<SlicersResult>();
+        assert!(conforms(schema.as_value(), schema.as_value(), reply), "{reply} doesn't match {schema:?}");
+        assert!(reply.get("param_warnings").is_none(), "{reply}");
+    }
+
     let _turn = CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let _reset = MadeUp;
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
