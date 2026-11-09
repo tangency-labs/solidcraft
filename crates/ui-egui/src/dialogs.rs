@@ -642,6 +642,8 @@ pub struct Dialog {
     /// shown while this dialog is open, as an edited feature's sketch does, so its profiles can
     /// be picked even when an earlier feature uses the sketch and hides it.
     pub(crate) started_from_sketch: Option<u64>,
+    /// Offset/Angle section open state was seeded once for this dialog (#12038).
+    pub(crate) plane_sections_seeded: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -916,6 +918,7 @@ impl Dialog {
             anchor_hint: None,
             started_from_sketch: None,
             auto: None,
+            plane_sections_seeded: false,
         }
     }
 
@@ -1484,7 +1487,9 @@ impl Dialog {
 
     /// Make the first single input still empty (after the filled ones) active.
     fn advance(&mut self) {
-        if let Some(i) = self.inputs.iter().position(|i| i.items.is_empty()) {
+        // Offset Plane keeps Through point next after Plane while Angle is empty (#12038).
+        let skip_axis = matches!(&self.kind, Kind::OffsetPlane { angle, .. } if angle.trim().is_empty());
+        if let Some(i) = self.inputs.iter().position(|inp| inp.items.is_empty() && !(skip_axis && inp.label == "Axis")) {
             self.active = i;
         } else {
             self.active = self.active.min(self.inputs.len().saturating_sub(1));
@@ -6546,7 +6551,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 None if !offset.trim().is_empty() => {
                     p["offset"] = json!(offset);
                 }
-                None => {}
+                // Explicit null: no offset before the turn (and no empty expression).
+                None => p["offset"] = Value::Null,
             }
             if *direction_only && let Some(pivot) = angle_pivot(d) {
                 p["pivot"] = construct_ref(app, pivot)?;
