@@ -59,7 +59,7 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     let open = panel_open(app);
     app.drawing_workspace.settings_open = false;
     app.drawing_workspace.options = None;
-    app.drawing_workspace.export = None;
+    crate::drawing_export_panel::close(app);
     app.drawing_workspace.settings = None;
     open
 }
@@ -88,7 +88,7 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
         _ => None,
     };
     app.drawing_workspace.settings_open = false;
-    app.drawing_workspace.export = None;
+    crate::drawing_export_panel::give_way(app);
     true
 }
 
@@ -295,7 +295,7 @@ pub fn chrome(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if icon_action(ui, "drawing:sheets:settings", "settings", "Sheet Settings", true).clicked() {
                     app.drawing_workspace.settings_open = !app.drawing_workspace.settings_open;
                     app.drawing_workspace.options = None;
-                    app.drawing_workspace.export = None;
+                    crate::drawing_export_panel::give_way(app);
                 }
             };
             if destination == "under_browser" {
