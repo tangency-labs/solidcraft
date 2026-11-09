@@ -38,6 +38,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PALETTE_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::PaletteResult>)
         .params("Open command search in the app. Headless calls are refused without changing the design"),
+    CommandSpec::new("ui.toggle_visibility", "Show/Hide Selection", crate::checked!("ui.toggle_visibility", toggle_visibility))
+        .icon("eye")
+        .key("V")
+        .noundo()
+        .doc_only()
+        .contract(&TOGGLE_VISIBILITY_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::ToggleVisibilityResult>)
+        .params("Show or hide what is selected in the app. Headless calls are refused without changing the design; browser.visibility takes explicit items"),
     CommandSpec::new("edit.undo", "Undo", crate::checked!("edit.undo", undo))
         .icon("undo")
         .key("Ctrl+Z")
@@ -271,6 +279,14 @@ const PALETTE_CONTRACT: crate::schema::TypedContract<crate::schema::edit::Palett
 /// in Preferences › Shortcuts like any other command's.
 fn palette(_s: &mut Session, _p: &Value) -> Result<Value> {
     Err(EngineError::Other("ui.palette opens command search in the app; there is no search box in a headless session".into()))
+}
+
+const TOGGLE_VISIBILITY_CONTRACT: crate::schema::TypedContract<crate::schema::edit::ToggleVisibilityParams> = crate::schema::TypedContract::new();
+
+/// Show/Hide of the selection (#13241) is the app's, which knows what is picked in the Browser:
+/// it runs in `SolveApp::start`, and its key can be moved in Preferences › Shortcuts.
+fn toggle_visibility(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other("ui.toggle_visibility acts on the app's selection; use browser.visibility in a headless session".into()))
 }
 
 const REPEAT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RepeatParams> = crate::schema::TypedContract::new();

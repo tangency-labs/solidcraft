@@ -1694,6 +1694,12 @@ fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
     assert_eq!((s.doc.to_json(), s.undo.len()), before);
     let spec = crate::find_command("ui.palette").unwrap();
     assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("S"), "", false));
+    // Show/Hide likewise (#13241): V is its default key, and a script names what to hide.
+    let error = s.execute("ui.toggle_visibility", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("headless session"), "{error}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    let spec = crate::find_command("ui.toggle_visibility").unwrap();
+    assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("V"), "", false));
 }
 
 #[test]
