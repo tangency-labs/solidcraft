@@ -1,7 +1,8 @@
 //! Resolve portable surface intent into the existing captured GPU texture contract.
 //! Definition/feature/occurrence identities are checked on every Check and Start.
+use crate::schema::TypedContract;
+use crate::schema::render_bindings::{SurfaceBindParams, SurfaceBindingSaved, SurfaceUnbindParams};
 use crate::{Result, Session, params::bad};
-use serde::Deserialize;
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::{
@@ -132,32 +133,32 @@ pub(super) fn resolve(s: &Session, scene: &ProductScene, bindings: &SurfaceBindi
     }
     Ok(result)
 }
-fn empty() -> Value {
-    json!({})
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Bind {
-    name: String,
-    surface: Value,
-    #[serde(default = "empty")]
-    set: Value,
-    #[serde(default)]
-    replace: bool,
-}
+pub(super) const BIND_CONTRACT: TypedContract<SurfaceBindParams> = TypedContract::new();
+pub(super) const UNBIND_CONTRACT: TypedContract<SurfaceUnbindParams> = TypedContract::new();
+
+/// Save `setup` under `name` in one undo step (none when nothing changed) and reply with it.
 fn publish(s: &mut Session, name: String, setup: RenderSetup, command: &str) -> Result<Value> {
     let mut settings = (*s.doc.render).clone();
     settings.setups.insert(name.clone(), setup.clone());
     settings.validate().map_err(|e| bad(command, e.to_string()))?;
+    // Serialized before the document changes, so a setup that can't be written leaves it as it was.
+    let setup = serde_json::to_value(&setup).map_err(|e| bad(command, e.to_string()))?;
     if settings != *s.doc.render {
         s.doc_mut().render = Arc::new(settings);
     }
-    Ok(json!({"name":name,"setup":setup,"mapping_space":"definition_local_mm","geometry_and_physical_materials_unchanged":true}))
+    let reply = SurfaceBindingSaved {
+        name,
+        setup,
+        mapping_space: "definition_local_mm".into(),
+        geometry_and_physical_materials_unchanged: true,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(command, e.to_string()))
 }
 pub(super) fn bind(s: &mut Session, params: &Value) -> Result<Value> {
     super::library::require_bundled("render.library.surface.bind")?;
     let command = "render.library.surface.bind";
-    let input: Bind = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: SurfaceBindParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     let mut setup = super::patched_settings(s, &input.name, &input.set, command)?;
     if s.doc.render.setups.get(&input.name).is_some_and(|old| old.surfaces != setup.surfaces) {
         return Err(bad(command, "setup patch cannot erase or replace saved surface bindings; use explicit bind/unbind commands"));
@@ -165,6 +166,14 @@ pub(super) fn bind(s: &mut Session, params: &Value) -> Result<Value> {
 
     if !matches!(setup.job, Some(RenderJob::CpuRaytrace { .. } | RenderJob::GpuPath { .. })) {
         return Err(bad(command, "persistent authored maps require an explicit CPU raytrace or GPU path setup"));
+    }
+    if let Some(RenderJob::CpuRaytrace { options, .. }) = &setup.job {
+        if !setup.optics.is_empty() && options.path.is_none() {
+            return Err(bad(command, "CPU maps with Glass require Indirect lighting and separate targets"));
+        }
+        // Saving validates portable intent; capture later resolves stable aging
+        // targets. The final setup validator still forbids maps on a Glass target.
+        options.validate_surface_maps(setup.exposure_ev).map_err(|e| bad(command, e.to_string()))?;
     }
     let prepared = super::library::prepare_surface(s, &input.surface)?;
     let id = prepared["id"].as_str().ok_or_else(|| bad(command, "missing prepared surface identifier"))?;
@@ -192,17 +201,9 @@ pub(super) fn bind(s: &mut Session, params: &Value) -> Result<Value> {
     super::textures::validate_targets(&scene, &resolved, command)?;
     publish(s, input.name, setup, command)
 }
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Unbind {
-    name: String,
-    target: RenderBodyTarget,
-    #[serde(default = "empty")]
-    set: Value,
-}
 pub(super) fn unbind(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.library.surface.unbind";
-    let input: Unbind = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: SurfaceUnbindParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     input.target.validate().map_err(|e| bad(command, e.to_string()))?;
     let mut setup = super::patched_settings(s, &input.name, &input.set, command)?;
     setup.surfaces.remove(&input.target);

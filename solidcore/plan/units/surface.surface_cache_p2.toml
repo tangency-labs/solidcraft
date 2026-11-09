@@ -1,0 +1,12 @@
+id = "surface.surface_cache_p2"
+upstream = ["source/SMLib/src/SmSurfaceCache.cpp"]
+rust_module = "surface::surface_cache::p2"
+depends_on = ["geom.extent2d", "geom.object", "geom.vector3d", "nurbs.b_spline_surface_p1", "nurbs.nurbs_srf", "surface.surface_cache_p1", "surface.surface_p2"]
+soft_depends_on = ["curve.curve_p5", "curve.iso_curve", "geom.extent1d", "geom.extent3d", "geom.pseudo_box", "geom.tol", "geom.tree", "geom.vector2d", "nlib.knots", "nlib.srf_basic", "nlib.srf_nurb", "nurbs.b_spline_curve_p1", "nurbs.b_spline_surface_p2", "surface.surface_p9"]
+est_lines = 1252
+layer = 24
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-surface.surface_cache_p2"
+claimed_at = "2026-10-13T22:42:47Z"
+notes = "GREEN, PR #563 on main b65597902: 905 native cases (105 fixture + 800 generated), 905 bit-identical passes, 0 failed, 0 deferred; all 904 main passes retained and the final deferral now passes. Verified by x86_64 CI 39928207576 and full ARM64 audit. Historical review sensitivity detected 751/751 (earlier 721/721). FindTessellationSplits uses the caller Kernel; SmPlane IsSingularity is wired in the Bezier approximation. Earlier dependency wiring included surface.surface_p1/p3/p4/p5/p7/p9, curve.iso_curve and surface_point_solve_p3; formerly deferred groups were 53 face-owned plane/cache calls, 43 singularity/iso-curve calls and subdivision splitting. No co-ports. Seven functions, largest TestAgainstTolerances, SubdivideByBlock, sm_CreateApproximateBezierPatchBlock, sm_CreateBezierPatchBlock; cycle back-edge surface.surface_p1(1); unit-SCC #22 (220 units); 317 upstream test entry points."

@@ -110,6 +110,9 @@ impl TextureSource {
     }
     pub fn new(bytes: Vec<u8>, role: MapRole) -> Result<Self> {
         let format = admitted_format(&bytes, bytes.capacity())?;
+        if format == ImageFormat::Png {
+            png_metadata::validate(&bytes)?;
+        }
         let (width, height) = guarded(|| {
             let mut decoder = reader(&bytes, format).into_decoder().map_err(|e| invalid(e.to_string()))?;
             if !matches!(decoder.color_type(), image::ColorType::L8 | image::ColorType::La8 | image::ColorType::Rgb8 | image::ColorType::Rgba8) {
@@ -160,12 +163,12 @@ impl TextureSource {
         }
         Ok(self.bytes.clone())
     }
-    /// Bounded whole-image codec work, intended for a caller-owned worker. Cancellation is
-    /// checked at the codec boundary, not during PNG/JPEG decoding. No partial image escapes.
     #[cfg(all(test, feature = "raytrace-cpu"))]
     pub(crate) fn encoded_weak(&self) -> std::sync::Weak<Vec<u8>> {
         Arc::downgrade(&self.bytes)
     }
+    /// Bounded whole-image codec work, intended for a caller-owned worker. Cancellation is
+    /// checked at the codec boundary, not during PNG/JPEG decoding. No partial image escapes.
     pub fn decode(&self, cancelled: impl Fn() -> bool) -> Result<DecodedTexture> {
         if cancelled() {
             return Err(invalid("texture decoding cancelled"));

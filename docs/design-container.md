@@ -175,9 +175,9 @@ numbers on the same kernel; a design opened on the other kernel is evaluated on 
 The evaluation source (`SOLIDCRAFT_EVALUATION_SOURCE`, `crates/io/build.rs`) is a
 digest of the committed source a model is computed from: the `doc` crate and every
 workspace crate it is built from (a test checks the list against their manifests),
-the patched dependencies in `vendor/` (not the interface's renderer), the locked
-versions of every other dependency, the workspace `Cargo.toml` without the
-application's version, `.cargo/config.toml`, and the cache's own reader. An update
+the vendored kernel in `solidcore/` and the patched dependencies in `vendor/` (not the
+interface's renderer), the locked versions of every other dependency, the workspace `Cargo.toml`
+without the application's version, `.cargo/config.toml`, and the cache's own reader. An update
 that changed none of it (the interface, the commands, other file formats, a new
 version number) opens designs from the caches the build before it wrote (#7168);
 one that changed any of it (a kernel fix, the codec, a dependency) evaluates them
@@ -261,7 +261,7 @@ phase-one container PR (#327):
    loops, geometric domains, analytic/spline curve and surface definitions, units,
    tolerances and orientation must have explicit semantics. Preserve face-source
    certificates, persistent names and history using SolidCraft-owned identities.
-   No truck serialized structs, memory layouts, pointers or opaque kernel blobs
+   No kernel serialized structs, memory layouts, pointers or opaque kernel blobs
    form part of the persisted contract. No evaluated STEP round trip is a substitute.
 3. Separate adapters between the neutral schema and supported kernels. Unsupported
    geometry or provenance is a cache miss. Explicitly fitted intersection splines

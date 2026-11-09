@@ -90,7 +90,7 @@ pub struct Drawing {
 }
 
 /// The fields a drawing's record has: anything else in a file is a newer build's.
-const RECORD_FIELDS: [&str; 7] = ["format", "name", "sources", "properties", "units", "language", "sheets"];
+const RECORD_FIELDS: [&str; 8] = ["format", "format_pending", "name", "sources", "properties", "units", "language", "sheets"];
 
 /// Move the elements of the list `key` that don't read as `T` out of a newer build's drawing.
 fn take_unread<T: serde::de::DeserializeOwned>(top: &mut serde_json::Map<String, Value>, key: &str, one: &str, file: &mut NewerDrawing) {

@@ -249,11 +249,11 @@ pub(crate) fn menu(ui: &Ui, response: &mut Response, text: &mut dyn TextBuffer, 
     };
     let mut picked = None;
     let open = super::Menu::context(response, |ui| {
-        super::Menu::show(ui, crate::context_menu::LIST_W, |ui| {
+        super::Menu::show(ui, super::LIST_W, |ui| {
             for edit in Edit::ALL {
                 let (row, message, icon, key) = edit.row();
                 let shortcut = crate::keymap::display(key);
-                let mut item = super::MenuItem::new(row, crate::i18n::tr(message), icon);
+                let mut item = super::MenuItem::new(row, solidcraft_ui_text::tr(message), icon);
                 item.shortcut = &shortcut;
                 item.enabled = enabled(edit, state);
                 if item.show(ui).clicked() && item.enabled {

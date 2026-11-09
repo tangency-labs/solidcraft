@@ -578,12 +578,12 @@ mod tests {
     }
 
     /// A stadium: two half-circle arcs (radius 5) bulging out of the 10 × 8 rectangle between two
-    /// lines. Each arc meets its lines at 180°, so the patch is singular at its corners, and the
-    /// reference mesher's walk round the boundary used to run from such a corner onto the
-    /// surface's extrapolation past its domain (a planar spline passes through every point of its
-    /// plane there): the face measured 289 mm² for its 158.5. The vendored mesher's bounded
-    /// projection (`nearest_projection`, vendor/README.md) keeps the walk on the domain. Its area
-    /// is the stadium's, 80 + 25π, by the faces, the measuring mesh and the display mesh.
+    /// lines. Each arc meets its lines at 180°, so the patch is singular at its corners, and a
+    /// boundary walk can run from such a corner onto the surface's extrapolation past its domain
+    /// (a planar spline passes through every point of its plane there): the face measured
+    /// 289 mm² for its 158.5. The mesher is SolidCraft's own (`crate::tess::plan`), which keeps
+    /// the walk on the domain. Its area is the stadium's, 80 + 25π, by the faces, the measuring
+    /// mesh and the display mesh.
     #[test]
     fn a_patch_with_straight_corners_measures_its_own_area() {
         use std::f64::consts::PI;

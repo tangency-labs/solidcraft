@@ -81,7 +81,7 @@ for message in icon_palette.validation_errors(pal, names | set(al)):
     err(d + '/palette.toml', message)
 # the review page lies its icons on the real app surfaces: its colours must be the app's tokens
 def app_tokens():
-    src = open(os.path.join(d, '..', '..', '..', 'styles', 'ui', 'palettes.rs'), encoding='utf-8').read()
+    src = open(os.path.join(d, '..', '..', '..', '..', 'crates', 'theme', 'src', 'palettes.rs'), encoding='utf-8').read()
     lo, hi = src.index('pub const fn light'), src.index('pub const fn dark')
     light_src, dark_src = src[lo:hi], src[hi:]
     def pick(block, name, dark):

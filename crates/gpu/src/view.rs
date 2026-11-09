@@ -24,6 +24,7 @@ pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, G
 #[cfg(not(target_arch = "wasm32"))]
 mod msaa_check;
 mod oit;
+mod product_highlights;
 #[cfg(not(target_arch = "wasm32"))]
 pub use msaa_check::MsaaCheck;
 
@@ -2159,6 +2160,10 @@ struct Cut {
 
 /// The viewport's pipelines and the scenes uploaded to one device, for one kind of target.
 pub struct Renderer {
+    /// Lazily created depth-only pipelines for feedback over a live product image.
+    product_depth: Option<product_highlights::DepthPipelines>,
+    /// The offscreen cache contains transparent product highlights rather than shaded colour.
+    product_highlights: bool,
     /// What the last frame drew ([`Renderer::stats`]).
     stats: DrawStatsHandle,
     /// What the frame `prepare` drew offscreen (supersampled, or for see-through surfaces),
@@ -2218,7 +2223,7 @@ pub struct Renderer {
     /// Lines behind the model (depth test >).
     line_hidden: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
-    /// Reference planes and axes: as `trans` and `line`, but not cut by a section.
+    /// Reference planes, axes and the ground shadow: as `trans` and `line`, but not cut by a section.
     guide_trans: wgpu::RenderPipeline,
     guide_line: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
@@ -3136,6 +3141,8 @@ impl Renderer {
             let (depth_reset, section_stencil) = resets.join();
             let oit = oit.join();
             Renderer {
+                product_depth: None,
+                product_highlights: false,
                 ao: ao.join(),
                 ground_ao: ground_ao.join(),
                 ground_ao_key: None,
@@ -3574,6 +3581,11 @@ impl Renderer {
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
         let res = self;
         let cb = frame;
+        if res.product_highlights {
+            res.product_highlights = false;
+            res.ss_key = None;
+            res.cached = None;
+        }
         let key = frame_key(cb);
         if can_reuse(res.ss_ready && res.ss.is_some(), res.ss_key, key) {
             // A still frame shows the picture as it is; the first one filters it down once.
@@ -3587,28 +3599,8 @@ impl Renderer {
         }
         res.cached = None;
         if cb.product {
-            // A large product scene can exceed what the device will allocate. Its upload runs under
-            // its own error scopes, so the failure reaches the preview instead of the device's
-            // uncaptured-error handler, and nothing half-uploaded is drawn.
-            let scopes =
-                [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation].map(|f| device.push_error_scope(f));
-            res.product.take(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, None, false);
-            let mut failed = None;
-            for scope in scopes.into_iter().rev() {
-                if let Some(e) = crate::popped(scope.pop()) {
-                    failed.get_or_insert(e.to_string());
-                }
-            }
-            if let Some(error) = failed {
-                log::error!("product preview upload failed: {error}");
-                res.product = Batches { key: Some(cb.key), ..Batches::default() };
-                if let Some(Ok(mut sink)) = cb.upload_error.as_ref().map(|e| e.lock()) {
-                    *sink = Some(error);
-                }
-            }
+            res.prepare_product_geometry(device, queue, cb);
             res.product.sort_glass(queue, cb.back);
-            res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, None, false);
-            queue.write_buffer(&res.uniform, 0, &uniform_bytes(cb, cb.size_px[0], cb.size_px[1], res.linear_out, res.target.reversed_depth()));
             // The product picture goes through the window's pass too: offscreen when the targets
             // differ or it is drawn smaller, else straight into the window's pass.
             res.ss_ready = (res.window_differs() || cb.ssaa != 1.0) && res.supersample(device, encoder, cb, false);
@@ -4077,9 +4069,10 @@ impl Renderer {
         tris(pass, &res.ghost, &pv.ghost);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         tris(pass, &res.ghost, &m.ghost);
-        tris(pass, &res.trans, &m.shadow);
+        // The ground shadow is never cut by a section, like the reference planes (#10708).
+        tris(pass, &res.guide_trans, &m.shadow);
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
-        tris(pass, &res.trans, &sk.shadow);
+        tris(pass, &res.guide_trans, &sk.shadow);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         if phase == Phase::BeforeSeeThrough {
             return;
@@ -4268,7 +4261,7 @@ impl Renderer {
         };
         // See-through surfaces (order-independent transparency) and a window pass of another kind
         // (samples, depth) need a frame of their own, even at the viewport's own size.
-        let needs_own = see_through || self.window_differs();
+        let needs_own = see_through || self.window_differs() || self.product_highlights;
         let samples = self.target.samples;
         let mut drawn = None;
         for _ in 0..FRAME_TRIES {
@@ -4365,7 +4358,11 @@ impl Renderer {
         let (Some(p), Some(t), true) = (&self.oit, &self.oit_targets, see_through) else {
             let mut first = pass(encoder, true);
             first.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
-            self.draw(cb, &mut first, Phase::All, &tally);
+            if self.product_highlights {
+                self.draw_product_highlights(&mut first, &tally);
+            } else {
+                self.draw(cb, &mut first, Phase::All, &tally);
+            }
             drop(first);
             self.ss_stats = tally.stats();
             return true;
@@ -4531,7 +4528,7 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
 /// The shader's analysis colours (`ana_c`: draft positive, between, negative; reachable,
 /// blocked; curvature flat, middle, tight; alpha 1) and flags (`ana_f.x`: 1 to stripe the bad
 /// faces).
-pub fn analysis_colors(c: &solidcraft_render::AnalysisColors) -> [f32; 36] {
+pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
     let mut v = [0.0; 36];
     let colors = c.draft.iter().chain(&c.access).chain(&c.curvature).flat_map(|rgb| [rgb[0], rgb[1], rgb[2], 1.0]);
     for (slot, x) in v.iter_mut().zip(colors) {
@@ -5074,6 +5071,28 @@ mod glass_tests {
         }
     }
 
+    /// With Section Analysis on, the ground shadow stays whole: the section plane hides cut bodies,
+    /// not the soft shadow under them, which a cut ended in a hard straight line (#10708).
+    #[test]
+    fn ground_shadow_is_not_cut_by_the_section_plane() {
+        let mut scene = GpuScene::default();
+        let square = [[-5.0, -5.0, -5.0], [5.0, -5.0, -5.0], [5.0, 5.0, -5.0], [-5.0, -5.0, -5.0], [5.0, 5.0, -5.0], [-5.0, 5.0, -5.0]];
+        let shadow_color = scene.color([0, 0, 0, 128]);
+        for p in square {
+            scene.shadow_tri(p, shadow_color);
+        }
+        // Hides everything with x > -1, the middle pixel among it.
+        let cut = [1.0, 0.0, 0.0, -1.0];
+        for view_dependent in [false, true] {
+            let (model, sketch) = if view_dependent { (GpuScene::default(), scene.clone()) } else { (scene.clone(), GpuScene::default()) };
+            let Some(shadow) = middle_pixel_cut(model, sketch, true, 1, cut) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            assert!(shadow[..3].iter().all(|c| (125..=129).contains(c)), "view-dependent={view_dependent} shadow under a section: {shadow:?}");
+        }
+    }
+
     /// A large import's triangles once went into one buffer past the device's limit (524 MB
     /// against 256 MB) and the app crashed (#883): they are split into whole triangles.
     #[test]
@@ -5238,6 +5257,11 @@ mod glass_tests {
     }
 
     fn middle_pixel_in_slots_with_samples(scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32) -> Option<[u8; 4]> {
+        middle_pixel_cut(scene, sketch, oit, samples, [0.0; 4])
+    }
+
+    /// [`middle_pixel_in_slots_with_samples`] with a section cut (`Frame::clip`).
+    fn middle_pixel_cut(scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32, clip: [f32; 4]) -> Option<[u8; 4]> {
         const SIZE: u32 = 64;
         let (_, device, queue) = crate::open_headless().ok()?;
         let depth = crate::depth_format(&device, true);
@@ -5265,7 +5289,7 @@ mod glass_tests {
             view_proj: [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, -0.01, 0.0], [0.0, 0.0, 0.5, 1.0]],
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
-            clip: [0.0; 4],
+            clip,
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
@@ -5355,6 +5379,18 @@ mod glass_tests {
 
     /// Render `frame` through `r` into a fresh 64 × 64 target and read the pixels back.
     fn render_frame(r: &mut Renderer, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Frame, with_depth: bool) -> Vec<u8> {
+        render_frame_kind(r, device, queue, frame, with_depth, false, wgpu::Color::WHITE)
+    }
+
+    fn render_frame_kind(
+        r: &mut Renderer,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &Frame,
+        with_depth: bool,
+        highlights: bool,
+        background: wgpu::Color,
+    ) -> Vec<u8> {
         const SIZE: u32 = 64;
         let depth = crate::depth_format(device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
@@ -5375,7 +5411,11 @@ mod glass_tests {
         let depth_tex = with_depth.then(|| texture(depth, wgpu::TextureUsages::RENDER_ATTACHMENT));
         let depth_view = depth_tex.as_ref().map(|t| t.create_view(&Default::default()));
         let mut encoder = device.create_command_encoder(&Default::default());
-        r.prepare(device, queue, &mut encoder, frame);
+        if highlights {
+            r.prepare_product_highlights(device, queue, &mut encoder, frame);
+        } else {
+            r.prepare(device, queue, &mut encoder, frame);
+        }
         {
             let mut pass = encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -5384,7 +5424,7 @@ mod glass_tests {
                         view: &color_view,
                         depth_slice: None,
                         resolve_target: None,
-                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::WHITE), store: wgpu::StoreOp::Store },
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(background), store: wgpu::StoreOp::Store },
                     })],
                     depth_stencil_attachment: depth_view.as_ref().map(|view| wgpu::RenderPassDepthStencilAttachment {
                         view,
@@ -5401,7 +5441,11 @@ mod glass_tests {
                     multiview_mask: None,
                 })
                 .forget_lifetime();
-            r.paint(frame, &mut pass, [0.0, 0.0, SIZE as f32, SIZE as f32]);
+            if highlights {
+                r.paint_product_highlights(frame, &mut pass, [0.0, 0.0, SIZE as f32, SIZE as f32]);
+            } else {
+                r.paint(frame, &mut pass, [0.0, 0.0, SIZE as f32, SIZE as f32]);
+            }
         }
         let read = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
@@ -5472,6 +5516,186 @@ mod glass_tests {
         scene.tri([5.0, -5.0, 0.0], [0.0, 0.0, 1.0], red);
         scene.tri([0.0, 5.0, 0.0], [0.0, 0.0, 1.0], red);
         scene
+    }
+
+    #[test]
+    fn product_highlights_keep_live_colour_and_occlude_faces_with_both_product_vertex_layouts_and_msaa() {
+        let (_, device, queue) = match crate::open_headless() {
+            Ok(opened) => opened,
+            Err(error) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+                eprintln!("skipping: {error}");
+                return;
+            }
+            Err(error) => panic!("required GPU unavailable: {error}"),
+        };
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let background = wgpu::Color { r: 17.0 / 255.0, g: 33.0 / 255.0, b: 65.0 / 255.0, a: 1.0 };
+        let surface = solidcraft_render::surface::OpaqueSurface::new(Vec3::new(0.8, 0.1, 0.1), 0.0, 0.6, 1.5).unwrap();
+        for depth in [wgpu::TextureFormat::Depth24PlusStencil8, crate::depth_format(&device, true)] {
+            for samples in [1, 4] {
+                let target = GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false };
+                let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
+                let mut renderer = Renderer::with_window_target(&device, target, window, None);
+                // Preserve the original built/PBR cases, and exercise the new
+                // upstream open-body batch with the same independent pixels.
+                for layout in 0_u64..3 {
+                    let pbr = layout == 1;
+                    let open = layout == 2;
+                    let mut scene = GpuScene::default();
+                    let red = scene.color([255, 0, 0, 255]);
+                    for p in [[-10.0, -10.0, 0.0], [10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, 10.0, 0.0]]
+                    {
+                        if pbr {
+                            scene.pbr_tri(p, [0.0, 0.0, 1.0], surface);
+                        } else if open {
+                            scene.open_tri(p, [0.0; 3], red);
+                        } else {
+                            scene.tri(p, [0.0; 3], red);
+                        }
+                    }
+                    let mut highlight = GpuScene::default();
+                    let green = highlight.color([0, 255, 0, 128]);
+                    let red = highlight.color([255, 0, 0, 255]);
+                    for p in [[-8.0, -4.0, 1.0], [-1.0, -4.0, 1.0], [-4.5, 4.0, 1.0]] {
+                        if open {
+                            highlight.open_tri(p, [0.0; 3], green);
+                        } else {
+                            highlight.tri(p, [0.0; 3], green);
+                        }
+                    }
+                    for p in [[1.0, -4.0, -1.0], [8.0, -4.0, -1.0], [4.5, 4.0, -1.0]] {
+                        if open {
+                            highlight.open_tri(p, [0.0; 3], red);
+                        } else {
+                            highlight.tri(p, [0.0; 3], red);
+                        }
+                    }
+                    let mut frame = test_frame(scene, 1.0);
+                    frame.product = true;
+                    frame.key = 1 + layout;
+                    frame.hl_key = 1 + layout;
+                    frame.hl_slot = Arc::new(Mutex::new(Some(highlight)));
+                    let normal = render_frame_kind(&mut renderer, &device, &queue, &frame, false, false, background);
+                    let overlay = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
+                    let pixel =
+                        |bytes: &[u8], x: usize, y: usize| -> [u8; 4] { bytes[((y * 64 + x) * 4)..((y * 64 + x) * 4 + 4)].try_into().unwrap() };
+                    let unchanged = [17, 33, 65, 255];
+                    assert_eq!(
+                        pixel(&overlay, 32, 32),
+                        unchanged,
+                        "depth-only product colour must not replace live pixels: {depth:?}, {samples}x, layout={layout}"
+                    );
+                    assert_eq!(
+                        pixel(&overlay, 46, 32),
+                        unchanged,
+                        "the rear target is hidden by actual product depth: {depth:?}, {samples}x, layout={layout}"
+                    );
+                    assert_eq!(pixel(&overlay, 3, 3), unchanged, "unselected product pixels remain exactly the live image colour");
+                    let selected = pixel(&overlay, 18, 32);
+                    assert!(
+                        selected[1] > 120 && selected[0] < 17 && selected[2] < 65,
+                        "the visible target is transparently composited: {selected:?}"
+                    );
+                    let again = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
+                    assert_eq!(overlay, again, "a cached overlay preserves its transparency");
+                    assert_eq!(
+                        normal,
+                        render_frame_kind(&mut renderer, &device, &queue, &frame, false, false, background),
+                        "returning to ordinary product rendering cannot reuse the transparent overlay"
+                    );
+                    assert_ne!(normal, overlay);
+                }
+                // Real imported-body feedback uses shared triangles and placements,
+                // not the loose triangle lists above. Compare both streams with a
+                // separately submitted face control over the same product depth.
+                for selected in [false, true] {
+                    for flat in [false, true] {
+                        let mut scene = GpuScene::default();
+                        let product_color = scene.color([255, 0, 0, 255]);
+                        for p in
+                            [[-10.0, -10.0, 0.0], [10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, 10.0, 0.0]]
+                        {
+                            scene.tri(p, [0.0; 3], product_color);
+                        }
+                        let mesh = solidcraft_geom::Mesh {
+                            positions: vec![Vec3::new(-3.5, -4.0, 0.0), Vec3::new(3.5, -4.0, 0.0), Vec3::new(0.0, 4.0, 0.0)],
+                            normals: if flat { vec![Vec3::Z; 3] } else { vec![Vec3::Z, Vec3::new(0.6, 0.0, 0.8), Vec3::new(-0.6, 0.0, 0.8)] },
+                            triangles: vec![[0, 1, 2]],
+                            ..Default::default()
+                        };
+                        let shared = Arc::new(SharedTris::new(&mesh));
+                        assert_eq!(shared.flat, flat, "exercise both actual shared-triangle vertex layouts");
+                        let mut control = GpuScene::default();
+                        let front = control.color([0, 255, 0, 128]);
+                        let rear = control.color([255, 0, 0, 255]);
+                        let ignored_color = control.color([0, 0, 255, 255]);
+                        let mut instances = InstancedMesh {
+                            key: 1,
+                            tris: shared,
+                            instances: Vec::new(),
+                            look: InstanceLook::Opaque,
+                            levels: Vec::new(),
+                            closed: false,
+                        };
+                        for (x, z, color) in [(-4.5, 1.0, front), (4.5, -1.0, rear)] {
+                            let rows = [[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, z]];
+                            instances.place(rows, color);
+                            for (p, n) in mesh.positions.iter().zip(&mesh.normals) {
+                                control.tri((*p + Vec3::new(f64::from(x), 0.0, f64::from(z))).to_f32(), n.to_f32(), color);
+                            }
+                        }
+                        assert_eq!(instances.instances.len(), 2 * INSTANCE_SIZE, "front and occluded rear targets are actual placements");
+                        let mut ignored = instances.clone();
+                        ignored.look = InstanceLook::Faded;
+                        ignored.instances.clear();
+                        ignored.place([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 2.0]], ignored_color);
+                        let mut highlight = GpuScene { palette: control.palette.clone(), ..Default::default() };
+                        if selected {
+                            highlight.selected_instanced = vec![instances, ignored];
+                        } else {
+                            highlight.hover_instanced = vec![instances, ignored];
+                        }
+                        let mut frame = test_frame(scene, 1.0);
+                        frame.product = true;
+                        frame.key = 100 + 2 * u64::from(selected) + u64::from(flat);
+                        frame.hl_key = frame.key;
+                        frame.hl_slot = Arc::new(Mutex::new(Some(control)));
+                        let reference = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
+                        frame.hl_key += 1000;
+                        frame.hl_slot = Arc::new(Mutex::new(Some(highlight)));
+                        let overlay = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
+                        let pixel =
+                            |bytes: &[u8], x: usize, y: usize| -> [u8; 4] { bytes[((y * 64 + x) * 4)..((y * 64 + x) * 4 + 4)].try_into().unwrap() };
+                        let unchanged = [17, 33, 65, 255];
+                        assert_eq!(pixel(&overlay, 3, 3), unchanged, "instanced feedback must not repaint the live image");
+                        assert_eq!(pixel(&overlay, 46, 32), unchanged, "product depth must hide the rear placement");
+                        assert_eq!(pixel(&overlay, 32, 32), unchanged, "non-opaque feedback placements are not part of this pass");
+                        let expected = pixel(&reference, 18, 32);
+                        assert_ne!(expected, unchanged, "the independent face control must visibly composite its translucent front target");
+                        let actual = pixel(&overlay, 18, 32);
+                        // Derivative flat normals and interpolated face normals can
+                        // straddle one RGBA8 rounding step; alpha compositing must
+                        // otherwise match the independently submitted face control.
+                        assert!(
+                            actual.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 1),
+                            "instanced feedback must draw and alpha-blend its visible target: selected={selected}, flat={flat}, {depth:?}, {samples}x: {actual:?} vs {expected:?}"
+                        );
+                        assert_eq!(
+                            overlay,
+                            render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background),
+                            "cached instanced feedback must retain identical pixels"
+                        );
+                        frame.hl_key += 1;
+                        frame.hl_slot = Arc::new(Mutex::new(Some(GpuScene::default())));
+                        let cleared = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
+                        assert!(
+                            cleared.as_chunks::<4>().0.iter().all(|pixel| *pixel == unchanged),
+                            "clearing the target restores every original live-image pixel"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
