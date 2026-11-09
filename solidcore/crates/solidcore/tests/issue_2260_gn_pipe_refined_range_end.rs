@@ -145,7 +145,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_rail_rim_on_face",
     "fillet_rails_meet_at_one_end_point",
     "fillet_rail_trim_at_near_knot",
-    "fillet_refuse_crossing_rails",
     "fillet_refuse_face_consuming_blends",
     "fillet_refuse_non_manifold_result",
     "fillet_refuse_overlapping_bands",

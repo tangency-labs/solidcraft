@@ -786,9 +786,6 @@ impl FilletSession<'_> {
                 }
                 return Err(failure());
             }
-            if k.fixes.fillet_refuse_crossing_rails {
-                session.refuse_crossing_rails(k)?;
-            }
             session.shrink_fillet_faces(k)?;
             // The fork's NoteRadiusCornerSurfaces (6eecf04): the fillet surfaces that turn at
             // a radius corner, whose faces DoFillet splits there once they are in the target
