@@ -1006,15 +1006,18 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
             loops.push(l);
         }
-        if !loops.iter().any(|l| matches!(l, LoopB::Edges(_))) {
-            return Err(format!("face #{id}: {}", unsupported("a face without an edge loop")));
-        }
         let (step_surface, same_sense) = if implicit {
+            if !loops.iter().any(|l| matches!(l, LoopB::Edges(_))) {
+                return Err(format!("face #{id}: {}", unsupported("a face without an edge loop")));
+            }
             (std::sync::Arc::new(self.loop_plane(&loops).map_err(|m| format!("face #{id}: {m}"))?), true)
         } else {
             let s = self.reader.surface(rid(p.get(2), "face geometry")?).map_err(|m| format!("face #{id}: {m}"))?;
             (s, flag(p.get(3), "face same_sense")?)
         };
+        if !loops.iter().any(|l| matches!(l, LoopB::Edges(_))) {
+            loops = self.whole_sphere(&step_surface, &loops).map_err(|m| format!("face #{id}: {m}"))?;
+        }
         let extent = self.extent(&loops)?;
         let (surface, reversed) = swept::map_surface(&step_surface, &extent, self.tol).map_err(|m| format!("face #{id}: {m}"))?;
         // Loops relative to the record's natural normal: the face's normal is STEP's surface
@@ -1030,6 +1033,49 @@ impl<'b, 'a> Builder<'b, 'a> {
         let i = index(self.faces.len())?;
         self.faces.push(FaceB { step: id, surface, loops, outer, forward: sense, extent: None });
         Ok((i, sense))
+    }
+
+    /// A sphere face bounded by vertex loops alone, each at one of its poles (ISO 10303-42: a face
+    /// of a closed surface bounded by vertices is all of the surface): the whole sphere, its loop
+    /// a meridian from the south pole to the north and back, which [`Builder::complete_slits`]
+    /// keeps as its seam. Any other face without an edge loop is refused.
+    fn whole_sphere(&mut self, surface: &crate::geom::Surface, loops: &[LoopB]) -> R<Vec<LoopB>> {
+        let unsupported_here = || unsupported("a face without an edge loop");
+        let crate::geom::Surface::Sphere { position, radius } = surface else { return Err(unsupported_here()) };
+        let (o, z, x) = (v3(position.origin), v3(position.axis), v3(position.ref_direction));
+        let poles = [o - z * *radius, o + z * *radius];
+        let mut at = [None, None];
+        for l in loops {
+            let LoopB::Vertex(v) = l else { return Err(unsupported_here()) };
+            let p = v3(self.point(*v)?);
+            let tol = self.vertices.get(*v as usize).map_or(self.tol, |x| x.tolerance.max(self.tol));
+            let k = poles.iter().position(|q| q.dist(p) <= tol).ok_or_else(unsupported_here)?;
+            if let Some(slot) = at.get_mut(k) {
+                *slot = Some(*v);
+            }
+        }
+        let mut ends = [0u32; 2];
+        for ((end, found), pole) in ends.iter_mut().zip(at).zip(poles) {
+            *end = match found {
+                Some(v) => v,
+                None => {
+                    let i = index(self.vertices.len())?;
+                    self.vertices.push(Vertex { point: [pole.x, pole.y, pole.z], tolerance: self.tol });
+                    i
+                }
+            };
+        }
+        let e = index(self.edges.len())?;
+        let frame = Frame { origin: position.origin, x_axis: [x.x, x.y, x.z], y_axis: [z.x, z.y, z.z] };
+        let half = std::f64::consts::FRAC_PI_2;
+        self.edges.push(EdgeB {
+            curve: BCurve::Circle { frame, radius: *radius },
+            interval: [-half, half],
+            vertices: ends,
+            tolerance: self.tol,
+            form: None,
+        });
+        Ok(vec![LoopB::Edges(vec![(e, true), (e, false)])])
     }
 
     /// The plane a plain FACE's loops lie in (ISO 10303-42: a FACE with no face geometry is

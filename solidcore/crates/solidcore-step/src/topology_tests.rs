@@ -576,6 +576,24 @@ fn a_half_torus_between_its_rims_gets_a_seam_round_the_tube() {
     });
 }
 
+/// A ball whose one face is bounded by two vertex loops, at its poles: the whole sphere, closed
+/// by a meridian seam from pole to pole.
+#[test]
+fn a_ball_bounded_by_vertex_loops_at_its_poles() {
+    let mut w = W::default();
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let sphere = w.add(format!("SPHERICAL_SURFACE('',#{a},5.)"));
+    let (n, s_) = (w.vertex([0.0, 0.0, 5.0]), w.vertex([0.0, 0.0, -5.0]));
+    let (ln, ls) = (w.add(format!("VERTEX_LOOP('',#{n})")), w.add(format!("VERTEX_LOOP('',#{s_})")));
+    let (bn, bs) = (w.add(format!("FACE_OUTER_BOUND('',#{ln},.T.)")), w.add(format!("FACE_BOUND('',#{ls},.T.)")));
+    let face = w.face(&[bn, bs], sphere, true);
+    let shell = closed_shell(&mut w, &[face]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('ball',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 1, 1, 2]);
+    faces_away(&s.brep, 0, |_| [0.0; 3]);
+}
+
 /// A FACETED_BREP: a tetrahedron of four FACE_SURFACEs on planes, each bounded by a POLY_LOOP of
 /// three of its four points. Each point is one vertex and each side one edge, shared by the two
 /// faces it bounds, so the shell closes.
