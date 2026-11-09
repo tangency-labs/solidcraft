@@ -124,6 +124,21 @@ sketch snapping is Punktfangst. Loft, Sweep, Spline and Offset remain technical
 terms. Command IDs, shortcuts, file formats, units and user-provided names stay
 unchanged.
 
+The Polish catalog (`pl`, shown as Polski) uses Szkic (Sketch), Bryła (Body), Ściana (Face),
+Krawędź (Edge), Wierzchołek (Vertex), Operacja (timeline Feature), Wiązanie (Constraint), Wymiar
+(Dimension), Wyciągnięcie (Extrude), Obrót (Revolve), Przeciągnięcie (Sweep), Wyciągnięcie złożone
+(Loft), Zaokrąglenie (Fillet), Faza (Chamfer), Szyk (Pattern), Skorupa (Shell), Złącze (Joint) and
+Złożenie (Assembly); a design is a projekt and a workspace is a środowisko (Projekt, Renderowanie).
+Draft is Pochylenie (a GitHub draft is a szkic zgłoszenia), Flat Pattern is Rozwinięcie, Suppress is
+Wygaś, Ground is Unieruchom, and Counterbore/Countersink are Pogłębienie walcowe/Pogłębienie stożkowe.
+Messages use sentence case and the informal "ty" in lower case, with no masculine-only forms. A
+button or command named inside a sentence takes a word that carries the grammar ("kliknij Zastosuj",
+"poleceniem Aktualizuj łącza", "opcję Nowa bryła"). Polish nouns change with the number, and messages
+have no plural selection, so a count follows a label (`Bryły: {count}`) or a unit
+(`{count} min temu`) rather than an inflected noun. Typography: „…” quotes, an en dash with spaces
+( – ) and the ellipsis character (…). Command IDs, shortcuts, file formats, units and user-provided
+names stay unchanged.
+
 One immutable `Locale` type handles all translations. Table widgets without an app reference
 use a render scope that restores the previous locale when it exits, including nested renders.
 Standalone translated panels enter the same scope. Measure rendered text to size custom
