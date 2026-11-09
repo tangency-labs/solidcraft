@@ -1058,7 +1058,8 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::String(x)) => x.clone(),
         _ => return Err(bad(cmd, "`component` must be an id or a name")),
     };
-    let comp = s.doc.find_component(&key).ok_or_else(|| bad(cmd, format!("no component `{key}`")))?;
+    let comp =
+        s.doc.resolve_component(&key).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{key}`")))?;
     let part = s.doc.parts.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not a standard part"))?;
     let size = str_(p, "size").map(str::to_string).unwrap_or(part.size.clone());
     let length = length_param(p, cmd)?.or(if size == part.size { part.length } else { None });
