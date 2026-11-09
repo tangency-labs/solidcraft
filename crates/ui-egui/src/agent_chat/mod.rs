@@ -433,6 +433,9 @@ pub struct AgentChat {
     /// in. The next message tells it when the design is no longer that one (#10854).
     seen: Option<Arc<solidcraft_engine::doc::Document>>,
     tools_available: Option<bool>,
+    /// The agent was started with SolidCraft's tools (solidcraft-cli and the control port were
+    /// both there): if they are still unavailable, they failed to start, not to be found.
+    tools_bridged: bool,
     /// The latest completed turn's notice; older notices remain in the transcript.
     turn_warning: Option<String>,
     held: Vec<Held>,
@@ -593,9 +596,16 @@ impl AgentChat {
         self.state() == State::Ready && self.tools_available == Some(false)
     }
     /// Why [`Self::without_design`], and what to do about it: the chat's endpoint did not start,
-    /// or `solidcraft-cli` was not found (as the notice `connect` posts says).
+    /// `solidcraft-cli` was not found (as the notice `connect` posts says), or it was found but
+    /// its tools did not start (an endpoint agent whose MCP start failed; the error is in the chat).
     pub(crate) fn no_design_hint(&self) -> &'static str {
-        if self.tools_port.is_none() { tr("ui.agent_chat_no_control") } else { tr("ui.agent_chat_no_design_hint") }
+        if self.tools_port.is_none() {
+            tr("ui.agent_chat_no_control")
+        } else if self.tools_bridged {
+            tr("ui.agent_chat_tools_not_started")
+        } else {
+            tr("ui.agent_chat_no_design_hint")
+        }
     }
     #[cfg(test)]
     pub(crate) fn set_state(&mut self, state: State) {
@@ -1042,6 +1052,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port });
     chat.tools_available = Some(bridge.is_some());
+    chat.tools_bridged = bridge.is_some();
     let wake = ctx.clone();
     let start = backend::StartContext { cwd: working_dir(), bridge, tools: chat.tools_tx.clone(), wake: Box::new(move || wake.request_repaint()) };
     let started: Result<Box<dyn ChatBackend>, String> = match entry.kind {

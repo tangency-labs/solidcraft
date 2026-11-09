@@ -3690,6 +3690,13 @@ fn an_agent_without_the_design_tools_is_not_shown_as_ready() {
     h.app.agent_chat.tools_port = Some(12345);
     assert_eq!(h.app.agent_chat.no_design_hint(), tr("ui.agent_chat_no_design_hint"));
     assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr("ui.agent_chat_no_design_hint")));
+    // solidcraft-cli was found and handed to the agent, but its tools did not start (an endpoint
+    // agent whose MCP start failed): the hint does not say the CLI is missing.
+    h.app.agent_chat.tools_bridged = true;
+    assert_eq!(h.app.agent_chat.no_design_hint(), tr("ui.agent_chat_tools_not_started"));
+    assert!(!tr("ui.agent_chat_tools_not_started").contains("not found"));
+    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr("ui.agent_chat_tools_not_started")));
+    h.app.agent_chat.tools_bridged = false;
     assert!(!assistant_tip(&h.app, AssistantMark::Ready).contains(tr("ui.agent_chat_no_design_hint")));
 
     // A turn in progress, or one waiting for approval, still shows what it is doing.
