@@ -1032,8 +1032,10 @@ one row inside a Navigation card. Cancel and the status always show whole; a lon
 cut first (ellipsis, full name on hover), then the track narrows. `Container::below_navigation_row` reserves that card
 and its shared gap above an inline result toolbar.
 
-`number_pair` extends the shared value-pair row to bounded numeric fields (such as
-image width and height), preserving label alignment, clipping and number-field behavior.
+`number_pair_preserving` extends the shared value-pair row to bounded numeric fields
+(such as image width and height), preserving label alignment and clipping. Authored
+out-of-range values remain unchanged on paint; explicit typing and dragging still
+respect the selected bounds.
 
 ## Preferences cards, figures and help (redesign)
 

@@ -1835,22 +1835,22 @@ fn window_pages_have_shared_metrics_callbacks_and_a_pinned_left_footer_action() 
         let pages = [
             WindowPage {
                 group: None,
-                icon: "settings",
+                icon: Icon::Kit("settings"),
                 label: "ui.general",
                 handle: "test:page:general",
                 scroll: true,
-                draw: |ui, state| {
+                draw: &|ui, state| {
                     *state = 1;
                     text(ui, "General", Text::Inline);
                 },
             },
             WindowPage {
                 group: None,
-                icon: "orbit",
+                icon: Icon::Kit("orbit"),
                 label: "ui.navigation",
                 handle: "test:page:navigation",
                 scroll: true,
-                draw: |ui, state| {
+                draw: &|ui, state| {
                     *state = 2;
                     text(ui, "Navigation", Text::Inline);
                 },
@@ -1924,11 +1924,11 @@ fn page_window_is_as_opaque_as_every_other_window_in_both_themes() {
         let ctx = crate::fonts::test_context();
         let list = [WindowPage {
             group: None,
-            icon: "settings",
+            icon: Icon::Kit("settings"),
             label: "ui.general",
             handle: "test:page:general",
             scroll: true,
-            draw: |ui, _: &mut ()| {
+            draw: &|ui, _: &mut ()| {
                 text(ui, "General", Text::Inline);
             },
         }];
@@ -2171,7 +2171,7 @@ fn preferences_preserves_every_page_and_footer_in_both_themes() {
         for (index, page) in crate::prefs::PAGES.iter().enumerate() {
             crate::prefs::open_at(&mut h.app, index);
             h.frames(3);
-            assert_eq!(h.app.prefs_window.section, index);
+            assert_eq!(h.app.prefs_window.shell.section, index);
             let nav = scenario::rect_of("dialog:pages").unwrap();
             let row = scenario::rect_of(&format!("prefs:page:{page}")).unwrap();
             assert!(nav.contains_rect(row), "{dark}: {page} stays visible");

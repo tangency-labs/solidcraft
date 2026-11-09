@@ -1,8 +1,8 @@
-//! A cylinder wall of a short arc far from the origin, extended 1500 mm along its rulings and
-//! round its axis. The iso that certifies the turn is interpolated between rulings 3 m long.
-//! At 500 mm the certificate took its rounding at the iso's own size and refused; at 1500 mm a
-//! weight ratio per row, differing by the continuation's rounding, took the iso out of its
-//! plane by 1.8e-10. Every point of the result stays on the cylinder, radius 80 about its axis.
+//! A cylinder wall of a short arc far from the origin, extended 500 and 1500 mm along its
+//! rulings and round its axis. The iso that certifies the turn is interpolated between rulings
+//! up to 3 m long: a weight ratio per row, differing by the continuation's rounding, took it out
+//! of its plane by 1.8e-10, and the certificate refused the extension as not exact. Every point
+//! of the result stays on the cylinder, radius 80 about its axis.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -16,9 +16,11 @@ use solidcore::kernel::UpstreamFixes;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::primitive::api_curves as curves;
 use solidcore::primitive::api_primitives::create_box;
+use solidcore::surface::cone::p1::Cone;
 use solidcore::surface::extend::Continuity;
 use solidcore::surface::implicit::AnalyticSupport;
 use solidcore::surface::side::BoxSide;
+use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::{Brep, Kernel};
@@ -104,6 +106,49 @@ fn a_short_arc_extends_along_long_rulings_on_its_cylinder() {
                 let x = grown.evaluate_point(&k, uv).unwrap();
                 let r = (x.x - CENTRE.0).hypot(x.y - CENTRE.1);
                 assert!((r - RADIUS).abs() < 1e-9, "{d} {i} {j} {r}");
+            }
+        }
+    }
+}
+
+/// A cylinder of radius 1, 60 degrees round and 1 high at the origin, extended along its
+/// rulings and round its axis by up to 1e5: the frame's size stays the source's (about 1)
+/// while the rows grow to the extension, so this is where a limit at the iso's own size
+/// could fall under its rounding. Every point stays on the cylinder.
+#[test]
+fn a_small_arc_extends_far_beyond_its_size_on_its_cylinder() {
+    let k = Kernel::default();
+    let wall = Surface::from(Cone::new_cylinder_bounded(
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        1.0,
+        0.0,
+        60.0,
+        1.0,
+        false,
+        false,
+        false,
+    ));
+    for d in [1e2, 1e3, 1e4, 1e5] {
+        let grown = wall
+            .extended_sides_keeping_parameters(&k, &BoxSide::ALL, Continuity::Ruled, d)
+            .unwrap_or_else(|e| panic!("{d}: {e}"))
+            .surface;
+        let dom = grown.natural_uv_domain_with_nurb(&k).unwrap();
+        let (u, v) = (dom.u_interval(), dom.v_interval());
+        for i in 0..=8 {
+            for j in 0..=8 {
+                let uv = Point2::new(
+                    u.min() + u.length() * f64::from(i) / 8.0,
+                    v.min() + v.length() * f64::from(j) / 8.0,
+                );
+                let x = grown.evaluate_point(&k, uv).unwrap();
+                let r = x.x.hypot(x.y);
+                assert!(
+                    (r - 1.0).abs() < 1e-9 * (1.0 + x.z.abs()),
+                    "{d} {i} {j} {r}"
+                );
             }
         }
     }
