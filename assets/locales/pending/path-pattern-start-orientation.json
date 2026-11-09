@@ -1,0 +1,58 @@
+{
+  "en": {
+    "pattern.orientation_identical": "Identical",
+    "pattern.orientation_path": "Path direction",
+    "pattern.start_fraction": "Fraction",
+    "pattern.start_point": "Start point",
+    "pattern.start_point_fraction": "Start point (0 to 1)"
+  },
+  "ar": {
+    "pattern.orientation_identical": "مطابق",
+    "pattern.orientation_path": "اتجاه المسار",
+    "pattern.start_fraction": "نسبة",
+    "pattern.start_point": "نقطة البداية",
+    "pattern.start_point_fraction": "نقطة البداية (0 إلى 1)"
+  },
+  "de": {
+    "pattern.orientation_identical": "Identisch",
+    "pattern.orientation_path": "Pfadrichtung",
+    "pattern.start_fraction": "Anteil",
+    "pattern.start_point": "Startpunkt",
+    "pattern.start_point_fraction": "Startpunkt (0 bis 1)"
+  },
+  "he": {
+    "pattern.orientation_identical": "זהה",
+    "pattern.orientation_path": "כיוון המסלול",
+    "pattern.start_fraction": "שבר",
+    "pattern.start_point": "נקודת התחלה",
+    "pattern.start_point_fraction": "נקודת התחלה (0 עד 1)"
+  },
+  "ja": {
+    "pattern.orientation_identical": "同一",
+    "pattern.orientation_path": "パスの方向",
+    "pattern.start_fraction": "割合",
+    "pattern.start_point": "開始点",
+    "pattern.start_point_fraction": "開始点 (0〜1)"
+  },
+  "ko": {
+    "pattern.orientation_identical": "동일",
+    "pattern.orientation_path": "경로 방향",
+    "pattern.start_fraction": "비율",
+    "pattern.start_point": "시작점",
+    "pattern.start_point_fraction": "시작점 (0~1)"
+  },
+  "vi": {
+    "pattern.orientation_identical": "Giống nhau",
+    "pattern.orientation_path": "Theo hướng đường dẫn",
+    "pattern.start_fraction": "Tỷ lệ",
+    "pattern.start_point": "Điểm bắt đầu",
+    "pattern.start_point_fraction": "Điểm bắt đầu (0 đến 1)"
+  },
+  "zh": {
+    "pattern.orientation_identical": "相同",
+    "pattern.orientation_path": "路径方向",
+    "pattern.start_fraction": "比例",
+    "pattern.start_point": "起点",
+    "pattern.start_point_fraction": "起点（0 到 1）"
+  }
+}
