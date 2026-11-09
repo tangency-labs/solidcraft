@@ -328,23 +328,6 @@ pub fn unwrap(x: f64, near: f64, period: Option<f64>) -> f64 {
     }
 }
 
-/// Is the surface degenerate along direction `d` at `uv` (a pole: moving along `d` does not
-/// move the point)?
-pub fn degenerate(s: &EvalSurface, uv: [f64; 2], d: usize) -> bool {
-    let Some((_, su, sv)) = s.derivs(uv[0], uv[1]) else { return false };
-    let (this, other) = if d == 0 { (su, sv) } else { (sv, su) };
-    this.len() <= 1e-9 * other.len().max(1e-12)
-}
-
-/// [`degenerate`], or within `reach` mm of a pole (see [`collapsed`]): a boundary point on a
-/// patch side collapsed to within a tolerance, not to a point, where its parameter along `d` is
-/// as free as at a pole.
-pub fn degenerate_within(s: &EvalSurface, dom: &Domain, uv: [f64; 2], d: usize, reach: f64) -> bool {
-    let Some((_, su, sv)) = s.derivs(uv[0], uv[1]) else { return false };
-    let speed = [su.len(), sv.len()];
-    collapsed(speed, dom, reach).get(d).copied().unwrap_or(false)
-}
-
 /// Along each direction, whether a point whose parameter speeds (mm per unit) are `speed` is a
 /// pole, or within `reach` mm of one: moving along the direction there not at all (to 1e-9 of
 /// the other's speed), or across half its period (or its whole range) by no more than `reach`.

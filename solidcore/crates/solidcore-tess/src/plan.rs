@@ -32,6 +32,14 @@ pub struct FacePlan {
 }
 
 impl FacePlan {
+    /// The rule of node `k` if the plan names it a pole of higher order.
+    pub(crate) fn pole(&self, k: usize) -> Option<crate::PoleRule> {
+        self.poles
+            .iter()
+            .find(|p| p.node as usize == k)
+            .map(|p| p.rule)
+    }
+
     /// Triangle `t` is on this face's own nodes (the evaluated mesh keeps only those).
     fn has_nodes(&self, t: &[u32; 3]) -> bool {
         t.iter().all(|&i| (i as usize) < self.uv.len())
@@ -57,20 +65,67 @@ impl TessPlan {
     #[must_use]
     pub fn evaluate(&self) -> (Mesh, Vec<crate::RefusedFace>) {
         let mut out = Mesh::default();
+        let mut refused = Vec::new();
         for f in &self.faces {
             let base = out.positions.len();
             let surface = f.surface.and_then(|i| self.surfaces.get(i as usize));
+            // At a degenerate point (a cone's apex, a sphere's pole) the kernel's exact limit
+            // normal, from the second partials; the kernel's form of the face is made only when a
+            // vertex of it needs one.
+            let mut kernel: Option<solidcore::eval::EvalSurface> = None;
+            let (mut positions, mut normals) = (
+                Vec::with_capacity(f.uv.len()),
+                Vec::with_capacity(f.uv.len()),
+            );
             for (k, uv) in f.uv.iter().enumerate() {
                 let (p, n) = match surface {
-                    Some(s) => solidcore_convert::record_pair(s.eval(uv[0], uv[1])),
+                    Some(s) => solidcore_convert::record_pair(
+                        s.regular(uv[0], uv[1]).unwrap_or_else(|| {
+                            let k =
+                                kernel.get_or_insert_with(|| crate::mesher::poles::kernel_form(s));
+                            k.eval(uv[0], uv[1])
+                                .unwrap_or_else(|_| s.eval(uv[0], uv[1]))
+                        }),
+                    ),
                     None => (Vec3::ZERO, f.normals.get(k).copied().unwrap_or(Vec3::Z)),
                 };
                 let p = f.fixed.get(k).copied().unwrap_or(p);
-                out.positions.push(p);
-                out.normals.push(if f.flip { -n } else { n });
+                positions.push(p);
+                normals.push(if f.flip { -n } else { n });
             }
-            for t in &f.triangles {
-                if f.has_nodes(t) {
+            // At the poles of higher order the plan names: one copy per triangle with its limit
+            // normal, or the mean of the triangles' normals, by the kernel's evaluator.
+            let mut triangles = std::borrow::Cow::Borrowed(&f.triangles);
+            if let Some(s) = surface
+                && !f.poles.is_empty()
+            {
+                let at_poles: Vec<usize> = f
+                    .poles
+                    .iter()
+                    .map(|p| p.node as usize)
+                    .filter(|&k| k < f.fixed.len())
+                    .collect();
+                let k = kernel.get_or_insert_with(|| crate::mesher::poles::kernel_form(s));
+                match crate::pole::apply(k, f, &at_poles, positions.clone(), normals.clone()) {
+                    Ok((p, n, t)) => {
+                        (positions, normals) = (p, n);
+                        triangles = std::borrow::Cow::Owned(t);
+                    }
+                    // A normal the rule cannot give refuses the face, nothing substituted.
+                    Err(reason) => {
+                        refused.push(crate::RefusedFace {
+                            face: f.face as usize,
+                            reason,
+                        });
+                        continue;
+                    }
+                }
+            }
+            let nodes = positions.len();
+            out.positions.extend(positions);
+            out.normals.extend(normals);
+            for t in triangles.iter() {
+                if t.iter().all(|&i| (i as usize) < nodes) {
                     let at = |i: u32| u32::try_from(base + i as usize).unwrap_or(u32::MAX);
                     out.triangles.push([at(t[0]), at(t[1]), at(t[2])]);
                     out.tri_face.push(f.face);
@@ -79,7 +134,7 @@ impl TessPlan {
         }
         out.edges.clone_from(&self.edges);
         out.edge_faces.clone_from(&self.edge_faces);
-        (out, Vec::new())
+        (out, refused)
     }
 
     /// Which of the body's `faces` faces have triangles in [`TessPlan::evaluate`]'s mesh,

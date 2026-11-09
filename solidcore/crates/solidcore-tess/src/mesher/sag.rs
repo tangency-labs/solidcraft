@@ -11,19 +11,17 @@ use crate::vec::VecExt as _;
 use std::collections::HashMap;
 
 use solidcore::Vec3;
-use solidcore::eval::plan::EvalSurface;
 
 /// Split the triangles `tris` of a face (indices into `uv`; the first `fixed.len()` points sit
 /// at `fixed`, the rest on the surface at their parameters) until none of them lies farther
 /// than `tol` from the surface `s`, adding at most `max_points` points to `uv`. `reach`: how near
-/// a pole a point is taken as one (see [`super::uv::degenerate_within`]).
-pub(crate) fn refine(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: &mut Vec<[f64; 2]>, tris: &mut Vec<[u32; 3]>, max_points: usize) {
+/// a pole a point is taken as one (see [`super::poles::Face::pole`]).
+pub(crate) fn refine(s: &super::poles::Face, tol: f64, reach: f64, fixed: &[Vec3], uv: &mut Vec<[f64; 2]>, tris: &mut Vec<[u32; 3]>, max_points: usize) {
     if !(tol.is_finite() && tol > 0.0) || tris.is_empty() {
         return;
     }
     let at = |q: [f64; 2]| s.eval(q[0], q[1]).0;
-    let dom = super::uv::domain(s);
-    let mean = |qs: &[[f64; 2]]| mean(s, &dom, reach, qs);
+    let mean = |qs: &[[f64; 2]]| mean(s, reach, qs);
     // How far the flat point `c` lies from the surface, measured along the normal at the surface
     // point of the same parameters: those parameters need not be the nearest (a straight line in
     // the parameters is no geodesic near a pole), and only the departure across the surface
@@ -115,10 +113,10 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: 
 /// The mean of parameter points, as the surface point between them: at a pole the parameter
 /// along the degenerate direction is free (the pole copy carries a neighbour's), so there the
 /// mean takes it from the other points alone.
-fn mean(s: &EvalSurface, dom: &super::uv::Domain, reach: f64, qs: &[[f64; 2]]) -> [f64; 2] {
+fn mean(s: &super::poles::Face, reach: f64, qs: &[[f64; 2]]) -> [f64; 2] {
     let mut out = [0.0; 2];
     for (d, slot) in out.iter_mut().enumerate() {
-        let free: Vec<f64> = qs.iter().filter(|q| !super::uv::degenerate_within(s, dom, **q, d, reach)).map(|q| q[d]).collect();
+        let free: Vec<f64> = qs.iter().filter(|q| !s.pole(**q, d, reach)).map(|q| q[d]).collect();
         let pick: Vec<f64> = if free.is_empty() { qs.iter().map(|q| q[d]).collect() } else { free };
         *slot = pick.iter().sum::<f64>() / pick.len().max(1) as f64;
     }
@@ -190,12 +188,11 @@ const MIN_FLIP_ANGLE: f64 = 1e-3;
 /// in (u, v) and against the surface normal (nothing folds), and the new side and the new
 /// triangles' middles stay within `tol` of the surface, or no farther than the old side's middle.
 /// Sides with one triangle (the face's boundary) are never flipped.
-pub(crate) fn flip(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: &[[f64; 2]], tris: &mut [[u32; 3]]) {
+pub(crate) fn flip(s: &super::poles::Face, tol: f64, reach: f64, fixed: &[Vec3], uv: &[[f64; 2]], tris: &mut [[u32; 3]]) {
     if !(tol.is_finite() && tol > 0.0) || tris.len() < 2 {
         return;
     }
-    let dom = super::uv::domain(s);
-    let mean = |qs: &[[f64; 2]]| mean(s, &dom, reach, qs);
+    let mean = |qs: &[[f64; 2]]| mean(s, reach, qs);
     let pos: Vec<Vec3> = uv.iter().enumerate().map(|(i, q)| fixed.get(i).copied().unwrap_or_else(|| s.eval(q[0], q[1]).0)).collect();
     let p = |i: u32| pos.get(i as usize).copied();
     let q = |i: u32| uv.get(i as usize).copied();
