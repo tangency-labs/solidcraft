@@ -571,3 +571,27 @@ fn redefine_panel_takes_a_plane_or_face_picked_in_the_view() {
     assert!(h.app.tree.redefine.is_none());
     assert!(h.app.session.model.result(sketch).unwrap().error.is_none());
 }
+
+#[test]
+fn redefine_panel_takes_repeated_explicit_plane_picks() {
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[10,10],"p1":[30,20]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("select.set", json!({"items":[{"type":"plane","name":"YZ"}]})).unwrap();
+    crate::browser::redefine_sketch(&mut h.app, sketch);
+    h.frames(3);
+    assert!(crate::sketch_attachment_ui::commands(&h.app).is_none(), "opening the panel does not consume its preselection");
+
+    // Viewport clicks use select.set even when the selected plane has not changed.
+    h.app.run("select.set", json!({"items":[{"type":"plane","name":"YZ"}]})).unwrap();
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"], "YZ");
+
+    h.step(&json!({"widget":"Use XZ plane"})).unwrap();
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"], "XZ");
+    h.app.run("select.set", json!({"items":[{"type":"plane","name":"YZ"}]})).unwrap();
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"], "YZ", "a repeated pick replaces the panel button's candidate");
+}

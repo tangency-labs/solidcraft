@@ -94,6 +94,13 @@ fn fixed_plane(plane: Plane) -> Value {
     json!({"origin":plane.origin,"x_dir":plane.x,"y_dir":plane.y})
 }
 
+/// A successful explicit pick is new even when it selects the same plane or face again.
+pub(crate) fn selection_picked(app: &mut SolveApp) {
+    if let Some(draft) = app.tree.redefine_draft.as_mut() {
+        draft.taken = None;
+    }
+}
+
 /// The selected item the Plane field can take: the first selected face, as the field always
 /// took, else the first origin or construction plane.
 fn picked_plane(app: &SolveApp) -> Option<Sel> {
