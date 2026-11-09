@@ -1,9 +1,22 @@
-use std::f64::consts::PI;
+use std::f64::consts::{PI, TAU};
 
 use solidcraft_geom::{Loop2, Region2, Vec2, Vec3};
 
 use super::*;
 use crate::offset::Shape;
+
+/// The built-in posts by name, for the tests that start from one.
+impl Post {
+    fn rs274() -> Post {
+        Post::builtin("rs274").unwrap()
+    }
+    fn tinyg() -> Post {
+        Post::builtin("tinyg").unwrap()
+    }
+}
+
+/// Each built-in post's sample: `drill_program()` posted through it, kept beside its file.
+const SAMPLES: &[(&str, &str)] = &[("rs274", include_str!("../posts/rs274.sample.gcode")), ("tinyg", include_str!("../posts/tinyg.sample.gcode"))];
 
 fn v(x: f64, y: f64) -> Vec2 {
     Vec2::new(x, y)
@@ -371,33 +384,225 @@ fn post_switches_change_how_numbers_and_codes_are_written() {
 }
 
 #[test]
-fn rs274_program_text() {
-    let text = emit(&drill_program(), &Post::rs274()).unwrap();
-    let expected = "\
-(Bracket rev 2)
-G17 G21 G40 G49 G54 G80 G90 G94
-(Drill: T3 D5 drill)
-M5
-T3 M6
-G43 H3
-S3000 M3
-M8
-G0 X10 Y10
-G0 Z10
-G0 Z2
-G1 Z-10 F200
-G4 P0.25
-G0 Z10
-G0 X30.5
-G0 Z2
-G1 Z-10
-G4 P0.25
-G0 Z10
-M9
-M5
-M30
-";
-    assert_eq!(text, expected);
+fn every_builtin_post_is_a_file_that_parses_validates_and_posts_its_sample() {
+    assert_eq!(Post::BUILTIN.len(), SAMPLES.len(), "every post file has a sample beside it");
+    for name in Post::BUILTIN {
+        let post = Post::builtin(name).unwrap_or_else(|| panic!("posts/{name}.json does not parse or is not in BUILTIN_FILES"));
+        assert_eq!(post.name, *name, "a post is named after its file");
+        post.validate().unwrap_or_else(|e| panic!("posts/{name}.json: {e}"));
+        assert!(!post.description.is_empty(), "posts/{name}.json says what it is for");
+        for alias in &post.aliases {
+            assert_eq!(Post::builtin(alias).as_ref(), Some(&post), "{name}: alias {alias}");
+        }
+        let sample = SAMPLES.iter().find(|(n, _)| n == name).map(|(_, s)| *s).unwrap_or_else(|| panic!("no posts/{name}.sample.gcode"));
+        let text = emit(&drill_program(), &post).unwrap();
+        assert_eq!(text, sample, "posts/{name}.sample.gcode is out of date; the sample program posted through posts/{name}.json is now:\n{text}");
+        let back = Toolpath { moves: parse(&text).unwrap() };
+        assert_eq!(back.stats(), drill_program().operations[0].path.stats(), "{name}");
+    }
+    assert_eq!(Post::builtin("LinuxCNC"), Some(Post::rs274()));
+    assert_eq!(Post::builtin(" Synthetos "), Some(Post::tinyg()));
+    assert_eq!(Post::builtin("no such post"), None);
+}
+
+#[test]
+fn tinyg_post_writes_only_what_its_firmware_parses() {
+    let text = emit(&drill_program(), &Post::tinyg()).unwrap();
+    // No tool table (`G43 H` is refused), so no `G43` anywhere; `M0` at each tool change because
+    // `M6` alone changes nothing on the machine; arc centres, tool offset and path mode set in the header.
+    assert!(!text.contains("G43") && !text.contains("G40") && !text.contains("G80"), "{text}");
+    assert_eq!(text.matches("\nM0\n").count(), 1);
+    let header = text.lines().nth(1).unwrap_or_default();
+    assert!(header.contains("G91.1") && header.contains("G49") && header.contains("G64"), "{header}");
+    assert_eq!(Post::tinyg().max_tool, Some(31));
+}
+
+#[test]
+fn a_post_with_a_tool_limit_refuses_a_program_above_it_before_writing() {
+    let mut program = drill_program();
+    let limited = Post::tinyg();
+    assert_eq!(limited.max_tool, Some(31));
+    program.operations[0].tool.number = 31;
+    assert!(emit(&program, &limited).is_ok());
+    for n in [32, 40, 9999] {
+        program.operations[0].tool.number = n;
+        let e = emit(&program, &limited).unwrap_err().to_string();
+        assert!(e.contains("tinyg") && e.contains(&format!("T{n}")) && e.contains("T31"), "{e}");
+        // A post without a limit takes the same program.
+        assert!(emit(&program, &Post::rs274()).is_ok());
+    }
+    // A post saved before the limit existed reads with no limit.
+    let mut old = serde_json::to_value(Post::rs274()).unwrap();
+    old.as_object_mut().unwrap().remove("max_tool");
+    assert_eq!(serde_json::from_value::<Post>(old).unwrap().max_tool, None);
+}
+
+#[test]
+fn the_first_rapid_of_an_operation_rises_before_it_moves_across() {
+    // Two operations on two tools: after the tool change (and the operator's M0) the writer does
+    // not know where the tool is, so the first block moves Z alone, up to the clearance height.
+    let mut program = drill_program();
+    let mut second = program.operations[0].clone();
+    (second.name, second.tool.number) = ("Second".into(), 4);
+    program.operations.push(second);
+    for post in [Post::rs274(), Post::tinyg()] {
+        let text = emit(&program, &post).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        for (i, l) in lines.iter().enumerate() {
+            if l.starts_with("T") {
+                let first_rapid = lines[i..].iter().find(|l| l.starts_with("G0")).copied().unwrap_or_default();
+                assert_eq!(first_rapid, "G0 Z10", "after `{l}` in\n{text}");
+            }
+        }
+        assert_eq!(text.matches("\nG0 Z10\nG0 X10 Y10\n").count(), 2, "{text}");
+        // The written program still cuts the planned paths (rapids between operations are extra).
+        let back = Toolpath { moves: parse(&text).unwrap() };
+        close(back.stats().cut_length, program.operations.iter().map(|o| o.path.stats().cut_length).sum::<f64>(), 1e-9);
+    }
+}
+
+#[test]
+fn a_pocket_stops_ringing_once_the_tool_has_cleared_the_middle() {
+    // A 5.5 mm hole with a 3 mm end mill: the first ring (radius 1.25) already reaches the centre,
+    // so no inner ring is cut. Drawn as a 48-gon, as a DXF import would give it, an inner ring would
+    // be 48 moves of a few microns round a 0.05 mm loop.
+    let hole = Loop2::polygon(&(0..48).map(|i| Vec2::from_angle(i as f64 * TAU / 48.0) * 2.75).collect::<Vec<_>>());
+    let regions = [Region2 { outer: hole, holes: vec![] }];
+    let params = PocketParams { stepover: 1.2, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 };
+    let path = pocket(&regions, &tool(3.0), &params, &cut(0.0, -1.0, 1.0)).unwrap();
+    let shortest = path
+        .moves
+        .windows(2)
+        .filter_map(|w| match (w[0].target(), w[1]) {
+            (Some(a), Move::Feed { to, .. }) if (to.z - a.z).abs() < 1e-9 => Some(a.dist(to)),
+            _ => None,
+        })
+        .fold(f64::INFINITY, f64::min);
+    assert!(shortest > 0.1, "a cutting move of {shortest} mm");
+    assert!(cutting_points(&path, -0.5).iter().all(|p| Vec2::new(p.x, p.y).len() > 1.0), "the tool never needs to be near the centre");
+    assert!(dist_to_cuts(&path, -0.5, Vec2::ZERO) <= 1.5 + 1e-6, "the centre is still cleared by the ring");
+    // A second region the tool does not fit is refused, not skipped.
+    let small = Loop2::circle(v(10.0, 0.0), 1.0);
+    let both = [regions[0].clone(), Region2 { outer: small, holes: vec![] }];
+    let e = pocket(&both, &tool(3.0), &params, &cut(0.0, -1.0, 1.0)).unwrap_err().to_string();
+    assert!(e.contains("region 2") && e.contains("fit"), "{e}");
+}
+
+/// Forty-eight cutting moves round a 0.02 mm loop, then one real move: denser than any machine uses.
+fn micro_loop_program() -> Program {
+    let mut moves = vec![Move::Rapid { to: Vec3::new(10.0, 10.0, 5.0) }, Move::Feed { to: Vec3::new(10.0, 10.0, -1.0), feed: 100.0 }];
+    for i in 1..=48 {
+        let p = Vec2::new(10.0, 10.0) + Vec2::from_angle(i as f64 * TAU / 48.0) * 0.02 - Vec2::new(0.02, 0.0);
+        moves.push(Move::Feed { to: p.extend(-1.0), feed: 300.0 });
+    }
+    moves.push(Move::Feed { to: Vec3::new(30.0, 10.0, -1.0), feed: 300.0 });
+    moves.push(Move::Rapid { to: Vec3::new(30.0, 10.0, 5.0) });
+    let mut t = tool(3.0);
+    t.number = 1;
+    Program {
+        work_offset: None,
+        name: "micro".into(),
+        operations: vec![Operation { name: "Loop".into(), tool: t, spindle_rpm: 10000.0, coolant: false, path: Toolpath { moves } }],
+    }
+}
+
+#[test]
+fn a_post_with_a_minimum_move_counts_the_moves_below_it_and_changes_nothing() {
+    let program = micro_loop_program();
+    let plain = Post::rs274();
+    assert_eq!(plain.min_move, 0.0);
+    let (text, report) = emit_with_report(&program, &plain).unwrap();
+    assert_eq!(report.short_moves, 0);
+    let mut limited = Post::rs274();
+    limited.min_move = 0.05;
+    let (same, report) = emit_with_report(&program, &limited).unwrap();
+    // The program is written exactly as planned, loop and all; the report says how dense it is.
+    assert_eq!(same, text);
+    assert_eq!(text.lines().filter(|l| l.starts_with("G1 ")).count(), 50, "{text}");
+    assert_eq!(report.short_moves, 48);
+    assert!(readback(&text, &program, &limited).unwrap().within());
+    // Moves above the limit are not short; a short plunge counts like any other move.
+    let mut moves = vec![Move::Rapid { to: Vec3::new(0.0, 0.0, 5.0) }, Move::Feed { to: Vec3::new(0.0, 0.0, -1.0), feed: 100.0 }];
+    for i in 1..=20 {
+        moves.push(Move::Feed { to: Vec3::new(0.06 * i as f64, 0.0, -1.0), feed: 300.0 });
+    }
+    moves.push(Move::Feed { to: Vec3::new(1.2, 0.0, -1.02), feed: 300.0 });
+    let mut stair = program.clone();
+    stair.operations[0].path = Toolpath { moves };
+    let (_, report) = emit_with_report(&stair, &limited).unwrap();
+    assert_eq!(report.short_moves, 1);
+    // The limit is data with bounds; TinyG's planner has no fixed one, so its post says nothing.
+    assert_eq!(Post::tinyg().min_move, 0.0);
+    let mut bad = Post::rs274();
+    bad.min_move = f64::NAN;
+    assert!(bad.validate().is_err());
+    bad.min_move = 5.0;
+    assert!(bad.validate().is_err());
+    let mut old = serde_json::to_value(Post::rs274()).unwrap();
+    old.as_object_mut().unwrap().remove("min_move");
+    assert_eq!(serde_json::from_value::<Post>(old).unwrap().min_move, 0.0);
+}
+
+/// Every point of `inside` is within the tool's radius of a cut below `below`.
+fn assert_cleared(path: &Toolpath, below: f64, r: f64, inside: &[Vec2]) {
+    for q in inside {
+        let d = dist_to_cuts(path, below, *q);
+        assert!(d <= r + 0.02, "{q:?} is {d} from the nearest pass");
+    }
+}
+
+#[test]
+fn a_pocket_clears_a_narrow_slot_an_annulus_and_two_lobes_but_never_enters_a_neck_it_does_not_fit() {
+    let r = 1.5;
+    let z = cut(0.0, -1.0, 1.0);
+    // A slot 3.2 wide for a 3 mm tool: the one ring runs along the 0.2 mm strip the tool centre
+    // may use (y 1.5 to 1.7), the tool touches the walls and never passes them, nothing is left.
+    let slot = [rect(0.0, 0.0, 40.0, 3.2)];
+    let p = PocketParams { stepover: 1.0, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 };
+    let path = pocket(&slot, &tool(3.0), &p, &z).unwrap();
+    for q in cutting_points(&path, -0.5) {
+        assert!(q.y >= r - 1e-6 && q.y <= 3.2 - r + 1e-6 && q.x >= r - 1e-6 && q.x <= 40.0 - r + 1e-6, "{q:?}");
+    }
+    assert_cleared(&path, -0.5, r, &(0..=36).map(|i| v(1.6 + i as f64, 1.6)).collect::<Vec<_>>());
+    // An annulus 4 wide with 0.3 to leave, stepover below and above the radius: cleared, walls kept.
+    let ring = [Region2 { outer: Loop2::circle(Vec2::ZERO, 12.0), holes: vec![Loop2::circle(Vec2::ZERO, 8.0)] }];
+    for stepover in [1.0, 2.0] {
+        let p = PocketParams { stepover, climb: true, stock_to_leave: 0.3, tolerance: 0.01, ramp_angle: 0.0 };
+        let path = pocket(&ring, &tool(3.0), &p, &z).unwrap();
+        for q in cutting_points(&path, -0.5) {
+            let d = Vec2::new(q.x, q.y).len();
+            assert!(d >= 8.0 + r + 0.3 - 1e-6 && d <= 12.0 - r - 0.3 + 1e-6, "stepover {stepover}: {q:?} at radius {d}");
+        }
+        let mid: Vec<Vec2> = (0..72).map(|i| Vec2::from_angle(i as f64 * TAU / 72.0) * 10.0).collect();
+        assert_cleared(&path, -0.5, r, &mid);
+    }
+    // Two 10 x 10 lobes joined by a 2 mm neck: both lobes cleared, the neck never entered.
+    let lobes = [polygon(&[
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 4.0),
+        (14.0, 4.0),
+        (14.0, 0.0),
+        (24.0, 0.0),
+        (24.0, 10.0),
+        (14.0, 10.0),
+        (14.0, 6.0),
+        (10.0, 6.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+    ])];
+    let path = pocket(&lobes, &tool(3.0), &p, &z).unwrap();
+    for q in cutting_points(&path, -0.5) {
+        assert!(!(q.x > 10.0 + 1e-6 && q.x < 14.0 - 1e-6), "in the neck: {q:?}");
+    }
+    let mut inside = Vec::new();
+    for i in 0..=7 {
+        for j in 0..=7 {
+            inside.push(v(1.5 + i as f64, 1.5 + j as f64));
+            inside.push(v(15.5 + i as f64, 1.5 + j as f64));
+        }
+    }
+    assert_cleared(&path, -0.5, r, &inside);
 }
 
 #[test]
@@ -624,6 +829,8 @@ fn posts_are_data_and_bad_ones_are_refused() {
     assert!(broken(|p| p.extension = "../x".into()));
     assert!(broken(|p| p.spindle_on = vec!["M3".into(); 1000]));
     assert!(broken(|p| p.dwell = "G4 P{minutes}".into()));
+    assert!(broken(|p| p.aliases = vec!["a b".into()]));
+    assert!(broken(|p| p.description = "x".repeat(2001)));
     // A post saved before these switches existed reads with what it meant.
     let mut old = serde_json::to_value(Post::rs274()).unwrap();
     for k in ["helical_arcs", "trailing_decimal", "two_digit_codes", "dwell"] {

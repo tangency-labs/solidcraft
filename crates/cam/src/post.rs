@@ -1,11 +1,14 @@
-//! Post processors: how a program is written for one kind of controller. A post is data (it
-//! can be read from JSON), not code: line templates around the motion blocks, and a few
-//! switches for how the motion itself is written.
+//! Post processors: how a program is written for one kind of controller. A post is data, not
+//! code: line templates around the motion blocks, and a few switches for how the motion itself
+//! is written. The built-in ones are the JSON files in `crates/cam/posts/`, one per controller
+//! (that folder's README says how to add one); a design can save its own.
 //!
 //! Templates may use `{program}` (program name), `{units}` (`G21` or `G20`), `{work_offset}`
 //! (the setup's work offset, `G54` to `G59`), `{tool}` (tool number), `{diameter}` (tool
 //! diameter in output units) and `{rpm}` (spindle speed); the dwell template uses `{seconds}` or
 //! `{milliseconds}`.
+
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -59,6 +62,12 @@ pub struct LineNumbers {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Post {
     pub name: String,
+    /// Other names `cam.post` takes for it (`linuxcnc` for `rs274`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+    /// What controllers it is for and what it writes for them, for someone choosing a post.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
     /// File extension without the dot.
     pub extension: String,
     pub units: Units,
@@ -98,6 +107,16 @@ pub struct Post {
     /// How a dwell is written: `{seconds}` or `{milliseconds}` (a whole number) stands for its length.
     #[serde(default = "default_dwell")]
     pub dwell: String,
+    /// The highest tool number the controller takes (inclusive); `None` for no limit. A program
+    /// with a tool above it is refused before anything is written: a controller that rejects the
+    /// `T` word does not stop the sender, so the lines after it would still run.
+    #[serde(default)]
+    pub max_tool: Option<u32>,
+    /// The shortest straight cutting move the controller plans well (mm); 0 for no opinion. The
+    /// writer changes nothing: it counts the moves shorter than this and reports them
+    /// (`short_moves`), so a toolpath denser than the machine can use is seen before it runs.
+    #[serde(default)]
+    pub min_move: f64,
 }
 
 fn yes() -> bool {
@@ -108,48 +127,26 @@ fn default_dwell() -> String {
     "G4 P{seconds}".into()
 }
 
-fn lines(l: &[&str]) -> Vec<String> {
-    l.iter().map(|s| s.to_string()).collect()
+/// The built-in posts: one JSON file per controller in `crates/cam/posts/`, embedded in the
+/// program. The names are the file names, in the order users see them.
+const BUILTIN_FILES: &[(&str, &str)] = &[("rs274", include_str!("../posts/rs274.json")), ("tinyg", include_str!("../posts/tinyg.json"))];
+
+/// Every built-in post, parsed once. A file that does not parse is left out here; the tests fail
+/// on it (`every_builtin_post_is_a_file_that_parses_validates_and_posts_its_sample`).
+fn builtins() -> &'static [Post] {
+    static POSTS: OnceLock<Vec<Post>> = OnceLock::new();
+    POSTS.get_or_init(|| BUILTIN_FILES.iter().filter_map(|(_, text)| serde_json::from_str::<Post>(text).ok()).collect())
 }
 
 impl Post {
-    /// Controllers that follow the NIST RS-274/NGC language closely (LinuxCNC and relatives):
-    /// automatic tool change with tool length offsets.
-    pub fn rs274() -> Post {
-        Post {
-            name: "rs274".into(),
-            extension: "ngc".into(),
-            units: Units::Mm,
-            decimals: 4,
-            feed_decimals: 1,
-            line_numbers: None,
-            comments: CommentStyle::Parentheses,
-            header: lines(&["G17 {units} G40 G49 {work_offset} G80 G90 G94"]),
-            tool_change: lines(&["M5", "T{tool} M6", "G43 H{tool}"]),
-            tool_change_first: true,
-            spindle_on: lines(&["S{rpm} M3"]),
-            spindle_off: lines(&["M5"]),
-            coolant_on: lines(&["M8"]),
-            coolant_off: lines(&["M9"]),
-            footer: lines(&["M30"]),
-            arcs: true,
-            arc_tolerance: 0.005,
-            helical_arcs: true,
-            trailing_decimal: false,
-            two_digit_codes: false,
-            dwell: default_dwell(),
-        }
-    }
+    /// The built-in posts' names, as `cam.post` takes them: the files in `crates/cam/posts/`.
+    pub const BUILTIN: &'static [&'static str] = &["rs274", "tinyg"];
 
-    /// The built-in post called `name`.
+    /// The built-in post called `name`, or one of its aliases (`linuxcnc` for `rs274`), in any case.
     pub fn builtin(name: &str) -> Option<Post> {
-        match name.trim().to_ascii_lowercase().as_str() {
-            "rs274" | "linuxcnc" => Some(Post::rs274()),
-            _ => None,
-        }
+        let want = name.trim();
+        builtins().iter().find(|p| p.name.eq_ignore_ascii_case(want) || p.aliases.iter().any(|a| a.eq_ignore_ascii_case(want))).cloned()
     }
-
-    pub const BUILTIN: &'static [&'static str] = &["rs274"];
 
     /// Whether the post writes the work offset (a `{work_offset}` in its header or tool change).
     pub fn writes_work_offset(&self) -> bool {
@@ -157,6 +154,16 @@ impl Post {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if self.description.chars().count() > 2000 || self.description.chars().any(|c| c.is_control() && c != '\n') {
+            return invalid("the post's description is at most 2000 characters, without control characters");
+        }
+        let alias_ok = |a: &String| !a.is_empty() && a.len() <= 32 && a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if self.aliases.len() > 8 || !self.aliases.iter().all(alias_ok) {
+            return invalid("a post alias is 1 to 32 letters, digits, dashes or underscores, at most 8 of them");
+        }
+        if !self.min_move.is_finite() || !(0.0..=1.0).contains(&self.min_move) {
+            return invalid("the post's minimum move is 0 (no limit) to 1 mm");
+        }
         if self.decimals > 6 || self.feed_decimals > 4 {
             return invalid("a post writes at most 6 decimals for coordinates and 4 for feeds");
         }

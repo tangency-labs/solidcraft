@@ -73,6 +73,17 @@ struct Writer<'a> {
     z: Option<String>,
     pos: Option<Vec3>,
     feed: Option<String>,
+    /// Straight cutting moves shorter than the post's `min_move`.
+    short: usize,
+}
+
+/// What the writer noticed on the way out. It changes nothing: a toolpath is machined as planned.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmitReport {
+    /// Straight cutting moves shorter than the post's `min_move`, the length its controller plans
+    /// well. Many of them means the toolpath is denser than the machine can use, which is a
+    /// throughput concern for the operator and a question for the operation that made them.
+    pub short_moves: usize,
 }
 
 impl Writer<'_> {
@@ -158,8 +169,11 @@ impl Writer<'_> {
     }
 
     fn rapid(&mut self, to: Vec3) {
-        // Never a diagonal rapid: up first when rising, across first when descending.
-        if self.pos.is_some_and(|p| to.z > p.z) {
+        // Never a diagonal rapid: up first when rising, across first when descending. Where the
+        // tool is is not known (the first move of an operation, and after a tool change the
+        // operator may have moved it), it rises first too: moving across at an unknown height
+        // would drive it through the part or the fixture.
+        if self.pos.is_none_or(|p| to.z > p.z) {
             self.linear(0, to, false, true, None);
             self.linear(0, to, true, false, None);
         } else {
@@ -170,6 +184,10 @@ impl Writer<'_> {
     }
 
     fn feed(&mut self, to: Vec3, feed: f64) {
+        // Counted, never changed: what the controller makes of a short move is its business.
+        if self.post.min_move > 0.0 && self.pos.is_some_and(|from| from.dist(to) < self.post.min_move) {
+            self.short += 1;
+        }
         self.linear(1, to, true, true, Some(feed));
         self.pos = Some(to);
     }
@@ -213,6 +231,11 @@ impl Writer<'_> {
 
 /// Writes `program` for the controller `post` describes.
 pub fn emit(program: &Program, post: &Post) -> Result<String> {
+    emit_with_report(program, post).map(|(text, _)| text)
+}
+
+/// [`emit`], and what the writer noticed on the way.
+pub fn emit_with_report(program: &Program, post: &Post) -> Result<(String, EmitReport)> {
     post.validate()?;
     if program.operations.is_empty() {
         return invalid("the program has no operation");
@@ -220,7 +243,20 @@ pub fn emit(program: &Program, post: &Post) -> Result<String> {
     if program.operations.len() > MAX_OPERATIONS {
         return Err(CamError::TooLarge(format!("more than {MAX_OPERATIONS} operations")));
     }
-    let mut w = Writer { post, out: String::new(), line: post.line_numbers.map(|n| n.start), x: None, y: None, z: None, pos: None, feed: None };
+    // Every tool is checked against the post's limit before a line is written, so a refusal
+    // leaves no partial program behind.
+    if let Some(max) = post.max_tool
+        && let Some(op) = program.operations.iter().find(|op| op.tool.number > max)
+    {
+        return invalid(format!(
+            "post `{}` takes tool numbers up to T{max}; operation `{}` uses T{}",
+            plain(&post.name),
+            plain(&op.name),
+            op.tool.number
+        ));
+    }
+    let mut w =
+        Writer { post, out: String::new(), line: post.line_numbers.map(|n| n.start), x: None, y: None, z: None, pos: None, feed: None, short: 0 };
     let offset = program.work_offset.unwrap_or(1);
     // A post that leaves the offset to the operator can only mean the first one.
     if offset != 1 && !post.writes_work_offset() {
@@ -293,7 +329,7 @@ pub fn emit(program: &Program, post: &Post) -> Result<String> {
     }
     w.template(&post.spindle_off, &values)?;
     w.template(&post.footer, &values)?;
-    Ok(w.out)
+    Ok((w.out, EmitReport { short_moves: w.short }))
 }
 
 /// The words of one line: `(letter, value)`.

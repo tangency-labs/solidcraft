@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_cam::{
-    ContourParams, Cut, Feeds, Heights, Operation, PocketParams, Post, Program, Side, Tool, ToolKind, contour, emit, pocket, readback,
+    ContourParams, Cut, Feeds, Heights, Operation, PocketParams, Post, Program, Side, Tool, ToolKind, contour, emit_with_report, pocket, readback,
 };
 use solidcraft_doc::cam::{
     CamContourParams, CamCut, CamFaceRef, CamGeometry, CamOperation, CamPocketParams, CamSettings, CamSetup, CamSide, MAX_OPS, MAX_SETUPS, MAX_TOOLS,
@@ -482,11 +482,12 @@ fn post_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         };
         program.operations.push(Operation { name: op.name().into(), tool, spindle_rpm, coolant, path });
     }
-    let gcode = emit(&program, &post).map_err(|e| bad(cmd, e.to_string()))?;
+    let (gcode, report) = emit_with_report(&program, &post).map_err(|e| bad(cmd, e.to_string()))?;
     let mut out = json!({
         "gcode": gcode,
         "extension": post.extension,
         "post": post.name,
+        "short_moves": report.short_moves,
         "operations": program.operations.len(),
         "work_offset": setup.work_offset,
     });

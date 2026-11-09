@@ -329,9 +329,21 @@ pub fn pocket(regions: &[Region2], tool: &Tool, params: &PocketParams, cut: &Cut
     }
     let shape = Shape::from_regions(regions, params.tolerance)?;
     let wall = r + params.stock_to_leave;
+    // A region the tool does not fit is refused, never skipped.
+    for (i, region) in regions.iter().enumerate() {
+        if Shape::from_regions(std::slice::from_ref(region), params.tolerance)?.offset(wall)?.is_empty() {
+            return invalid(format!("the tool does not fit region {} of the pocket", i + 1));
+        }
+    }
     let mut rings: Vec<Vec<Vec<Piece>>> = Vec::new();
     loop {
-        let ring = shape.offset(wall + params.stepover * rings.len() as f64)?;
+        let k = rings.len();
+        // Another ring is cut only while the last one leaves material inside its reach: a ring
+        // smaller than the tool clears nothing and only makes moves too short to run.
+        if k > 0 && shape.offset(wall + params.stepover * (k - 1) as f64 + r)?.is_empty() {
+            break;
+        }
+        let ring = shape.offset(wall + params.stepover * k as f64)?;
         if ring.is_empty() {
             break;
         }

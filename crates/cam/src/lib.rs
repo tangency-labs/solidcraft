@@ -24,7 +24,7 @@ mod readback;
 mod tool;
 
 pub use check::verify;
-pub use gcode::{Operation, Program, emit, parse, work_offset_code};
+pub use gcode::{EmitReport, Operation, Program, emit, emit_with_report, parse, work_offset_code};
 pub use offset::offset_regions;
 pub use ops::{ContourParams, Cut, Feeds, Heights, PocketParams, Side, contour, pocket};
 pub use path::{Move, PathStats, Toolpath, arc_sweep};
