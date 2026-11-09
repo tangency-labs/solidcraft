@@ -160,6 +160,14 @@ The remaining lines of `app-geometry.txt` and `mesh-decisions.txt`, one cluster 
 
 ## 3. Rules for the agents doing it
 
+- **Scope: like OpenCASCADE.** solidcore covers what OpenCASCADE's published module list covers: modelling algorithms, surface construction and filling, meshing, data exchange (STEP, IGES), hidden-line removal, shape healing, sections and projections, distance and measure, mass properties. Anything outside that list stays in SolidCraft unless the owner says otherwise. Only the public module overview is used as the yardstick. Never OpenCASCADE's source or headers, nor OCP or pythonOCC.
+
+  Under this rule these rows would change placement. They're left unchanged in §1 until the owner decides:
+  - **Mesh file formats** (STL, OBJ, glTF in `io`): OpenCASCADE's data exchange covers them, so they would move to solidcore (record + ops). Mesh repair and mesh booleans stay in the app, as the row says.
+  - **Sheet metal:** there's no such module in the list, so fold and unfold would stay in SolidCraft as recipes over ops calls, not kernel and ops.
+  - **T-splines** (`geom/src/tspline/`, `kernel/src/tspline.rs`): not in the list's surface construction, so they would stay in SolidCraft. Fills, curve networks, bridge, match and fair stay in solidcore.
+  - **Lip and emboss** (in "Local surface commands"): these are SolidCraft product features, so they would stay as app recipes over ops. Trim, untrim, extend, ruled, split, delete face and repair stay ops (local operations, shape healing).
+
 - **Literature first.** Show the problem, read the papers that solve it, and say in the issue how the design follows them (solidcore `AGENTS.md` §1).
 - **No fallbacks or try-chains.** One construction per job. An old path is deleted when its replacement lands, never kept behind it (§4b).
 - **One topic per PR**: one job moved, its callers switched, the old copy deleted, its ledger lines removed.
