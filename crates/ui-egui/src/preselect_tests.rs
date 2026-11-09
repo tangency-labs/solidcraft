@@ -2081,7 +2081,7 @@ fn align_with_cleared_axes_and_a_face_pick_says_what_axes_are_for() {
     let mut d = start(&mut app, vec![], "solid.align");
     d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
     d.inputs[1].items = vec![face(&app, Vec3::new(20.0, 15.0, 0.0))];
-    d.inputs[2].items = vec![face(&app, Vec3::new(20.0, 15.0, 10.0))];
+    d.inputs[2].items = vec![face(&app, Vec3::new(20.0, 15.0, 20.0))];
     if let Kind::Align { axes, .. } = &mut d.kind {
         *axes = [false, true, false];
     }
