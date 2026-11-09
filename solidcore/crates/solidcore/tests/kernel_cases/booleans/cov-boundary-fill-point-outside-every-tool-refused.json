@@ -1,0 +1,38 @@
+{
+  "area": "booleans",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-boundary-fill-point-outside-every-tool-refused",
+  "expected": {
+    "method": "(50,50,5) is in neither cylinder: no cell there, a clean refusal",
+    "outcome": "refused",
+    "refusal": "outside every tool",
+    "source": "analytic",
+    "sources": [],
+    "what": "a cell point outside every tool encloses nothing: refused"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 3 (solid.boundary_fill): the point Position(Vec3 { x: 50.0, y: 50.0, z: 5.0 }) is outside every tool: no enclosed cell there",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 3 (solid.boundary_fill): the point Position(Vec3 { x: 50.0, y: 50.0, z: 5.0 }) is outside every tool: no enclosed cell there",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "a cell point outside every tool encloses nothing: refused",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.boundary_fill): the point Position(Vec3 { x: 50.0, y: 50.0, z: 5.0 }) is outside every tool: no enclosed cell there"
+  ]
+}

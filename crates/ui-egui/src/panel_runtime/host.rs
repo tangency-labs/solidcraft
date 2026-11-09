@@ -145,6 +145,13 @@ pub trait PanelLocalServices {
     fn request_overlay_layer(&mut self, scope: &LocalScope, instance: &InstanceId, region: InputRegion, _layer: egui::LayerId) -> PanelResult<()> {
         self.request(scope, LocalRequest::Overlay { instance: instance.clone(), region })
     }
+    /// Report a response just created by the current content render. The host
+    /// uses this optional provenance to retain/restore focus; reporting never
+    /// requests focus or stores editor state. Hidden or disabled controls are
+    /// ineligible, and absence of a report must never fall back to an old widget.
+    fn register_focus_response(&mut self, _scope: &LocalScope, _instance: &InstanceId, _response: &egui::Response) -> PanelResult<()> {
+        Ok(())
+    }
     fn release(&mut self, scope: &LocalScope, instance: &InstanceId);
 }
 
@@ -154,6 +161,8 @@ pub struct RuntimeAction {
     pub label: String,
     pub enabled: bool,
     pub disabled_reason: Option<String>,
+    /// Toggle state, when the action represents a persistent on/off choice.
+    pub pressed: Option<bool>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PanelPresentation {
@@ -196,6 +205,25 @@ pub enum ContentSlot {
     /// One total short-wide row, sharing its height with the host controls.
     Inline,
 }
+
+/// A frame-scoped content binding. Application bodies may borrow their existing
+/// owner for this paint without storing that borrow in a retained controller.
+/// The host supplies the same bounded slot and focus services as ordinary content.
+pub trait FramePanelContent {
+    fn render(
+        &mut self,
+        slot: ContentSlot,
+        ui: &mut egui::Ui,
+        context: &PanelContext,
+        content: &mut dyn super::PanelController,
+        services: &mut super::ContentServices<'_>,
+    ) -> PanelResult<()> {
+        if slot == ContentSlot::Inline { content.render_inline(ui, context, services) } else { content.render(slot, ui, context, services) }
+    }
+}
+
+pub(super) struct ControllerFrameContent;
+impl FramePanelContent for ControllerFrameContent {}
 
 /// Shared host adapter seam. Geometry is resolved by the host; content chooses
 /// its own scrolling within slots. The egui adapter below owns one kit Container.
@@ -274,7 +302,7 @@ impl PanelHost for EguiPanelHost<'_> {
         let body = geometry.body.map(rect);
         let parent_clip = self.ui.clip_rect().intersect(outer);
         let container = crate::ui_kit::Container::new(self.ui.ctx(), crate::ui_kit::Surface::Panel);
-        let frame = container.frame(self.ui.ctx(), crate::theme::Tokens::get().dialog_body, crate::frame::Side::Left).inner_margin(0);
+        let frame = container.frame(self.ui.ctx(), solidcraft_theme::Tokens::get().dialog_body, crate::frame::Side::Left).inner_margin(0);
         let mut failure = None;
         self.ui.scope_builder(
             egui::UiBuilder::new().scope_id(egui::Id::unique(("panel_runtime", &geometry.instance.0, &context.owner))).max_rect(outer),
@@ -296,7 +324,7 @@ impl PanelHost for EguiPanelHost<'_> {
                             if slot == ContentSlot::Header {
                                 // Dynamic title/status have semantic metadata; content owns
                                 // additional controls and returns requests through services.
-                                let tokens = crate::theme::Tokens::get();
+                                let tokens = solidcraft_theme::Tokens::get();
                                 let ink = if presentation.attention { tokens.form_primary } else { tokens.form_ink };
                                 let mut response = ui.label(egui::RichText::new(&presentation.title).color(ink));
                                 if let Some(status) = &presentation.status {
@@ -316,6 +344,9 @@ impl PanelHost for EguiPanelHost<'_> {
                                                     .inner
                                                 })
                                                 .inner;
+                                            if let Some(pressed) = action.pressed {
+                                                ui.ctx().accesskit_node_builder(response.id, |node| node.set_toggled(pressed.into()));
+                                            }
                                             let clicked = response.clicked();
                                             if let Some(reason) = &action.disabled_reason {
                                                 response.backing_on_disabled_hover_text(reason);

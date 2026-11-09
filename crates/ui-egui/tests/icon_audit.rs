@@ -622,7 +622,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     documents.call("ui.resize", json!({"width":640,"height":1000}));
     click(&mut documents, "tab:overflow");
     documents.frames(3);
-    assert!(documents.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_doc_more"))).unwrap_or(false), "the document list must actually be open");
+    assert!(solidcraft_ui_egui::documents::tab_list_open(&documents.ctx), "the document list must actually be open");
     collect(&mut documents, "document overflow list (active icon is a selection marker)", &mut requested);
     // Diagnostic badges and Copy Error/Warning Message only appear on troubled features.
     for failing in [false, true] {
@@ -693,7 +693,7 @@ fn audit_is_opt_in_drains_and_records_resolved_aliases() {
 /// Review evidence uses the application's actual SVG renderer, without a window or screenshot.
 #[test]
 fn offset_mode_artwork_review() {
-    use solidcraft_ui_egui::theme::{ColorVision, Tokens};
+    use solidcraft_theme::{ColorVision, Tokens};
     let names = ["offset", "offset_two_sides", "offset_symmetric", "sketch_chamfer", "sketch_chamfer_two_distances", "split_body"];
     let mut sheet = tiny_skia::Pixmap::new(400, names.len() as u32 * 88).unwrap();
     for (row, name) in names.iter().enumerate() {

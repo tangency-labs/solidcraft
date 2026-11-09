@@ -11,7 +11,7 @@ ordinary `execute` tool: `render.preflight`, `render.start`, `render.status`,
 in the session until explicit PNG export. See [render jobs](render-jobs.md).
 
 For sandboxed plugins and parametric timeline
-features that also use `run(command, args)`, see [plugins.md](plugins.md). Desktop MCP in this
+features that also use `run(command, args)`, see [RFC 0002](rfcs/0002-plugins.md). Desktop MCP in this
 document remains the reference implementation today.
 
 ## Start it
@@ -474,7 +474,9 @@ Feature replies omit the full `bodies` list while keeping `feature`, `name`,
 `created_bodies`, `changed_bodies` and `removed_bodies`. A cut can therefore report a
 changed body even when no body name was added or removed. Sketch replies keep new
 IDs under `created` and omit only identical top-level `points`, `curves`,
-`constraints` and `dimensions` lists. Other fields and errors are unchanged;
+`constraints` and `dimensions` lists. When a sketch command creates more points than
+its new curves have ends (the poles of an offset's splines), `created.points` becomes
+`created.point_count`: refer to those curves by their ids. Other fields and errors are unchanged;
 inspection commands still return their complete results. Compaction uses the
 engine's reply directly, without an additional design-inspection request.
 

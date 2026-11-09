@@ -1,0 +1,53 @@
+{
+  "cases": [
+    {
+      "name": "upstream-TestSmCircularFillet",
+      "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:26",
+      "inputs": {
+        "upstream_case": 0
+      }
+    },
+    {
+      "name": "upstream-TestSmChamferFillet",
+      "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:47",
+      "inputs": {
+        "upstream_case": 1
+      }
+    },
+    {
+      "name": "upstream-TestSmFilletEdges",
+      "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+      "inputs": {
+        "upstream_case": 2
+      }
+    },
+    {
+      "name": "upstream-TestSmFilletEdgesPerEdge",
+      "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:96",
+      "inputs": {
+        "upstream_case": 3
+      }
+    },
+    {
+      "name": "upstream-TestSmVariableRadiusFillet",
+      "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:132",
+      "inputs": {
+        "upstream_case": 4
+      }
+    },
+    {
+      "name": "upstream-TestSmSetBevelCorners-round",
+      "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:252",
+      "inputs": {
+        "upstream_case": 5
+      }
+    },
+    {
+      "name": "upstream-TestSmSetBevelCorners-bevel",
+      "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:252",
+      "inputs": {
+        "upstream_case": 6
+      }
+    }
+  ]
+}

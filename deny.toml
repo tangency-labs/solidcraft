@@ -13,5 +13,3 @@ allow-wildcard-paths = true
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-# solidcore, pinned by rev in Cargo.toml (the kernel behind crates/smlib).
-allow-git = ["https://github.com/tangency-labs/solidcore"]

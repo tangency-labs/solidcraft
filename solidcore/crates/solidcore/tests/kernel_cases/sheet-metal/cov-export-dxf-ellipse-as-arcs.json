@@ -1,0 +1,80 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-export-dxf-ellipse-as-arcs",
+  "expected": {
+    "body_count": 1,
+    "files": [
+      {
+        "dxf": {
+          "CUT": {
+            "ELLIPSE": 0,
+            "SPLINE": 0,
+            "length_mm": 51.053997725577524
+          },
+          "OUTLINE": {
+            "LINE": 4,
+            "length_mm": 320.0
+          }
+        },
+        "path": "flat.dxf"
+      }
+    ],
+    "method": "curves: arcs writes the ellipse as tangent arcs and lines within 0.001 mm, for machines that read only those: on layer CUT no ELLIPSE and no SPLINE, and their length is the ellipse's perimeter 51.053998 (within 0.001 mm of the curve, the length to 1e-3 relative)",
+    "source": "analytic",
+    "sources": [],
+    "what": "sheet.export_dxf with curves: arcs of a 100 x 60 x 2 plate with a 20 x 12 elliptical cut-out: the ellipse becomes tangent arcs"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 180,
+      "faces": 62,
+      "vertices": 120
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 12365.104818193327,
+      "body_count": 1,
+      "edges": 168,
+      "faces": 58,
+      "vertices": 112,
+      "volume_mm3": 11622.995895852331
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d"
+  ],
+  "ungraded": [
+    "files: SolidCraft computes it"
+  ],
+  "what": "sheet.export_dxf with curves: arcs of a 100 x 60 x 2 plate with a 20 x 12 elliptical cut-out: the ellipse becomes tangent arcs",
+  "why_not": [
+    "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}
