@@ -17,6 +17,7 @@ pub mod control_pending;
 pub mod cosmetic_threads;
 pub mod crash;
 pub mod easyprint;
+pub mod features;
 pub mod frames;
 pub mod fuzz;
 pub mod licences;
@@ -37,6 +38,8 @@ pub mod slicers;
 pub mod snap;
 pub mod status_details;
 pub mod status_items;
+pub mod timeline;
+pub use timeline::*;
 pub mod timing;
 pub mod view;
 
@@ -61,7 +64,51 @@ pub use solidcraft_io as io;
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_profile as profile;
 pub use solidcraft_render as render;
+pub use features::lighten::{ChamferLocation, FilletLocation, LightenConfig, ManufacturingMethod, PocketDepthSpec};
 pub use solidcraft_sketch as sketch;
+
+/// AI client and Model Context Protocol (MCP) configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiClient {
+    pub endpoint: Option<String>,
+    pub api_key: Option<String>,
+    pub model: Option<String>,
+    pub mcp_connected: bool,
+}
+
+impl Default for AiClient {
+    fn default() -> Self {
+        Self {
+            endpoint: None,
+            api_key: None,
+            model: None,
+            mcp_connected: false,
+        }
+    }
+}
+
+impl AiClient {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether an AI model or MCP server is connected and configured.
+    pub fn is_configured(&self) -> bool {
+        self.mcp_connected || (self.endpoint.is_some() && self.api_key.is_some())
+    }
+
+    pub fn set_mcp_connected(&mut self, connected: bool) {
+        self.mcp_connected = connected;
+    }
+
+    pub fn configure(&mut self, endpoint: impl Into<String>, api_key: impl Into<String>, model: Option<String>) {
+        self.endpoint = Some(endpoint.into());
+        self.api_key = Some(api_key.into());
+        self.model = model;
+    }
+}
+
+pub type Engine = Session;
 
 /// Longest accepted request line on the JSON-lines channels (MCP over stdio and the control
 /// server over loopback), so both refuse runaway input at the same size.
@@ -638,6 +685,8 @@ pub struct Session {
     /// Record this session's top-level commands in the crash journal (the app's own design;
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
+    /// AI model and MCP server client configuration.
+    pub ai_client: AiClient,
     /// Live-model evaluations after this session's initialization; never serialized.
     pub(crate) evaluations: usize,
     /// Resolved associative trace inputs, independent of the document revision and view state.
@@ -879,7 +928,19 @@ impl Session {
             motion_traces: Default::default(),
             command_check: None,
             crash_journal: false,
+            ai_client: AiClient::default(),
         }
+    }
+
+
+    /// Access the active AI client / MCP configuration.
+    pub fn ai_client(&self) -> &AiClient {
+        &self.ai_client
+    }
+
+    /// Mutably access the active AI client / MCP configuration.
+    pub fn ai_client_mut(&mut self) -> &mut AiClient {
+        &mut self.ai_client
     }
 
     /// Become `fresh` (another design opened, recovered or started), keeping the settings that
@@ -2002,6 +2063,7 @@ impl Session {
             motion_traces: self.motion_traces.clone(),
             command_check: self.command_check.clone(),
             crash_journal: false,
+            ai_client: AiClient::default(),
         }
     }
 

@@ -7651,6 +7651,7 @@ fn eval_feature(
         | FeatureKind::Rib { .. }
         | FeatureKind::ReplaceFace { .. }
         | FeatureKind::Align { .. }
+        | FeatureKind::Lighten { .. }
         | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st, warning),
         FeatureKind::Sketch { plane, sketch } => eval_sketch(doc, vals, f, plane, sketch, st, warning, crate::project::LostNames::Fail),
         FeatureKind::Extrude { operation, targets, .. }

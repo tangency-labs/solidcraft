@@ -51,14 +51,48 @@ pub(super) fn paint_box(ui: &Ui, square: Rect, response: &Response, on: bool, mi
     }
 }
 
+/// Circular toggle painting: compact hollow ring when off, blue circle with thin white outline when on.
+pub(super) fn paint_circle(ui: &Ui, square: Rect, response: &Response, on: bool) {
+    let t = Tokens::get();
+    let center = square.center();
+    let radius = (square.width().min(square.height()) * 0.34).clamp(4.0, 4.75);
+    let fill = if on {
+        t.form_primary_fill
+    } else if response.hovered() {
+        t.hover
+    } else {
+        t.control_fill
+    };
+    let stroke = if on {
+        egui::Stroke::new(1.0, egui::Color32::WHITE)
+    } else if response.hovered() || response.has_focus() {
+        egui::Stroke::new(1.0, t.form_primary)
+    } else {
+        t.control_border_stroke(t.control_border)
+    };
+    ui.painter().circle(center, radius, fill, stroke);
+    if response.has_focus() {
+        ui.painter().circle_stroke(center, radius + t.space_2, egui::Stroke::new(1.0, t.form_primary));
+    }
+}
+
 /// Checkboxes only via ui_kit::checkbox. Labels, accessibility, keyboard and response stay native.
 pub(crate) fn checkbox(ui: &mut Ui, label: &str, value: &mut bool) -> Response {
     checkbox_indeterminate(ui, label, value, false)
 }
 
+/// Circular toggle indicator that fills blue when selected (`circle_toggle`).
+pub(crate) fn circle_toggle(ui: &mut Ui, label: &str, value: &mut bool) -> Response {
+    toggle_row(ui, label, value, false, true)
+}
+
 /// Mixed values become checked when activated; the caller owns whether selection is mixed.
 /// Tokens: space_14/3/2/6, radius_sm, control_fill/border, form_primary/ink, hover, on_accent.
 pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool, mixed: bool) -> Response {
+    toggle_row(ui, label, value, mixed, false)
+}
+
+fn toggle_row(ui: &mut Ui, label: &str, value: &mut bool, mixed: bool, circle: bool) -> Response {
     super::settings_search::note_unlabelled(ui, &[label]);
     if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &[label]) {
         return super::settings_search::hidden_response(ui);
@@ -82,7 +116,11 @@ pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool,
         response.mark_changed();
     }
     let square = box_at(ui, pos2(rect.left() + t.space_14 / 2.0, rect.center().y));
-    paint_box(ui, square, &response, *value, mixed && !response.changed());
+    if circle {
+        paint_circle(ui, square, &response, *value);
+    } else {
+        paint_box(ui, square, &response, *value, mixed && !response.changed());
+    }
     let text_rect = Rect::from_min_max(pos2((square.right() + gap).min(rect.right()), rect.top()), rect.max);
     if wrap {
         let ppp = ui.ctx().pixels_per_point().max(0.5);
