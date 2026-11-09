@@ -21,6 +21,7 @@ use crate::schema::motion::{
     FindLimitsResult, MotionListParams, MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted, MotionStudyInfo, MotionStudyKeyInfo,
     MotionStudyParams, MotionStudySaved,
 };
+use crate::schema::motion_animation::{AnimationExported, ExportAnimationParams};
 use crate::schema::motion_play::{
     DriveReport, ExportParams, PartPose, PlayParams, Pose, StudyExport, StudyExported, StudyPlayed, StudySample, UnmovedJoint,
 };
@@ -61,6 +62,7 @@ const EXPLODE_LIST_CONTRACT: TypedContract<ExplodeListParams> = TypedContract::n
 const EXPLODE_DELETE_CONTRACT: TypedContract<ExplodeDeleteParams> = TypedContract::new();
 const PLAY_CONTRACT: TypedContract<PlayParams> = TypedContract::new();
 const EXPORT_CONTRACT: TypedContract<ExportParams> = TypedContract::new();
+const EXPORT_ANIMATION_CONTRACT: TypedContract<ExportAnimationParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("contact.enable_sets", "Enable Contact Sets", crate::checked!("contact.enable_sets", enable_sets))
@@ -132,8 +134,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPORT_CONTRACT)
         .output(output_schema_for::<StudyExported>)
         .params("study; samples? (default steps + 1); path? (.json or .csv) → occurrence positions per step (the design is not changed)"),
-    CommandSpec::new("motion.export_animation", "Export Motion Animation", animation::export).icon("export").noundo().params(
-        "study: id|name, or joint: id|name with from and to (degrees for angles, mm for distances, or expressions) and index?, or \
+    CommandSpec::new("motion.export_animation", "Export Motion Animation", crate::checked!("motion.export_animation", animation::export))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_ANIMATION_CONTRACT)
+        .output(output_schema_for::<AnimationExported>)
+        .params(
+            "study: id|name, or joint: id|name with from and to (degrees for angles, mm for distances, or expressions) and index?, or \
          view: id|name (an exploded view, coming apart from the assembled placement) with back? (default false; true: back together \
          too, exploded at the middle frame of an odd count); path: a .gif file, or a folder for PNG frames (frame-0001.png, \
          frame-0002.png, …); samples? (frames, 2…1000; default the study's steps + 1, 100 for a joint, 41 for a view or 81 with \
@@ -143,7 +150,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          axes) - draws the study as it plays, the joint as it is driven or the view as it explodes, with the headless renderer → \
          path, format, frames, width, height, fps (GIF), bytes, renderer, stopped_at, stopped_by_loop, stopped_by_contact (the \
          design is not changed, nor its placements)",
-    ),
+        ),
     CommandSpec::new("motion.trace", "Motion Trace", trace).at("SOLID", "ASSEMBLE").icon("trace").noundo().params(concat!(
         trace_doc!(),
         " → points: [[x,y,z]…] world positions, samples (taken), stopped_at (the sample where the motion stopped short; the trace \

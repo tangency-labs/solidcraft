@@ -85,6 +85,7 @@ pub mod mesh;
 pub mod metadata;
 pub mod motion;
 pub mod motion_analysis;
+pub mod motion_animation;
 pub mod motion_play;
 pub mod new_design;
 pub mod panels;

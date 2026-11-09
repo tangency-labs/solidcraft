@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value};
 use solidcore_record::Vec3;
 use solidcraft_doc::Mat;
 
@@ -13,6 +13,8 @@ use super::{Plan, drive_with_contact, explode_moves, exploded_at, motion_plan, s
 use crate::capture::{self, Renderer};
 use crate::params::{bad, str_};
 use crate::render::Camera;
+use crate::schema::motion_analysis::StudyStop;
+use crate::schema::motion_animation::AnimationExported;
 use crate::{Result, Session};
 
 /// What the frames show.
@@ -128,14 +130,15 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
     // Motion Study dialog shows) are not where the joints are solved, nor the assembled placement.
     t.pending_moves.clear();
     let (mut frames, mut bytes, mut drawn_by) = (Vec::new(), 0, "");
-    let mut stop = (Value::Null, Value::Null, Value::Null);
+    // The frame where the motion stopped short, and what stopped it: a loop, or a contact set.
+    let mut stop: Option<(usize, Option<Map<String, Value>>, Option<Map<String, Value>>)> = None;
     for k in 0..n {
         match &motion {
             Motion::Drive(given, plan) => {
                 let want = plan(&t, k, n);
                 let (r, _) = drive_with_contact(&mut t, &want, given)?;
-                if stop.0.is_null() && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object()) {
-                    stop = (json!(k), r["stopped_by_loop"].clone(), r["stopped_by_contact"].clone());
+                if stop.is_none() && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object()) {
+                    stop = Some((k, r["stopped_by_loop"].as_object().cloned(), r["stopped_by_contact"].as_object().cloned()));
                 }
             }
             // Shown as explode.show shows it, the way out at a steady pace (and back).
@@ -156,24 +159,37 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
             bytes += png.len();
         }
     }
-    let mut out = json!({"path": path, "format": if gif { "gif" } else { "png" }, "frames": n, "width": width, "height": height});
-    if gif {
+    let fps = if gif {
         // GIF counts in hundredths of a second, and viewers slow anything under 2 down.
         let delay = (100.0 / fps).round().clamp(2.0, 100.0) as u16;
         let gif = crate::render::gif(width as usize, height as usize, &frames, delay).ok_or_else(|| bad(cmd, "GIF encoding failed"))?;
         solidcraft_io::write_atomic(std::path::Path::new(path), &gif, false).map_err(io)?;
         bytes = gif.len();
-        out["fps"] = json!(100.0 / f64::from(delay));
-    }
-    out["bytes"] = json!(bytes);
-    out["renderer"] = json!(drawn_by);
-    if let Some(w) = capture::warning(drawn_by) {
-        out["warning"] = json!(w);
-    }
-    out["stopped_at"] = stop.0;
-    out["stopped_by_loop"] = stop.1;
-    out["stopped_by_contact"] = stop.2;
-    Ok(out)
+        Some(100.0 / f64::from(delay))
+    } else {
+        None
+    };
+    let (stopped_at, stopped_by_loop, stopped_by_contact) = match stop {
+        Some((k, by_loop, by_contact)) => (Some(k), by_loop, by_contact),
+        None => (None, None, None),
+    };
+    super::typed_reply(
+        cmd,
+        AnimationExported {
+            path: path.to_string(),
+            format: if gif { "gif" } else { "png" },
+            frames: n,
+            width,
+            height,
+            fps,
+            bytes,
+            renderer: drawn_by,
+            warning: capture::warning(drawn_by),
+            stop: StudyStop { stopped_at, stopped_by_loop },
+            stopped_by_contact,
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 /// The camera the frames are drawn from: the session's (`view.apply`), or `home` framing the
