@@ -2230,6 +2230,10 @@ fn a_linked_components_row_shows_the_state_of_its_file() {
     source.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
     source.execute("file.save", &json!({"path": part})).unwrap();
     let component = h.app.run("component.insert_design", json!({"path": part})).unwrap()["component"].as_u64().unwrap();
+    // The frame asks, whichever layout paints the Browser, or none.
+    let ctx = h.ctx.clone();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| h.app.logic(ui.ctx()));
+    assert!(h.app.tree.links.busy(), "asked without painting the Browser");
     answer(&mut h);
 
     let link = h.app.tree.links.get(component).expect("the link's badge").clone();

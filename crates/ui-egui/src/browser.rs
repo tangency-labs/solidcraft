@@ -1417,7 +1417,6 @@ pub(crate) fn panel_bounds(available: Rect, history: Option<Rect>, width: f32, g
 
 fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let t = Tokens::get();
-    crate::browser_links::refresh(app, ui.ctx());
     // Only the floating card folds; the docked column keeps its full height.
     let render = crate::render_workspace::active(app);
     if !render {
