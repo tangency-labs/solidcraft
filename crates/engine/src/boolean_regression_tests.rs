@@ -1606,3 +1606,23 @@ fn pattern_of_an_untargeted_cut_still_cuts_its_own_components_body() {
     assert!((one_hole - body1).abs() < 0.02 * hole, "Body1 untouched: {one_hole} -> {body1}");
     assert!((plate - plate2 - 9.0 * hole).abs() < 0.02 * hole, "Plate2 cut: {plate} -> {plate2}");
 }
+
+/// Issue #10: fuzzer seed 158. Box, chamfer, join/cut cylinders, join box, join cylinder, then
+/// shell. The shell step fails with "SMLib shell: operation: SMLib failed (status 1001)".
+/// Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a regression test
+/// that fails without the fix.
+/// TODO: root cause not yet found — shell result tolerance, topologically different from seed 73's
+/// "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the shell root cause for seed 158 is found (#10)"]
+#[test]
+fn fuzz_seed_158_shell_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_158_shell.json"));
+    let state = s.model.state();
+    // Every step ran: every body is a sound solid, and the shell produced one body.
+    assert_eq!(state.bodies.len(), 1, "the shell must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the shelled body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the shell must be a real solid: {}", m.volume);
+    println!("#10 seed 158: shelled body volume {volume:.2} mm³", volume = m.volume);
+}
