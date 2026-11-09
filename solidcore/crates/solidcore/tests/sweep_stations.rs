@@ -781,3 +781,32 @@ fn a_joint_is_a_corner_past_the_procedural_sweep_s_g1_rule() {
     assert!(kinked(1e-10).corner_fractions().unwrap().is_empty());
     assert_eq!(kinked(1e-7).corner_fractions().unwrap().len(), 1);
 }
+
+/// The caller's limits on twist and end scale are refused past, by name; the defaults take
+/// any finite twist and positive scale.
+#[test]
+fn the_caller_s_twist_and_scale_limits_refuse_past_them() {
+    let k = Kernel::default();
+    let path = along_x(5.0);
+    let at = stops(&[0.0, 1.0]);
+    let free = Laws {
+        twist: 5.0 * TAU,
+        end_scale: 200.0,
+        ..Laws::default()
+    };
+    stations(&k, &path, Vec3::X, &free, &at).unwrap();
+    let limited = |twist: f64, end_scale: f64| Laws {
+        twist,
+        end_scale,
+        max_twist: 4.0 * TAU,
+        end_scale_within: [0.01, 100.0],
+        ..Laws::default()
+    };
+    let err = stations(&k, &path, Vec3::X, &limited(5.0 * TAU, 1.0), &at).unwrap_err();
+    assert!(format!("{err:?}").contains("twist past"), "{err:?}");
+    for s in [0.005, 200.0] {
+        let err = stations(&k, &path, Vec3::X, &limited(0.0, s), &at).unwrap_err();
+        assert!(format!("{err:?}").contains("end scale outside"), "{err:?}");
+    }
+    stations(&k, &path, Vec3::X, &limited(-4.0 * TAU, 100.0), &at).unwrap();
+}

@@ -52,8 +52,9 @@
 //! limits are refused here (a scale not positive, a path not crossing a parallel profile's
 //! plane or running along the orientation direction, a corner doubling back); SolidCraft's
 //! limits on them (four turns of twist, scales 0.01 to 100, 5 degrees and `1e-3`) are the
-//! ops entry's, labelled there, and the last two reach this module as
-//! [`Laws::min_crossing`] and [`Laws::min_across`].
+//! ops entry's, labelled there, and reach this module as the caller's limits
+//! [`Laws::max_twist`], [`Laws::end_scale_within`], [`Laws::min_crossing`] and
+//! [`Laws::min_across`].
 //! - `twist` turns the profile about its normal (turned to point the way the path leaves it)
 //!   by `twist u` radians, right-handed, and `end_scale` scales it about the path by
 //!   `1 + (end_scale - 1) u`, `u` the fraction of the path's arc length run.
@@ -130,11 +131,12 @@ fn rotate(axis: Vec3, angle: f64, v: Vec3) -> Vec3 {
 }
 
 /// A linear map by its columns.
-type Map = [Vec3; 3];
+pub(crate) type Map = [Vec3; 3];
 
 const IDENTITY: Map = [Vec3::X, Vec3::Y, Vec3::Z];
 
-fn apply(m: &Map, v: Vec3) -> Vec3 {
+/// `m v`.
+pub(crate) fn apply(m: &Map, v: Vec3) -> Vec3 {
     let [a, b, c] = *m;
     a * v.x + b * v.y + c * v.z
 }
@@ -498,6 +500,12 @@ pub struct Laws<'a> {
     /// path's tangent and the direction at a station: the caller's limit (SolidCraft's is
     /// `1e-3`). At 0, only a path along the direction is refused.
     pub min_across: f64,
+    /// The most twist (radians, either way) the caller takes: its limit (SolidCraft's is four
+    /// turns). At infinity, any finite twist.
+    pub max_twist: f64,
+    /// The end scales the caller takes, `[least, most]`: its limits (SolidCraft's are 0.01 and
+    /// 100). At `[0, infinity]`, any finite positive scale.
+    pub end_scale_within: [f64; 2],
 }
 
 impl Default for Laws<'_> {
@@ -510,6 +518,8 @@ impl Default for Laws<'_> {
             rail_fit: RailFit::Scale,
             min_crossing: 0.0,
             min_across: 0.0,
+            max_twist: f64::INFINITY,
+            end_scale_within: [0.0, f64::INFINITY],
         }
     }
 }
@@ -523,6 +533,16 @@ impl Laws<'_> {
         }
         if !(self.end_scale.is_finite() && self.end_scale > 0.0) {
             return Err(invalid("an end scale not finite and positive"));
+        }
+        // the caller's limits on them (`max_twist`, `end_scale_within`)
+        let twist_taken = self.twist.abs() <= self.max_twist;
+        if !twist_taken {
+            return Err(invalid("a twist past the most the caller takes"));
+        }
+        let [least, most] = self.end_scale_within;
+        let scale_taken = least <= self.end_scale && self.end_scale <= most;
+        if !scale_taken {
+            return Err(invalid("an end scale outside the caller's range"));
         }
         if let Orientation::Direction(d) = self.orientation {
             if !(finite(d) && d.length_squared().is_finite()) {
@@ -711,11 +731,12 @@ fn transpose_rotation(r: &Map) -> Map {
     ]
 }
 
-/// Where `rail` crosses the plane through `p` square to the unit `t`: the root in its
-/// parameter of its signed distance from the plane, taken span by span in Bernstein form.
+/// Where `rail` crosses the plane through `p` square to the unit `t`, and its parameter there:
+/// the root in its parameter of its signed distance from the plane, taken span by span in
+/// Bernstein form.
 /// Refused unless exactly one root, at which the distance changes sign over the rail (a touch
 /// is not a crossing), and refused where the roots could not be isolated.
-fn rail_crossing(k: &Kernel, rail: &Curve, p: Point3, t: Vec3) -> Result<Point3> {
+pub(crate) fn rail_crossing(k: &Kernel, rail: &Curve, p: Point3, t: Vec3) -> Result<(f64, Point3)> {
     let base = rail
         .b_spline_base()
         .ok_or_else(|| unsupported("a guide rail with no NURBS form"))?;
@@ -826,7 +847,7 @@ fn rail_crossing(k: &Kernel, rail: &Curve, p: Point3, t: Vec3) -> Result<Point3>
                     "a guide rail touching a station's plane without crossing it",
                 ));
             }
-            rail.evaluate_point(k, *x)
+            Ok((*x, rail.evaluate_point(k, *x)?))
         }
         [] => Err(invalid(
             "a guide rail that does not reach a station's plane: it must run the path's length",
@@ -840,7 +861,7 @@ fn rail_crossing(k: &Kernel, rail: &Curve, p: Point3, t: Vec3) -> Result<Point3>
 /// How guide rails turn and size a section (SolidCraft's `rail_frame`): `along` (unit) turns
 /// onto `along_to`, `across` (unit, square to `along`) onto `across_to` sized by `k`, and the
 /// third way follows, sized by `k` ([`RailFit::Scale`]) or kept ([`RailFit::Stretch`]).
-fn rail_frame(
+pub(crate) fn rail_frame(
     along: Vec3,
     across: Vec3,
     along_to: Vec3,
@@ -967,7 +988,7 @@ fn railed(
         let (p, t, _, _) = locate(measured, stop)?;
         let mut hits = Vec::new();
         for rail in &laws.rails {
-            hits.push(rail_crossing(k, rail, p, t)?);
+            hits.push(rail_crossing(k, rail, p, t)?.1);
         }
         let (anchor, v) = match hits.as_slice() {
             [r] => (p, *r - p),
