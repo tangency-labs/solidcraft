@@ -1,4 +1,5 @@
 use super::*;
+use crate::prelude::*;
 
 fn bx(x0: f64, y0: f64, x1: f64, y1: f64) -> Aabb2 {
     Aabb2 { min: Vec2::new(x0, y0), max: Vec2::new(x1, y1) }

@@ -14,8 +14,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::Aabb2;
 use crate::paper::{MAX_COORDINATE_MM, MAX_SIDE_MM};
-use crate::{Aabb2, Vec2};
+use solidcore_record::Vec2;
 
 /// The most boxes one arrangement may hold.
 pub const MAX_BOXES: usize = 10_000;
