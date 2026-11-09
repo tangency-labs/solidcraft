@@ -1,0 +1,162 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b14": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "intersect"
+      }
+    }
+  ],
+  "case": "3526-intersect-keeps-every-lump",
+  "expected": {
+    "body_count": 1,
+    "method": "box x -10..40, y -10..10, z -10..0 holds the z<=0 half of each r=4 sphere (centres (0,0,0), (30,0,0)): V = 2 * (2/3) pi 4^3 = 268.083. The body must not be removed. One body with two shells",
+    "shells": 2,
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3526",
+      "tangency-labs/solidcraft#3888"
+    ],
+    "volume_mm3": 268.0826,
+    "what": "intersect of a two-lump target (two spheres joined while apart) with a box holding the bottom half of each"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 6,
+      "faces": 4,
+      "vertices": 6
+    }
+  },
+  "records": "3526-intersect-keeps-every-lump.bodies.json.gz",
+  "result": [
+    {
+      "body": "Balls",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 301.592894750877,
+      "body_count": 1,
+      "edges": 4,
+      "faces": 4,
+      "vertices": 4,
+      "volume_mm3": 268.0825731606335
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3526",
+    "tangency-labs/solidcraft#3888"
+  ],
+  "traced_ops": [
+    "make_sphere",
+    "make_sphere",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "intersect of a two-lump target (two spheres joined while apart) with a box holding the bottom half of each",
+  "why_not": []
+}

@@ -682,7 +682,9 @@ impl AppPanelRuntime {
                 if (self.runtime.environment() != &before || self.runtime.layout().inspect().revision != revision)
                     && let Some(host) = &mut self.host
                 {
-                    host.invalidate_context();
+                    // Presentation metadata can revise an unrelated panel.
+                    // Scope and focused-owner checks decide input ownership.
+                    host.invalidate_geometry();
                     host.reconcile_scope(&self.runtime);
                 }
             }
