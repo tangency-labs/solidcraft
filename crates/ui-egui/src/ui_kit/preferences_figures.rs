@@ -152,7 +152,7 @@ pub(crate) fn paint_orientation(p: &Painter, rect: Rect, y_up: bool) {
         arrow(&p, centre, end, colour, c.width(2.3), c.width(6.5));
         let text_pos = if y < 20.0 { c.at(x, y - 6.0) } else { c.at(x + if x < 60.0 { -7.0 } else { 7.0 }, y + 3.0) };
         let ink = if solidcraft_theme::contrast_ratio(colour, t.viewport_top) >= 4.5 { colour } else { t.form_ink };
-        p.text(text_pos, egui::Align2::CENTER_CENTER, label, crate::fonts::semibold(t.font_small), ink);
+        p.text(text_pos, egui::Align2::CENTER_CENTER, label, crate::ui_kit::type_face::semibold(t.font_small), ink);
     }
     p.circle_filled(centre, c.width(2.7), t.form_ink);
     p.circle_filled(centre, c.width(1.2), t.viewport_top);

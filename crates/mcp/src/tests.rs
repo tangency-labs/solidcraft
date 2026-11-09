@@ -323,14 +323,14 @@ fn document_only_atomic_tool_fallback_keeps_existing_checkpoint_rollback_behavio
 /// tests install the same one. `false`, with the reason printed, on a machine without a GPU
 /// adapter: the screenshots are then left out of the test.
 fn renders() -> bool {
-    match solidcraft_gpu::capture::shared() {
+    match solidcraft_viewport_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(c) => {
             solidcraft_engine::capture::install(std::sync::Arc::new(move |scene, cam, w, h| {
                 c.rgba(scene, cam, w, h).map(|rgba| solidcraft_engine::capture::Picture { rgba, renderer: c.renderer() }).map_err(|e| e.to_string())
             }));
             true
         }
-        Err(e @ solidcraft_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+        Err(e @ solidcraft_viewport_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
             eprintln!("screenshots left out: {e}");
             false
         }
@@ -2485,6 +2485,26 @@ fn compact_execute_keeps_changes_ids_and_default_replies() {
         let error = raw_tool(&mut s, "execute", json!({"command": "not.a.command", "verbose": false}));
         assert_eq!(error["result"]["isError"], true);
     }
+}
+
+/// #9180: a compact sketch reply counts the points of a spline's poles instead of listing them,
+/// and keeps the point ids of curves with only their ends.
+#[test]
+fn compact_sketch_replies_count_spline_poles() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY"}}));
+    let points = json!([[0, 0], [10, 5], [20, 0], [30, 5], [40, 0], [50, 5]]);
+    let full = tool(&mut s, "execute", json!({"command": "sketch.spline.fit_point", "params": {"points": points}}));
+    let listed = full["created"]["points"].as_array().unwrap().len();
+    let curves = full["created"]["curves"].as_array().unwrap().len();
+    assert!(listed > 2 * curves, "{full}");
+    let compact = tool(&mut s, "execute", json!({"command": "sketch.spline.fit_point", "params": {"points": points}, "verbose": false}));
+    assert_eq!(compact["created"]["point_count"], json!(listed), "{compact}");
+    assert!(compact["created"].get("points").is_none(), "{compact}");
+    assert_eq!(compact["created"]["curves"].as_array().map(Vec::len), Some(curves));
+    let rectangle =
+        tool(&mut s, "execute", json!({"command": "sketch.rectangle.two_point", "params": {"p0": [0, 20], "p1": [10, 30]}, "verbose": false}));
+    assert_eq!(rectangle["created"]["points"].as_array().map(Vec::len), Some(4), "{rectangle}");
 }
 
 /// A connected app sees exactly one engine call; no inventory inspection is needed.

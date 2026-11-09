@@ -21,7 +21,7 @@ use solidcraft_doc::NamedView;
 use super::check::{located, whole};
 use super::types::{CameraParam, not_blank_pattern};
 use super::view_navigation::{read_as, read_with};
-use crate::render::{Camera, StandardView};
+use solidcraft_viewport::{Camera, StandardView};
 
 /// The most body names `inspect.silhouette` reads from a list, as the handler does.
 const MAX_BODIES: usize = 10_000;

@@ -183,7 +183,7 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                 Value::Number(n) => n.to_string(),
                 _ => return Err(bad(CMD, "`component` must be a component id or name")),
             };
-            s.doc.find_component(&key).ok_or_else(|| bad(CMD, format!("no component `{key}`")))?
+            s.doc.resolve_component(&key).map_err(|error| bad(CMD, error.to_string()))?.ok_or_else(|| bad(CMD, format!("no component `{key}`")))?
         }
     };
     let path = match p.get("component_path") {

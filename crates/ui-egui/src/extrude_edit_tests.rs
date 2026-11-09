@@ -2,6 +2,7 @@
 use crate::scenario::Harness;
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{Extent, FeatureKind};
+use solidcraft_engine::geom::MeshGeom;
 
 fn make(params: Value) -> Harness {
     make_in(Harness::new(), params)

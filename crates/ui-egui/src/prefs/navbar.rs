@@ -182,7 +182,10 @@ fn preview(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, width: f32)
     scenario::publish_target("prefs:navbar:stage", stage);
     scenario::publish_target("prefs:navbar:preview", stage);
     let bar = navigation_bar_view::editor_layout(stage, &app.preferences.navigation_bar, |slot| {
-        ui.painter().layout_no_wrap(navigation_bar_view::slot_text(app, slot).to_owned(), crate::fonts::medium(ui_kit::NAV_TEXT), t.form_ink).size().x
+        ui.painter()
+            .layout_no_wrap(navigation_bar_view::slot_text(app, slot).to_owned(), crate::ui_kit::type_face::medium(ui_kit::NAV_TEXT), t.form_ink)
+            .size()
+            .x
     });
     scenario::publish_rect("prefs:navbar:bar", bar.rect);
     let mut cells = Vec::new();

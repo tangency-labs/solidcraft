@@ -1085,7 +1085,7 @@ fn named_views_save_restore_rename_and_delete() {
     act(&mut app, &Target::NamedViews, "New Named View");
     assert_eq!(app.session.doc.named_views.len(), 1);
     let saved = app.cam;
-    app.cam.set_view(solidcraft_engine::render::StandardView::Top);
+    app.cam.set_view(solidcraft_viewport::StandardView::Top);
     let t = Target::NamedView { name: "Named View1".into() };
     act(&mut app, &t, "Restore");
     assert_eq!(app.cam_anim.map(|a| a.to), Some(saved), "animates back to the saved camera");
@@ -1821,6 +1821,32 @@ fn appearance_browser_selection_reaches_the_editor_without_other_bodies() {
     }
 }
 
+/// #12334: Save As Mesh and Send to Slicer on a selected browser row open their dialog with every
+/// selected body; a row outside the selection, or a lone selected one, opens it with that row only.
+#[test]
+fn mesh_export_from_a_selected_browser_body_takes_the_selected_bodies() {
+    let cases = [
+        ("One", vec!["One", "Two"], vec!["One", "Two"]),
+        ("Two", vec!["One", "Two"], vec!["One", "Two"]),
+        ("Other", vec!["One", "Two"], vec!["Other"]),
+        ("One", vec!["One"], vec!["One"]),
+    ];
+    for label in ["Send to Slicer", "Save As Mesh"] {
+        for (clicked, selected, expected) in &cases {
+            let mut app = appearance_selection_app();
+            // Send to Slicer needs a way to start a program.
+            app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+            let items: Vec<_> = selected.iter().map(|name| json!({"type":"body","name":name})).collect();
+            app.run("select.set", json!({ "items": items })).unwrap();
+            let item = find(&context_menu::items(&app, &Target::Body { name: (*clicked).into() }), label);
+            context_menu::run_item(&mut app, &item, pos2(0.0, 0.0));
+            let dialog = app.dialog.as_ref().unwrap_or_else(|| panic!("{label} opens its dialog"));
+            let bodies: Vec<_> = expected.iter().map(|name| solidcraft_engine::Sel::Body { name: (*name).into() }).collect();
+            assert_eq!(dialog.inputs[0].items, bodies, "{label}: clicked {clicked}, selected {selected:?}");
+        }
+    }
+}
+
 #[test]
 fn appearance_parent_click_opens_editor_after_hovering_quick_choices() {
     use crate::scenario::{Harness, rect_of};
@@ -2256,10 +2282,14 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
         "a saved design, one with unsaved changes, one never saved; not the blank new tab"
     );
 
+    // Each is read beside the window, as a file picked under Browse… is (#11593).
     act(&mut h.app, &Target::InsertDesign, &names[0]);
+    assert!(h.app.file_load.busy(), "the design is read off the window thread");
+    h.settle();
     assert_eq!(linked(&h.app, "bracket.solidcraft"), 1);
     assert!(h.app.status.as_ref().is_none_or(|(s, _, _)| !s.contains("unsaved")), "{:?}", h.app.status);
     act(&mut h.app, &Target::InsertDesign, &names[1]);
+    h.settle();
     assert_eq!(linked(&h.app, "plate.solidcraft"), 1);
     assert!(
         h.app.status.as_ref().is_some_and(|(s, _, error)| !*error && s.contains("unsaved changes") && s.contains("Update Links")),
@@ -2271,6 +2301,7 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
     h.step(&json!({"choose_file": "bracket.solidcraft"})).unwrap();
     act(&mut h.app, &Target::InsertDesign, "Browse…");
     h.frames(3);
+    h.settle();
     assert_eq!(linked(&h.app, "bracket.solidcraft"), 2);
 
     // The preference off: straight to the picker.
@@ -2280,6 +2311,7 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
     h.app.start("component.insert_design");
     assert!(!menu_open(&h.app));
     h.frames(3);
+    h.settle();
     assert_eq!(linked(&h.app, "plate.solidcraft"), 2);
 }
 
