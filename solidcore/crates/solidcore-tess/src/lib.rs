@@ -41,7 +41,7 @@ pub use mesher::{MAX_ANGLE_BOUNDARY, plan};
 pub use par::guarded;
 pub use plan::{FacePlan, TessPlan};
 pub use pole::{AveragedPole, PoleNode, PoleRule};
-pub use stats::{Cap, CappedEdge, EdgeCap, OverTolerance, PlanStats, RefusedEdge, RefusedFace};
+pub use stats::{PlanStats, RefusedEdge, RefusedFace};
 pub use tolerance::{DISPLAY_ANGLE, MeshTolerance};
 
 /// Why a body could not be planned. The messages are the ones the mesher has always reported.
