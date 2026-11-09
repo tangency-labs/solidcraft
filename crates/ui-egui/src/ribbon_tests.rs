@@ -381,3 +381,164 @@ fn the_tab_row_returns_what_was_clicked() {
     assert_eq!(rig.click("t:action:go"), vec![TabAction::Run { id: "go".into() }]);
     assert_eq!(rig.click("t:action:stop"), Vec::new(), "a button that is not ready runs nothing");
 }
+
+use egui::{Event, RawInput};
+
+/// One pass of a fake two-row drop-down at `menu`; returns the tips shown this pass.
+fn tip_pass(ctx: &egui::Context, menu: Rect, time: f64, at: egui::Pos2) -> Vec<(usize, Rect)> {
+    let raw = RawInput { events: vec![Event::PointerMoved(at)], time: Some(time), ..Default::default() };
+    let mut shown: Vec<(usize, Rect)> = Vec::new();
+    crate::test_support::frame(ctx, raw, |ui| {
+        let ctx = ui.ctx();
+        egui::Area::new(egui::Id::unique("test_dropdown")).fixed_pos(menu.min).show(ctx, |ui| {
+            for row in 0..2 {
+                let rect = Rect::from_min_size(menu.min + vec2(0.0, row as f32 * 32.0), vec2(menu.width(), 32.0));
+                let resp = ui.interact(rect, egui::Id::unique(("test_row", row)), Sense::hover());
+                let tip = if row == 0 {
+                    menu_tip(ui, menu, &resp, |ui| {
+                        ui.label("first row");
+                    })
+                } else {
+                    menu_tip(ui, menu, &resp, |ui| {
+                        ui.label("second row");
+                    })
+                };
+                if let Some(rect) = tip {
+                    shown.push((row, rect));
+                }
+            }
+        });
+    });
+    shown
+}
+
+/// egui registers hover a pass or two after the pointer arrives (measured), while leaving
+/// a row drops hover the same pass. Timings below keep a margin around that lag.
+#[test]
+fn each_newly_hovered_row_waits_the_full_tip_delay() {
+    let ctx = crate::fonts::test_context();
+    let menu = Rect::from_min_size(pos2(20.0, 20.0), vec2(220.0, 64.0));
+    let a = menu.min + vec2(10.0, 16.0);
+    let b = menu.min + vec2(10.0, 48.0);
+    let mut tips = Vec::new();
+    for (time, at, expect) in [
+        (0.0, a, None),
+        (0.1, a, None),
+        (0.3, a, None), // hover registers around here; the first row's delay starts
+        (0.5, a, None), // still inside the delay
+        (0.9, a, Some(0)),
+        (1.0, b, None),    // the first row lost hover the moment the pointer left it
+        (1.2, b, None),    // the second row must not inherit the open tip's grace (#10481)
+        (1.4, b, None),    // its own delay cannot have elapsed yet, whenever hover registered
+        (2.2, b, Some(1)), // after its own full delay, with margin for late registration
+    ] {
+        let got = tip_pass(&ctx, menu, time, at);
+        match expect {
+            Some(row) => {
+                assert_eq!(got.len(), 1, "exactly row {row}'s tip at t={time}, got {got:?}");
+                assert_eq!(got[0].0, row, "wrong row's tip at t={time}");
+                let tip = got[0].1;
+                assert!(tip.min.x >= menu.max.x, "the tip sits beside the menu, never over its rows: {tip:?} vs {menu:?}");
+                tips.push((row, tip));
+            }
+            None => assert!(got.is_empty(), "no tip expected at t={time}, got {got:?}"),
+        }
+    }
+    assert_eq!(tips.len(), 2, "both rows showed a tip after their own delay");
+}
+
+fn menu_style() -> MenuStyle<'static> {
+    MenuStyle {
+        pin_tip: "Pin",
+        unpin_tip: "Unpin",
+        accent: TabAccent::for_tab(&Tokens::get(), "MODEL"),
+        focus: egui::Id::unique("test_menu"),
+        entry: &["t:entry:"],
+        pin: "t:pin:",
+        hot: "t:hot:",
+        reveal: "t:reveal",
+    }
+}
+
+fn entry(id: &'static str, enabled: bool) -> MenuEntry<'static> {
+    MenuEntry { id, label: id, icon: "box", shortcut: "", enabled, checked: None, pinned: false, tip: None, app_paints: false }
+}
+
+/// A menu of two rows (the second disabled) or, `grid`, the same as a grid; each frame's choice.
+struct MenuRig {
+    ctx: egui::Context,
+    grid: bool,
+    time: std::cell::Cell<f64>,
+}
+
+impl MenuRig {
+    fn new(grid: bool) -> MenuRig {
+        let rig = MenuRig { ctx: crate::fonts::test_context(), grid, time: std::cell::Cell::new(0.0) };
+        rig.frame(Vec::new(), 0.0);
+        rig
+    }
+
+    fn frame(&self, events: Vec<egui::Event>, wait: f64) -> Vec<(String, MenuAction)> {
+        solidcraft_ui_registry::clear_handles();
+        self.time.set(self.time.get() + 1.0 / 60.0 + wait);
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0))),
+            time: Some(self.time.get()),
+            events,
+            focused: true,
+            ..Default::default()
+        };
+        let entries = [entry("m.on", true), entry("m.off", false)];
+        let style = menu_style();
+        let mut chosen = Vec::new();
+        crate::test_support::frame(&self.ctx, input, |ui| {
+            if self.grid {
+                let grouped: Vec<(Option<&str>, MenuEntry)> = entries.iter().map(|e| (None, *e)).collect();
+                let out = grid(ui, &grouped, &[], &style);
+                chosen.extend(out.action.and_then(|(i, a)| entries.get(i).map(|e| (e.id.to_string(), a))));
+            } else {
+                for e in &entries {
+                    let (action, _) = menu_row(ui, e, 220.0, None, &style);
+                    chosen.extend(action.map(|a| (e.id.to_string(), a)));
+                }
+            }
+        });
+        chosen
+    }
+
+    fn press(&self, at: egui::Pos2, button: egui::PointerButton, wait: f64) -> Vec<(String, MenuAction)> {
+        let event = |pressed| egui::Event::PointerButton { pos: at, button, pressed, modifiers: egui::Modifiers::NONE };
+        let mut chosen = self.frame(vec![egui::Event::PointerMoved(at)], 1.0);
+        chosen.extend(self.frame(vec![egui::Event::PointerMoved(at)], wait));
+        chosen.extend(self.frame(vec![egui::Event::PointerMoved(at), event(true)], 0.0));
+        chosen.extend(self.frame(vec![egui::Event::PointerMoved(at), event(false)], 0.0));
+        chosen
+    }
+
+    fn at(&self, name: &str) -> egui::Pos2 {
+        solidcraft_ui_registry::handle_at(name).unwrap_or_else(|| panic!("{name} is drawn"))
+    }
+}
+
+/// A row or grid icon is hot under the pointer, runs its command when clicked, opens its menu on
+/// a right-click, runs nothing when disabled, and pins or unpins from its pin.
+#[test]
+fn a_menu_entry_returns_what_was_chosen() {
+    for grid in [false, true] {
+        let rig = MenuRig::new(grid);
+        let on = rig.at("t:entry:m.on");
+        let chosen = rig.press(on, egui::PointerButton::Primary, 0.0);
+        assert!(matches!(chosen.as_slice(), [(id, MenuAction::Run(rect))] if id == "m.on" && rect.contains(on)), "grid {grid}: {chosen:?}");
+        assert_eq!(solidcraft_ui_registry::handle_at("t:hot:m.on"), Some(on), "grid {grid}: the entry under the pointer is hot");
+        let chosen = rig.press(on, egui::PointerButton::Secondary, 0.0);
+        assert!(matches!(chosen.as_slice(), [(id, MenuAction::Menu(_))] if id == "m.on"), "grid {grid}: {chosen:?}");
+        assert_eq!(rig.press(rig.at("t:entry:m.off"), egui::PointerButton::Primary, 0.0), Vec::new(), "grid {grid}: a disabled entry runs nothing");
+        // A grid icon's pin takes clicks once the pointer has rested on the icon.
+        let wait = if grid { PIN_DELAY + 0.1 } else { 0.0 };
+        rig.press(on, egui::PointerButton::Primary, wait);
+        rig.frame(vec![egui::Event::PointerMoved(on)], wait);
+        let pin = rig.at("t:pin:m.on");
+        let chosen = rig.press(pin, egui::PointerButton::Primary, 0.0);
+        assert_eq!(chosen, vec![("m.on".to_string(), MenuAction::TogglePin)], "grid {grid}");
+    }
+}
