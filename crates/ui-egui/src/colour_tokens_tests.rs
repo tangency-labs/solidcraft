@@ -158,6 +158,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("render_ui/scene.rs", 2, "Browser appearance swatches: the colours are document data"),
     ("render_workspace_library.rs", 1, "a catalog appearance preview: the colour is authored data"),
     ("render_workspace_materials.rs", 1, "an authored material swatch: the displayed colour is the material data"),
+    ("render_workspace_quality.rs", 1, "the denoise guide legend reproduces categorical mask pixels; colour is exported image data"),
     ("dialogs_assembly.rs", 1, "the interference fill, shaded from its token"),
     ("dialogs_motion.rs", 1, "a white outline"),
     ("gizmo.rs", 2, "the gizmo's neutral grey ball"),

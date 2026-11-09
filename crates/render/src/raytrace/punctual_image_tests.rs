@@ -32,6 +32,7 @@ fn task(blocker: Option<(f64, f64)>, shadows: bool) -> ImageTask {
     let mut camera = solidcraft_viewport::Camera { distance: 80.0, fov: 0.0, ..Default::default() };
     camera.set_view(StandardView::Top);
     let options = RaytraceOptions {
+        threads: 1,
         lights: Some(Vec::new()),
         punctual_lights: Some(vec![PunctualLightOptions {
             position_mm: [20.0, 0.0, 10.0],

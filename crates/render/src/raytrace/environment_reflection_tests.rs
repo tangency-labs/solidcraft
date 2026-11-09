@@ -45,6 +45,7 @@ fn request(mode: ReflectionMode) -> ImageRequest {
         textures: None,
         integrator: job::Integrator::Raytrace,
         raytrace: Some(RaytraceOptions {
+            threads: 1,
             lights: Some(Vec::new()),
             reflections: Some(ReflectionOptions { bodies: vec![ReflectionBody { body: "Metal".into(), mode }], max_bounces: 1, samples: 64 }),
             ..Default::default()

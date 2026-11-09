@@ -82,7 +82,6 @@ pub(crate) fn with_room<T>(n: usize) -> Option<Vec<T>> {
     Some(v)
 }
 
-
 #[cfg(test)]
 mod reexport_tests {
     use solidcore_record::Vec3;
@@ -99,9 +98,14 @@ mod reexport_tests {
             du: crate::vec3(Vec3::new(1.0, 0.0, 0.0)),
             dv: crate::vec3(Vec3::new(0.0, 1.0, 0.0)),
         };
-        let crate::EvalSurface::Plane { origin, .. } = &plane else { panic!("{plane:?}") };
+        let crate::EvalSurface::Plane { origin, .. } = &plane else {
+            panic!("{plane:?}")
+        };
         assert_eq!(crate::record_vec3(*origin), Vec3::new(1.0, 2.0, 3.0));
-        let plan = crate::TessPlan { surfaces: vec![plane.clone()], ..Default::default() };
+        let plan = crate::TessPlan {
+            surfaces: vec![plane.clone()],
+            ..Default::default()
+        };
         assert_eq!(surfaces(&plan), [plane]);
     }
 }

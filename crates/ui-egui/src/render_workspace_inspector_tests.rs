@@ -439,10 +439,10 @@ fn projected_quality_changes_only_requested_budget_fields_and_has_no_runtime_cla
     h.app.render_workspace.view.studio.ambient = [0.11, 0.22, 0.33];
     let before = h.app.session.doc.to_json();
     let camera = h.app.cam;
-    let plan = h.app.run("render.quality.prepare", json!({"id":"Q-002","variant":"fixed_samples_png","acknowledge_omissions":true})).unwrap();
+    let plan = h.app.run("render.quality.prepare", json!({"id":"Q-001","variant":"fixed_samples_png","acknowledge_omissions":true})).unwrap();
     apply_quality(&mut h.app, &plan).unwrap();
-    assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (1600, 900));
-    assert_eq!(h.app.render_workspace.view.samples, 512);
+    assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (960, 540));
+    assert_eq!(h.app.render_workspace.view.samples, 64);
     assert_eq!(h.app.cam, camera);
     assert_eq!(h.app.render_workspace.view.studio.intensity, 0.42);
     assert_eq!(h.app.render_workspace.view.studio.ambient, [0.11, 0.22, 0.33]);
@@ -620,7 +620,7 @@ fn quality_review_is_callable_by_command_and_saves_only_after_acknowledgement() 
     let mut h = fixture();
     super::super::select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
     let mut view = library::View::default();
-    library::choose(&mut h.app, &mut view, "quality", "Q-002").unwrap();
+    library::choose(&mut h.app, &mut view, "quality", "Q-001").unwrap();
     h.app.render_workspace.view.library = view;
     let before = h.app.session.doc.to_json();
     h.app.start("render.quality.prepare");
@@ -630,9 +630,25 @@ fn quality_review_is_callable_by_command_and_saves_only_after_acknowledgement() 
     h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     let saved = &h.app.session.doc.render.setups[&h.app.render_workspace.view.name];
-    assert_eq!((saved.width, saved.height), (1600, 900));
-    assert_eq!(h.app.render_workspace.view.samples, 512);
+    assert_eq!((saved.width, saved.height), (960, 540));
+    assert_eq!(h.app.render_workspace.view.samples, 64);
     assert!(h.app.render_workspace.view.library.review.is_none());
+
+    // Balanced keeps its canonical budget and remains read-only until acknowledged.
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    library::review::quality(&mut h.app, "Q-002").unwrap();
+    h.frames(3);
+    assert_eq!(h.app.render_workspace.view.library.review.as_ref().unwrap().plan["gpu_options"]["samples"], json!(512));
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!(h.app.session.undo.len(), undo);
+    h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.render_workspace.view.samples, 512);
+    assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (1600, 900));
+    assert!(h.app.render_workspace.view.library.review.is_none());
+    assert!(h.app.render_workspace.view.job.is_none());
 }
 
 #[test]
@@ -837,6 +853,173 @@ fn resolution_lock_reanchors_for_explicit_presets_and_does_not_affect_other_inte
     assert_eq!(edit.edit([777, 777], 0, 555, 8192), Some([555, 777]));
     edit.locked = true;
     assert_eq!(edit.edit([555, 777], 0, 1110, 8192), Some([1110, 1554]));
+}
+
+#[test]
+fn output_dimensions_preserve_legacy_size_until_an_explicit_bounded_edit() {
+    use solidcraft_engine::render::job::CpuBudget;
+    for (width, height, field) in [(16384, 1, "render:output-width"), (1, 16384, "render:output-height")] {
+        let mut h = fixture();
+        h.call("ui.resize", json!({"width":1440,"height":1600}));
+        h.app
+            .run(
+                "render.settings.set",
+                json!({"name":"Legacy native","set":{
+                    "width":width,"height":height,
+                    "job":{"method":"cpu_raytrace","options":{"budget":"workstation"}}
+                }}),
+            )
+            .unwrap();
+        h.app.render_workspace.view.name = "Legacy native".into();
+        setups::load(&mut h.app);
+        let saved = h.app.session.doc.render.setups["Legacy native"].clone();
+        saved.validate().unwrap();
+        assert_eq!(h.app.render_workspace.view.raytrace.budget, CpuBudget::Workstation);
+        assert_eq!(h.app.render_workspace.view.studio.supersampling, 1);
+        assert!(!h.app.render_workspace.view.studio.denoise);
+        assert!(!h.app.render_workspace.view.studio.denoise_diagnostics);
+        let doc = h.app.session.doc.clone();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+
+        // Revealing either field and navigating between editors must not turn the
+        // new 8K edit bound into a saved size change for an admitted legacy job.
+        for kind in ["output", "sampling", "output"] {
+            h.app.run("view.render_select", json!({"kind":kind})).unwrap();
+            h.frames(3);
+            assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (width, height));
+            assert_eq!(h.app.session.doc.render.setups["Legacy native"], saved);
+            assert!(Arc::ptr_eq(&doc, &h.app.session.doc), "painting must not issue a settings command");
+            assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+            assert!(h.app.render_workspace.view.job.is_none());
+        }
+
+        // An actual text edit still clamps to the current UI side limit.
+        let at = reveal_inspector_target(&mut h, field).center();
+        h.step(&json!({"click":[at.x,at.y],"double":true})).unwrap();
+        h.step(&json!({"key":"A","cmd":true,"ctrl":true})).unwrap();
+        h.step(&json!({"text":"20000"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(3);
+        let edited = if width > 8192 { (8192, height) } else { (width, 8192) };
+        assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), edited);
+        let mut expected = saved.clone();
+        (expected.width, expected.height) = edited;
+        assert_eq!(h.app.session.doc.render.setups["Legacy native"], expected);
+        assert_eq!(h.app.session.undo.len(), history.1 + 1);
+
+        // Undo restores the authored size, which must remain unchanged on paint.
+        h.app.run("edit.undo", json!({})).unwrap();
+        setups::sync_revision(&mut h.app);
+        h.frames(3);
+        assert_eq!(h.app.session.doc.render.setups["Legacy native"], saved);
+        assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (width, height));
+
+        reveal_inspector_target(&mut h, "render:size:8k");
+        h.step(&json!({"click":{"handle":"render:size:8k"}})).unwrap();
+        assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (7680, 4320));
+        assert_eq!(h.app.render_workspace.view.raytrace.budget, CpuBudget::Workstation);
+        assert!(h.app.render_workspace.view.job.is_none());
+        let doc = h.app.session.doc.clone();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        for (width, height) in [(8193, 1), (1, 8193), (8192, 8192)] {
+            assert!(apply_size(&mut h.app, width, height, true).is_err());
+            assert!(Arc::ptr_eq(&doc, &h.app.session.doc), "side and pixel bounds must still reject explicit requests");
+            assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (7680, 4320));
+            assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_cpu_legacy_dimensions_remain_checkable_renderable_and_saveable_with_bounded_new_choices() {
+    use solidcraft_engine::render::job::{CpuBudget, CpuHost, MAX_OUTPUT_DIMENSION, MAX_OUTPUT_PIXELS};
+    // Exercise both legacy side limits and a native pixel count above the new
+    // output envelope, including progressive sampling and explicit identity output.
+    for (width, height, progressive, identity_output) in [(16384, 1, false, false), (1, 16384, true, true), (8192, 8192, true, false)] {
+        let mut h = fixture();
+        h.app.render_workspace.view.live_paused = true;
+        h.app.session.set_render_job_host(Some(CpuHost::for_platform().unwrap())).unwrap();
+        let mut options = json!({"budget":"workstation","threads":1});
+        if progressive {
+            options["progressive"] = json!({"samples_per_pixel":32,"seed":81});
+        }
+        if identity_output {
+            options["output"] = json!({});
+        }
+        h.app
+            .run(
+                "render.settings.set",
+                json!({"name":"Legacy native","set":{
+                    "width":width,"height":height,"camera":h.app.cam,
+                    "job":{"method":"cpu_raytrace","options":options}
+                }}),
+            )
+            .unwrap();
+        h.app.render_workspace.view.name = "Legacy native".into();
+        setups::load(&mut h.app);
+        h.frames(3);
+        let native_size = (u64::from(width), u64::from(height));
+        assert_eq!(cpu::image_limits(&h.app).fit(native_size.0, native_size.1, None), Some(native_size));
+        assert_ne!(cpu::size_selection_limits(&h.app).fit(native_size.0, native_size.1, None), Some(native_size));
+        assert!(cpu::progressive_adoption_reason(&h.app).is_none());
+        cpu::validate_progressive_image(&h.app).unwrap();
+        let original = h.app.session.doc.render.setups["Legacy native"].clone();
+        let snapshot = setups::snapshot(&h.app).unwrap();
+        assert_eq!((snapshot.width, snapshot.height), (width, height));
+        assert_eq!(snapshot.job, original.job, "an explicit identity output object must remain native");
+        let request = super::super::image_request(&h.app).unwrap();
+        assert_eq!((request["settings"]["width"].as_u64(), request["settings"]["height"].as_u64()), (Some(native_size.0), Some(native_size.1)));
+        for action in ["render.preflight", "render.start"] {
+            super::super::ribbon::action_ready(&h.app, action).unwrap();
+        }
+        // Save uses the same validation as Check and Render. No image allocation or
+        // execution is necessary to prove that those routes accept the native intent.
+        setups::save_numerical(&mut h.app).unwrap();
+        assert_eq!(h.app.session.doc.render.setups["Legacy native"].job, original.job);
+        assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (width, height));
+        let saved = h.app.session.doc.clone();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let studio = h.app.render_workspace.view.studio.clone();
+
+        for feature in ["supersampling", "denoise", "diagnostics", "exr", "presentation"] {
+            h.app.render_workspace.view.studio = studio.clone();
+            match feature {
+                "supersampling" => h.app.render_workspace.view.studio.supersampling = 2,
+                "denoise" => h.app.render_workspace.view.studio.denoise = true,
+                "diagnostics" => h.app.render_workspace.view.studio.denoise_diagnostics = true,
+                "exr" => h.app.render_workspace.view.studio.linear_exr = true,
+                _ => h.app.render_workspace.view.studio.finishing.contrast = 1.1,
+            }
+            assert!(setups::draft(&h.app).unwrap().validate().is_err(), "{feature}: saved validation owns the output envelope");
+            assert!(cpu::validate_progressive_image(&h.app).is_err(), "{feature}: UI must agree with saved/native output admission");
+            assert!(super::super::image_request(&h.app).is_err());
+            assert!(setups::snapshot(&h.app).is_err());
+            for action in ["render.preflight", "render.start"] {
+                assert!(super::super::ribbon::action_ready(&h.app, action).is_err(), "{feature}: {action}");
+            }
+            assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (width, height));
+            assert_eq!(h.app.render_workspace.view.raytrace.budget, CpuBudget::Workstation);
+            assert!(Arc::ptr_eq(&saved, &h.app.session.doc), "refusal must not downgrade or rewrite native intent");
+        }
+        h.app.render_workspace.view.studio = studio;
+        cpu::validate_progressive_image(&h.app).unwrap();
+
+        let largest = largest_output(&h.app).unwrap();
+        assert!(largest.0 <= u64::from(MAX_OUTPUT_DIMENSION) && largest.1 <= u64::from(MAX_OUTPUT_DIMENSION));
+        assert!(largest.0 * largest.1 <= MAX_OUTPUT_PIXELS);
+        assert_eq!(cpu::size_selection_limits(&h.app).fit(largest.0, largest.1, None), Some(largest));
+        for (new_width, new_height) in [(16384, 1), (1, 16384), (8192, 8192)] {
+            let refusal = apply_size(&mut h.app, new_width, new_height, true).unwrap_err();
+            assert!(refusal.contains("8192"), "the explicit size refusal must name the UI envelope: {refusal}");
+            assert!(h.app.run("render.output.size", json!({"width":new_width,"height":new_height,"custom":true})).is_err());
+            assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (width, height));
+            assert!(Arc::ptr_eq(&saved, &h.app.session.doc));
+        }
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert!(h.app.render_workspace.view.job.is_none());
+        assert_eq!(h.app.session.render_job_host().unwrap().admitted_bytes(), 0);
+    }
 }
 
 #[test]
@@ -1775,14 +1958,24 @@ fn a_size_the_cpu_profile_refuses_names_the_profile_that_renders_it() {
     assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (3840, 2160));
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
 
-    // Studio renders 4K and marks nothing up to it; a 16K-wide image names Workstation.
+    // Studio renders 4K; 8K UHD needs Workstation within the new UI output envelope.
     h.app.render_workspace.view.raytrace.budget = CpuBudget::Studio;
+    assert_eq!(h.app.render_workspace.view.studio.supersampling, 1);
+    assert!(h.app.render_workspace.view.raytrace.progressive.is_none());
     cpu::validate_progressive_image(&h.app).unwrap();
     assert_eq!(size_mark(&h.app, "4K UHD", Some((3840, 2160))), None);
-    assert_eq!(size_mark(&h.app, "16K", Some((15360, 4320))).as_deref(), Some("16K · needs Workstation"));
-    assert!(size_limit_reason(&h.app, 15360, 4320).contains("choose the Workstation CPU resource profile"));
-    h.app.render_workspace.view.raytrace.budget = CpuBudget::Workstation;
+    assert_eq!(size_mark(&h.app, "8K UHD", Some((7680, 4320))).as_deref(), Some("8K UHD · needs Workstation"));
+    assert!(size_limit_reason(&h.app, 7680, 4320).contains("choose the Workstation CPU resource profile"));
+    assert_eq!(h.app.render_workspace.view.raytrace.budget, CpuBudget::Studio, "a hint does not change the profile");
+    assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (3840, 2160));
+    // Existing native requests retain their profile hint, while size selectors do
+    // not advertise a new over-8K choice.
+    assert_eq!(cpu::profile_for_size(&h.app, 15360, 4320), Some(CpuBudget::Workstation));
     assert_eq!(size_mark(&h.app, "16K", Some((15360, 4320))), None);
+    assert!(size_limit_reason(&h.app, 15360, 4320).contains("choose the Workstation CPU resource profile"));
+    assert!(!size_selection_limit_reason(&h.app, 15360, 4320).contains("CPU resource profile"));
+    h.app.render_workspace.view.raytrace.budget = CpuBudget::Workstation;
+    assert_eq!(size_mark(&h.app, "8K UHD", Some((7680, 4320))), None);
 
     // Progressive sampling's camera-sample budget counts: 4K at 64 spp needs Studio too.
     h.app.render_workspace.view.raytrace.budget = CpuBudget::Compact;
@@ -1807,7 +2000,7 @@ fn a_size_the_cpu_profile_refuses_names_the_profile_that_renders_it() {
     h.step(&json!({"click":{"handle":"render:shots:size"}})).unwrap();
     h.step(&json!({"widget":"4K UHD · 3840 × 2160"})).unwrap();
     assert_eq!(size_mark(&h.app, "4K UHD", Some((3840, 2160))), None);
-    // 15360 × 4320 is past the GPU limits, yet Workstation would admit it: still no CPU profile.
+    // An over-8K UI size never names a CPU profile, including on the GPU method.
     assert_eq!(size_mark(&h.app, "16K", Some((15360, 4320))), None);
     assert!(!size_limit_reason(&h.app, 15360, 4320).contains("CPU resource profile"));
     cpu::validate_progressive_image(&h.app).unwrap();
@@ -2889,7 +3082,7 @@ mod quality_button_contract {
     }
 
     #[test]
-    fn quality_buttons_apply_all_three_actual_catalog_budgets_as_one_numerical_edit() {
+    fn quality_buttons_apply_canonical_catalog_budgets_within_ui_limit() {
         for (index, id, width, height, samples, depth, denoise) in
             [(0, "Q-001", 960, 540, 64, 4, false), (1, "Q-002", 1600, 900, 512, 8, true), (2, "Q-003", 2560, 1440, 2048, 12, true)]
         {
@@ -2902,6 +3095,8 @@ mod quality_button_contract {
             assert_eq!(plan["settings"], json!({"width":width,"height":height}));
             assert_eq!(plan["gpu_options"], json!({"samples":samples,"max_depth":depth,"seed":21026,"denoise":denoise}));
             assert!(plan["omitted"].as_array().unwrap().iter().any(|v| v == "convergence_certification"));
+            prepare_quality_choices(&mut h.app);
+            assert_eq!(quality_reason(&h.app, index), None);
             choose_quality(&mut h.app, index).unwrap();
             assert!(h.app.render_workspace.view.library.review.is_none());
             assert_eq!((h.app.session.revision, h.app.session.undo.len()), (history.0 + 1, history.1 + 1));
@@ -2935,14 +3130,14 @@ mod quality_button_contract {
         let history = (h.app.session.revision, h.app.session.undo.len());
         h.app.run("view.render_select", json!({"kind":"sampling"})).unwrap();
         h.frames(3);
-        h.step(&json!({"click":{"handle":"render:quality:balanced"}})).unwrap();
+        h.step(&json!({"click":{"handle":"render:quality:draft"}})).unwrap();
         h.frames(3);
         assert!(h.app.render_workspace.view.library.review.is_none());
         assert_eq!(h.app.session.revision, history.0 + 1);
         assert_eq!(h.app.session.undo.len(), history.1 + 1);
-        assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (1600, 900));
-        assert_eq!((h.app.render_workspace.view.samples, h.app.render_workspace.view.max_depth, h.app.render_workspace.view.seed), (512, 8, 21026));
-        assert!(h.app.render_workspace.view.studio.denoise);
+        assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (960, 540));
+        assert_eq!((h.app.render_workspace.view.samples, h.app.render_workspace.view.max_depth, h.app.render_workspace.view.seed), (64, 4, 21026));
+        assert!(!h.app.render_workspace.view.studio.denoise);
         assert_eq!(h.app.render_workspace.view.name, shot);
         assert_eq!(h.app.render_workspace.view.stage, stage);
         assert_eq!(h.app.render_workspace.view.method, ImageMethod::GpuRaytrace);
@@ -2950,9 +3145,9 @@ mod quality_button_contract {
         assert_eq!(h.app.render_workspace.view.studio.intensity, 0.42);
         assert_eq!(h.app.render_workspace.view.studio.ambient, [0.11, 0.22, 0.33]);
         assert_eq!(h.app.render_workspace.view.draft.exposure_ev, 1.23);
-        assert_eq!(h.app.session.doc.render.setups[&shot].width, 1600);
-        assert_eq!(quality_selection(&h.app), 1);
-        let summary = quality_summary(&h.app, 1600, 900, 512, 8, 21026, true);
+        assert_eq!(h.app.session.doc.render.setups[&shot].width, 960);
+        assert_eq!(quality_selection(&h.app), 0);
+        let summary = quality_summary(&h.app, 960, 540, 64, 4, 21026, false);
         assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == summary)));
         assert!(crate::scenario::rect_of("render:review:acknowledge").is_none());
         assert!(h.app.render_workspace.view.job.is_none(), "choosing quality never starts a renderer");
@@ -3116,12 +3311,12 @@ mod quality_button_contract {
         h.frames(3);
         let navigation = h.app.cam;
         let history = (h.app.session.revision, h.app.session.undo.len());
-        choose_quality(&mut h.app, 1).unwrap();
+        choose_quality(&mut h.app, 0).unwrap();
         h.frames(3);
         assert!(h.app.render_workspace.view.library.review.is_none());
         let updated = &h.app.session.doc.render.setups[&shot];
         assert_eq!(updated.camera, saved.camera, "a sample budget is not an Update shot action");
-        assert_eq!((updated.width, updated.height), (1600, 900));
+        assert_eq!((updated.width, updated.height), (960, 540));
         assert_eq!(h.app.cam, navigation);
         assert!(h.app.render_workspace.view.dirty, "the explicit camera draft remains unsaved");
         assert_eq!((h.app.session.revision, h.app.session.undo.len()), (history.0 + 1, history.1 + 1));

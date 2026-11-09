@@ -188,6 +188,7 @@ fn request(reflections: Option<ReflectionOptions>) -> ImageRequest {
         textures: None,
         integrator: job::Integrator::Raytrace,
         raytrace: Some(RaytraceOptions {
+            threads: 1,
             reflections,
             shadows: false,
             lights: Some(vec![job::DirectionalLightOptions { direction: [0.0, 0.0, -1.0], color: [1.0; 3], intensity: 2.0 }]),

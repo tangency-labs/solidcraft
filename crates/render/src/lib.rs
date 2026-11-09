@@ -14,6 +14,7 @@ pub mod job;
 pub mod lighting;
 pub mod mapping;
 mod model_bounds;
+pub mod optical_boundary;
 mod product;
 #[cfg(feature = "raytrace-cpu")]
 pub mod raytrace;

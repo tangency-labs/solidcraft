@@ -71,16 +71,19 @@ pub fn surface_pdf(surface: OpaqueSurface, normal: Vec3, view: Vec3, light: Vec3
     let v = unit_direction(view)?;
     let l = unit_direction(light)?;
     let nl = n.dot(l);
-    if nl <= 0.0 || n.dot(v) <= 0.0 {
+    let nv = n.dot(v).min(1.0);
+    if nl <= 0.0 || nv <= 0.0 {
         return Ok(0.0);
     }
     let h = unit_direction(v + l)?;
     let nh = n.dot(h).clamp(0.0, 1.0);
-    let vh = v.dot(h).max(1e-20);
+    // Visible normal density times the reflection Jacobian. The view-half
+    // cosine cancels, and G1 / nv has a finite grazing limit.
     let ggx = |roughness: f64| {
         let a2 = roughness.powi(4);
         let d = (1.0 - nh * nh) + nh * nh * a2;
-        a2 / (PI * d * d) * nh / (4.0 * vh)
+        let root = (nv * nv + a2 * (1.0 - nv * nv)).sqrt();
+        a2 / (PI * d * d) / (2.0 * (nv + root))
     };
     let base = 0.5 * nl / PI + 0.5 * ggx(surface.roughness());
     Ok(surface.clear_coat().map_or(base, |coat| {
@@ -179,7 +182,7 @@ mod tests {
                                 let p = weight * 0.5;
                                 let mut energy = 0.0;
                                 // Integrate each proposal with its mixture probability.
-                                // NDF importance quadrature resolves sharp lobes, unlike
+                                // Visible-normal quadrature resolves sharp lobes, unlike
                                 // a uniform hemisphere grid at roughness 0.045.
                                 for (component, probability) in [(0, (1.0 - p) * 0.5), (1, (1.0 - p) * 0.5), (2, p)] {
                                     for i in 0..COUNT {
@@ -189,9 +192,7 @@ mod tests {
                                             Vec3::new(x.sqrt() * phi.cos(), x.sqrt() * phi.sin(), (1.0 - x).sqrt())
                                         } else {
                                             let r = if component == 1 { base_roughness } else { coat_roughness };
-                                            let c = ((1.0 - x) / (1.0 + (r.powi(4) - 1.0) * x)).sqrt();
-                                            let radius = (1.0 - c * c).sqrt();
-                                            let h = Vec3::new(radius * phi.cos(), radius * phi.sin(), c);
+                                            let h = crate::glass_model::visible_normal(v, Vec3::Z, r * r, [x, phi / (2.0 * PI)]).unwrap();
                                             h * (2.0 * v.dot(h)) - v
                                         };
                                         if l.z <= 0.0 {

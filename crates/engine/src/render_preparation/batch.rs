@@ -245,10 +245,11 @@ fn first(claim: Claim, out: &mut Prepared) -> Result<()> {
     // No normalized Arc<Value> remains alongside this arena. The exact original
     // Batch input belongs only to this first Prepared command metadata owner,
     // never to the persistent Plan, and retires on the same worker after finish.
-    let plan = Plan { ticket: claim.ticket, payload, rows, scope: claim.scope, next: 0, lease };
+    let mut plan = Plan { ticket: claim.ticket, payload, rows, scope: claim.scope, next: 0, lease };
     if plan.actual_bytes()? != plan.lease.bytes() {
         return Err(bad("batch arena actual backing disagrees with reservation"));
     }
+    plan.lease.settle().map_err(crate::render_jobs::job_error)?;
     out.plan = Some(plan);
     Ok(())
 }

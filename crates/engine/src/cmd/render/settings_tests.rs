@@ -784,7 +784,7 @@ fn invalid_saved_jobs_never_partially_replace_a_setup() {
     save(&mut s, json!({"job":{"method":"cpu_raytrace","options":{"primary_samples":4}},"exposure_ev":2}));
     for patch in [
         json!({"width":800,"job":{"method":"cpu_raytrace","options":{"primary_samples":3}}}),
-        json!({"job":{"method":"gpu_path","options":{"samples":4097}}}),
+        json!({"job":{"method":"gpu_path","options":{"samples":65537}}}),
         json!({"job":{"method":"cpu_raytrace","options":{"emissions":[]}}}),
         json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"hdr","path":"not-opened.hdr"}}}}),
         json!({"job":{"method":"raster"}}),
