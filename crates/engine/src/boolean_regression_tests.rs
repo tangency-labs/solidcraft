@@ -1606,3 +1606,22 @@ fn pattern_of_an_untargeted_cut_still_cuts_its_own_components_body() {
     assert!((one_hole - body1).abs() < 0.02 * hole, "Body1 untouched: {one_hole} -> {body1}");
     assert!((plate - plate2 - 9.0 * hole).abs() < 0.02 * hole, "Plate2 cut: {plate} -> {plate2}");
 }
+
+/// Issue #10: fuzzer seed 185. Box, join cylinder, cut cylinder, then rectangular pattern on the
+/// cut cylinder. The pattern's boolean result is refused as "SMLib's result is not a closed
+/// solid". Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a
+/// regression test that fails without the fix.
+/// Root cause not yet found — pattern boolean result tolerance, topologically different from
+/// seed 73's "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the pattern boolean root cause for seed 185 is found (#10)"]
+#[test]
+fn fuzz_seed_185_pattern_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_185_pattern.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the pattern must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the pattern result must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the pattern result must be a real solid: {}", m.volume);
+    println!("#10 seed 185: pattern result volume {volume:.2} mm³", volume = m.volume);
+}
