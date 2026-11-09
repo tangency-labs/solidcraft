@@ -775,7 +775,7 @@ mod tests {
         };
         // Each flat is the parallelogram o + s·u + t·v (s, t in 0..1) with u × v outward: its
         // ring of corners and edge midpoints, fanned from its centre, runs counter-clockwise.
-        let mut flat = |o: Vec3, u: Vec3, v: Vec3, at: &mut dyn FnMut(Vec3) -> u32, triangles: &mut Vec<[u32; 3]>| {
+        let flat = |o: Vec3, u: Vec3, v: Vec3, at: &mut dyn FnMut(Vec3) -> u32, triangles: &mut Vec<[u32; 3]>| {
             let corners = [o, o + u, o + u + v, o + v];
             let mid = |a: Vec3, b: Vec3, at: &mut dyn FnMut(Vec3) -> u32| at(a + (b - a) * 0.5);
             let ring = [
