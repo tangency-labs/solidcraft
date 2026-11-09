@@ -25,6 +25,7 @@ use super::print_face;
 use crate::params::{bad, bool_, num, str_, string_list};
 use crate::schema::file::ExportResult;
 use crate::schema::insert_mesh::{InsertMeshParams, MeshInserted};
+use crate::schema::new_design::{NewDesignParams, NewDesignResult};
 use crate::schema::save::{SaveAsParams, SaveParams, SaveResult};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::schema::save_mesh::{SaveMeshResult, SlicerDelivery};
@@ -35,7 +36,13 @@ use crate::{EngineError, Result, Session};
 const INSERT_MESH_CONTRACT: TypedContract<InsertMeshParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("file.new", "New Design", new_doc).icon("new").key("Ctrl+N").noundo().params("name?"),
+    CommandSpec::new("file.new", "New Design", crate::checked!("file.new", new_doc))
+        .icon("new")
+        .key("Ctrl+N")
+        .noundo()
+        .contract(&NEW_DESIGN_CONTRACT)
+        .output(output_schema_for::<NewDesignResult>)
+        .params("name?"),
     CommandSpec::new("doc.open", "Open", open)
         .icon("open")
         .key("Ctrl+O")
@@ -141,8 +148,11 @@ fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     s.replace_design(Session::new(Document::new(name)));
     // A name given here is the user's own, so Save As keeps it (#4907); "Untitled" is none.
     s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
-    Ok(json!({"name": name}))
+    let reply = NewDesignResult { name: name.to_string(), param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| bad("file.new", e.to_string()))
 }
+
+const NEW_DESIGN_CONTRACT: TypedContract<NewDesignParams> = TypedContract::new();
 
 const EXPORT_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportParams> = crate::schema::TypedContract::new();
 const SAVE_CONTRACT: TypedContract<SaveParams> = TypedContract::new();

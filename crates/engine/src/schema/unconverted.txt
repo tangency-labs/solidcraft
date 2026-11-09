@@ -8,7 +8,6 @@ doc.recovery_discard
 doc.recovery_list
 face.delete
 file.insert_step
-file.new
 motion.export_animation
 motion.trace
 motion.trace.edit
