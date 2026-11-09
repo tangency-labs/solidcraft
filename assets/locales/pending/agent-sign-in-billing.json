@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.agent_chat_auth_bills": "This sign-in bills API credits for each use, not a subscription. It can also replace this agent's sign-in everywhere else on this computer."
+  },
+  "ar": {
+    "ui.agent_chat_auth_bills": "يخصم تسجيل الدخول هذا أرصدة API عن كل استخدام، ولا يستخدم اشتراكًا. وقد يحل أيضًا محل تسجيل دخول هذا الوكيل في كل مكان آخر على هذا الكمبيوتر."
+  },
+  "de": {
+    "ui.agent_chat_auth_bills": "Diese Anmeldung rechnet jede Nutzung über API-Guthaben ab, nicht über ein Abonnement. Sie kann auch die Anmeldung dieses Agenten überall sonst auf diesem Computer ersetzen."
+  },
+  "he": {
+    "ui.agent_chat_auth_bills": "כניסה זו מחייבת קרדיטים של API על כל שימוש, ולא מנוי. היא גם עשויה להחליף את הכניסה של הסוכן הזה בכל מקום אחר במחשב."
+  },
+  "ja": {
+    "ui.agent_chat_auth_bills": "このサインインでは、サブスクリプションではなく、使用ごとに API クレジットが請求されます。このコンピューター上の他の場所でも、このエージェントのサインインが置き換えられることがあります。"
+  },
+  "ko": {
+    "ui.agent_chat_auth_bills": "이 로그인은 구독이 아니라 사용할 때마다 API 크레딧으로 청구됩니다. 이 컴퓨터의 다른 모든 곳에서 이 에이전트의 로그인을 대체할 수도 있습니다."
+  },
+  "vi": {
+    "ui.agent_chat_auth_bills": "Cách đăng nhập này tính phí tín dụng API cho mỗi lần dùng, không dùng gói đăng ký. Nó cũng có thể thay thế đăng nhập của tác nhân này ở mọi nơi khác trên máy tính."
+  },
+  "zh": {
+    "ui.agent_chat_auth_bills": "此登录方式按每次使用扣除 API 额度,而不是使用订阅。它还可能替换此代理在这台计算机上其他位置的登录。"
+  }
+}
