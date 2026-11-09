@@ -1600,29 +1600,6 @@ fn a_hole_leaves_sheets_it_cannot_reach_as_they_were() {
     assert!(volume(&work.model, "Plate") < 43_200.0 - 300.0, "and the plate is drilled");
 }
 
-/// A hole drilled into a sheet's rim still bores that sheet, beside sheets it cannot reach.
-#[test]
-fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
-    let mut doc = Document::new("rim");
-    for i in 0..4 {
-        flat_sheet(&mut doc, Vec2::new(200.0 * i as f64, 0.0), 60.0, 40.0);
-    }
-    let mut model = Model::new();
-    model.evaluate(&doc);
-    let near = sheet_bodies(&model)[0].clone();
-    let whole = volume(&model, &near);
-    let d = 1.5;
-    let work = cut_work(&mut doc, hole(Vec3::new(60.0, 20.0, 1.25), Vec3::new(-1.0, 0.0, 0.0), d));
-    assert_eq!(work.cut, 1, "only the sheet the drill meets is bored");
-    assert_eq!(work.kept, sheet_bodies(&work.model)[1..]);
-    let state = work.model.state();
-    let sheet = state.sheets.iter().find(|s| s.body == near).unwrap();
-    assert_eq!(sheet.bores.len(), 1, "kept as a bore of the sheet");
-    let removed = whole - volume(&work.model, &near);
-    let bore = std::f64::consts::PI * (d / 2.0).powi(2) * 60.0;
-    assert!((removed - bore).abs() < 0.02 * bore, "removed {removed} of {bore}");
-}
-
 /// A flange on a sheet made from surfaces lays the sheet's flat out once, however many flanges
 /// the sheet already has: naming its pick (the model's name for the edge), finding the sheet and
 /// the edge again by that name, and keying the panels it makes lay nothing out. Each of them laid

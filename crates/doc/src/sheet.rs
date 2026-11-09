@@ -34,8 +34,6 @@ const MAX_FLAT_POINTS: usize = 16_384;
 const MAX_FLAT_SAMPLES: usize = 65_536;
 const MAX_FLAT_PIECES: usize = 4096;
 const MAX_FLAT_WORK: usize = 500_000_000;
-/// Pieces of flat material sharing less area than this (mm²) only touch.
-const TOUCH_AREA: f64 = 1e-6;
 
 /// Starts the warning a fold gives when its `fixed` point touches no material: a recompute keeps
 /// the side the point lies on, and the `sheet.fold` command refuses such a point (#263).
@@ -367,33 +365,10 @@ fn regions_complexity<'a>(regions: impl Iterator<Item = &'a Region2>) -> Result<
     Ok((edges, points))
 }
 
-/// A flat region's cut-outs by their bounding boxes, to clip tools against only the ones near
-/// them (the result is the same: a cut-out clear of a tool's box can't change what it meets).
-pub(crate) struct NearHoles<'a> {
-    region: &'a Region2,
-    boxes: Vec<Aabb2>,
-}
-
 /// A loop's bounding box, a little larger than its chords so arcs stay inside.
 fn loop_box(lp: &Loop2) -> Result<Aabb2> {
     let b = flat_polyline(lp)?.bounds();
     Ok(b.inflated(1e-3 + 1e-9 * (b.min.x.abs() + b.min.y.abs() + b.max.x.abs() + b.max.y.abs())))
-}
-
-impl<'a> NearHoles<'a> {
-    pub(crate) fn new(region: &'a Region2) -> Result<Self> {
-        Ok(Self { region, boxes: region.holes.iter().map(loop_box).collect::<Result<_>>()? })
-    }
-
-    /// The region with only the cut-outs whose boxes meet `tool`'s.
-    pub(crate) fn around(&self, tool: &Region2) -> Result<Region2> {
-        if self.region.holes.is_empty() {
-            return Ok(self.region.clone());
-        }
-        let near = loop_box(&tool.outer)?;
-        let holes = self.region.holes.iter().zip(&self.boxes).filter(|(_, b)| b.meets(&near)).map(|(h, _)| h.clone()).collect();
-        Ok(Region2 { outer: self.region.outer.clone(), holes })
-    }
 }
 
 pub(crate) fn material_boolean(a: &[Region2], b: &[Region2], op: kernel::BoolOp, work: &mut FlatWork) -> Result<Vec<Region2>> {
@@ -2212,66 +2187,6 @@ impl SheetBody {
         if self.frame == Plane::XY { Ok(body) } else { Ok(kernel::transform_matrix(&body, self.frame_mat())?) }
     }
 
-    /// Retain bounded derived machining records, without duplicating identical replay work.
-    pub(crate) fn record_pocket(&mut self, region: Region2, z0: f64, z1: f64, work: &mut FlatWork) -> Result<()> {
-        if !z0.is_finite() || !z1.is_finite() || z0 < 0.0 || z1 > self.t || z0 >= z1 {
-            return Err(DocError::Invalid("invalid sheet pocket depth".into()));
-        }
-        if self.pockets.len() > 1000 {
-            return Err(flat_budget_error());
-        }
-        let pocket = SheetPocket { region, z0, z1 };
-        let (old_edges, old_points) = regions_complexity(self.pockets.iter().map(|p| &p.region))?;
-        let (new_edges, new_points) = region_complexity(std::slice::from_ref(&pocket.region))?;
-        work.charge(
-            old_edges.saturating_add(old_points).saturating_add(new_edges.saturating_add(new_points).saturating_mul(self.pockets.len().max(1))),
-        )?;
-        if self.pockets.contains(&pocket) {
-            return Ok(());
-        }
-        if self.pockets.len() >= 1000 {
-            return Err(flat_budget_error());
-        }
-        if old_edges.saturating_add(new_edges) > MAX_FLAT_POINTS || old_points.saturating_add(new_points) > MAX_FLAT_POINTS {
-            return Err(flat_budget_error());
-        }
-        self.pockets.push(pocket);
-        Ok(())
-    }
-
-    /// Certify whether a planar panel has material outside a retained thickness interval.
-    /// Classification uses exact planar arrangements at every pocket depth boundary.
-    pub(crate) fn material_outside_depth(&self, panel: &Region2, z0: f64, z1: f64, work: &mut FlatWork) -> Result<bool> {
-        if !z0.is_finite() || !z1.is_finite() || z0 < 0.0 || z1 > self.t || z0 >= z1 {
-            return Err(DocError::Invalid("invalid sheet retained depth".into()));
-        }
-        if self.pockets.len() > 1000 {
-            return Err(flat_budget_error());
-        }
-        regions_complexity(self.pockets.iter().map(|p| &p.region))?;
-        let mut levels = vec![0.0, self.t, z0, z1];
-        for p in &self.pockets {
-            if !p.z0.is_finite() || !p.z1.is_finite() || p.z0 < 0.0 || p.z1 > self.t || p.z0 >= p.z1 {
-                return Err(DocError::Invalid("invalid sheet pocket depth".into()));
-            }
-            levels.extend([p.z0, p.z1]);
-        }
-        levels.sort_by(f64::total_cmp);
-        levels.dedup();
-        work.charge(levels.len().saturating_mul(self.pockets.len().max(1)))?;
-        for zs in levels.windows(2) {
-            if zs[0] >= z0 && zs[1] <= z1 {
-                continue;
-            }
-            let active: Vec<_> = self.pockets.iter().filter(|p| p.z0 <= zs[0] && p.z1 >= zs[1]).map(|p| p.region.clone()).collect();
-            let removed = material_union(active, work)?;
-            if !material_boolean(std::slice::from_ref(panel), &removed, kernel::BoolOp::Cut, work)?.is_empty() {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-
     /// Replay exact planar machining after forming the full-thickness material.
     /// Cut the bores (see [`SheetBore`]) from a solid built in the sheet's local frame.
     fn machine_bores(&self, mut body: Body, work: &mut FlatWork) -> Result<Body> {
@@ -2300,81 +2215,6 @@ impl SheetBody {
                 .ok_or_else(|| DocError::Invalid("a sheet bore removes all sheet material".into()))?;
         }
         Ok(body)
-    }
-
-    /// Whether the sheet holds all the bores it may: [`Self::add_bore`] refuses any more.
-    pub(crate) fn bores_full(&self) -> bool {
-        self.bores.len() >= MAX_BORES
-    }
-
-    /// The panels a straight drill (the world cylinder from `base` along `axis`) meets, each with
-    /// how square the drill is to it: |panel normal · axis|, 1 across the panel and 0 along it.
-    /// A drill that meets a bend is refused (a bend's material has no flat place for a hole).
-    pub(crate) fn drilled_panels(&self, base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<Vec<(Option<usize>, f64)>> {
-        let axis = axis.normalized().ok_or_else(|| DocError::Invalid("bore axis".into()))?;
-        if ![base.x, base.y, base.z, radius, height].iter().all(|v| v.is_finite()) || !(radius > 0.0) || height == 0.0 {
-            return Err(DocError::Invalid("invalid sheet bore".into()));
-        }
-        let mut work = FlatWork::new();
-        let drill = kernel::cylinder(base, axis, radius, height)?;
-        let mut found = Vec::new();
-        for cell in self.cells_with_work(&mut work)? {
-            work.charge(100_000)?;
-            let solid = if self.flat {
-                let region = fitted_region(&Region2 {
-                    outer: Loop2 { segs: cell.outer.clone() },
-                    holes: cell.holes.iter().map(|h| Loop2 { segs: h.clone() }).collect(),
-                })?;
-                extrude_flat(&self.frame, &[region], 0.0, self.t)?
-            } else {
-                kernel::sew_touching(&self.faces(std::slice::from_ref(&cell), 0.0, self.t, &mut work)?)?
-            };
-            if kernel::boolean(&solid, &drill, kernel::BoolOp::Intersect)?.is_none() {
-                continue;
-            }
-            let Piece::Panel(pi) = cell.piece else {
-                return Err(DocError::Invalid(
-                    "this hole runs into a bend; drill it into a flat panel, or unfold the sheet before machining that material".into(),
-                ));
-            };
-            let w = self.world(if self.flat { None } else { pi });
-            found.push((pi, apply_vector(&w, Vec3::Z).dot(axis).abs()));
-        }
-        Ok(found)
-    }
-
-    /// Record a round bore drilled along the sheet (a hole into a rim): the world cylinder from
-    /// `base` along `axis`, one record per panel whose material it meets. Ok(false) when it
-    /// meets no material; an error when it meets a bend, or crosses a panel other than along
-    /// its plane (that machining has no exact place in the flat pattern).
-    pub(crate) fn add_bore(&mut self, base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<bool> {
-        if self.bores_full() {
-            return Err(flat_budget_error());
-        }
-        let panels = self.drilled_panels(base, axis, radius, height)?;
-        let axis = axis.normalized().ok_or_else(|| DocError::Invalid("bore axis".into()))?;
-        let mut found = Vec::new();
-        for (pi, square) in panels {
-            if square > 1e-6 {
-                return Err(DocError::Invalid(
-                    "this hole crosses a sheet panel at an angle; drill it square to the panel, or along it into a rim".into(),
-                ));
-            }
-            let w = self.world(if self.flat { None } else { pi });
-            let inv = mat_inverse(&w).ok_or_else(|| DocError::Invalid("invalid sheet panel frame".into()))?;
-            let bore = SheetBore { panel: pi, base: apply_point(&inv, base), axis: apply_vector(&inv, axis), radius, height };
-            if !found.contains(&bore) {
-                found.push(bore);
-            }
-        }
-        if found.is_empty() {
-            return Ok(false);
-        }
-        if self.bores.len().saturating_add(found.len()) > MAX_BORES {
-            return Err(flat_budget_error());
-        }
-        self.bores.extend(found);
-        Ok(true)
     }
 
     fn machine_pockets(&self, mut body: Body, work: &mut FlatWork) -> Result<Body> {
@@ -2433,26 +2273,6 @@ impl SheetBody {
             }
         }
         Ok(body)
-    }
-
-    /// Actual curved material, used to certify unsupported folded machining before mutation:
-    /// one solid per bend zone or nonparallel panel. Each is sewn on its own, because the
-    /// selected pieces need not form a manifold solid together (two bends meeting at an open
-    /// corner relief touch only along an edge).
-    pub(crate) fn unmodeled_solids(&self, plane: &Plane) -> Result<Vec<Body>> {
-        if self.flat || self.flanges.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut work = FlatWork::new();
-        let cells: Vec<_> = self
-            .cells_with_work(&mut work)?
-            .into_iter()
-            .filter(|c| match c.piece {
-                Piece::Zone(_) => true,
-                Piece::Panel(pi) => apply_vector(&self.world(pi), Vec3::Z).cross(plane.normal()).len() > 1e-6,
-            })
-            .collect();
-        cells.iter().map(|c| Ok(kernel::sew_touching(&self.faces(std::slice::from_ref(c), 0.0, self.t, &mut work)?)?)).collect()
     }
 
     fn through_pocket_regions(&self, work: &mut FlatWork) -> Result<Vec<Region2>> {
@@ -2632,82 +2452,6 @@ impl SheetBody {
         let cuts = material_union(cuts, &mut work)?;
         let regions = if cuts.is_empty() { regions } else { material_boolean(&regions, &cuts, kernel::BoolOp::Cut, &mut work)? };
         Ok(regions)
-    }
-
-    /// The pieces of flat material that a cut parted from the base: `after` is this sheet's
-    /// [`Self::flat_material`] after the cut, `before` the sheet before it. A piece is parted when
-    /// it holds none of the base panel, lies in a piece that held some before the cut, and no
-    /// other piece surrounds it: a flange cut off along its bend (with any flange on it), the
-    /// part of a ring's inside that lies on a flange's edge, the tip of a flange beyond a cut
-    /// through a closed corner. A ring's island and a letter's counter, inside other material,
-    /// are not counted; nor are pieces an earlier cut parted, nor anything once no piece holds
-    /// the base.
-    pub(crate) fn parted_from_base(&self, after: &[Region2], before: &SheetBody) -> Result<Vec<Region2>> {
-        if after.len() < 2 {
-            return Ok(Vec::new());
-        }
-        let mut work = FlatWork::new();
-        work.charge(after.len().saturating_mul(after.len()))?;
-        let base = [planar_region(&self.base)?];
-        let holds_base = |piece: &Region2, work: &mut FlatWork| -> Result<bool> {
-            let common = material_boolean(std::slice::from_ref(piece), &base, kernel::BoolOp::Intersect, work)?;
-            Ok(common.iter().map(Region2::area).sum::<f64>() > TOUCH_AREA)
-        };
-        // The cheap test first: a piece inside another's outline is an island, whatever it holds.
-        let outlines: Vec<(Ring<Vec2>, Aabb2)> = after
-            .iter()
-            .map(|r| {
-                let pts = r.outer.polyline(1e-3);
-                let b = pts.bounds();
-                (pts, b)
-            })
-            .collect();
-        let (mut open, mut islands) = (Vec::new(), Vec::new());
-        for (i, piece) in after.iter().enumerate() {
-            let p = piece.interior_point();
-            let inside = |(pts, b): &(Ring<Vec2>, Aabb2)| b.contains(p) && pts.contains(p);
-            if outlines.iter().enumerate().any(|(j, o)| j != i && inside(o)) {
-                islands.push(piece);
-            } else {
-                open.push(piece);
-            }
-        }
-        let (mut joined, mut loose) = (false, Vec::new());
-        for piece in open {
-            if holds_base(piece, &mut work)? {
-                joined = true;
-            } else {
-                loose.push(piece);
-            }
-        }
-        if loose.is_empty() {
-            return Ok(Vec::new());
-        }
-        // The base may be an island itself (a cut all round it).
-        for piece in islands {
-            if joined {
-                break;
-            }
-            joined = holds_base(piece, &mut work)?;
-        }
-        if !joined {
-            return Ok(Vec::new());
-        }
-        // A cut only takes material away: each piece lies in the piece it was part of.
-        let mut held = Vec::new();
-        for piece in before.flat_material()? {
-            if holds_base(&piece, &mut work)? {
-                held.push(piece);
-            }
-        }
-        Ok(loose
-            .into_iter()
-            .filter(|piece| {
-                let p = piece.interior_point();
-                held.iter().any(|h| h.contains(p))
-            })
-            .cloned()
-            .collect())
     }
 
     /// Outline loops of the flat pattern (flat coordinates): the pieces' edges, shared ones left out.
@@ -6280,67 +6024,6 @@ mod tests {
     }
 
     #[test]
-    fn bends_are_listed_where_their_centre_lines_have_material() {
-        // A 200 × 100 plate with a 40 mm flange on its y = 0 edge: the bend zone lies below
-        // y = 0, BA wide, its centre line along y = −BA / 2 from x = 0 to 200.
-        let mut s = plate(200.0, 100.0);
-        s.add_flange(Vec3::new(100.0, 0.0, 2.5), 40.0, std::f64::consts::FRAC_PI_2, 2.5, "outside", false).unwrap();
-        let ba = s.allowance(&s.flanges[0]);
-        assert!((ba - std::f64::consts::FRAC_PI_2 * 3.6).abs() < 1e-12);
-        let y = -ba / 2.0;
-        let whole = s.bends();
-        assert_eq!(whole.len(), 1);
-        assert!(whole[0].length == 200.0 && whole[0].start == Vec2::new(0.0, y) && whole[0].end == Vec2::new(200.0, y), "{whole:?}");
-        let spans = |s: &SheetBody| -> Vec<(usize, f64, f64)> {
-            let b = s.bends();
-            assert!(b.iter().all(|b| (b.start.y - y).abs() < 1e-12 && (b.end.y - y).abs() < 1e-12 && (b.length - b.start.dist(b.end)).abs() < 1e-12));
-            assert!(b.iter().all(|b| b.up && b.allowance == ba && b.radius == 2.5 && (b.angle_deg - 90.0).abs() < 1e-12));
-            b.iter().map(|b| (b.index, b.start.x, b.end.x)).collect()
-        };
-        let close = |got: &[(usize, f64, f64)], want: &[(usize, f64, f64)]| {
-            got.len() == want.len() && got.iter().zip(want).all(|(g, w)| g.0 == w.0 && (g.1 - w.1).abs() < 1e-9 && (g.2 - w.2).abs() < 1e-9)
-        };
-        let block = |x0: f64, x1: f64, y0: f64, y1: f64| rect(Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1));
-        let disc = |x: f64, y: f64, r: f64| Region2 { outer: Loop2::circle(Vec2::new(x, y), r), holes: vec![] };
-        let with = |cuts: Vec<Region2>| {
-            let mut c = s.clone();
-            c.holes.extend(cuts);
-            c
-        };
-        // A cut that takes the flange's left half, bend and all (and a strip of the base).
-        let half = with(vec![block(-10.0, 100.0, -60.0, 10.0)]);
-        assert!(close(&spans(&half), &[(1, 100.0, 200.0)]), "{:?}", half.bends());
-        // A slot across the bend: two stretches, both the same bend.
-        let slot = with(vec![block(90.0, 110.0, -20.0, 10.0)]);
-        assert!(close(&spans(&slot), &[(1, 0.0, 90.0), (1, 110.0, 200.0)]), "{:?}", slot.bends());
-        // A round hole on the centre line takes its diameter; one in the zone beside the line
-        // (0.5 across, 2 mm off it) takes nothing.
-        let hole = with(vec![disc(50.0, y, 1.0), disc(150.0, y + 2.0, 0.25)]);
-        assert!(close(&spans(&hole), &[(1, 0.0, 49.0), (1, 51.0, 200.0)]), "{:?}", hole.bends());
-        // A hole crossed off its centre takes its chord there: 2·√(3² − 1²).
-        let chord = with(vec![disc(50.0, y + 1.0, 3.0)]);
-        let c = 8f64.sqrt();
-        assert!(close(&spans(&chord), &[(1, 0.0, 50.0 - c), (1, 50.0 + c, 200.0)]), "{:?}", chord.bends());
-        // A ring leaves the island inside it its stretch of the bend.
-        let ring = with(vec![Region2 { outer: Loop2::circle(Vec2::new(150.0, y), 10.0), holes: vec![Loop2::circle(Vec2::new(150.0, y), 4.0)] }]);
-        assert!(close(&spans(&ring), &[(1, 0.0, 140.0), (1, 146.0, 154.0), (1, 160.0, 200.0)]), "{:?}", ring.bends());
-        // A cut over the whole bend zone leaves no bend, and cuts elsewhere leave it whole.
-        assert!(with(vec![block(-1.0, 201.0, -ba - 0.5, 0.5)]).bends().is_empty());
-        assert_eq!(with(vec![disc(50.0, 50.0, 10.0), block(20.0, 40.0, -30.0, -10.0)]).bends(), whole);
-        // Pockets count where together they go through the sheet.
-        let mut pocketed = s.clone();
-        pocketed.record_pocket(block(90.0, 110.0, -20.0, 10.0), 0.0, 1.0, &mut FlatWork::new()).unwrap();
-        assert_eq!(pocketed.bends(), whole);
-        pocketed.record_pocket(block(80.0, 105.0, -20.0, 10.0), 1.0, 2.5, &mut FlatWork::new()).unwrap();
-        assert!(close(&spans(&pocketed), &[(1, 0.0, 90.0), (1, 105.0, 200.0)]), "{:?}", pocketed.bends());
-        // A second flange keeps its own number.
-        let mut two = half.clone();
-        two.add_flange(Vec3::new(100.0, 100.0, 2.5), 40.0, std::f64::consts::FRAC_PI_2, 2.5, "outside", false).unwrap();
-        let b = two.bends();
-        assert!(b.len() == 2 && b[0].index == 1 && (b[0].length - 100.0).abs() < 1e-9 && b[1].index == 2 && b[1].length == 200.0, "{b:?}");
-    }
-
-    #[test]
     fn flat_faces_of_a_sheet_are_found_and_named_by_panel() {
         use std::f64::consts::FRAC_PI_2;
         // Steel, 2.5 thick, R = T: a 90° flange on the y = 0 edge stands between the planes
@@ -6580,26 +6263,6 @@ mod tests {
     }
 
     #[test]
-    fn pockets_with_free_form_outlines_are_machined_beside_free_form_cut_outs() {
-        let mut s = plate(100.0, 60.0);
-        s.holes.push(ellipse(Vec2::new(30.0, 30.0), 15.0, 8.0));
-        let pocket = ellipse(Vec2::new(70.0, 30.0), 10.0, 6.0);
-        s.record_pocket(pocket.clone(), 0.0, 1.0, &mut FlatWork::new()).unwrap();
-        // The plate less the through ellipse (π·15·8 of 2.5 mm) and the pocket (π·10·6 of 1 mm).
-        let expected = (6000.0 - std::f64::consts::PI * 120.0) * 2.5 - std::f64::consts::PI * 60.0;
-        assert!((vol(&s.solid().unwrap()) - expected).abs() < 0.5, "{}", vol(&s.solid().unwrap()));
-        assert!((vol(&s.flat_solid().unwrap()) - expected).abs() < 0.5, "{}", vol(&s.flat_solid().unwrap()));
-        // The machining record keeps the pocket's exact outline: its four conics in their order,
-        // the loop started at any of them.
-        let machined = s.machining().unwrap();
-        let same_loop = |l: &Loop2| {
-            let n = pocket.outer.segs.len();
-            l.segs.len() == n && (0..n).any(|k| (0..n).all(|i| l.segs[(i + k) % n] == pocket.outer.segs[i]))
-        };
-        assert!(machined.len() == 1 && same_loop(&machined[0].region.outer), "{machined:?}");
-    }
-
-    #[test]
     fn flat_geometry_budgets_reject_aggregate_and_intermediate_work() {
         let mut s = plate(100.0, 60.0);
         // Each arc is individually legal, but their combined sampled points exceed the cap.
@@ -6696,20 +6359,6 @@ mod tests {
             s.pockets = vec![SheetPocket { z0, z1, ..pocket.clone() }];
             assert!(s.flat_solid().unwrap_err().to_string().contains("depth"));
         }
-    }
-    #[test]
-    fn pocket_recording_deduplicates_at_limit_and_rejects_growth_before_mutation() {
-        let mut s = plate(100.0, 60.0);
-        let pocket =
-            SheetPocket { region: rect(Vec2::new(1.0, 1.0), Vec2::new(2.0, 1.0), Vec2::new(2.0, 2.0), Vec2::new(1.0, 2.0)), z0: 0.0, z1: 0.5 };
-        s.pockets = vec![pocket.clone(); 1000];
-        let mut work = FlatWork::new();
-        s.record_pocket(pocket.region.clone(), pocket.z0, pocket.z1, &mut work).unwrap();
-        assert_eq!(s.pockets.len(), 1000);
-        assert!(s.record_pocket(pocket.region.clone(), 0.0, 0.6, &mut work).is_err());
-        assert_eq!(s.pockets.len(), 1000);
-        s.pockets.push(pocket.clone());
-        assert!(s.record_pocket(pocket.region, 0.0, 0.5, &mut work).is_err());
     }
 
     /// A sketch solved again after a parameter change leaves its corners off by ~1e-13 mm, so
@@ -10285,48 +9934,4 @@ mod tests {
         }
     }
 
-    /// The 100 x 60 plate with a 20 mm flange on its y = 0 edge (2.5 mm, R 2.5, K 0.44): in the
-    /// flat the base starts at y = t + R = 5, the bend's zone is (π/2)·(R + K·t) long and the
-    /// flange's panel 20 − 5, so its far edge lies at y = 5 − (π/2)·3.6 − 15.
-    #[test]
-    fn a_cut_names_the_pieces_it_parts_from_the_base_and_no_others() {
-        use std::f64::consts::{FRAC_PI_2, PI};
-        let far = 5.0 - FRAC_PI_2 * (2.5 + 0.44 * 2.5) - 15.0;
-        let mut s = plate(100.0, 60.0);
-        s.add_flange(Vec3::new(50.0, 0.0, 2.5), 20.0, FRAC_PI_2, 2.5, "inside", false).unwrap();
-        let r = |x0: f64, y0: f64, x1: f64, y1: f64| rect(Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1));
-        let ring = |c: Vec2, ro: f64, ri: f64| Region2 { outer: Loop2::circle(c, ro), holes: vec![Loop2::circle(c, ri)] };
-        let parted = |before: &SheetBody, holes: &[Region2]| {
-            let mut after = before.clone();
-            after.holes.extend_from_slice(holes);
-            after.parted_from_base(&after.flat_material().unwrap(), before).unwrap()
-        };
-        // A slot across the flange beside its bend parts the rest of the flange: 100 × (−3 − far).
-        let slot = r(-5.0, -3.0, 105.0, -1.0);
-        let p = parted(&s, std::slice::from_ref(&slot));
-        assert!(p.len() == 1 && (p[0].area() - 100.0 * (-3.0 - far)).abs() < 1e-6, "{p:?}");
-        // So does a ring on the flange's far edge: the half of its inside on the flange, π·2²/2.
-        let p = parted(&s, &[ring(Vec2::new(50.0, far), 4.0, 2.0)]);
-        assert!(p.len() == 1 && (p[0].area() - 2.0 * PI).abs() < 1e-6, "{p:?}");
-        // A ring's island, on the base or on the flange, has material round it; a strip across the
-        // whole sheet leaves two halves that each keep their part of the base. None is named.
-        for holes in [ring(Vec2::new(50.0, 30.0), 10.0, 5.0), ring(Vec2::new(50.0, -9.0), 4.0, 2.0), r(45.0, -30.0, 55.0, 70.0)] {
-            assert!(parted(&s, std::slice::from_ref(&holes)).is_empty(), "{holes:?}");
-        }
-        // Pieces an earlier cut parted are not named again, nor when a later cut splits them.
-        let mut cut = s.clone();
-        cut.holes.push(slot);
-        for holes in [Region2 { outer: Loop2::circle(Vec2::new(30.0, 30.0), 4.0), holes: vec![] }, r(45.0, -30.0, 55.0, -2.0)] {
-            assert!(parted(&cut, std::slice::from_ref(&holes)).is_empty(), "{holes:?}");
-        }
-        // Nothing is named once no piece holds the base: a cut that takes the base and both bends
-        // of a sheet with flanges on two sides leaves the two flanges.
-        let mut two = plate(100.0, 60.0);
-        two.add_flanges(&[Vec3::new(50.0, 0.0, 2.5), Vec3::new(50.0, 60.0, 2.5)], 20.0, FRAC_PI_2, 2.5, "inside", false).unwrap();
-        let mut after = two.clone();
-        after.holes.push(r(-5.0, -3.0, 105.0, 63.0));
-        let material = after.flat_material().unwrap();
-        assert_eq!(material.len(), 2);
-        assert!(after.parted_from_base(&material, &two).unwrap().is_empty());
-    }
 }
