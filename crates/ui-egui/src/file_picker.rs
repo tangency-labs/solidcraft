@@ -491,6 +491,7 @@ mod tests {
     /// #13926: a picture dropped on the window starts the Canvas tool with it, as choosing it in
     /// the tool's file dialog does, and a click on the sketch places it. It was opened as a
     /// design instead, and failed ("design file is not UTF-8 JSON").
+    /// Dropped on Home, it closes Home so the viewport is there to click.
     #[test]
     fn a_picture_dropped_on_the_window_is_placed_as_a_canvas() {
         #[derive(Debug)]
@@ -507,12 +508,14 @@ mod tests {
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.step(&json!({"make_image": "Plan.PNG"})).unwrap();
         h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+        h.app.home.open = true;
         let tabs = h.app.docs.count();
         let file = h.dir.join("Plan.PNG");
         h.drop_files(egui::pos2(800.0, 500.0), vec![std::sync::Arc::new(Dropped(file)) as egui::DroppedFileHandle]);
         h.frames(2);
         assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some("canvas.insert"), "{:?}", h.app.status);
         assert_eq!(h.app.docs.count(), tabs, "the drop opened no design");
+        assert!(!h.app.home.open, "Home closes so the viewport can be clicked");
         assert!(h.app.session.doc.canvases.is_empty(), "the click places it, not the drop");
         h.step(&json!({"click": {"world": [0, 0, 0]}})).unwrap();
         h.step(&json!({"shot": "dropped-canvas"})).unwrap();

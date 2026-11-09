@@ -388,7 +388,9 @@ pub(crate) fn is_canvas_image(path: &str) -> bool {
 
 /// Start placing image `path` with `command` (Canvas or Decal), as when it is chosen in the
 /// tool's file dialog: the next click on a plane or face (or the sketch plane) places it.
+/// Home closes, since the click needs the viewport (a picture can be dropped on Home).
 pub(crate) fn start_image_placement(app: &mut SolveApp, command: &str, path: String) {
+    app.home.open = false;
     IMAGE.with(|i| *i.borrow_mut() = Some(path));
     app.last_command = solidcraft_engine::find_command(command).map(|spec| (spec.id.into(), spec.label.into()));
     app.tool = crate::tools::Tool::for_command(command);
