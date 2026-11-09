@@ -510,7 +510,7 @@ fn imported_outline_midpoints_remain_available_away_from_the_edge() {
     h.frames(4);
     h.app.start("inspect.measure");
     h.step(&json!({"move":{"world":[20,0,5]}})).unwrap();
-    let middle = solidcraft_engine::geom::Vec3::new(20.0, 0.0, 5.0);
+    let middle = solidcore_record::Vec3::new(20.0, 0.0, 5.0);
     assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(middle) < 1e-6));
     let mut at = |z| {
         let p = h.call("ui.at", json!({"world":[20,0,z]}))["result"].clone();

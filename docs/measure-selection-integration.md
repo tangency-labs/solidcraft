@@ -17,14 +17,14 @@ For overlapping geometry, hold the left mouse button still or use **Select
 Other** from the viewport menu. The list groups each body's references together,
 with the nearest body first. While measuring or selecting normally it also offers
 opposite faces of the same body and obscured edges and vertices. Normal clicks
-still select the front geometry. Placement commands, including Hole, retain their
-nearest-face list and local snapping.
+still follow the visual style and selection preferences. Placement commands,
+including Hole, retain their own selection filters and local snapping.
 
-In Preferences → Graphics, **Include hidden geometry in Select Other** controls
+In Preferences → Sketch, **Select Other reaches hidden geometry** controls
 the extra references (`select_other_hidden`, enabled by default). Turn
 it off to restore the nearest-face list. The preference is saved with the other
-application preferences. Hidden bodies and geometry removed by a section remain
-excluded. Ray traversal is bounded to 64 crossings per body, and the existing
+application preferences. The list can include hidden bodies without changing
+their visibility; geometry removed by a section remains excluded. Ray traversal is bounded to 64 crossings per body, and the existing
 20-row limit per kind still applies.
 
 ## Example: plate thickness
