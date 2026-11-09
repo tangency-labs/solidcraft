@@ -14,7 +14,7 @@ use crate::capture::{self, Renderer};
 use crate::params::{bad, str_};
 use crate::render::Camera;
 use crate::schema::motion_analysis::StudyStop;
-use crate::schema::motion_animation::AnimationExported;
+use crate::schema::motion_animation::{AnimationExported, CAMERA_FIELDS, MAX_FRAMES, MAX_GIF_PIXELS, MAX_PNG_PIXELS, MAX_SIDE};
 use crate::{Result, Session};
 
 /// What the frames show.
@@ -24,19 +24,6 @@ enum Motion {
     /// An exploded view's moves coming apart, and back together when true.
     Explode(Vec<(u64, Mat, Vec3)>, bool),
 }
-
-/// Most frames of one animation.
-const MAX_FRAMES: usize = 1000;
-/// Largest frame side, in pixels.
-const MAX_SIDE: u32 = 4096;
-/// Most pixels of a GIF's frames together: they are held in memory (4 bytes each) until the
-/// palette is chosen, so 256 MB at most.
-const MAX_GIF_PIXELS: usize = 1 << 26;
-/// Most pixels of a PNG folder's frames together (each frame is written as it is drawn): about
-/// 500 frames of 1920 × 1080.
-const MAX_PNG_PIXELS: usize = 1 << 30;
-/// The camera fields `camera` may set: those of `ui.camera`'s reply.
-const FIELDS: [&str; 7] = ["target", "yaw", "pitch", "roll", "distance", "fov", "up"];
 
 pub(super) fn export(s: &mut Session, p: &Value) -> Result<Value> {
     export_with(s, p, capture::installed().as_deref())
@@ -203,8 +190,8 @@ fn camera(s: &Session, home: impl FnOnce() -> Result<Camera>, given: Option<&Val
     let fields = given.as_object().ok_or_else(|| bad(cmd, "`camera` must be an object, such as ui.camera's reply"))?;
     let mut v = serde_json::to_value(base).map_err(|e| bad(cmd, e.to_string()))?;
     for (k, x) in fields {
-        if !FIELDS.contains(&k.as_str()) {
-            return Err(bad(cmd, format!("unknown camera field `{k}` (it takes {})", FIELDS.join(", "))));
+        if !CAMERA_FIELDS.contains(&k.as_str()) {
+            return Err(bad(cmd, format!("unknown camera field `{k}` (it takes {})", CAMERA_FIELDS.join(", "))));
         }
         if let Some(o) = v.as_object_mut() {
             o.insert(k.clone(), x.clone());

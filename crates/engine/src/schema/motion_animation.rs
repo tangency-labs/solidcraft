@@ -29,16 +29,19 @@ use super::motion_analysis::StudyStop;
 use super::types::not_blank_pattern;
 use crate::render::Camera;
 
-/// The most frames of one animation (`MAX_FRAMES` in `cmd/motion_animation.rs`).
-const MAX_FRAMES: usize = 1000;
-/// The largest frame side, in pixels (`MAX_SIDE`).
-const MAX_SIDE: u32 = 4096;
-/// The most pixels of all a GIF's frames together (`MAX_GIF_PIXELS`), and of a folder of PNG
-/// frames (`MAX_PNG_PIXELS`).
-const MAX_GIF_PIXELS: usize = 1 << 26;
-const MAX_PNG_PIXELS: usize = 1 << 30;
-/// The camera fields `camera` may set (`FIELDS`): those of `ui.camera`'s reply.
-const CAMERA_FIELDS: [&str; 7] = ["target", "yaw", "pitch", "roll", "distance", "fov", "up"];
+/// The most frames of one animation. The handler (`cmd/motion_animation.rs`) uses these limits
+/// too, so the schema, the strict check and the handler cannot disagree.
+pub(crate) const MAX_FRAMES: usize = 1000;
+/// The largest frame side, in pixels.
+pub(crate) const MAX_SIDE: u32 = 4096;
+/// The most pixels of a GIF's frames together: they are held in memory (4 bytes each) until the
+/// palette is chosen, so 256 MB at most.
+pub(crate) const MAX_GIF_PIXELS: usize = 1 << 26;
+/// The most pixels of a PNG folder's frames together (each frame is written as it is drawn):
+/// about 500 frames of 1920 × 1080.
+pub(crate) const MAX_PNG_PIXELS: usize = 1 << 30;
+/// The camera fields `camera` may set: those of `ui.camera`'s reply.
+pub(crate) const CAMERA_FIELDS: [&str; 7] = ["target", "yaw", "pitch", "roll", "distance", "fov", "up"];
 /// The handler's message for a camera that isn't finite or is out of range.
 const BAD_CAMERA: &str = "the camera must be finite, with a distance up to 1e15 mm, a pitch within ±π/2 and a fov of 0 (orthographic) to 3 radians";
 
