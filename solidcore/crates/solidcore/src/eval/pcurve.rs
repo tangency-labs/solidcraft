@@ -952,7 +952,7 @@ fn basis(knots: &[f64], p: usize, span: usize, t: f64) -> Option<Vec<f64>> {
 /// Whether `uv` is at a pole along each direction, or within `reach` of one, by the surface's
 /// speeds there: a speed below 10⁻⁹ of the other's, or one that moves the point no more than
 /// `reach` over half the period (or the whole range) of its parameter.
-pub(crate) fn pole_by_speed(s: &SurfaceEval, dom: &Domain, uv: [f64; 2], reach: f64) -> [bool; 2] {
+pub fn pole_by_speed(s: &SurfaceEval, dom: &Domain, uv: [f64; 2], reach: f64) -> [bool; 2] {
     let Some((_, su, sv)) = s.derivs(uv[0], uv[1]) else {
         return [false; 2];
     };
@@ -1052,7 +1052,10 @@ fn insert_knot(
 /// sub-interval of its domain, as a clamped B-spline whose domain is exactly `[a, b]`: Boehm
 /// insertion of `a` and `b` until each has multiplicity `p` (NURBS Book §5.3), then the knots and
 /// control points between them.
-fn segment(
+///
+/// # Errors
+/// Counts that do not match the degree, an interval outside the domain, or too many knots.
+pub fn segment(
     p: usize,
     knots: &[f64],
     ctrl: &[[f64; 4]],

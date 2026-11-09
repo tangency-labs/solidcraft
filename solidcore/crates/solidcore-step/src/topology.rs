@@ -34,17 +34,17 @@
 //! Input is hostile: every reference is checked, nesting and counts are capped, and the work of
 //! a whole file is bounded (shared shells count each time a solid uses them).
 
-use solidcraft_geom::prelude::*;
+use crate::vec::Vec3Geom as _;
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::TAU;
 
+use crate::kernel::{CurveEval, SurfaceEval, face_flux};
 use solidcore_ops::pcurve::{self, EdgeUse, TrimEdge, TrimFace, TrimUse, Trims};
 use solidcore_record::Vec3;
 use solidcore_record::brep::{
     self, Brep, Curve as BCurve, Curve2, Edge, EdgeUseRef, Face, Frame, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell,
     Surface as BSurface, Vertex,
 };
-use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval, face_flux};
 
 use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Placement, Transform, dot, scale, sub};
 use crate::p21::{Entity, Exchange, Param};
@@ -350,7 +350,6 @@ fn read_with<'a>(
     let name = e.params().first().and_then(Param::as_str).unwrap_or("").to_string();
     let mut b = Builder::new(ex, reader, tolerance(&context), budget, trims);
     // The file's faces, edges, vertices and their geometry read into the builder.
-    let topology = solidcraft_profile::span("import", "step.topology");
     let (ids, kind) = item_shells(ex, item)?;
     let mut shells = Vec::with_capacity(ids.len());
     let mut skipped = false;
@@ -359,7 +358,6 @@ fn read_with<'a>(
         skipped |= any;
         shells.push(faces);
     }
-    drop(topology);
     b.finish(item, name, shells, if skipped { Kind::Open } else { kind })
 }
 
@@ -512,7 +510,7 @@ struct FaceB {
     outer: Option<usize>,
     /// The face's normal is the surface's natural normal.
     forward: bool,
-    /// A round face's box on its label (`solidcraft_geom::brep::form::extent`), once measured.
+    /// A round face's box on its label (`crate::kernel::form::extent`), once measured.
     extent: Option<[[f64; 2]; 2]>,
 }
 
@@ -610,7 +608,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             return Ok(());
         }
         let on = SurfaceEval::new(surface).map_err(|m| m.to_string())?;
-        let starts = solidcraft_geom::tess::uv::Starts::default();
+        let starts = crate::kernel::Starts::default();
         for l in edge_loops {
             for &(e, _) in l {
                 let edge = self.edges.get(e as usize).ok_or("edge reference")?;
@@ -943,7 +941,6 @@ impl<'b, 'a> Builder<'b, 'a> {
 
     /// Pcurves, outer loops, domains and the canonical order: the finished record.
     fn finish(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
-        let _span = solidcraft_profile::span("import", "step.solid_record");
         let mut notes = Vec::new();
         // A face bounded by a slit alone is the whole of its closed surface, closed by its seams
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
@@ -970,7 +967,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         let mut frames: Vec<Vec<brep::Frame>> = vec![Vec::new(); self.edges.len()];
         let mut tori: Vec<Vec<BSurface>> = vec![Vec::new(); self.edges.len()];
         for f in &self.faces {
-            let Some(frame) = solidcraft_geom::brep::form::frame_of(&f.surface) else { continue };
+            let Some(frame) = crate::kernel::form::frame_of(&f.surface) else { continue };
             let torus = matches!(f.surface, BSurface::Torus { .. });
             for l in &f.loops {
                 if let LoopB::Edges(es) = l {
@@ -986,7 +983,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
         }
         for ((edge, fr), tr) in self.edges.iter_mut().zip(&frames).zip(&tori) {
-            let (label, interval, form) = solidcraft_geom::brep::form::edge_on(&edge.curve, edge.interval, fr, tr, self.tol)
+            let (label, interval, form) = crate::kernel::form::edge_on(&edge.curve, edge.interval, fr, tr, self.tol)
                 .ok_or_else(|| unsupported("an arc of more than one turn"))?;
             (edge.curve, edge.interval, edge.form) = (label, interval, form);
         }
@@ -1079,15 +1076,23 @@ impl<'b, 'a> Builder<'b, 'a> {
                 if let Some(k) = closed.iter().position(|c| !c) {
                     return Err(format!("{} shell is not closed", if k == 0 { "the outer" } else { "a void" }));
                 }
-                regions[0].shells.push(0);
+                if let Some(r) = regions.first_mut() {
+                    r.shells.push(0);
+                }
                 regions.push(Region { shells: (0..index(shells.len())?).collect(), void: false });
                 for v in 1..shells.len() {
                     regions.push(Region { shells: vec![index(v)?], void: true });
                 }
             }
-            Kind::Open => regions[0].shells = (0..index(shells.len())?).collect(),
+            Kind::Open => {
+                if let Some(r) = regions.first_mut() {
+                    r.shells = (0..index(shells.len())?).collect();
+                }
+            }
             Kind::Model => {
-                regions[0].shells = (0..index(shells.len())?).collect();
+                if let Some(r) = regions.first_mut() {
+                    r.shells = (0..index(shells.len())?).collect();
+                }
                 for (k, c) in closed.iter().enumerate() {
                     if *c {
                         regions.push(Region { shells: vec![index(k)?], void: false });
@@ -1292,7 +1297,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         std::iter::once(outer).chain((0..face.loops.len()).filter(|l| *l != outer)).collect()
     }
 
-    /// A face's box on its label over its edge loops (`solidcraft_geom::brep::form::extent`); `None` where the
+    /// A face's box on its label over its edge loops (`crate::kernel::form::extent`); `None` where the
     /// boundary does not project onto it.
     fn face_extent(&self, fi: usize) -> R<Option<[[f64; 2]; 2]>> {
         let face = self.faces.get(fi).ok_or("face reference")?;
@@ -1306,7 +1311,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
             boundary.push(b);
         }
-        Ok(solidcraft_geom::brep::form::extent(&face.surface, &boundary))
+        Ok(crate::kernel::form::extent(&face.surface, &boundary))
     }
 
     /// The pcurves of a face's edge loops (in its edge-loop order), its domain, whether it was
@@ -1315,7 +1320,6 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// outer loop runs clockwise about the natural normal on a surface where that cannot be a
     /// face's outer boundary.
     fn face_pcurves(&mut self, fi: usize) -> R<(Vec<Vec<Curve2>>, [[f64; 2]; 2], bool, Option<BSurface>)> {
-        let _span = solidcraft_profile::span("import", "step.face_pcurves");
         let face = self.faces.get(fi).ok_or("face reference")?;
         let label = face.surface.clone();
         let edge_loops: Vec<Vec<(u32, bool)>> = face
@@ -1331,14 +1335,14 @@ impl<'b, 'a> Builder<'b, 'a> {
         let tol = self.tol;
         // A cylinder, cone, sphere, torus or revolution on its NURBS form, over the extent of its
         // boundary on its label; then every pcurve on the forms.
-        let form = match solidcraft_geom::brep::form::frame_of(&label) {
+        let form = match crate::kernel::form::frame_of(&label) {
             Some(_) => {
                 let extent = match face.extent {
                     Some(e) => Some(e),
                     None => self.face_extent(fi)?,
                 };
                 let extent = extent.ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
-                Some(solidcraft_geom::brep::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?)
+                Some(crate::kernel::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?)
             }
             None => None,
         };
@@ -1389,7 +1393,8 @@ impl<'b, 'a> Builder<'b, 'a> {
                 let (Some((start, _)), Some((_, end))) = (ends.get(k), ends.get(if k == 0 { ends.len() - 1 } else { k - 1 })) else { continue };
                 // The vertex use k starts at, where the one before it ends.
                 let &(e, forward) = l.get(k).ok_or("edge use")?;
-                let v = self.edges.get(e as usize).ok_or("edge reference")?.vertices[if forward { 0 } else { 1 }];
+                let v = self.edges.get(e as usize).ok_or("edge reference")?.vertices;
+                let v = if forward { v[0] } else { v[1] };
                 let reach = self.vertices.get(v as usize).ok_or("vertex reference")?.tolerance.max(tol);
                 if at_pole(*start, reach) || at_pole(*end, reach) {
                     continue;
@@ -1400,11 +1405,14 @@ impl<'b, 'a> Builder<'b, 'a> {
                     if !(b - a).is_finite() {
                         continue;
                     }
-                    if !((start[d] - end[d]).abs() <= 0.5 * (b - a)) {
+                    let (Some(sd), Some(ed)) = (start.get(d), end.get(d)) else { continue };
+                    if !((sd - ed).abs() <= 0.5 * (b - a)) {
                         // Whether the surface closes across `d` there: its two boundaries meet.
                         let ends_at = |x: f64| {
                             let mut q = *start;
-                            q[d] = x;
+                            if let Some(c) = q.get_mut(d) {
+                                *c = x;
+                            }
                             poles.as_ref().and_then(|s| s.point(q))
                         };
                         let closed = matches!((ends_at(*a), ends_at(*b)), (Some(p), Some(q)) if p.dist(q) <= reach);
@@ -1470,7 +1478,6 @@ impl Builder<'_, '_> {
         edge_loops: &[Vec<(u32, bool)>],
         exact: Vec<Vec<Option<Curve2>>>,
     ) -> R<TrimFace<'s>> {
-        let _span = solidcraft_profile::span("import", "step.trim_face");
         let (mut edge_at, mut vertex_at) = (HashMap::new(), HashMap::new());
         let (mut edges, mut vertices) = (Vec::new(), Vec::new());
         let mut loops = Vec::with_capacity(edge_loops.len());
@@ -1604,16 +1611,15 @@ fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2]; 2]> {
             Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().filter(|h| h[2] > 0.0).map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
         };
         for p in pts {
-            for d in 0..2 {
-                lo[d] = lo[d].min(p[d]);
-                hi[d] = hi[d].max(p[d]);
+            for ((lo, hi), x) in lo.iter_mut().zip(hi.iter_mut()).zip(p) {
+                *lo = lo.min(x);
+                *hi = hi.max(x);
             }
         }
     }
     let natural = solidcore_ops::label::surface_natural(surface);
     let mut out = [[0.0; 2]; 2];
-    for d in 0..2 {
-        let (a, b) = (lo[d], hi[d]);
+    for (d, (a, b)) in lo.into_iter().zip(hi).enumerate() {
         if !(a.is_finite() && b.is_finite() && a <= b) {
             return Err("a face without pcurves".into());
         }

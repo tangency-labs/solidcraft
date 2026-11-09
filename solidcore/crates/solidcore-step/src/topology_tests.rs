@@ -895,12 +895,17 @@ fn hostile_topology_is_an_error_never_a_panic() {
     }
 }
 
-/// The step-conformance parts (tests/step-conformance, CC0): every one reads, its faces facing
-/// out of its material; the NURBS cylinder, dome and torus ring, whose faces wind around a
-/// spline closed on itself in u without a seam edge, get one along its boundary column.
+/// The step-conformance parts (SolidCraft's tests/step-conformance, CC0): every one reads, its
+/// faces facing out of its material; the NURBS cylinder, dome and torus ring, whose faces wind
+/// around a spline closed on itself in u without a seam edge, get one along its boundary column.
+/// The parts live in SolidCraft's tree, where solidcore is vendored; outside it this has nothing
+/// to read.
 #[test]
 fn step_conformance_parts() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tests/step-conformance");
+    if !dir.is_dir() {
+        return;
+    }
     let mut paths: Vec<_> =
         std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "step")).collect();
     paths.sort();

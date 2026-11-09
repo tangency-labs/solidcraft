@@ -44,7 +44,11 @@ fn de_boor(u: &[f64], degree: usize, ctrl: &[[f64; 4]], t: f64) -> Option<[f64; 
             let alpha = if b - a > 0.0 { (t - a) / (b - a) } else { 0.0 };
             let p = *d.get(j - 1)?;
             let q = *d.get(j)?;
-            *d.get_mut(j)? = [0, 1, 2, 3].map(|c| (1.0 - alpha) * p[c] + alpha * q[c]);
+            let mut r = [0.0; 4];
+            for ((r, p), q) in r.iter_mut().zip(p).zip(q) {
+                *r = (1.0 - alpha) * p + alpha * q;
+            }
+            *d.get_mut(j)? = r;
         }
     }
     d.get(degree).copied()

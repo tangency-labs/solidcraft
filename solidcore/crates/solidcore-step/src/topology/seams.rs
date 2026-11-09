@@ -15,12 +15,12 @@
 //! on a closed surface is all of that surface less a cut of none: its slit is made its seams
 //! ([`Builder::complete_slits`]), so the loop bounds the surface's whole (u, v) domain.
 
-use solidcraft_geom::prelude::*;
+use crate::vec::Vec3Geom as _;
 use std::f64::consts::{PI, TAU};
 
+use crate::kernel::{CurveEval, SurfaceEval};
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface, Vertex};
-use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 
 use super::{Builder, EdgeB, LoopB, R, index, unsupported};
 
@@ -177,14 +177,12 @@ fn meridian(profile: &BCurve, o: Vec3, k: Vec3, angle: f64) -> R<BCurve> {
 /// The same points at parameters a period apart before `s`; `None` for another surface or an `s`
 /// outside the open domain.
 fn restarted(surface: &BSurface, s: f64, period: f64) -> Option<BSurface> {
-    use solidcraft_geom::bspline::{HPoint, segment};
-    let (u_knots, v_knots, rows): (&Vec<f64>, &Vec<f64>, Vec<Vec<HPoint>>) = match surface {
+    use solidcore::eval::pcurve::segment;
+    let (u_knots, v_knots, rows): (&Vec<f64>, &Vec<f64>, Vec<Vec<[f64; 4]>>) = match surface {
         BSurface::Spline { u_knots, v_knots, points } => {
-            (u_knots, v_knots, points.iter().map(|r| r.iter().map(|p| HPoint { x: p[0], y: p[1], z: p[2], w: 1.0 }).collect()).collect())
+            (u_knots, v_knots, points.iter().map(|r| r.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()).collect())
         }
-        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => {
-            (u_knots, v_knots, homogeneous.iter().map(|r| r.iter().map(|h| HPoint { x: h[0], y: h[1], z: h[2], w: h[3] }).collect()).collect())
-        }
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => (u_knots, v_knots, homogeneous.clone()),
         _ => return None,
     };
     let n = rows.len();
@@ -195,9 +193,9 @@ fn restarted(surface: &BSurface, s: f64, period: f64) -> Option<BSurface> {
     }
     // Each v column of control points across u is a curve along u.
     let columns = rows.first()?.len();
-    let column = |j: usize| rows.iter().map(|r| r.get(j).copied()).collect::<Option<Vec<HPoint>>>();
+    let column = |j: usize| rows.iter().map(|r| r.get(j).copied()).collect::<Option<Vec<[f64; 4]>>>();
     let mut knots: Option<Vec<f64>> = None;
-    let mut out: Vec<Vec<HPoint>> = Vec::with_capacity(columns);
+    let mut out: Vec<Vec<[f64; 4]>> = Vec::with_capacity(columns);
     for j in 0..columns {
         let c = column(j)?;
         let (ka, a) = segment(p, u_knots, &c, s, u1).ok()?;
@@ -216,19 +214,15 @@ fn restarted(surface: &BSurface, s: f64, period: f64) -> Option<BSurface> {
     }
     let u_knots = knots?;
     // Back to rows along u.
-    let rows: Vec<Vec<HPoint>> =
+    let rows: Vec<Vec<[f64; 4]>> =
         (0..out.first()?.len()).map(|i| out.iter().map(|c| c.get(i).copied()).collect::<Option<Vec<_>>>()).collect::<Option<_>>()?;
     Some(match surface {
         BSurface::Spline { .. } => BSurface::Spline {
             u_knots,
             v_knots: v_knots.clone(),
-            points: rows.iter().map(|r| r.iter().map(|h| [h.x / h.w, h.y / h.w, h.z / h.w]).collect()).collect(),
+            points: rows.iter().map(|r| r.iter().map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3]]).collect()).collect(),
         },
-        _ => BSurface::RationalSpline {
-            u_knots,
-            v_knots: v_knots.clone(),
-            homogeneous: rows.iter().map(|r| r.iter().map(|h| [h.x, h.y, h.z, h.w]).collect()).collect(),
-        },
+        _ => BSurface::RationalSpline { u_knots, v_knots: v_knots.clone(), homogeneous: rows },
     })
 }
 
@@ -307,7 +301,8 @@ impl Builder<'_, '_> {
             let natural = super::natural_periods(&surface);
             let eval = SurfaceEval::new(&surface).map_err(|e| e.to_string())?;
             // Periodic as the surface is, or as a spline closed on itself is (its knot width).
-            let periods = [0, 1].map(|d| if natural[d] { Some(TAU) } else { eval.domain().period[d] });
+            let dom = eval.domain().period;
+            let periods = [(natural[0], dom[0]), (natural[1], dom[1])].map(|(n, p)| if n { Some(TAU) } else { p });
             if periods.iter().all(Option::is_none) {
                 continue;
             }
@@ -428,9 +423,9 @@ impl Builder<'_, '_> {
                 let p = c.point(t).ok_or("edge point")?;
                 let Some(q) = eval.project(p, last, f64::INFINITY) else { continue };
                 if let Some(l) = last {
-                    for d in 0..2 {
-                        if let Some(p) = periods[d] {
-                            total[d] += wrap_by(q[d] - l[d], p) / p;
+                    for (((t, period), q), l) in total.iter_mut().zip(periods).zip(q).zip(l) {
+                        if let Some(p) = period {
+                            *t += wrap_by(q - l, p) / p;
                         }
                     }
                 }
