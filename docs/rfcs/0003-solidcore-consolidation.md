@@ -8,7 +8,7 @@
 | Authority | `solidcore/docs/layers.md` |
 | Discussion | the pull request that adds this file, then the tracking issue of each job |
 
-`layers.md` says each job lives in one layer: the kernel computes, ops decides and sequences, record is data, convert is the one record↔kernel conversion, tess draws, and apps hold state with no geometry math. Today SolidCraft still carries its own copy of most of those jobs. This RFC lists those copies, orders the work of removing them, and sets the gate each PR must pass. It fits inside the plan already agreed for solidcore-ops: the local-operation sprint, the solidcore#3005 follow-ups, stage 3b, blends last, then the switch commit. It adds no stage of its own.
+`layers.md` says each job lives in one layer: the kernel computes, ops decides and sequences, record is data, convert is the one record↔kernel conversion, tess draws, and apps hold state with no geometry math. SolidCraft still carries its own copy of most of those jobs. This RFC lists those copies, orders the work of removing them, and sets the gate each PR must pass. It fits inside the plan already agreed for solidcore-ops: the local-operation sprint, the solidcore#3005 follow-ups, stage 3b, blends last, then the switch commit. It adds no stage of its own.
 
 ## Goals
 
@@ -81,9 +81,9 @@ Every PR uses the gates below, plus the gate named in its row.
 
 | PR | What | Gate |
 |---|---|---|
-| 0.1 | `cargo xtask app-geometry` and `xtask/app-geometry.txt` (layers §4): a shrink-only list of functions in `doc`, `engine`, `ui-egui`, `io`, `kernel` and `geom` that compute geometry (vector maths on coordinates, solves, mesh queries), seeded from §1. CI posts per-crate counts on each PR | lists today's sites; fails on a new one |
+| 0.1 | `cargo xtask app-geometry` and `xtask/app-geometry.txt` (layers §4): a shrink-only list of functions in `doc`, `engine`, `ui-egui`, `io`, `kernel` and `geom` that compute geometry (vector maths on coordinates, solves, mesh queries), seeded from §1. CI posts per-crate counts on each PR | lists the current sites; fails on a new one |
 | 0.2 | `solidcore/docs/jobs.toml` and `cargo xtask jobs`: each job names its one crate and module; the duplicates in §1a are listed with the PR that removes them, and the list only shrinks | fails on a new public entry point outside its job's module |
-| 0.3 | The seam check also fails on a new use of `solidcraft-geom`'s evaluator, tess or mesh queries from a crate that does not use them today | ledger counts unchanged |
+| 0.3 | The seam check also fails on a new use of `solidcraft-geom`'s evaluator, tess or mesh queries from a crate that does not already use them | ledger counts unchanged |
 
 ### Phase 1: jobs solidcore already wins or ties
 
@@ -91,7 +91,7 @@ Every PR uses the gates below, plus the gate named in its row.
 |---|---|---|---|---|
 | 1.1 | solidcore-tess speed (#13655): cache `eval::collapse` per surface or boundary row, or port SolidCraft's evaluator (`EvalSurface::derivs`, `basis_ders_into`, `degenerate_within`) as tess's private, display-only evaluator | kernel | Speed: no body more than 1.2x SolidCraft's tess on the 1,267-body corpus; triangle counts unchanged | 1.2, 1.4 |
 | 1.2 | solidcore-tess flat faces with no size cap (port of #13266 into `planner/size.rs`) | kernel | the 20 x 10 x 5 box exports 12 triangles; tessellation cases | 1.1 |
-| 1.3 | SolidCraft meshes through `solidcore-tess`; delete `kernel/src/tess/`, `geom/src/tess.rs` and `tess/`, `geom/src/simplify.rs` if solidcore's simplify ties | main | display-mesh and export tests; triangle counts within 5% of the bake-off; cracks no more than today (3 of 1,176) | after 1.1, 1.2 |
+| 1.3 | SolidCraft meshes through `solidcore-tess`; delete `kernel/src/tess/`, `geom/src/tess.rs` and `tess/`, `geom/src/simplify.rs` if solidcore's simplify ties | main | display-mesh and export tests; triangle counts within 5% of the bake-off; cracks no more than in the bake-off (3 of 1,176) | after 1.1, 1.2 |
 | 1.4 | `nurbs-grid-mesh`: the 300 x 300-pole test, `deviation` kept as a test checker, crate deleted | kernel | the test recorded on #13625 | any |
 | 1.5 | STEP reader: fix the `ap203/rear` timeout (to be filed) and close the speed gap by its root cause | kernel | `rear` opens; median within 1.5x of 0.14 s on the 320 files | 1.1–1.4 |
 | 1.6 | SolidCraft reads STEP through `solidcore-record` + ops build; delete `crates/step` reading and `kernel/src/step_in` | main | `tests/step-conformance`, `tests/step-regressions`, `kernel-cases/import` unchanged or better; bake-off: opens ≥218, refuses 0, ≥22 of 23 volumes | after 1.5 |
