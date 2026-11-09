@@ -598,10 +598,7 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
     }
     let (format, ext) = FORMATS.get(k.format).map_or(("stl", "stl"), |f| (f.1, f.2));
     let body = crate::selection::items(inputs, 0).body_names().into_iter().next();
-    let design = &app.session.doc.name;
-    let legacy = body.clone().unwrap_or_else(|| design.clone());
-    let names = crate::export_name::Names { design, body: body.as_deref(), metadata: &app.session.doc.metadata };
-    let name = crate::export_name::stem(&app.preferences.export_name, &names, &legacy);
+    let name = crate::export_name::offered(app, body.as_deref(), body.as_deref().unwrap_or(&app.session.doc.name));
     app.preferences.save_mesh_format = format.into();
     app.preferences.save_mesh_quality = QUALITIES.get(k.quality).map_or("standard", |q| q.1).into();
     // The file dialog answers later; the dialog closes meanwhile, as for every export.
@@ -967,8 +964,9 @@ mod tests {
         assert_eq!(saved["quality"], "finest");
     }
 
-    /// The Export file name preference names the file every export offers from the design's and
-    /// the body's names; left empty, STEP offers the design's name and a mesh its body's, as before.
+    /// The Export file name preference names the file every export offers: File › Export, Save As
+    /// Mesh and a body's right-click Export…. Left empty, File › Export offers the design's name and
+    /// the other two the body's, as before.
     #[test]
     fn exports_offer_the_name_the_export_file_name_preference_makes() {
         let mut h = crate::scenario::Harness::new();
@@ -991,18 +989,23 @@ mod tests {
             run(&mut h.app, &stl, std::slice::from_ref(&bodies)).unwrap();
             h.frames(3);
             h.settle();
+            // A body's right-click menu: Export….
+            let item = crate::context_menu::act("ui.export", "Export…", "export").with(json!({"bodies": ["Base"]}));
+            crate::context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+            h.frames(3);
+            h.settle();
             offered.borrow_mut().drain(..).collect::<Vec<_>>()
         };
-        assert_eq!(offer(&mut h), ["Bracket.step", "Base.stl"], "an empty template offers the old names");
+        assert_eq!(offer(&mut h), ["Bracket.step", "Base.stl", "Base.step"], "an empty template offers the old names");
 
         h.app.preferences.export_name = "{design}-{body}".into();
-        assert_eq!(offer(&mut h), ["Bracket-Base.step", "Bracket-Base.stl"]);
+        assert_eq!(offer(&mut h), ["Bracket-Base.step", "Bracket-Base.stl", "Bracket-Base.step"]);
         assert!(h.dir.join("Bracket-Base.step").is_file() && h.dir.join("Bracket-Base.stl").is_file(), "the files are written");
 
         // Design properties are placeholders too, set as File › Design Properties sets them.
         h.app.run("document.metadata.set", json!({"values": {"part_number": "RV-102", "revision": "C"}})).unwrap();
         h.app.preferences.export_name = "{part_number}_rev{revision}".into();
-        assert_eq!(offer(&mut h), ["RV-102_revC.step", "RV-102_revC.stl"]);
+        assert_eq!(offer(&mut h), ["RV-102_revC.step", "RV-102_revC.stl", "RV-102_revC.step"]);
     }
 
     #[test]

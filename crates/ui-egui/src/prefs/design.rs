@@ -205,9 +205,7 @@ fn export_name(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
         });
         if !app.preferences.export_name.trim().is_empty() {
             let body = crate::export_name::first_body(app);
-            let design = &app.session.doc.name;
-            let names = crate::export_name::Names { design, body: body.as_deref(), metadata: &app.session.doc.metadata };
-            let sample = crate::export_name::stem(&app.preferences.export_name, &names, design);
+            let sample = crate::export_name::offered(app, body.as_deref(), &app.session.doc.name);
             ui_kit::text(
                 ui,
                 &solidcraft_ui_text::format("prefs.export_name_sample", &[("name", &format!("{sample}.step"))]),

@@ -48,6 +48,14 @@ pub(crate) fn stem(template: &str, names: &Names, legacy: &str) -> String {
     if safe.chars().all(|c| c == '_') { legacy.to_string() } else { safe.to_string() }
 }
 
+/// The file name, without extension, that an export of `body` from the open design offers, from
+/// the Export file name preference. Every place that asks where to export a design or its bodies
+/// takes its name from here; `legacy` is the name it offered before the preference existed.
+pub(crate) fn offered(app: &crate::SolveApp, body: Option<&str>, legacy: &str) -> String {
+    let names = Names { design: &app.session.doc.name, body, metadata: &app.session.doc.metadata };
+    stem(&app.preferences.export_name, &names, legacy)
+}
+
 /// `template` with each `{placeholder}` replaced, in one pass: a value that holds braces itself
 /// (a body named `{revision}`) is kept as it is. Other text in braces is kept as typed.
 fn fill(template: &str, names: &Names) -> String {

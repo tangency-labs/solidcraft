@@ -219,8 +219,9 @@ The control channel sets the same preference with `ui.prefs {"max_step_file_mb":
 
 ## Export file names
 
-**Preferences → Design → Export file name** sets the name that **File → Export** and **Save As
-Mesh** offer in the save dialog. The setting is a template. Each placeholder in it is replaced:
+**Preferences → Design → Export file name** sets the name that **File → Export**, **Save As Mesh**
+and a body's right-click **Export…** offer in the save dialog. The setting is a template. Each
+placeholder in it is replaced:
 
 | Placeholder | Replaced with |
 |---|---|
@@ -234,8 +235,8 @@ is left out. Other text in braces stays as typed.
 With `{part_number}_rev{revision}`, a design with part number RV-102 and revision C is offered as
 `RV-102_revC.step`. With `{design}-{body}`, the body Base of the design Bracket is offered as
 `Bracket-Base.stl`. Characters that file names cannot hold (`/ \ : * ? " < > |`) become `_`. Left
-empty, STEP, OBJ and URDF offer the design's name, and a mesh offers its body's name. The control
-channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
+empty, File → Export offers the design's name, and Save As Mesh and a body's Export… offer the
+body's name. The control channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
 
 ## Design properties
 
