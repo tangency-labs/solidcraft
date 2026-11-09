@@ -374,14 +374,11 @@ fn a_status_error_with_a_port_failure_or_cancellation_as_cause_fails_the_call() 
     assert!(unported.sm_status().is_some());
     assert!(matches!(answer::<()>(Err(unported)), Err(e) if e.is_port_failure()));
     let deep = wrap(wrap(SolidError::unported("test::callee", "test.unit")));
-    assert!(matches!(answer::<()>(Err(deep)), Err(_)));
+    assert!(answer::<()>(Err(deep)).is_err());
 
     let cancelled = wrap(SolidError::cancelled("test::cancelled"));
     assert!(cancelled.sm_status().is_some() && !cancelled.is_port_failure());
-    assert!(matches!(answer::<()>(Err(cancelled)), Err(_)));
+    assert!(answer::<()>(Err(cancelled)).is_err());
 
-    assert!(matches!(
-        answer::<()>(Err(SolidError::invalid_input("test::input", "bad"))),
-        Err(_)
-    ));
+    assert!(answer::<()>(Err(SolidError::invalid_input("test::input", "bad"))).is_err());
 }
