@@ -26,35 +26,58 @@ pub mod validate;
 pub use model::Model;
 pub use part21::{Limits, ParseError};
 
+// Some AP203 files use the Part 21 short entity names. The parser stores the raw
+// name, so normalize the handful of geometry entities needed by the mapper.
+// Every pair as ISO's short-names file gives it
+// (<http://standards.iso.org/iso/10303/tech/short_names/short-names.txt>).
+const ALIASES: [(&str, &str); 12] = [
+    ("FCSRF", "FACE_SURFACE"),
+    ("FCOTBN", "FACE_OUTER_BOUND"),
+    ("PLYLP", "POLY_LOOP"),
+    ("CRTPNT", "CARTESIAN_POINT"),
+    ("DRCTN", "DIRECTION"),
+    ("A2PL3D", "AXIS2_PLACEMENT_3D"),
+    ("CLSSHL", "CLOSED_SHELL"),
+    ("BSSWK", "B_SPLINE_SURFACE_WITH_KNOTS"),
+    ("BSCWK", "B_SPLINE_CURVE_WITH_KNOTS"),
+    ("TRMCRV", "TRIMMED_CURVE"),
+    ("CMCRSG", "COMPOSITE_CURVE_SEGMENT"),
+    ("CMPCRV", "COMPOSITE_CURVE"),
+];
+
 /// Parses `bytes` and maps every B-rep body.
 pub fn import(bytes: &[u8], limits: &Limits) -> Result<Model, ParseError> {
-    // Some AP203 files use the Part 21 short entity names. The parser stores the raw
-    // name, so normalize the handful of geometry entities needed by the mapper.
-    const ALIASES: [(&str, &str); 11] = [
-        ("FCSRF", "FACE_SURFACE"),
-        ("FCOTBN", "FACE_OUTER_BOUND"),
-        ("PLYLP", "POLY_LOOP"),
-        ("CRTPNT", "CARTESIAN_POINT"),
-        ("DRCTN", "DIRECTION"),
-        ("A2PL3D", "AXIS2_PLACEMENT_3D"),
-        ("CLSSHL", "CLOSED_SHELL"),
-        ("BSSWK", "B_SPLINE_SURFACE_WITH_KNOTS"),
-        ("BSCWK", "B_SPLINE_CURVE_WITH_KNOTS"),
-        ("TRMCRV", "TRIMMED_CURVE"),
-        ("CMCRSG", "COMPOSITE_CURVE"),
-    ];
-    let text = String::from_utf8_lossy(bytes);
-    let mut normalized = text.into_owned();
-    for (short, long) in ALIASES {
-        normalized = normalized.replace(&format!("={short}("), &format!("={long}("));
-    }
+    let normalized = long_names(&String::from_utf8_lossy(bytes), &ALIASES);
     let file = part21::parse(normalized.as_bytes(), limits)?;
     Ok(map::map_file(&file, limits))
+}
+
+/// `text` with each instance written with a short name in `aliases` written with its long name.
+fn long_names(text: &str, aliases: &[(&str, &str)]) -> String {
+    let mut normalized = text.to_owned();
+    for (short, long) in aliases {
+        normalized = normalized.replace(&format!("={short}("), &format!("={long}("));
+    }
+    normalized
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Short names read as ISO's short-names file gives them: `CMCRSG` is a composite curve's
+    /// segment, `CMPCRV` the composite curve (the table had `CMCRSG` as the curve).
+    #[test]
+    fn composite_curve_short_names_read_as_iso_gives_them() {
+        let text = long_names(
+            "#1=CMCRSG(.CONTINUOUS.,.T.,#2);#3=CMPCRV('',(#1),.F.);",
+            &ALIASES,
+        );
+        assert!(
+            text.contains("#1=COMPOSITE_CURVE_SEGMENT(") && text.contains("#3=COMPOSITE_CURVE("),
+            "{text}"
+        );
+    }
     use crate::model::{Bound, Curve, Surface};
 
     /// A tetrahedron (0,0,0) (10,0,0) (0,10,0) (0,0,10), written by hand, in

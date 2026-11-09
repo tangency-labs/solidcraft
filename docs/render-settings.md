@@ -5,7 +5,9 @@ configuration of one selected image method, including an optional embedded HDR.
 Saving does not start a render, apply
 the navigation camera or require an installed CPU/GPU executor. `render.preflight`
 and `render.start` consume the same saved configuration and still check the current
-host, geometry, capabilities and memory limits.
+host, geometry, capabilities and memory limits. Sample selections through 16,384,
+8K output, X2 supersampling, CPU workers, denoising controls and guide capture use
+these same saved jobs; see [render quality controls](render-quality-controls.md).
 
 ## Commands
 
@@ -140,7 +142,7 @@ and full emitter sampling remain the image renderer's responsibility.
 | `backend` | `builtin` | Valid R1 backend ID, at most 64 ASCII bytes; unavailable IDs survive reopen |
 | `mode` | `preview` | R1 `preview` / `final` mode; availability checked by a future render request |
 | `camera` | Existing `Camera::default()` | Snapshot of target, yaw, pitch, roll, distance, fov and up; mm/radians, existing Z-up default |
-| `width`, `height` | 1024, 768 | Positive, each at most 4096; product at most 4,194,304 pixels |
+| `width`, `height` | 1024, 768 | Selected final output size. Legacy/raster: sides at most 4096 and 4,194,304 pixels. Typed GPU: sides at most 8192 and 33,554,432 pixels. Typed CPU: selected resource profile plus output-feature limits; X2 charges the internal grid separately. |
 | `format` | `png` | R1 output format (`png` / `exr`); saving EXR does not add an encoder |
 | `exposure_ev` | 0 | One exposure authority: raster requires 0; CPU raytrace accepts -16 through 16; GPU path accepts -32 through 32. Legacy setups retain -32 through 32. |
 | `environment_rotation` | 0 | Legacy finite radians, magnitude at most 1,000,000. A typed `job` requires 0. |
@@ -170,7 +172,7 @@ are millimetres, angles are radians and light colours/radiances are linear RGB.
 |---|---|---|
 | `raster` | `transparent_background` | Defaults to false; no nonzero exposure or raytrace controls |
 | `cpu_raytrace` | `transparent_background` (default false), `options`: optional `progressive`, `primary_samples`, `preset`, `lights`, `punctual_lights`, `area_lights`, `area_samples`, `seed`, `shadows`, constant `environment`, embedded `hdr`, optional `lens` and `output` presentation | Primary samples 1/4/16 (default 1); shadows true; optional progressive/lists/preset/environment/HDR absent. At most 8 directional, 8 point/spot and 4 rectangular lights; progressive has the narrower contract below. |
-| `gpu_path` | `transparent_background`, `options`: `samples`, `max_depth`, `seed`, `tone_map`, `denoise`, `lens`, `lighting`, sky `environment`, embedded `hdr` | Samples 1..4096 (default 64), depth 1..16 (default 8), seed u32 (default 0), Reinhard tone map, denoise false, optional values absent |
+| `gpu_path` | `transparent_background`, `options`: `samples`, `max_depth`, `seed`, `tone_map`, `denoise`, `lens`, `lighting`, sky `environment`, embedded `hdr` | Samples 1..65536 (default 64), depth 1..64 (default 8), seed u32 (default 0), Reinhard tone map, denoise false, optional values absent |
 
 CPU `preset` and explicit `lights` are mutually exclusive. An omitted/null light
 list remains unspecified; `lights: []` explicitly removes the default directional
@@ -185,11 +187,13 @@ validation contracts.
 CPU `progressive: {samples_per_pixel, seed}` stores bounded camera accumulation
 using the existing CPU transport. An absent/null value preserves fixed AA; an
 empty object defaults to 16 samples and seed 0. With the Compact profile, samples
-are 1..64 and the seed is u32. `primary_samples` must be 1, output is at most 1,048,576 pixels, and
-`width × height × samples_per_pixel` is at most 16,777,216. Saving checks these
-limits without a render host. Larger CPU profiles use their own bounds; for example,
-Studio admits 3840 × 2160 at 128 samples per pixel. Other memory, geometry and work
-limits still apply. See [CPU resource profiles](render-cpu-resource-profiles.md).
+are 1..64 and the seed is u32. `primary_samples` must be 1, the internal trace grid
+is at most 1,048,576 pixels, and `trace_width × trace_height × samples_per_pixel`
+is at most 16,777,216. Trace dimensions equal the selected output dimensions
+multiplied by `supersampling`. Saving checks these limits without a render host.
+Larger CPU profiles use their own bounds; for example, Studio admits native
+3840 × 2160 at 128 samples per pixel. Other memory, geometry and work limits
+still apply. See [CPU resource profiles](render-cpu-resource-profiles.md).
 Rectangular and continuous LED lights retain their
 bounded direct-light integral for each camera sample. Dielectric and anisotropic-face
 overrides retain the existing certified thin-sheet/axis-aligned-box and planar-face
@@ -208,11 +212,12 @@ captured scene at render admission. See [physical thin lens](render-thin-lens.md
 
 CPU `output` optionally stores `{tone_map, finishing, backdrop, linear_exr}` using
 exactly the shared presentation operators. It has no second exposure/background:
-setup exposure and background remain authoritative. Omission/null preserves the
-original CPU f64 PNG, as does identity presentation with optional raw retention.
-Nonidentity effects apply to every complete progressive pass; only final completion
-retains a raw master. The shared output envelope is 8192 per side and 16,777,216
-pixels, independently of a larger CPU resource profile. See
+setup exposure and background remain authoritative. With native resolution and
+denoising disabled, omission/null preserves the original CPU f64 PNG, as does
+identity presentation with optional raw retention. Nonidentity effects apply to
+every complete progressive pass; only final completion retains a raw master.
+The shared output envelope is 8192 per side and 33,554,432 pixels, independently
+of a larger CPU resource profile. See
 [CPU output presentation](render-cpu-output.md).
 
 GPU `lighting` retains the complete RGB ambient radiance, optional sun, at most
@@ -342,14 +347,18 @@ false is omitted from the canonical wire representation, so older CPU setups
 keep their previous image and allocation path. It lowers only to the native
 CPU `raytrace.denoise` option. The corresponding GPU field remains separate.
 
-The optional three-pass filter uses deterministic first-hit geometry guides,
-filters every complete published image pass before presentation, and preserves
-raw film, RNG/sample identity and final-only EXR. Its guide, ping-pong and task
-storage is admitted under the unchanged CPU profile. Filtering shares the
-8192-side/16,777,216-pixel output envelope and never silently reduces size or
-changes the selected executor. Offline validation and save/reopen retain the
-flag without initializing a renderer. See [spatial denoising](render-denoise.md)
-for bypasses, bias, cancellation/work units and retained-master regrade limits.
+The optional filter uses deterministic geometry guides, filters every complete
+published image pass before presentation, and preserves raw film, RNG/sample
+identity and final-only EXR. It defaults to three passes; saved denoising controls
+select one through three passes, per-pass strength and firefly suppression. Guide,
+ping-pong and task storage are admitted under the selected CPU resource profile.
+The output envelope is 8192 per side and 33,554,432 pixels; X2 filtering runs on
+the internal grid, bounded at 16384 per side and 134,217,728 pixels. Profile byte,
+work and sample limits still apply. No request silently reduces size or changes
+the selected executor. Offline validation and save/reopen retain these options
+without initializing a renderer. See [spatial denoising](render-denoise.md) for
+bypasses, bias, cancellation/work units and retained-master regrade limits, and
+[quality controls](render-quality-controls.md) for the saved fields.
 
 
 ### CPU consumer of portable optics

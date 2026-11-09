@@ -2,6 +2,7 @@
 //! design with many bodies must not make every frame or every click slower per body squared.
 
 use serde_json::json;
+use solidcraft_engine::geom::MeshGeom;
 
 use crate::scenario::Harness;
 
@@ -291,7 +292,7 @@ pub(crate) fn view_frame(
         outline: false,
         eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
-        ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+        ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
         sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [f32::from(t.hover_face_lift) / 255.0; 3],

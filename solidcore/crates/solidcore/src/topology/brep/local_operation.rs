@@ -34,6 +34,7 @@ use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::kernel::Kernel;
+use crate::mass::enclosure::VolumeSign;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::knots::Side;
@@ -311,8 +312,12 @@ fn local_operation_on(
 /// - the body's pointer check failed, so its geometry was not checked (`AssertValid` is
 ///   skipped then), even where the input's pointer check failed alike;
 /// - the input was a manifold solid and the body is not;
-/// - the body is a manifold solid whose volume is not positive (the input's volume is
-///   not measured).
+/// - the body is a manifold solid whose volume is not proved positive: its certified
+///   enclosure lies below 0, or still holds 0 after its budget
+///   ([`validation::volume_sign`]; the input's volume is not measured). A face whose net
+///   is certified within ε > 0 of its definition (a Gⁿ or law round, a sweep, a Mixed
+///   corner) is read on its net, so the gate decides on the body as stored; widening the
+///   enclosure by ε needs bounds on the definition's `S_u` and `S_v` (#3170).
 ///
 /// The owners the check tests the geometry against are the identities the body's naming
 /// scheme names its entities by ([`validation::standing`]), as `move_faces` sets them.
@@ -357,10 +362,12 @@ fn refuse_unsound(k: &mut Kernel, b: &Brep, input: &validation::Standing) -> Res
         Unsoundness::GeometryUnchecked
     } else if let Some(lost) = validation::lost_manifold(found.manifold, || Ok(input.manifold))? {
         lost
-    } else if found.manifold
-        && validation::volume(k, &mut copy)?.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
-    {
-        Unsoundness::VolumeNotPositive
+    } else if found.manifold {
+        match validation::volume_sign(k, &mut copy)? {
+            VolumeSign::Positive(_) => return Ok(()),
+            VolumeSign::Negative(_) => Unsoundness::VolumeNotPositive,
+            VolumeSign::Undecided(_) => Unsoundness::VolumeUndecided,
+        }
     } else {
         return Ok(());
     };
@@ -2082,6 +2089,36 @@ mod tests {
             own.failures_beyond(&clean_own).is_empty(),
             "{:?}",
             own.lines()
+        );
+    }
+
+    /// A body whose volume's sign is not proved is refused as such: the quarter shell R 10,
+    /// t 1e-6 passes the check, but its faces' boundaries lie apart by about its thickness,
+    /// so the strips between them hold 0 in its enclosure whatever its cells become.
+    #[test]
+    fn the_gate_refuses_a_body_whose_sign_it_cannot_prove() {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_cylindrical_box(
+            &mut k,
+            Point3::ZERO,
+            10.0,
+            10.0,
+            10.0 + 1e-6,
+            0.0,
+            90.0,
+        )
+        .unwrap();
+        let input =
+            validation::standing(&mut k, &mut b.clone_standing_for_self().unwrap()).unwrap();
+        let e = refuse_unsound(&mut k, &b, &input).unwrap_err();
+        assert!(
+            matches!(
+                e.failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Offset(OffsetFailure::Unsound {
+                    what: crate::error::offset::Unsoundness::VolumeUndecided
+                }))
+            ),
+            "{e}"
         );
     }
 

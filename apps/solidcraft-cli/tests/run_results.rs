@@ -507,7 +507,7 @@ fn snapshot_runs_its_script_on_the_in_design() {
         std::fs::read(&png).unwrap()
     };
     // Pictures are drawn on the GPU: without an adapter only the option checks below run.
-    match solidcraft_gpu::capture::shared() {
+    match solidcraft_viewport_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(_) => {
             let alone = shot("alone.png", &[shifted.as_os_str()]);
             let on_base = shot("on_base.png", &[shifted.as_os_str(), "--in".as_ref(), base.as_os_str()]);
@@ -515,7 +515,7 @@ fn snapshot_runs_its_script_on_the_in_design() {
             assert_ne!(alone, on_base, "the script ran on the --in design");
             assert_ne!(base_only, on_base);
         }
-        Err(e @ solidcraft_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+        Err(e @ solidcraft_viewport_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
             eprintln!("pictures left out: {e}")
         }
         Err(e) => panic!("{e}"),
@@ -673,6 +673,7 @@ fn render_uses_typed_cpu_setups_from_scripts_and_saved_designs() {
                 .unwrap(),
         );
         assert_eq!(result["preflight"]["resolved"]["executor"], "cpu-raytrace");
+        assert_eq!(result["preflight"]["admission"]["host_memory"]["policy"], "available_ram");
         assert_eq!(result["export"]["frame"]["executor"], "cpu-raytrace");
         assert_eq!(result["preflight"]["request"]["integrator"], "raytrace");
         assert_eq!(result["preflight"]["request"]["raytrace"].get("progressive"), options.get("progressive"));
@@ -689,11 +690,12 @@ fn render_uses_typed_cpu_setups_from_scripts_and_saved_designs() {
                 .arg(&saved)
                 .args(["--setup", "Portable setup", "--out"])
                 .arg(&overridden)
-                .args(["--width", "12", "--height", "8", "--exposure", "1.25"])
+                .args(["--width", "12", "--height", "8", "--exposure", "1.25", "--legacy-memory-admission"])
                 .env("SOLIDCRAFT_GPU", "must-not-be-read-for-cpu")
                 .output()
                 .unwrap(),
         );
+        assert_eq!(result["preflight"]["admission"]["host_memory"]["policy"], "software_pool_only");
         assert_eq!(result["preflight"]["request"]["width"], 12);
         assert_eq!(result["preflight"]["request"]["height"], 8);
         assert_eq!(result["preflight"]["request"]["raytrace"]["exposure_ev"], 1.25);
@@ -773,7 +775,13 @@ fn typed_gpu_render_selects_its_host_without_a_progressive_runtime_flag() {
         let script = render_setup_script(&dir, job.clone());
         let out = dir.0.join("gpu.png");
         let mut command = cli();
-        command.arg("render").arg(&script).args(["--setup", "Portable setup", "--out"]).arg(&out).env("SOLIDCRAFT_GPU", "not-a-gpu-policy");
+        command
+            .arg("render")
+            .arg(&script)
+            .args(["--setup", "Portable setup", "--out"])
+            .arg(&out)
+            .arg("--legacy-memory-admission")
+            .env("SOLIDCRAFT_GPU", "not-a-gpu-policy");
         if job.is_null() {
             command.arg("--progressive");
         }

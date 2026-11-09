@@ -178,7 +178,7 @@ pub(crate) fn curve_derivative(c: &Curve, t: f64) -> Option<Vec3> {
             v3(*points.get(i + 1)?) - v3(*points.get(i)?)
         }
         Curve::Spline { .. } | Curve::RationalSpline { .. } => match CurveEval::new(c).ok()? {
-            CurveEval::Spline(s) => s.eval(t)?.1,
+            CurveEval::Spline(s) => solidcraft_geom::tess::from_kernel(s.eval(t)?.1),
             _ => return None,
         },
         Curve::SurfaceIntersection { surfaces, leader, .. } => {
