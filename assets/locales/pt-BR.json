@@ -2029,7 +2029,7 @@
   "help.view.visual_style": "Muda como o modelo é desenhado: sombreado com ou sem arestas, aramado ou com arestas ocultas. Use aramado para ver o interior e sombreado para uma aparência limpa.",
   "history.sketch_under_constrained": "Subrestrito ({count} graus de liberdade)",
   "history.sketch_under_constrained_one": "Subrestrito ({count} grau de liberdade)",
-  "hole_folder.applies_to": "As alterações se aplicam aos {count} furos em {pasta}; cada um mantém seu lugar.",
+  "hole_folder.applies_to": "As alterações se aplicam aos {count} furos em {folder}; cada um mantém seu lugar.",
   "hole_presets.confirm_delete": "Confirmar exclusão",
   "hole_presets.delete": "Excluir",
   "hole_presets.delete_prompt": "Excluir esta predefinição pessoal? Os furos existentes não mudam.",
