@@ -3579,7 +3579,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     // These owners render after global shortcuts. Leave their Escape available to the
     // normal window/palette handler, but retain ownership if egui repeats the layout.
     if ctx.input(|input| input.key_pressed(egui::Key::Escape))
-        && (app.prefs_window.open || app.keymap.open || app.ui.palette_open || ctx.memory(|memory| memory.top_modal_layer().is_some()))
+        && (app.prefs_window.shell.open || app.keymap.open || app.ui.palette_open || ctx.memory(|memory| memory.top_modal_layer().is_some()))
     {
         app.escape_owner = Some(crate::EscapeOwner::Overlay);
         if crate::viewport_status::enabled(app) {
@@ -3885,7 +3885,7 @@ mod header_report_tests {
     fn native_menu_actions_share_settings_and_unsaved_quit() {
         let mut h = crate::scenario::Harness::new();
         FileAction::Settings.run(&mut h.app);
-        assert!(h.app.prefs_window.open);
+        assert!(h.app.prefs_window.shell.open);
         h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
         FileAction::Quit.run(&mut h.app);
         assert!(!h.app.quit_requested);
@@ -4049,7 +4049,9 @@ mod header_report_tests {
             action.run(&mut h.app);
         }
         assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.docs.count(), h.app.home.recent.clone()));
-        assert!(h.app.dialog.is_none() && h.app.file_picker.is_none() && !h.app.prefs_window.open && !h.app.keymap.open && !h.app.agent_chat.open);
+        assert!(
+            h.app.dialog.is_none() && h.app.file_picker.is_none() && !h.app.prefs_window.shell.open && !h.app.keymap.open && !h.app.agent_chat.open
+        );
         // A focused report field still gets the menu's Undo and Redo.
         assert!(FileAction::Undo.menu_enabled(&h.app, true) && !FileAction::Undo.menu_enabled(&h.app, false));
         assert!(!FileAction::Save.menu_enabled(&h.app, true));

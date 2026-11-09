@@ -643,7 +643,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 
     if interactive
         && !had_help_window
-        && !app.prefs_window.open
+        && !app.prefs_window.shell.open
         && !app.help.about
         && !app.crashes.open
         && !app.help.menu
@@ -656,7 +656,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if interactive
         && !had_help_window
-        && !app.prefs_window.open
+        && !app.prefs_window.shell.open
         && !app.help.about
         && !app.crashes.open
         && !egui::Popup::is_any_open(ui.ctx())
@@ -1449,7 +1449,7 @@ mod tests {
         assert!(h.app.home.open);
         let gear = crate::scenario::handle_at("titlebar:preferences").unwrap();
         h.call("ui.click", serde_json::json!({"x": gear.x, "y": gear.y}));
-        assert!(h.app.prefs_window.open && h.app.home.open);
+        assert!(h.app.prefs_window.shell.open && h.app.home.open);
         let shown = |h: &crate::scenario::Harness| {
             h.ctx.memory(|m| m.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::unique("sc_prefs"))))
         };
@@ -1460,7 +1460,7 @@ mod tests {
         // Home › Keyboard Shortcuts opens the same window at its page.
         h.app.keymap.open = true;
         h.frames(2);
-        assert!(shown(&h) && h.app.prefs_window.section == crate::prefs::PAGE_SHORTCUTS && h.app.home.open);
+        assert!(shown(&h) && h.app.prefs_window.shell.section == crate::prefs::PAGE_SHORTCUTS && h.app.home.open);
     }
 
     fn click_file(h: &mut crate::scenario::Harness, id: &str) {
@@ -1572,7 +1572,7 @@ mod tests {
         h.app.home.show(0);
         assert_eq!(solidcraft_ui_text::tr("home.settings"), solidcraft_ui_text::tr("ui.preferences"), "one name for the window");
         click_file(&mut h, "home:settings");
-        assert!(h.app.prefs_window.open, "the entry opens Preferences");
+        assert!(h.app.prefs_window.shell.open, "the entry opens Preferences");
     }
 
     #[test]
