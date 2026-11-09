@@ -490,7 +490,9 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
 /// Sketch (on the selected plane or planar face, else on the plane picked next) and the tool
 /// starts in the new sketch.
 pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
-    if let Some(id) = command_for(app, key) {
+    if keeps_old_show_hide(app, key) {
+        app.start("ui.toggle_visibility");
+    } else if let Some(id) = command_for(app, key) {
         if id == DRAG_ZOOM {
             // The viewport reads the held chord. A key press must not latch Zoom.
             return;
@@ -518,6 +520,14 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
             d.then_start = Some(then);
         }
     }
+}
+
+/// V with Shift or Alt has always toggled visibility too. It still does while Show/Hide is on V
+/// and nothing else is bound to that chord.
+fn keeps_old_show_hide(app: &SolveApp, key: &str) -> bool {
+    matches!(key, "Shift+V" | "Alt+V" | "Alt+Shift+V")
+        && effective(app, "ui.toggle_visibility").as_deref() == Some("V")
+        && commands_for(app, key).is_empty()
 }
 
 /// What a family's key starts: the variant used last (#4308), unless that variant has a key of
@@ -1939,8 +1949,16 @@ mod tests {
         assert!(hidden(&h), "V hides the selection by default");
         h.step(&json!({"key": "V"})).unwrap();
         assert!(!hidden(&h), "and shows it again");
+        for chord in ["Shift+V", "Alt+V", "Alt+Shift+V"] {
+            press(&mut h.app, chord, false);
+            assert!(hidden(&h), "{chord} still toggles while Show/Hide is on V");
+            press(&mut h.app, chord, false);
+            assert!(!hidden(&h), "{chord} toggles back");
+        }
 
         bind(&mut h.app, ID, "Shift+J", true).unwrap();
+        press(&mut h.app, "Shift+V", false);
+        assert!(!hidden(&h), "the old chords leave with V");
         h.step(&json!({"key": "V"})).unwrap();
         assert!(!hidden(&h), "V no longer hides");
         h.step(&json!({"key": "J", "shift": true})).unwrap();
@@ -1950,8 +1968,18 @@ mod tests {
 
         // With a menu open the new key runs the menu's own Show/Hide, and the row names that key.
         assert_eq!(context_menu::shortcut_shown(&h.app, "V"), "Shift+J");
+        let mut rows = [
+            crate::ui_kit::Item { shortcut: "V".into(), ..crate::ui_kit::Item::action("solid.extrude", "Extrude", "") },
+            crate::ui_kit::Item { shortcut: "V".into(), ..crate::ui_kit::Item::action("ui.hide", "Show/Hide", "") },
+        ];
+        context_menu::show_current_keys(&h.app, &mut rows);
+        assert_eq!(rows[0].shortcut, "V", "another command's V stays on its row");
+        assert_eq!(rows[1].shortcut, "Shift+J");
         context_menu::open_for(&mut h.app, egui::pos2(300.0, 200.0), Target::Body { name: body.clone() });
         h.frames(2);
+        let report = context_menu::describe(&h.app);
+        let show_hide = report["items"].as_array().and_then(|rows| rows.iter().find(|row| row["label"] == "Show/Hide")).unwrap();
+        assert_eq!(show_hide["shortcut"], "Shift+J", "`ui.menu` reports the current key");
         h.step(&json!({"key": "J", "shift": true})).unwrap();
         h.frames(2);
         assert!(hidden(&h), "the menu's Show/Hide ran");

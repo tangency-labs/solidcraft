@@ -2013,9 +2013,12 @@ pub fn shortcut_shown(app: &SolveApp, tag: &str) -> String {
     if tag == "V" { crate::keymap::display_for(app, "ui.toggle_visibility").unwrap_or_default() } else { tag.to_string() }
 }
 
-fn show_current_keys(app: &SolveApp, list: &mut [Item]) {
+/// Only Show/Hide rows carry the `V` tag for that command: another row showing V has V bound to it.
+pub(crate) fn show_current_keys(app: &SolveApp, list: &mut [Item]) {
     for item in list {
-        item.shortcut = shortcut_shown(app, &item.shortcut);
+        if item.label == "Show/Hide" {
+            item.shortcut = shortcut_shown(app, &item.shortcut);
+        }
         show_current_keys(app, &mut item.children);
     }
 }
@@ -2373,7 +2376,10 @@ pub fn describe(app: &SolveApp) -> Value {
     let Some(at) = app.viewport.context_menu else {
         return json!({ "open": false, "pending": app.menu.pending.is_some() });
     };
-    let radial = if app.menu.radial { radial_items(app) } else { Vec::new() };
+    let mut radial = if app.menu.radial { radial_items(app) } else { Vec::new() };
+    show_current_keys(app, &mut radial);
+    let mut rows = items(app, &app.menu.target);
+    show_current_keys(app, &mut rows);
     /// A row with its `placeholder` flag, and a flyout's rows likewise.
     fn describe_items(items: Vec<Item>) -> Vec<Value> {
         items
@@ -2395,7 +2401,7 @@ pub fn describe(app: &SolveApp) -> Value {
         "at": [at.x, at.y],
         "target": app.menu.target,
         "radial": describe_items(radial),
-        "items": describe_items(items(app, &app.menu.target)),
+        "items": describe_items(rows),
         "rename": app.menu.rename.as_ref().map(|r| r.text.clone()),
     })
 }
