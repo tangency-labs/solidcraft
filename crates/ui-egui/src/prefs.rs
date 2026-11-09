@@ -7173,9 +7173,9 @@ mod tests {
         h.frames(4);
         assert!(shows(&far), "coming back to the page shows the theme in use: {far}");
         page_back(&mut h);
-        h.app.prefs_window.filter = "Onyx".to_owned();
+        h.app.prefs_window.shell.filter = "Onyx".to_owned();
         h.frames(5);
-        h.app.prefs_window.filter.clear();
+        h.app.prefs_window.shell.filter.clear();
         h.frames(5);
         assert!(shows(&far), "clearing a search shows the theme in use: {far}");
         assert_eq!(h.app.preferences.theme, far, "showing a theme never chooses one");

@@ -1692,7 +1692,7 @@ fn custom_instructions_reach_the_system_note_of_each_new_session() {
     h.step(&json!({"text": "M3"})).unwrap();
     h.frames(2);
     assert_eq!(h.app.preferences.agent_instructions, "M3", "typed text lands in the field");
-    assert!(h.app.prefs_window.filter.is_empty(), "Preferences search does not take the typing");
+    assert!(h.app.prefs_window.shell.filter.is_empty(), "Preferences search does not take the typing");
     let long = "x".repeat(acp::INSTRUCTIONS_LIMIT + 5);
     assert_eq!(
         h.call("ui.agent_chat", json!({"instructions": long}))["result"]["instructions"].as_str().map(str::len),
