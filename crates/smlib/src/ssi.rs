@@ -202,8 +202,8 @@ impl Surface {
 
     /// A schema 4 record surface over the parameter box `domain` (`[[u0, u1], [v0, v1]]`, the
     /// record's own parameters: radians for angles), with the record's parameterisation and
-    /// normal. A spline is taken over its whole knot domain. A cone only as a whole turn, widening
-    /// along its axis; a revolution not at all ([`Error::Unsupported`]).
+    /// normal. A spline is taken over its whole knot domain. A cone only as a whole turn (narrowing
+    /// along its axis as well: on the mirrored frame); a revolution not at all ([`Error::Unsupported`]).
     pub fn from_record(surface: &solidcore_record::brep::Surface, domain: [[f64; 2]; 2]) -> Result<Surface> {
         use solidcore_record::brep::Surface as S;
         let [u, v] = domain;
@@ -222,14 +222,19 @@ impl Surface {
             S::Cylinder { frame, radius } => Surface::cylinder(frame.origin, frame.x_axis, frame.y_axis, *radius, deg(u), v),
             S::Cone { frame, radius_at_origin, half_angle } => {
                 let t = half_angle.tan();
-                if !(t > 0.0) || !(u[1] - u[0] >= std::f64::consts::TAU * (1.0 - 1e-12)) {
+                if !(t != 0.0 && t.is_finite()) || !(u[1] - u[0] >= std::f64::consts::TAU * (1.0 - 1e-12)) {
                     return Err(Error::Unsupported);
                 }
+                // SMLib's cone widens along its axis. A record cone with a negative half angle
+                // narrows along the frame's z (docs/native-brep.md), so it is built on the mirrored
+                // frame (y negated: x × -y = -z), along which it widens, with its heights mirrored
+                // (as the kernel's `surf_of` reads such a cone).
+                let (y_axis, t, v) = if t > 0.0 { (frame.y_axis, t, v) } else { (frame.y_axis.map(|c| -c), -t, [-v[1], -v[0]]) };
                 // The apex lies where the radius is 0; heights run from it along the axis.
                 let at = -radius_at_origin / t;
-                let z = cross(frame.x_axis, frame.y_axis);
+                let z = cross(frame.x_axis, y_axis);
                 let apex = [0, 1, 2].map(|k| frame.origin[k] + z[k] * at);
-                Surface::cone(apex, frame.x_axis, frame.y_axis, half_angle.to_degrees(), [(v[0] - at).max(0.0), v[1] - at])
+                Surface::cone(apex, frame.x_axis, y_axis, t.atan().to_degrees(), [(v[0] - at).max(0.0), v[1] - at])
             }
             S::Sphere { frame, radius } => Surface::sphere(frame.origin, frame.x_axis, frame.y_axis, *radius, deg(u), deg(v)),
             S::Torus { frame, major_radius, minor_radius, tube_start } => {
@@ -389,6 +394,32 @@ mod tests {
         ];
         for (i, r) in refused.iter().enumerate() {
             assert_eq!(r.as_ref().err(), Some(&Error::Argument), "{i}");
+        }
+    }
+
+    /// #13917: a record cone with a negative half angle narrows along its frame's z axis
+    /// (docs/native-brep.md); it converts like a widening one, and every point of the surface
+    /// over its domain has the record's radius at its height.
+    #[test]
+    fn a_record_cone_narrowing_along_its_axis_converts() {
+        use solidcore_record::brep::{Frame, Surface as S};
+        let frame = Frame { origin: [1.0, 2.0, 3.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] };
+        for half in [0.2f64, -0.2] {
+            let rec = S::Cone { frame: frame.clone(), radius_at_origin: 5.0, half_angle: half };
+            let s = Surface::from_record(&rec, [[0.0, std::f64::consts::TAU], [-4.0, 6.0]]).unwrap_or_else(|e| panic!("half {half}: {e}"));
+            let [u0, u1, v0, v1] = s.domain().unwrap();
+            let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+            for i in 0..=8 {
+                for j in 0..=8 {
+                    let p = s.evaluate(u0 + (u1 - u0) * f64::from(i) / 8.0, v0 + (v1 - v0) * f64::from(j) / 8.0).unwrap();
+                    let h = p[2] - 3.0;
+                    let r = ((p[0] - 1.0).powi(2) + (p[1] - 2.0).powi(2)).sqrt();
+                    assert!((r - (5.0 + h * half.tan())).abs() < 1e-9, "half {half}: ({},{},{}) r {r} at h {h}", p[0], p[1], p[2]);
+                    lo = lo.min(h);
+                    hi = hi.max(h);
+                }
+            }
+            assert!((lo + 4.0).abs() < 1e-9 && (hi - 6.0).abs() < 1e-9, "half {half}: heights {lo}..{hi}");
         }
     }
 
