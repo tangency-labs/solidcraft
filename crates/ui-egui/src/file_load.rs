@@ -1505,6 +1505,31 @@ mod tests {
         });
     }
 
+    /// A design saved with its own orientation (#6455) opens at its own isometric Home view,
+    /// whether it replaces the blank design or takes a tab of its own.
+    #[test]
+    fn a_design_with_its_own_orientation_opens_at_its_own_home_view() {
+        use solidcraft_engine::render::{Camera, StandardView};
+        let ctx = egui::Context::default();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        for name in ["plate", "post"] {
+            let mut part = Session::default();
+            part.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+            let seen = Camera { yaw: 1.1, pitch: 0.4, ..Camera::default() };
+            part.execute("view.frame", &json!({"set": "front", "camera": seen})).unwrap();
+            let frame = part.doc.view_frame;
+            assert!(frame.is_some(), "the part has its own orientation");
+            part.path = Some(format!("{name}.solidcraft"));
+            completed_open(&mut app, Request::new(&format!("{name}.solidcraft"), Kind::Open), part);
+            tick(&mut app, &ctx);
+            let mut home = Camera { frame, ..Camera::default() };
+            home.set_view(StandardView::Iso);
+            assert_eq!(app.cam.frame, frame, "{name}: the camera is in the design's orientation");
+            assert!(app.cam.back().dist(home.back()) < 1e-9, "{name}: at its own isometric view");
+        }
+        assert_eq!(app.docs.count(), 2, "the second took a tab of its own");
+    }
+
     /// An Open says which design it brought in, by the name its tab shows, and whether it took
     /// a tab of its own or replaced the blank design.
     #[test]

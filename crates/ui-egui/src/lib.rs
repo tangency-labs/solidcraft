@@ -2790,7 +2790,9 @@ impl SolveApp {
         let params = self.load_params(path, options);
         if let Ok(r) = self.run("doc.open", params) {
             // An opened design comes up at the home view, not at the angle the design before it
-            // was left at: `prepare_open` keeps the camera when it reuses a blank design.
+            // was left at: `prepare_open` keeps the camera when it reuses a blank design. Its
+            // Home is in its own orientation (#6455), so the frame is set before the view.
+            self.cam.frame = self.session.doc.view_frame;
             self.cam.set_view(StandardView::Iso);
             self.fit_view();
             stand_up::offer(self, path, &[], Some(&r));
@@ -2872,10 +2874,9 @@ impl SolveApp {
     /// The design's own FRONT and TOP changed (#6455): the camera takes them and keeps looking
     /// from where it was. A Set as turns it to the face itself (`view.frame` sets the camera).
     pub fn follow_view_frame(&mut self) {
-        let back = self.cam.back();
         self.cam_anim = None;
-        self.cam.frame = self.session.doc.view_frame;
-        self.cam = self.cam.looking_from(back);
+        // The same view, roll included, in the new orientation: nothing moves on screen.
+        self.cam = self.cam.in_frame(self.session.doc.view_frame);
     }
 
     /// Make `up` the world's up axis: the camera turns to the same standard view in that world
@@ -3076,9 +3077,7 @@ impl SolveApp {
         // A camera from outside the design's orientation (#6455) keeps its world direction in it;
         // else the frame check in `logic` would stop the animation on its first frame.
         if to.frame != self.session.doc.view_frame {
-            let back = to.back();
-            to.frame = self.session.doc.view_frame;
-            to = to.looking_from(back);
+            to = to.in_frame(self.session.doc.view_frame);
         }
         // Preferences › Navigation: animated (at a chosen speed) or immediate.
         if !self.preferences.look_at_anim {

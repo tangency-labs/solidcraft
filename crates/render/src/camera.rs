@@ -629,6 +629,18 @@ impl Camera {
         };
         Camera { yaw, pitch, roll: 0.0, ..*self }
     }
+    /// This camera's view in another design orientation (`frame`): the same viewing direction and
+    /// the same turn of the image (roll), so changing frames moves nothing on screen.
+    pub fn in_frame(&self, frame: Option<ViewFrame>) -> Camera {
+        let (right, _, back) = self.basis();
+        let mut c = Camera { frame, ..*self }.looking_from(back);
+        let (base_right, base_up, _) = c.basis();
+        let roll = right.dot(base_up).atan2(right.dot(base_right));
+        if roll.is_finite() {
+            c.roll = roll;
+        }
+        c
+    }
     /// Orientation as a unit quaternion (camera → world rotation).
     pub fn orientation(&self) -> Quat {
         let (r, u, b) = self.basis();
@@ -781,6 +793,18 @@ mod frame_tests {
         assert!(close(framed.up_dir(), -Vec3::Y), "the orbit turns about the new top");
         // Every standard view is square to the model and the frame is right-handed.
         assert!(close(f.right().cross(-f.front), f.top));
+    }
+
+    #[test]
+    fn a_rolled_view_keeps_its_image_in_another_frame() {
+        let mut cam = Camera { yaw: 0.7, pitch: 0.35, roll: 0.5, ..Camera::default() };
+        let before = cam.basis();
+        for frame in [ViewFrame::new(Vec3::X, Vec3::Y), ViewFrame::new(-Vec3::Z, Vec3::X), None] {
+            cam = cam.in_frame(frame);
+            assert_eq!(cam.frame, frame);
+            let after = cam.basis();
+            assert!(close(after.0, before.0) && close(after.1, before.1) && close(after.2, before.2), "{frame:?}: {before:?} -> {after:?}");
+        }
     }
 
     #[test]
