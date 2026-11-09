@@ -3694,6 +3694,8 @@ impl SolveApp {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
+        // Before anything is drawn: a press the OS took on the window's frame closes open menus.
+        titlebar::begin_frame(ui.ctx());
         prefs::prepare_blur(self, ui.ctx());
         render_workspace::displayed::begin(self);
         let blur_source = !self.home.open && !render_workspace::result_active(self);
@@ -3729,6 +3731,8 @@ impl SolveApp {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
         control::publish_design(self, &control::DOCUMENT_WATCH);
+        // Last: everything that can lie over the title bar is laid out by now.
+        titlebar::publish_caption(ui.ctx(), self.custom_titlebar && self.native_resize_border);
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());

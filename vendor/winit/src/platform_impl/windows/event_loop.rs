@@ -1180,19 +1180,12 @@ unsafe fn public_window_callback_inner(
                     params.rgrc[0] = monitor_info.monitorInfo.rcWork;
                 }
             } else if window_flags.contains(WindowFlags::MARKER_UNDECORATED_SHADOW) {
-                // Extend the client area to cover the whole non-client area.
-                // https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-nccalcsize#remarks
-                //
-                // HACK(msiglreith): To add the drop shadow we slightly tweak the non-client area.
-                // This leads to a small black 1px border on the top. Adding a margin manually
-                // on all 4 borders would result in the caption getting drawn by the DWM.
-                //
-                // Another option would be to allow the DWM to paint inside the client area.
-                // Unfortunately this results in janky resize behavior, where the compositor is
-                // ahead of the window surface. Currently, there seems no option to achieve this
-                // with the Windows API.
-                params.rgrc[0].top += 1;
-                params.rgrc[0].bottom += 1;
+                // SolidCraft: the system frame on the left, right and bottom (resize borders and
+                // shadow), none at the top: a non-client row at the top stops Windows 11 offering
+                // snap layouts on the restored window. `WindowFlags::adjust_rect` mirrors this.
+                let top = params.rgrc[0].top;
+                unsafe { DefWindowProcW(window, msg, wparam, lparam) };
+                params.rgrc[0].top = top;
             }
 
             result = ProcResult::Value(0);

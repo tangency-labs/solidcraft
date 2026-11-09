@@ -1671,7 +1671,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 let dragging = ribbon::dragging(ui.ctx());
                 if open
                     && ((area.response.clicked_elsewhere() && !lresp.clicked() && !opened && !dragging)
-                        || ui.input(|i| i.key_pressed(egui::Key::Escape)))
+                        || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                        || crate::titlebar::frame_pressed(ui.ctx()))
                 {
                     ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
                 }

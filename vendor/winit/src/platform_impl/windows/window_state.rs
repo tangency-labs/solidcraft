@@ -432,7 +432,11 @@ impl WindowFlags {
 
             // Frameless style implemented by manually overriding the non-client area in
             // `WM_NCCALCSIZE`.
-            if !self.contains(WindowFlags::MARKER_DECORATIONS) {
+            // SolidCraft: with the undecorated shadow, that keeps the frame but not its top.
+            let side_frame = !self.contains(WindowFlags::MARKER_DECORATIONS)
+                && self.contains(WindowFlags::MARKER_UNDECORATED_SHADOW);
+            let top = rect.top;
+            if !self.contains(WindowFlags::MARKER_DECORATIONS) && !side_frame {
                 style &= !(WS_CAPTION | WS_SIZEBOX);
             }
 
@@ -447,6 +451,9 @@ impl WindowFlags {
                     AdjustWindowRectEx(&mut rect, style, b_menu.into(), style_ex)
                 }
             })?;
+            if side_frame {
+                rect.top = top;
+            }
             Ok(rect)
         }
     }

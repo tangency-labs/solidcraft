@@ -702,7 +702,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         }
     }
-    let outside = ctx.input(|i| i.pointer.any_pressed()) && !response.response.contains_pointer();
+    let outside = ctx.input(|i| i.pointer.any_pressed()) && !response.response.contains_pointer() || crate::titlebar::frame_pressed(ctx);
     if esc || outside {
         close(app);
     }

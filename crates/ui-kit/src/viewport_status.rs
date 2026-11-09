@@ -525,14 +525,13 @@ pub fn show_card(
             },
         );
     solidcraft_ui_registry::publish_target("viewport_status:card", result.response.rect);
-    if state.opened_frame != Some(ctx.cumulative_frame_nr())
-        && !popup_was_open
+    let pressed_outside = !popup_was_open
         && !egui::Popup::is_any_open(ctx)
         && ctx.input(|input| {
             input.pointer.any_pressed()
                 && input.pointer.interact_pos().is_some_and(|point| !result.response.rect.contains(point) && !owner.contains(point))
-        })
-    {
+        });
+    if state.opened_frame != Some(ctx.cumulative_frame_nr()) && (pressed_outside || crate::window_chrome::frame_pressed(ctx)) {
         state.close_details();
     }
 }

@@ -1,0 +1,78 @@
+{
+  "en": {
+    "ui.window_menu_close": "Close",
+    "ui.window_menu_maximize": "Maximize",
+    "ui.window_menu_minimize": "Minimize",
+    "ui.window_menu_move": "Move",
+    "ui.window_menu_restore": "Restore",
+    "ui.window_menu_size": "Size"
+  },
+  "en-GB": {
+    "ui.window_menu_maximize": "Maximise",
+    "ui.window_menu_minimize": "Minimise"
+  },
+  "ar": {
+    "ui.window_menu_close": "إغلاق",
+    "ui.window_menu_maximize": "تكبير",
+    "ui.window_menu_minimize": "تصغير",
+    "ui.window_menu_move": "نقل",
+    "ui.window_menu_restore": "استعادة",
+    "ui.window_menu_size": "الحجم"
+  },
+  "de": {
+    "ui.window_menu_close": "Schließen",
+    "ui.window_menu_maximize": "Maximieren",
+    "ui.window_menu_minimize": "Minimieren",
+    "ui.window_menu_move": "Verschieben",
+    "ui.window_menu_restore": "Wiederherstellen",
+    "ui.window_menu_size": "Größe ändern"
+  },
+  "he": {
+    "ui.window_menu_close": "סגירה",
+    "ui.window_menu_maximize": "הגדלה",
+    "ui.window_menu_minimize": "מזעור",
+    "ui.window_menu_move": "הזזה",
+    "ui.window_menu_restore": "שחזור",
+    "ui.window_menu_size": "שינוי גודל"
+  },
+  "ja": {
+    "ui.window_menu_close": "閉じる",
+    "ui.window_menu_maximize": "最大化",
+    "ui.window_menu_minimize": "最小化",
+    "ui.window_menu_move": "移動",
+    "ui.window_menu_restore": "元のサイズに戻す",
+    "ui.window_menu_size": "サイズ変更"
+  },
+  "ko": {
+    "ui.window_menu_close": "닫기",
+    "ui.window_menu_maximize": "최대화",
+    "ui.window_menu_minimize": "최소화",
+    "ui.window_menu_move": "이동",
+    "ui.window_menu_restore": "이전 크기로",
+    "ui.window_menu_size": "크기 조정"
+  },
+  "vi": {
+    "ui.window_menu_close": "Đóng",
+    "ui.window_menu_maximize": "Phóng to",
+    "ui.window_menu_minimize": "Thu nhỏ",
+    "ui.window_menu_move": "Di chuyển",
+    "ui.window_menu_restore": "Khôi phục",
+    "ui.window_menu_size": "Kích thước"
+  },
+  "zh": {
+    "ui.window_menu_close": "关闭",
+    "ui.window_menu_maximize": "最大化",
+    "ui.window_menu_minimize": "最小化",
+    "ui.window_menu_move": "移动",
+    "ui.window_menu_restore": "还原",
+    "ui.window_menu_size": "大小"
+  },
+  "zh-TW": {
+    "ui.window_menu_close": "關閉",
+    "ui.window_menu_maximize": "最大化",
+    "ui.window_menu_minimize": "最小化",
+    "ui.window_menu_move": "移動",
+    "ui.window_menu_restore": "還原",
+    "ui.window_menu_size": "大小"
+  }
+}

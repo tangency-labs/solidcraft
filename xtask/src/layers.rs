@@ -95,6 +95,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("viewport-gpu", Class::Shared),
     // the viewport in an egui window: egui-wgpu paint callbacks and install (#12943)
     ("viewport-egui", Class::Shared),
+    // the title bar's regions for native hit testing, read lock-free by the window procedure (no dependencies)
+    ("frame", Class::Shared),
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),

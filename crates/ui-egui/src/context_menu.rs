@@ -2858,7 +2858,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if secondary && inside && app.menu.radial {
         // A right press on the ring: drag toward a command and release to pick it.
         app.menu.flick = true;
-    } else if (primary || secondary) && !inside || esc {
+    } else if (primary || secondary) && !inside || esc || crate::titlebar::frame_pressed(ctx) {
         close(app);
     }
     if let Some(item) = picked {

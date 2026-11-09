@@ -168,7 +168,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
             });
         if let Some(p) = pick {
             run(app, ctx, p);
-        } else if ctx.input(|i| i.pointer.any_pressed() || i.key_pressed(egui::Key::Escape)) && !resp.response.contains_pointer() {
+        } else if (ctx.input(|i| i.pointer.any_pressed() || i.key_pressed(egui::Key::Escape)) && !resp.response.contains_pointer())
+            || crate::titlebar::frame_pressed(ctx)
+        {
             // Pressed elsewhere (the ? button toggles it itself).
             if !ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_help_opened")).unwrap_or(false)) {
                 app.help.menu = false;
