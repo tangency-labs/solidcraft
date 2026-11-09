@@ -528,15 +528,8 @@ fn a_balloon_reads_a_components_list_below_it() {
 /// The W23 assembly sheet's test assembly (#11773), from its command script, and the occurrences
 /// the script names: the plate, the first screw, the two holders and the block placed in each.
 fn assembly_sheet() -> (Session, [u64; 5]) {
-    let script: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/w23-assembly-sheet/assembly.json")).unwrap();
-    let mut s = Session::default();
-    let made = s.run_script(&script).unwrap();
-    let named = |name: &str| {
-        let step = script["commands"].as_array().unwrap().iter().position(|c| c["as"] == name).unwrap();
-        made[step]["occurrence"].as_u64().unwrap()
-    };
-    let occurrences = ["plate", "screw", "first_holder", "second_holder", "block"].map(named);
-    (s, occurrences)
+    let (session, named) = crate::tests::w23_assembly_sheet();
+    (session, ["plate", "screw", "first_holder", "second_holder", "block"].map(|name| named[name]))
 }
 
 /// Balloons on the assembly sheet's top view and the drawing's revision rows, through model edits
