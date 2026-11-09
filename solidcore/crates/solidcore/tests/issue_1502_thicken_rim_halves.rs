@@ -48,8 +48,7 @@ use solidcore::{Brep, FaceId, Kernel};
 const REL: f64 = 1e-5;
 
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k
+    Kernel::default()
 }
 
 fn shell_options(distance: f64, create_offset_solid: bool) -> ShellOptions {

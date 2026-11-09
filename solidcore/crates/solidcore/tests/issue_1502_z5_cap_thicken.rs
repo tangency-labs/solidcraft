@@ -104,8 +104,7 @@ fn thicken(k: &mut Kernel, mut sheet: Brep, distance: f64) -> solidcore::Result<
 
 /// The issue's configuration: the existing #403 opt-in on (WR-463), nothing else.
 fn wr463() -> Kernel {
-    let mut k = Kernel::default();
-    k
+    Kernel::default()
 }
 
 /// The sector between the sphere's radii 10 and 11 over the cap's solid angle pi.
