@@ -598,7 +598,15 @@ fn hostile_arguments_are_refused() {
     assert_eq!(loft(std::slice::from_ref(&sq), 1, true).err(), Some(Error::Argument), "one section");
     assert_eq!(loft(&[sq.clone(), sq.clone()], 4, true).err(), Some(Error::Argument), "degree 4");
     assert_eq!(loft_to_point(&sq, [0.5, 0.5, 0.0]).err(), Some(Error::Argument), "apex in the base's plane");
-    assert_eq!(loft_to_point(&[circle([0.0; 3], Z, [1.0, 0.0, 0.0], 1.0)], Z).err(), Some(Error::Argument), "not lines");
+    // A circle lofts to a point above it: the cone, pi r^2 h / 3 (#11216); in its plane it is refused.
+    let cone = loft_to_point(&[circle([0.0; 3], Z, [1.0, 0.0, 0.0], 1.0)], Z).unwrap_or_else(|e| panic!("circle base: {e:?}"));
+    let v = volume(&cone, 1e-8).unwrap();
+    assert!((v - PI / 3.0).abs() < 1e-6 * PI, "circle base: {v}");
+    assert_eq!(
+        loft_to_point(&[circle([0.0; 3], Z, [1.0, 0.0, 0.0], 1.0)], [0.5, 0.0, 0.0]).err(),
+        Some(Error::Argument),
+        "circle, apex in its plane"
+    );
     let flat = Affine { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]], t: [0.0; 3] };
     assert_eq!(sweep_stations(&sq, &[translate([0.0; 3]), flat], Ends::Capped).err(), Some(Error::Argument), "a singular map");
     assert_eq!(sweep_stations(&sq, &[translate([0.0; 3])], Ends::Capped).err(), Some(Error::Argument), "one station");
