@@ -571,18 +571,61 @@ pub(crate) fn matches(names: &Names, index: usize, name: &str) -> Option<Match> 
     if descends(current, name) {
         return Some(Match::Piece);
     }
-    // The named piece, told apart by the faces around it: they still bound this piece. Or the
-    // face it was a piece of, whole again since, which they still bound: the piece is all of it
-    // (#11731). Only a piece told apart by faces: a numbered one (`#2`, nothing told it apart)
-    // says nothing about which part of the whole face it was.
+    // The named piece, told apart by the faces around it: they still bound this piece, directly or
+    // through a blend that replaced the edge it shared with them (`F4:blend:A|B` rounds the edge
+    // between A and B, and is named after it, so it still tells them apart). Or the face it was a
+    // piece of, whole again since, which they still bound: the piece is all of it (#11731). Only a
+    // piece told apart by faces: a numbered one (`#2`, nothing told it apart) says nothing about
+    // which part of the whole face it was.
     if let Some((stem, around)) = crate::piece_names::piece_parts(name)
         && (crate::naming::parent_piece(current) == Some(stem) || (current == stem && !around.is_empty() && name.ends_with(']')))
-        && info.is_some_and(|i| around.iter().all(|f| i.bounds.contains(*f)))
+        && info.is_some_and(|i| around.iter().all(|f| i.bounds.contains(*f) || i.bounds.iter().any(|bound| rounds_the_edge(bound, current, f))))
+    {
+        return Some(Match::Piece);
+    }
+    // A piece of a blend face: a blend is named after the edge it replaced, so the qualifier that
+    // tells its pieces apart sits *inside* that name, on one of the edge's sides
+    // (`F4:blend:F2:side:c1#[F2:side:l3]|F2:side:l3`), and the face whole again since is the blend
+    // of the sides without their qualifiers (#4325).
+    if name.contains(":blend:")
+        && let Some((stem, around)) = blend_piece(name)
+        && (current == stem || crate::naming::parent_piece(current) == Some(stem.as_str()))
+        && info.is_some_and(|i| around.iter().all(|f| i.bounds.contains(*f) || i.bounds.iter().any(|bound| rounds_the_edge(bound, &stem, f))))
     {
         return Some(Match::Piece);
     }
     let root = crate::naming::strip_piece(name);
     (crate::naming::strip_piece(current) == root).then_some(Match::Stem)
+}
+
+/// A piece of a blend face, read out of its name: the blend of the edge's sides without their
+/// qualifiers (the face whole again since), and the faces that told the piece apart. `None` when no
+/// side of the edge holds a qualifier, or the name is not a blend's.
+fn blend_piece(name: &str) -> Option<(String, Vec<&str>)> {
+    let (a, b) = crate::naming::blend_sides(name)?;
+    let mut around = Vec::new();
+    for side in [a, b] {
+        if let Some((_, faces)) = crate::piece_names::piece_parts(side) {
+            around.extend(faces);
+        }
+    }
+    if around.is_empty() {
+        return None;
+    }
+    let mark = name.find(":blend:")?;
+    let stem = format!("{}:blend:{}|{}", name.get(..mark)?, crate::naming::strip_piece(a), crate::naming::strip_piece(b));
+    Some((stem, around))
+}
+
+/// Whether the face named `bound` (one of the faces around face `here`) is a blend that rounds the
+/// edge `here` shared with face `face`: a fillet or chamfer sits between the two, so they no longer
+/// touch, and the blend's name — the edge it replaced, `F4:blend:<here>|<face>` — is what tells them
+/// apart now.
+fn rounds_the_edge(bound: &str, here: &str, face: &str) -> bool {
+    let here = crate::naming::strip_piece(here);
+    let face = crate::naming::strip_piece(face);
+    let sides = |n: &str| crate::naming::strip_piece(n).to_string();
+    crate::naming::blend_sides(bound).is_some_and(|(a, b)| (sides(a) == here && sides(b) == face) || (sides(a) == face && sides(b) == here))
 }
 
 /// A name and the pattern instances after it (`F3:top#[F4:side]@F9.1` is `F3:top#[F4:side]` and

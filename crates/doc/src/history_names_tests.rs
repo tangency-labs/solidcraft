@@ -189,3 +189,35 @@ fn a_piece_name_finds_its_face_once_it_is_whole_again() {
     assert_eq!(matches(&names, 0, "top#[left]#2"), Some(Match::Stem));
     assert_eq!(matches(&names, 0, "top#[]"), Some(Match::Stem));
 }
+
+/// A fillet or chamfer replaces the edge between two faces with a face of its own, named after
+/// that edge (`F3:blend:side|start`): the two no longer touch, and the blend is what tells a piece
+/// of one from a piece of another. A piece told apart by the face the blend separated from is
+/// still found, so the edge saved with it is too (#4325).
+#[test]
+fn a_piece_name_survives_the_blend_that_replaced_the_edge_it_was_told_apart_by() {
+    // The side now meets the start cap only through the blend along their old edge.
+    let faces = named(&["side", "start", "F3:blend:side|start"]);
+    let names = qualify(faces, &[(0, 2), (1, 2)]);
+    assert_eq!(names.faces[0], "side");
+    assert_eq!(matches(&names, 0, "side#[start]"), Some(Match::Piece));
+    // A face the blend does not round an edge with is not one the side is told apart by.
+    assert_eq!(matches(&names, 0, "side#[top]"), Some(Match::Stem));
+    assert_eq!(matches(&names, 0, "side#[F3:blend:side|top]"), Some(Match::Stem), "a blend of another edge");
+}
+
+/// A blend face's own name is the edge it replaced, so the faces that told a piece of one apart
+/// sit inside that name (`F3:blend:side#[start]|start`); the face whole again since is the blend
+/// of the sides without their qualifiers (#4325).
+#[test]
+fn a_piece_of_a_blend_face_finds_it_once_it_is_one_face_again() {
+    let faces = named(&["F3:blend:side|start", "side", "start"]);
+    let names = qualify(faces, &[(0, 1), (0, 2)]);
+    assert_eq!(names.faces[0], "F3:blend:side|start");
+    assert_eq!(matches(&names, 0, "F3:blend:side#[start]|start"), Some(Match::Piece));
+    assert_eq!(matches(&names, 0, "F3:blend:side#[side]|start"), Some(Match::Piece));
+    // A face the blend no longer touches, inside its name: not its piece.
+    assert_eq!(matches(&names, 0, "F3:blend:side#[top]|start"), None);
+    // A qualifier on the side that is whole anyway is not a piece at all.
+    assert_eq!(matches(&names, 0, "F3:blend:side|start"), Some(Match::Exact));
+}
