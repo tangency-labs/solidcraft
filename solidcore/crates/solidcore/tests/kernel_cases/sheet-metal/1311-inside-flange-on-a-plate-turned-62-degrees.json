@@ -1,0 +1,59 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "1311-inside-flange-on-a-plate-turned-62-degrees",
+  "expected": {
+    "body_count": 1,
+    "method": "T = 2, R = 1, K = 0.5, setback R + T = 3. Plate 100 x 57 x 2 after the setback = 11400; the bend is a quarter annulus of radii 1 and 3 over 100 mm = (pi/4)(9 - 1)*100*... = (pi/2)(9-1)*100/2 = 628.319; the leg 20 - 3 = 17 long: 17*2*100 = 3400. V = 11400 + 628.319 + 3400",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1311"
+    ],
+    "volume_mm3": 15428.31853071796,
+    "what": "a 100 x 60 plate turned 62 degrees about the origin with a 90 degree inside flange on one edge: the trimmed corner falls on the sew grid and the flange failed to close"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 28,
+      "faces": 14,
+      "vertices": 16
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 16136.884901396788,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16,
+      "volume_mm3": 15428.318530559736
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1311"
+  ],
+  "traced_ops": [
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d"
+  ],
+  "ungraded": [],
+  "what": "a 100 x 60 plate turned 62 degrees about the origin with a 90 degree inside flange on one edge: the trimmed corner falls on the sew grid and the flange failed to close",
+  "why_not": [
+    "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

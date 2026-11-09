@@ -1,5 +1,5 @@
 //! One work-owned cache for opaque CPU image maps. Every hit reuses one complete
-//! mapped closure for directional, point, area and environment direct lighting.
+//! mapped closure for direct/indirect BRDF, PDF and deterministic denoise guides.
 use super::cpu_preparation::{MapPoint, MapTask, PreparedMap};
 use super::{RuntimeTextures, TextureBinding, TextureMap, validate_cpu_options};
 use crate::{

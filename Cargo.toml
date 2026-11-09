@@ -1,11 +1,12 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
-# Third-party code kept with local fixes (see vendor/README.md); not linted as ours.
-exclude = ["vendor"]
+# Third-party code kept with local fixes (vendor/), and the vendored SolidCore kernel (solidcore/);
+# neither is linted as ours. See CONTRIBUTING.md, "How the code is laid out".
+exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.40.0-rc.2"
+version = "0.40.0-rc.3"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -28,18 +29,24 @@ solidcraft-doc = { path = "crates/doc" }
 solidcraft-io = { path = "crates/io" }
 solidcraft-engine = { path = "crates/engine" }
 solidcraft-ui-egui = { path = "crates/ui-egui" }
+solidcraft-ui-registry = { path = "crates/ui-registry" }
+solidcraft-color = { path = "crates/color" }
+solidcraft-ui-text = { path = "crates/ui-text" }
+solidcraft-theme = { path = "crates/theme" }
 solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }
+solidcraft-mcp-server = { path = "crates/mcp-server" }
+solidcraft-control = { path = "crates/control" }
+solidcraft-control-egui = { path = "crates/control-egui" }
 solidcraft-derive = { path = "crates/derive" }
 solidcraft-3dx-client = { path = "crates/threedx-client" }
-# The Rust port of NVIDIA's SMLib (Apache-2.0), the B-rep kernel behind crates/smlib. Pinned;
-# move the rev on its own commit. For a
-# local checkout, add `[patch."https://github.com/tangency-labs/solidcore"] solidcore = { path =
-# "../solidcore/crates/solidcore" }` to a `.cargo/config.toml` outside the repository.
-solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "8ddce901671f1cebd9214a31d21895d725e886c8" }
+# The Rust port of NVIDIA's SMLib (Apache-2.0), the B-rep kernel behind crates/smlib. Vendored with
+# `git subtree` at solidcore: that tree is the source of truth, and
+# .github/workflows/solidcore-mirror.yml pushes changes in it back to its own repository (#13153).
+solidcore = { path = "solidcore/crates/solidcore" }
 # Geometry as data (solidcore's layers §1, "Record"): the B-rep record, its structural validation
-# and the native body file. Pinned like solidcore; for a local checkout, patch it as above.
-solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "f5e8e9a29e0c9b7cf6c4040a5bc8878382b3c62f" }
+# and the native body file. Vendored with solidcore, in the same subtree.
+solidcore-record = { path = "solidcore/crates/solidcore-record" }
 # test tooling: a dev-dependency only (xtask/src/layers.rs)
 solidcraft-testkit = { path = "crates/testkit" }
 

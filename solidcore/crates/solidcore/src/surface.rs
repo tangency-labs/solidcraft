@@ -1,0 +1,40 @@
+//! Surface geometry: plane, cylinder, cone, sphere, torus, B-spline, extrusion,
+//! revolution, offset and blend surfaces, as a concrete `enum` with evaluation,
+//! normals, derivatives and closest point.
+//!
+//! Upstream: `SmSurface` and its subclasses (`SmPlane`, `SmCylinder`, `SmCone`,
+//! `SmSphere`, `SmTorus`, `SmBSplineSurface`, `SmSurfOfExtrusion`,
+//! `SmSurfOfRevolution`, `SmOffsetSurface`, `SmBlendSurface`, ...) in `source/SMLib`,
+//! and `SM_API/SmApiSurfaces`.
+
+pub mod b_spline_volume;
+pub mod b_spline_volume_n_lib;
+pub mod ball_patch;
+pub mod bend_volume;
+pub mod cone;
+pub mod continued;
+pub mod curve_bounded_surface;
+pub mod extend;
+pub mod face_surface;
+pub mod from_parameters;
+pub mod implicit;
+pub mod offset_surface;
+pub mod plane;
+pub mod procedural_blend;
+pub mod procedural_sweep;
+pub mod side;
+pub mod sphere;
+pub mod srf_in_volume;
+pub mod step_seam;
+pub mod step_window;
+pub mod surf_of_extrusion;
+pub mod surf_of_revolution;
+#[allow(clippy::module_inception)]
+pub mod surface;
+pub mod surface_cache;
+pub mod surface_point_solve;
+pub mod torus;
+pub mod trim_srf_cache;
+pub mod twist_volume;
+pub mod unbend_volume;
+pub mod volume;

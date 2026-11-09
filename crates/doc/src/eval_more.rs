@@ -1441,7 +1441,8 @@ const MAX_CONE_SIZE: f64 = 1e7;
 /// of `top_radius` `height` along `axis` (a negative height goes the other way). A top radius of
 /// 0 (or below a micrometre) makes a full cone ending in an apex. Built, as the torus is, by
 /// revolving its half section, a trapezoid (a triangle for a full cone) with an edge on the axis.
-pub(super) fn cone(base: Vec3, axis: Vec3, radius: f64, top_radius: f64, height: f64) -> Result<Body> {
+/// Its faces are named `bottom`, `side` and `top` ([`crate::lineage::cone_roles`]).
+pub(super) fn cone(base: Vec3, axis: Vec3, radius: f64, top_radius: f64, height: f64) -> Result<Traced> {
     let in_range = |v: f64| v.is_finite() && v.abs() <= MAX_CONE_SIZE;
     if !(in_range(base.x) && in_range(base.y) && in_range(base.z)) {
         return Err(DocError::Invalid("the cone's base is out of range".into()));
@@ -1475,14 +1476,16 @@ pub(super) fn cone(base: Vec3, axis: Vec3, radius: f64, top_radius: f64, height:
         (Some(b), true) => b,
         _ => return Err(DocError::Invalid("the cone could not be built".into())),
     };
+    // Read off the revolve's own history; moving the body keeps its faces' order.
+    let roles = crate::lineage::cone_roles(&body);
     if (dir - Vec3::Z).len() < 1e-12 && base.len() == 0.0 {
-        return Ok(body);
+        return Ok(Traced::made(body, roles));
     }
     // A rotation taking +Z onto the axis (x and y square to it, right-handed), then the base.
     let x = Plane::from_normal(base, dir).ok_or_else(|| DocError::Invalid("the cone's axis has no direction".into()))?.x;
     let y = dir.cross(x);
     let m = [[x.x, x.y, x.z, 0.0], [y.x, y.y, y.z, 0.0], [dir.x, dir.y, dir.z, 0.0], [base.x, base.y, base.z, 1.0]];
-    Ok(kernel::transform_matrix(&body, m)?)
+    Ok(Traced::made(kernel::transform_matrix(&body, m)?, roles))
 }
 
 /// A primitive tool's exact geometry, for [`sheet_primitive_cut`].
@@ -1826,6 +1829,26 @@ pub(super) fn line_beyond_reach(mb: &ModelBody, at: Vec3, dir: Vec3, reach: f64)
         hi = hi.min(t0.max(t1));
     }
     lo > hi
+}
+
+/// Whether [`kernel::cylinder_face_at`] is known to find no face of `mb` at `p`. It takes a face
+/// only when its mesh of the body, made to a chord tolerance of `(size * 1e-3).max(1e-3)`, comes
+/// within a twentieth of the body's size of the point. That mesh lies within its tolerance of
+/// the exact faces, so of the body's exact box ([`exact_box`]): a box farther from the point
+/// than a twentieth of the size and twice that tolerance holds no face for it. Working that out
+/// from the exact box spares meshing every body in the design for each tap marking (#10227). A
+/// mesh body, and a body whose box is unknown, are searched as before.
+pub(super) fn beyond_cylinder_reach(mb: &ModelBody, p: Vec3) -> bool {
+    if mb.body.is_mesh() {
+        return false;
+    }
+    let Some(b) = exact_box(&mb.body) else { return false };
+    let size = mb.body.size();
+    let reach = size * 0.05 + 2.0 * (size * 1e-3).max(1e-3);
+    let off = |at: f64, lo: f64, hi: f64| (lo - at).max(at - hi).max(0.0);
+    let (dx, dy, dz) = (off(p.x, b.min.x, b.max.x), off(p.y, b.min.y, b.max.y), off(p.z, b.min.z, b.max.z));
+    let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+    dist.is_finite() && reach.is_finite() && dist > reach
 }
 
 /// Whether two boxes are known to be apart (an unknown box is never apart).

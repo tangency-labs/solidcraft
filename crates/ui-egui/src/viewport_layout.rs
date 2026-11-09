@@ -5,7 +5,7 @@ use solidcraft_engine::geom::Aabb3;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::Camera;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Layout {
     pub viewport: Rect,
     pub drawable: Rect,
@@ -112,7 +112,7 @@ impl Layout {
     ) -> Self {
         use crate::panel_runtime::{egui_rect, logical_rect, resolve_usable_region};
         use solidcraft_engine::panels::{Point, Size};
-        let clearance = crate::theme::Tokens::get().space_4;
+        let clearance = solidcraft_theme::Tokens::get().space_4;
         let mut obstacles = usable.obstacles.clone();
         let navigation = if navigation.is_positive() && navigation.is_finite() && usable.contains_rect(logical_rect(navigation)) {
             navigation
@@ -381,7 +381,7 @@ pub(crate) fn fit_host_bounds(
     let room = region.fit_rect_with_clearance(
         aspect,
         Point { x: layout.viewport.center().x, y: layout.viewport.center().y },
-        crate::theme::Tokens::get().space_8,
+        solidcraft_theme::Tokens::get().space_8,
     )?;
     let room = egui_rect(room);
     if !room.is_positive() {
@@ -452,14 +452,14 @@ pub(crate) fn centre_host_camera(
             if let Some(landing) = region.place_footprint(
                 Size { width: size.x, height: size.y },
                 Point { x: layout.viewport.center().x, y: layout.viewport.center().y },
-                crate::theme::Tokens::get().space_8,
+                solidcraft_theme::Tokens::get().space_8,
             ) {
                 let at = layout.viewport.center() + (egui_rect(landing).center() - footprint.center());
                 let candidate = translate(at);
                 let final_points: Option<Vec<_>> = corners.iter().map(|p| project(candidate, *p)).collect();
                 if let Some(points) = final_points {
                     let footprint = points.iter().fold(Rect::NOTHING, |rect, p| rect.union(Rect::from_min_max(*p, *p)));
-                    if region.contains_rect(logical_rect(footprint.expand(crate::theme::Tokens::get().space_4))) {
+                    if region.contains_rect(logical_rect(footprint.expand(solidcraft_theme::Tokens::get().space_4))) {
                         result = candidate;
                     }
                 }

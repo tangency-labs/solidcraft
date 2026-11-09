@@ -1,6 +1,6 @@
 # Explicit CPU resource profiles
 
-**Implementation batch: source prepared; consolidated compilation and large-scene runtime acceptance are pending.** These envelopes are admission limits, not measured performance or a final-quality certification.
+**The combined CPU-feature renderer build and profile/admission regressions have executed; current combined workflow and large-scene runtime acceptance remain pending.** These envelopes are admission limits, not measured performance or a final-quality certification.
 
 ## Intent
 
@@ -61,11 +61,11 @@ Fallible allocation, actual vector-capacity checks, checked arithmetic, bounded 
 
 The new pending-format descriptor is `render-cpu-budget`. Old intent has Compact semantics; larger intent is not discarded on reopen. The independent GPU sampling flag remains separate from CPU progressive sampling. Visual material edits still do not change engineering material properties.
 
-This increment does not introduce CPU diffuse global illumination, adaptive sampling, multithreaded transport, arbitrary dielectric geometry, texture displacement or EXR output. The existing optical-combination restrictions remain explicit. Raising an admission ceiling is not a performance optimization or a claim that every large scene is practical yet.
+Resource-profile selection alone does not enable CPU diffuse global illumination, adaptive sampling, multithreaded transport, arbitrary dielectric geometry, texture displacement or EXR output. Optional [opaque path lighting](render-cpu-path.md) and [output presentation](render-cpu-output.md) have their own explicit contracts. The existing optical-combination restrictions remain explicit. Raising an admission ceiling is not a performance optimization or a claim that every large scene is practical yet.
 
-## Prepared regression coverage
+## Regression coverage
 
-Tests cover explicit 4K/8K admission without allocating a large film, BVH cardinality estimates for larger profiles, old/unknown profile handling, offline saved round trips, preservation of incompatible UI drafts, host-pool isolation, arithmetic overflow and linear film accumulation above 64 samples. Their execution belongs to the consolidated batch gate; formatting or static source checks alone do not constitute a passing test run.
+Tests cover explicit 4K/8K admission without allocating a large film, BVH cardinality estimates for larger profiles, old/unknown profile handling, offline saved round trips, preservation of incompatible UI drafts, host-pool isolation, arithmetic overflow and linear film accumulation above 64 samples. Renderer admission and above-64-sample film regressions have executed. Offline document/UI, host and platform qualifications remain separate; admission tests without a large film do not establish large-scene performance.
 
 ## Display is separate from output
 

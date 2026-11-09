@@ -1,0 +1,3952 @@
+{
+ "cases": [
+  {
+   "name": "point_edge_owned_tol_unit_deftol_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_deftol_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ]
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_deftol_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_deftol_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ]
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1e-10_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1e-10
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1e-10_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1e-10
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1e-10_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1e-10
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1e-10_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1e-10
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1e-8_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1e-08
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1e-8_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1e-08
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1e-8_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1e-08
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1e-8_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1e-08
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1e-2_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 0.01
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1e-2_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 0.01
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1e-2_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 0.01
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1e-2_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 0.01
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_unit_tol1_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3.0,
+         5.0,
+         1.0
+        ],
+        "p2": [
+         4.0,
+         1.0,
+         2.0
+        ],
+        "d2": [
+         2.0,
+         -6.0,
+         0.5
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      1.6580000000000004,
+      1.668,
+      0.785
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_deftol_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_deftol_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ]
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_deftol_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_deftol_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ]
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1e-10_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1e-10
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1e-10_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1e-10
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1e-10_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1e-10
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1e-10_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1e-10
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1e-8_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1e-08
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1e-8_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1e-08
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1e-8_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1e-08
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1e-8_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1e-08
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1e-2_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 0.01
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1e-2_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 0.01
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1e-2_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 0.01
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1e-2_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 0.01
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e6_tol1_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1234567.0,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         3000000.0,
+         5000000.0,
+         1000000.0
+        ],
+        "p2": [
+         5234567.0,
+         1000000.0,
+         2000000.0
+        ],
+        "d2": [
+         2000000.0,
+         -6000000.0,
+         500000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      2892567.0,
+      1668000.0,
+      785000.0000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_deftol_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_deftol_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ]
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_deftol_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_deftol_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ]
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1e-10_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1e-10
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1e-10_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1e-10
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1e-10_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1e-10
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1e-10_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1e-10
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1e-8_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1e-08
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1e-8_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1e-08
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1e-8_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1e-08
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1e-8_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1e-08
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1e-2_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 0.01
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1e-2_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 0.01
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1e-2_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 0.01
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1e-2_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 0.01
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1_min_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1_min_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 0,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1_op3_full",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.0,
+        1.0
+       ],
+       "tol": 1.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_edge_owned_tol_1e7_tol1_op3_sub",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp (SmTLSPointEdge: GlobalPointSolve on the edge's curve; its cache at SmTol::GetApproxTol3d(&m_crCurve), the edge's tolerance)",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 3,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20
+    },
+    "objects": [
+     {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         12345678.9,
+         0.0,
+         0.0
+        ],
+        "d1": [
+         30000000.0,
+         50000000.0,
+         10000000.0
+        ],
+        "p2": [
+         52345678.9,
+         10000000.0,
+         20000000.0
+        ],
+        "d2": [
+         20000000.0,
+         -60000000.0,
+         5000000.0
+        ]
+       }
+      }
+     },
+     {
+      "edge": {
+       "curve": 0,
+       "ivl": [
+        0.25,
+        0.75
+       ],
+       "tol": 1.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 5,
+     "point": [
+      28925678.900000002,
+      16680000.0,
+      7850000.000000002
+     ]
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  }
+ ]
+}
