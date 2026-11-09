@@ -763,8 +763,8 @@ pub(crate) fn corner_row(ui: &mut Ui, key: &str, name: &str, text: &str, on: boo
     // The X takes the cut away and the V brings it back, so the button says what a click does.
     let (icon, tip) = if on { ("close", "Remove") } else { ("check", "Show") };
     let response = ui.push_id((key, "toggle"), |ui| super::icon_button_at(ui, toggle, icon, tip)).inner;
-    scenario::publish_rect(&format!("dialog:list:{key}"), rect);
-    scenario::publish_handle(&format!("dialog:list:{key}:remove"), toggle.center());
+    crate::scenario::publish_rect(&format!("dialog:list:{key}"), rect);
+    crate::scenario::publish_handle(&format!("dialog:list:{key}:remove"), toggle.center());
     (response, flipped)
 }
 

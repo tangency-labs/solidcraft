@@ -3138,7 +3138,7 @@ fn surrender_keyboard_focus(ui: &egui::Ui) {
 /// Whether this frame is the first to see a click on this corner row's buttons: the later passes
 /// of a multi-pass frame all report the same click, and it must count once.
 fn first_click(ui: &egui::Ui, key: &str) -> bool {
-    let id = egui::Id::new(("corner_click", key));
+    let id = egui::Id::unique(("corner_click", key));
     let frame = ui.ctx().cumulative_frame_nr();
     if ui.ctx().data(|data| data.get_temp::<u64>(id)) == Some(frame) {
         return false;
@@ -3307,10 +3307,6 @@ pub(crate) fn input_rows_range(
                     }
                     if row.clicked() {
                         remove = Some((i, item));
-                    }
-                }
-            });
-        }
                     }
                 }
             });

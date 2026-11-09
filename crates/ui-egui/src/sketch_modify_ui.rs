@@ -391,7 +391,7 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
 /// lines that make a corner, the lines still waiting for one, and points picked on their own.
 pub(crate) fn dialog_rows(s: &solidcraft_engine::Session, d: &Dialog) -> Vec<crate::sketch_corner_rows::Row> {
     let Some(sid) = s.active_sketch else { return Vec::new() };
-    let state = s.world_state();
+    let Ok(state) = s.world_state() else { return Vec::new() };
     let Some(ss) = state.sketch(sid) else { return Vec::new() };
     crate::sketch_corner_rows::rows(&ss.sketch, items(&d.inputs, 0), &d.extra)
 }
@@ -1100,7 +1100,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
         }
         Mod::Corner { chamfer: false, size, .. } => {
             let Some(sid) = app.session.active_sketch else { return Err("open a sketch first".into()) };
-            let state = app.session.world_state();
+            let Ok(state) = app.session.world_state() else { return Err("the sketch no longer exists".into()) };
             let Some(ss) = state.sketch(sid) else { return Err("the sketch no longer exists".into()) };
             let rows = crate::sketch_corner_rows::rows(&ss.sketch, items(inputs, 0), extra);
             let mut points = Vec::new();
@@ -1121,7 +1121,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
         }
         Mod::Corner { ctype, size, distance2, angle, .. } => {
             let Some(sid) = app.session.active_sketch else { return Err("open a sketch first".into()) };
-            let state = app.session.world_state();
+            let Ok(state) = app.session.world_state() else { return Err("the sketch no longer exists".into()) };
             let Some(ss) = state.sketch(sid) else { return Err("the sketch no longer exists".into()) };
             let rows = crate::sketch_corner_rows::rows(&ss.sketch, items(inputs, 0), extra);
             let mut points = Vec::new();

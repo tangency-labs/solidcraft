@@ -23,8 +23,9 @@
 use std::collections::HashMap;
 
 use serde_json::{Map, Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::{CurveKind, Sketch};
 
 /// Points closer together than this are at one place, as the corner commands take them.

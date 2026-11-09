@@ -451,10 +451,10 @@ pub(crate) fn toggle_icon_at(ui: &mut Ui, rect: egui::Rect, row: &str, icon: &st
         ui.painter().rect_filled(rect, t.control_radius, t.hover);
     }
     crate::icons::paint_icon(ui.painter(), rect.shrink(t.space_3), icon, f32::from(t.icon.a()) / 255.0);
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, crate::i18n::tr_label(label)));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, solidcraft_ui_text::tr_label(label)));
     crate::scenario::publish_handle(&format!("dialog:{row}:{label}"), rect.center());
     crate::scenario::publish_rect(&format!("dialog:{row}:{label}"), rect);
-    response.on_hover_text(crate::i18n::tr_label(label))
+    response.on_hover_text(solidcraft_ui_text::tr_label(label))
 }
 
 #[cfg(test)]

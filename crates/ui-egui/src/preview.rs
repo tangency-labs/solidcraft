@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use serde_json::Value;
-use solidcore_record::Vec3;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::ModelState;
 use solidcraft_engine::doc::progress::Progress;
@@ -813,7 +813,7 @@ const FACE_SAMPLES: usize = 24;
 /// A point's place, on a grid fine enough that only a moved point changes cell. The corner
 /// commands take points closer than a millionth of a millimetre as one place, and the preview
 /// compares where points are the same way.
-fn place(p: solidcraft_engine::geom::Vec2) -> (i64, i64) {
+fn place(p: Vec2) -> (i64, i64) {
     ((p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64)
 }
 
@@ -848,7 +848,10 @@ pub(crate) fn sketch_changes(
     old: Option<&solidcraft_engine::doc::SolvedSketch>,
     sketch: &std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
 ) -> Option<SketchPreview> {
-    let old_curves = old.into_iter().flat_map(|s| s.sketch.curves.iter().map(|c| (c.id.as_str(), signature(&s.sketch, c)))).collect::<std::collections::HashMap<_, _>>();
+    let old_curves = old
+        .into_iter()
+        .flat_map(|s| s.sketch.curves.iter().map(|c| (c.id.as_str(), signature(&s.sketch, c))))
+        .collect::<std::collections::HashMap<_, _>>();
     let old_points =
         old.into_iter().flat_map(|s| s.sketch.points.iter().map(|p| (p.id.as_str(), p.pos))).collect::<std::collections::HashMap<_, _>>();
     let indices = sketch
@@ -1021,7 +1024,7 @@ fn corner_picks(app: &SolveApp) -> Option<(u64, Vec<String>)> {
         return None;
     }
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = app.session.world_state().ok()?;
     let feature = state.sketch(sid)?.feature;
     let ids = crate::selection::items(&d.inputs, 0)
         .iter()
@@ -1060,8 +1063,8 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
                 preview.curves.iter().filter_map(move |index| sketch.sketch.curves.get(*index).map(|curve| (sketch.feature, curve.id.clone())))
             })
             .collect();
-        let state = app.session.world_state();
-        if let Some(ss) = app.session.active_sketch.and_then(|sid| state.sketch(sid))
+        if let Ok(state) = app.session.world_state()
+            && let Some(ss) = app.session.active_sketch.and_then(|sid| state.sketch(sid))
             && ss.feature == feature
         {
             let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);

@@ -2049,7 +2049,9 @@ fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<Corner> {
         let q = sk.resolve_point(r).ok_or_else(|| bad(cmd, format!("unknown point `{r}`")))?;
         // An ellipse's construction axis is never a side: it would round a line into the axis.
         let lines: Vec<usize> = (0..sk.curves.len())
-            .filter(|i| ends(*i).is_some_and(|(a, b)| one_place(sk, a, q) || one_place(sk, b, q)) && !sk.is_linked_curve(*i) && !sk.is_ellipse_axis(*i))
+            .filter(|i| {
+                ends(*i).is_some_and(|(a, b)| one_place(sk, a, q) || one_place(sk, b, q)) && !sk.is_linked_curve(*i) && !sk.is_ellipse_axis(*i)
+            })
             .collect();
         // A construction line ending there too (a diagonal that centres something) is not one of
         // the corner's sides: it keeps its end on the virtual sharp corner (#1026).

@@ -448,7 +448,7 @@ fn a_fillet_joins_two_profiles_that_have_a_corner_point_each_at_one_place() {
     };
     let mut s = rectangles();
     let k = sk(&s);
-    let at_origin = k.points.iter().filter(|p| p.pos.dist(solidcraft_geom::Vec2::ZERO) < 1e-9).count();
+    let at_origin = k.points.iter().filter(|p| p.pos.dist(solidcore_record::Vec2::ZERO) < 1e-9).count();
     assert_eq!(at_origin, 3, "the origin and a corner point of each rectangle: {:?}", k.points.iter().map(|p| &p.id).collect::<Vec<_>>());
     let union = 26.2 * 18.8 + 24.8 * 27.8;
     let r = 5.0;
