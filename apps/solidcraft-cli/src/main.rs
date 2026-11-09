@@ -321,7 +321,7 @@ fn load_with(path: &str, check: solidcraft_engine::schema::ParamCheck, validatio
     let s = read_session(path, check, validation)?;
     // A newer SolidCraft's file opens all the same; stderr says so, stdout stays the caller's.
     for warning in s.doc.newer_file.iter().flat_map(|file| file.warnings()) {
-        eprintln!("{path}: warning: {warning}");
+        solidcraft_engine::note!("{path}: warning: {warning}");
     }
     Ok(s)
 }

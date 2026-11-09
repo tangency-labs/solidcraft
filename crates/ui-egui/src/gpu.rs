@@ -524,8 +524,6 @@ fn offscreen_adapter(policy: solidcraft_gpu::select::Policy) -> Option<wgpu::Ada
 /// that loses its device, or changes how the device reports errors or its loss, takes
 /// [`offscreen_own_device`] instead.
 #[cfg(all(test, not(target_arch = "wasm32")))]
-// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
-#[allow(clippy::print_stderr)]
 pub(crate) fn offscreen_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     static SHARED: std::sync::Mutex<Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)>> = std::sync::Mutex::new(None);
     let mut shared = SHARED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -539,6 +537,8 @@ pub(crate) fn offscreen_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Q
 /// policy admits, or when the variable names no policy), on [`offscreen_backends`]. One test at a
 /// time starts its instance, adapter and device ([`offscreen_starting`]).
 #[cfg(all(test, not(target_arch = "wasm32")))]
+// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
+#[allow(clippy::print_stderr)]
 pub(crate) fn offscreen_own_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     let policy = solidcraft_gpu::select::Policy::from_env().map_err(|e| eprintln!("no offscreen device: {e}")).ok()?;
     let _one_at_a_time = offscreen_starting();
