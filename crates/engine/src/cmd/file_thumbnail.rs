@@ -19,6 +19,10 @@ const EXPORT_SIZE: u32 = 512;
 
 /// A mesh export's thumbnail: the same scene, fitted whole into a square, on a transparent background.
 pub(super) fn exported(s: &Session) -> Option<Vec<u8>> {
+    // A headless export has drawn nothing yet, so warm the display meshes the scene reads; the export tessellates anyway.
+    for body in s.world_state().ok()?.bodies.iter().filter(|b| s.body_visible(&b.name)) {
+        body.mesh();
+    }
     let (mut scene, camera) = scene(s, 1.0)?;
     let renderer = crate::capture::installed()?;
     let rgba = transparent(&*renderer, &mut scene, &camera, EXPORT_SIZE)?;

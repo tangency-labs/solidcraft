@@ -1381,11 +1381,8 @@ mod tests {
     fn a_3mf_export_carries_the_design_thumbnail() {
         crate::capture::install_test_renderer();
         let mut s = Session::default();
+        // Headless, as from the CLI: nothing has drawn the bodies, so their display meshes are cold.
         s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
-        for body in &s.world_state().unwrap().bodies {
-            body.mesh();
-        }
-        assert!(thumbnail::exported(&s).is_some());
         let dir = std::env::temp_dir();
         let has_thumbnail = |s: &mut Session, name: &str| {
             let path = dir.join(format!("solidcraft-3mf-thumbnail-{}-{name}", std::process::id()));
