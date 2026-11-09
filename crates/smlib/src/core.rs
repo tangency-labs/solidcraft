@@ -579,11 +579,14 @@ fn call_on<T: dump::Answer>(
 /// that stands for an SMLib status exactly ([`SolidError::sm_status`](solidcore::SolidError::sm_status),
 /// solidcore#1452) is `None`. Every other solidcore error
 /// (unported code, invalid input to an adapter, a missing record...) is not a status the C++
-/// path returns, so it fails the call instead of hiding as a skipped entity.
+/// path returns, so it fails the call instead of hiding as a skipped entity. So does a status
+/// error whose cause chain holds a solidcore-side failure or a cancellation
+/// ([`SolidError::is_status_answer`](solidcore::SolidError::is_status_answer)), the rule of
+/// solidcore-ops' `session::answer`.
 pub(crate) fn answer<T>(r: std::result::Result<T, solidcore::SolidError>) -> std::result::Result<Option<T>, solidcore::SolidError> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.sm_status().is_some() => Ok(None),
+        Err(e) if e.is_status_answer() => Ok(None),
         Err(e) => Err(e),
     }
 }

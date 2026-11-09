@@ -397,15 +397,9 @@ fn written(
 pub(crate) fn answer<T>(r: solidcore::Result<T>) -> solidcore::Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.sm_status().is_some() && !stops_a_skip(&e) => Ok(None),
+        Err(e) if e.is_status_answer() => Ok(None),
         Err(e) => Err(e),
     }
-}
-
-/// True when `e`, or an error in its cause chain, is a solidcore-side failure or a cancellation.
-fn stops_a_skip(e: &SolidError) -> bool {
-    e.is_port_failure()
-        || std::iter::successors(Some(e), |e| e.cause()).any(SolidError::is_cancelled)
 }
 
 /// Runs `f`, which edits `body`, on the kernel. A refused, failed or panicking edit leaves the

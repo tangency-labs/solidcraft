@@ -1110,6 +1110,19 @@ impl SolidError {
         }
     }
 
+    /// True when the error is a kernel status the operation answers with, and so stands for
+    /// "no answer" rather than a failure of the call: it is exactly a status
+    /// ([`SolidError::sm_status`]) and nothing in its cause chain ([`SolidError::cause`]) is a
+    /// solidcore-side failure ([`SolidError::is_port_failure`]) or a cancellation
+    /// ([`SolidError::is_cancelled`]). A stage that failed because a call was unported, or
+    /// because the caller cancelled, is no answer of the operation on its input.
+    #[must_use]
+    pub fn is_status_answer(&self) -> bool {
+        self.sm_status().is_some()
+            && !self.is_port_failure()
+            && !std::iter::successors(Some(self), |e| e.cause()).any(Self::is_cancelled)
+    }
+
     /// The failure in solidcore's terms, for a [`SolidError::Failed`].
     #[must_use]
     pub fn failure(&self) -> Option<&Failure> {
