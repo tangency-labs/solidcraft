@@ -814,7 +814,7 @@ mod tests {
 
     #[test]
     fn rounded_rectangle_preserves_its_authored_dashes() {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let t = Tokens::light();
             let drawing = Ctx { t: &t, sample: None, palette: Palette::Figure, origin: pos2(10.0, 10.0), scale: 1.0 };

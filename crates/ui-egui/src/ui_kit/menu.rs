@@ -690,11 +690,11 @@ pub(crate) fn rename_menu(ui: &mut Ui, value: &mut String, focused: &mut bool) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{key, pointer};
+    use crate::ui_kit::test_support::{key, pointer};
 
     #[test]
     fn menu_navigation_skips_disabled_rows_and_wraps() {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut selected = None;
         let mut accepted = false;
         let mut frame = |events| {
@@ -737,7 +737,7 @@ mod tests {
     #[test]
     fn disabled_menu_rows_are_inert_and_live_rows_accept_clicks() {
         for enabled in [false, true] {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             let target = std::cell::Cell::new(Rect::NOTHING);
             let clicked = std::cell::Cell::new(false);
             let mut draw = |ui: &mut Ui| {

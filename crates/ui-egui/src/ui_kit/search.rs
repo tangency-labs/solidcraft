@@ -392,7 +392,7 @@ mod tests {
                 assert_eq!(rect.min + vec2(radius, radius), ring.min + vec2(ring_radius, ring_radius));
                 // Inspect the real paint shapes so a stale fill/ring radius cannot
                 // pass by merely keeping the geometry calculation correct.
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 let mut query = String::new();
                 let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                     CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, Some("S"), 4096);
@@ -426,7 +426,7 @@ mod tests {
         for floating in [false, true] {
             for progress in [0.0, 0.5, 1.0] {
                 let radius = CommandSearch::field_radius(progress, floating);
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 let mut query = String::new();
                 let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                     CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, Some("S"), 4096);

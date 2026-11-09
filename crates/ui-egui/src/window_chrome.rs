@@ -312,7 +312,7 @@ mod tests {
 
     impl Bar {
         fn new(bar: TitleBar, width: f32) -> Self {
-            Self { ctx: crate::fonts::test_context(), bar, width, time: 0.0, maximized: false, content: None, action: None }
+            Self { ctx: crate::ui_kit::test_support::context(), bar, width, time: 0.0, maximized: false, content: None, action: None }
         }
 
         fn rect(&self) -> Rect {

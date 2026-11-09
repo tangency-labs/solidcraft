@@ -313,7 +313,7 @@ mod tests {
         for dark in [false, true] {
             solidcraft_theme::set_dark(dark);
             let draw = |state| {
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                     ui.set_width(262.0);
                     super::paint_layout(ui, state);
@@ -334,9 +334,9 @@ mod tests {
                 assert_ne!(original, draw(state), "each actual choice changes the schematic");
             }
             let _ = draw(LayoutPreview { compact: false, labels: false, history: 2, translucent: true, dialog_left: true });
-            let browser = crate::scenario::rect_of("prefs:layout_preview:browser").unwrap();
-            let history = crate::scenario::rect_of("prefs:layout_preview:history").unwrap();
-            let dialog = crate::scenario::rect_of("prefs:layout_preview:dialog").unwrap();
+            let browser = solidcraft_ui_registry::rect_of("prefs:layout_preview:browser").unwrap();
+            let history = solidcraft_ui_registry::rect_of("prefs:layout_preview:history").unwrap();
+            let dialog = solidcraft_ui_registry::rect_of("prefs:layout_preview:dialog").unwrap();
             assert!(browser.contains_rect(dialog), "the left-column dialog remains inside the Browser region");
             assert!(!dialog.intersects(history), "the dialog cannot cover the Under browser History caption");
         }
@@ -368,7 +368,7 @@ mod tests {
 
     /// Shapes a figure paints into `rect` on a fresh frame, in the given theme.
     fn shapes(rect: Rect, paint: impl Fn(&egui::Painter, Rect)) -> Vec<egui::epaint::ClippedShape> {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut output =
             ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))), ..Default::default() }, |ui| {
                 paint(ui.painter(), rect);
@@ -404,7 +404,7 @@ mod tests {
                 let centre_rect = rect.shrink(radius);
                 let mut vertices = 0;
                 for clipped in shapes(rect, |p, r| paint_theme_thumbnail_rounded(p, r, &sample, radius)) {
-                    crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                    crate::ui_kit::test_support::each_shape(&clipped.shape, &mut |shape| {
                         if let egui::Shape::Mesh(mesh) = shape {
                             for vertex in &mesh.vertices {
                                 let nearest = Pos2::new(

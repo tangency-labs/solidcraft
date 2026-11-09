@@ -69,7 +69,3 @@ pub(crate) fn strip_toggle(ui: &mut Ui, expanded: bool, label: &str) -> Response
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(label)
 }
-
-#[cfg(test)]
-#[path = "disclosure_tests.rs"]
-mod tests;

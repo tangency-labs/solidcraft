@@ -415,7 +415,7 @@ mod tests {
     #[test]
     fn assistant_bubble_stays_right_aligned_at_narrow_and_wide_widths() {
         for width in [220.0, 280.0, 440.0, 740.0] {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             for _ in 0..2 {
                 super::super::test_support::frame(&ctx, vec![], |ui| {
                     ui.set_width(width);
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn assistant_bubble_stacks_message_and_file_summary_without_squeezing_either() {
         for width in [280.0, 440.0, 740.0] {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             for _ in 0..2 {
                 super::super::test_support::frame(&ctx, vec![], |ui| {
                     ui.set_width(width);
@@ -456,7 +456,7 @@ mod tests {
     #[test]
     fn assistant_send_only_activates_when_enabled() {
         for enabled in [false, true] {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             let mut position = egui::Pos2::ZERO;
             let mut clicked = false;
             super::super::test_support::frame(&ctx, vec![], |ui| {
@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn assistant_header_and_badge_share_reference_control_heights() {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         super::super::test_support::frame(&ctx, vec![], |ui| {
             let t = Tokens::get();
             let header = assistant_header(ui, |ui| {

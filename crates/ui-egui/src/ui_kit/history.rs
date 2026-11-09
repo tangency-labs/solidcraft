@@ -443,7 +443,7 @@ mod tests {
                 assert_eq!(seam.pill.center(), card.right_center());
                 assert_eq!(seam.edge.width(), 10.0);
                 for state in [HistoryHandleState::Rest, HistoryHandleState::Hover, HistoryHandleState::Drag] {
-                    let ctx = crate::fonts::test_context();
+                    let ctx = crate::ui_kit::test_support::context();
                     let mut out = ctx.run_ui(egui::RawInput::default(), |ui| seam.paint(ui.painter(), card, names, state));
                     out.textures_delta.clear();
                     let t = Tokens::get();
@@ -489,7 +489,7 @@ mod tests {
 
     impl SeamHarness {
         fn new(names: bool) -> Self {
-            let mut h = Self { ctx: crate::fonts::test_context(), names, width: history_width(names), time: 0.0, focused: false };
+            let mut h = Self { ctx: crate::ui_kit::test_support::context(), names, width: history_width(names), time: 0.0, focused: false };
             h.frame(vec![]);
             h.frame(vec![]);
             h
@@ -532,7 +532,7 @@ mod tests {
 
     #[test]
     fn seam_edge_cursor_pill_click_double_click_and_keyboard_toggle() {
-        use crate::test_support::{key, pointer};
+        use crate::ui_kit::test_support::{key, pointer};
         let mut h = SeamHarness::new(false);
         let edge = pos2(h.card().right() - 4.0, h.card().top() + 30.0);
         assert_eq!(h.frame(vec![egui::Event::PointerMoved(edge)]).platform_output.cursor_icon, egui::CursorIcon::ResizeHorizontal);
@@ -567,7 +567,7 @@ mod tests {
 
     #[test]
     fn seam_drag_resizes_continuously_and_snaps_both_directions() {
-        use crate::test_support::pointer;
+        use crate::ui_kit::test_support::pointer;
         for (names, delta, expected) in [(false, 40.0, true), (false, 20.0, false), (true, -40.0, false), (true, -20.0, true)] {
             for pill in [false, true] {
                 let mut h = SeamHarness::new(names);
@@ -597,7 +597,7 @@ mod tests {
             for style in [HistoryStyle::Icons, HistoryStyle::Names] {
                 for (selected, error, dim) in [(true, false, false), (false, true, false), (true, false, true)] {
                     let rect = Rect::from_min_size(pos2(20.0, 20.0), vec2(158.0, style.height()));
-                    let ctx = crate::fonts::test_context();
+                    let ctx = crate::ui_kit::test_support::context();
                     let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                         HistoryChip {
                             icon: "surface_extrude",
@@ -654,7 +654,7 @@ mod tests {
             solidcraft_theme::set_dark(dark);
             let t = Tokens::get();
             for style in [HistoryStyle::Bottom, HistoryStyle::Icons, HistoryStyle::Names] {
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                     for index in 0..3 {
                         let rect = Rect::from_min_size(
@@ -681,7 +681,7 @@ mod tests {
                 out.textures_delta.clear();
                 let mut connections = 0;
                 for clipped in out.shapes {
-                    crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                    crate::ui_kit::test_support::each_shape(&clipped.shape, &mut |shape| {
                         if matches!(shape, egui::Shape::LineSegment { .. } | egui::Shape::Path(_)) {
                             connections += 1;
                         }
@@ -699,7 +699,7 @@ mod tests {
         let accent = TabAccent::for_tab(&t, "SURFACE");
         for vertical in [false, true] {
             let rect = Rect::from_min_size(pos2(20.0, 20.0), if vertical { vec2(160.0, 12.0) } else { vec2(12.0, 28.0) });
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| history_drop_bar(ui.painter(), rect, vertical, accent.color));
             out.textures_delta.clear();
             let lines: Vec<_> = out
@@ -719,7 +719,7 @@ mod tests {
             // Both vertical widths retain the 12 pt marker row; the bottom strip rotates it.
             for (vertical, size) in [(true, vec2(46.0, 12.0)), (true, vec2(158.0, 12.0)), (false, vec2(12.0, 28.0))] {
                 let rect = Rect::from_min_size(pos2(20.0, 20.0), size);
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 let mut out = ctx.run_ui(egui::RawInput::default(), |ui| history_marker(ui.painter(), rect, vertical, accent));
                 out.textures_delta.clear();
                 let lines: Vec<_> = out
