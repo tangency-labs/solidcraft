@@ -105,10 +105,6 @@
 //!   the other base is the edge use's own UV point. Upstream reads an existing curve only and
 //!   otherwise solves globally on the base, which finds a point on a closed surface's seam
 //!   once at each end of the period and refuses the two answers.
-//! - **The drop onto the other offset** (solidcore's): when that offset continues as itself
-//!   (`offset_continues_as_itself`) `LoadInitialValues` drops the rail end onto the face's own
-//!   domain, not the extended one, which holds a second root of the rail-end solve on the far
-//!   side of the whole circle (the solve's interval is the extended one, as upstream's).
 
 use crate::blend::fillet_custom_solver::{
     face_owner, offset_compute_inward_vector, offset_evaluate_1st, offset_evaluate_point,
@@ -710,13 +706,7 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
         // to get a better guess
         let uv_guess = Point2::new(srf2_guess_uv.x, srf2_guess_uv.y);
         let mut domain = base2.natural_uv_domain_with_nurb(k)?;
-        // Not upstream (#3045): an offset continued as itself is the whole circle, not upstream's
-        // tangent extension that stays near the face. The drop on the extended domain finds the
-        // nearest point of that circle, whose far side holds a second root of the rail-end solve
-        // outside the face; the rail end lies on the face's edge, so the drop stays on the face.
-        if !offset_continues_as_itself(k, base2) {
-            solver.setup_offset_extension(k, base2, &mut domain)?; // expands sDomain
-        }
+        solver.setup_offset_extension(k, base2, &mut domain)?; // expands sDomain
 
         if let Some((sol_uv, dist)) = offset_local_point_solve(k, surface2, &domain, pnt, uv_guess)?
         {

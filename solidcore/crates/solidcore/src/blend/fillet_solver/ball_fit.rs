@@ -17,7 +17,9 @@
 
 use super::p1::FilletSolverOps;
 use crate::blend::fillet_custom_solver::offset_evaluate_1st;
+use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
+use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
@@ -87,58 +89,9 @@ pub fn ball_fits_its_faces(
 
     for j in 0..NUM_SAMPLES {
         let t = interval.evaluate((j as f64 + 0.5) / NUM_SAMPLES as f64);
-        let pv = curve.evaluate(k, t, 1, true, false)?;
-        let (Some(&point), Some(&tangent)) = (pv.first(), pv.get(1)) else {
+        let Some(section) = edge_section(ops, k, brep, &curve, t, &domains)? else {
             continue;
         };
-        let moves = tangent.length() > EFF_ZERO;
-        if !moves {
-            continue;
-        }
-        let normal = tangent.unitize()?;
-
-        // the edge point on each face's surface: the section's guess
-        let mut guess: Vec<Point2> = Vec::with_capacity(2);
-        let mut dropped = true;
-        for (rail, domain) in domains.iter().enumerate() {
-            if !dropped {
-                break;
-            }
-            let Some(slot) = ops.solver().surface(rail)? else {
-                return Ok(true);
-            };
-            let drop = slot.surface.base_surface().drop_point::<NoObject>(
-                k,
-                point,
-                domain,
-                &DropPointOptions::default(),
-            )?;
-            dropped = drop.success;
-            guess.push(drop.result_uv);
-        }
-        if !dropped {
-            continue;
-        }
-
-        let [g0, g1] = *guess.as_slice() else {
-            continue;
-        };
-
-        // the section through it
-        let mut section = TsectPnt::new();
-        if !ops.point_on_plane_solve(
-            k,
-            Some(&mut *brep),
-            point,
-            normal,
-            &domains[0],
-            &domains[1],
-            g0,
-            g1,
-            &mut section,
-        )? {
-            continue;
-        }
         let radii_change = ops.offset_radii_can_change()?;
         if radii_change {
             ops.setup_offset_values(&section, None)?;
@@ -191,6 +144,66 @@ fn stretches_fit(o1: Vec3, o2: Vec3, b1: Vec3, b2: Vec3) -> bool {
     let det_m = (h11 * h22 - h12 * h21) / det_g;
     let trace_m = (h11 * g22 - h12 * g12 - h21 * g12 + h22 * g11) / det_g;
     !(det_m < -FIT_TOL || trace_m < -FIT_TOL)
+}
+
+/// The rolling ball's section in the plane through the point of `curve` (the solver's
+/// filleted edge) at `t`, normal to the edge there: the ball touching both of the solver's
+/// faces, solved from the edge point on each face (where a ball of radius 0 touches them), so
+/// the solve starts on the edge and finds the ball that rolls along it. `None` where the edge
+/// does not move at `t`, the point does not drop onto a face within `domains`, or the solve
+/// does not converge. `brep` is the target holding the solver's edge uses.
+///
+/// # Errors
+///
+/// Those of the evaluation, the drops and the section solve.
+pub(crate) fn edge_section(
+    ops: &mut dyn FilletSolverOps,
+    k: &Kernel,
+    brep: &mut Brep,
+    curve: &Curve,
+    t: f64,
+    domains: &[Extent2d; 2],
+) -> Result<Option<TsectPnt>> {
+    let pv = curve.evaluate(k, t, 1, true, false)?;
+    let (Some(&point), Some(&tangent)) = (pv.first(), pv.get(1)) else {
+        return Ok(None);
+    };
+    let moves = tangent.length() > EFF_ZERO;
+    if !moves {
+        return Ok(None);
+    }
+    let normal = tangent.unitize()?;
+    // the edge point on each face's surface: the section's guess
+    let mut guess = [Point2::UNDEF; 2];
+    for ((rail, domain), g) in domains.iter().enumerate().zip(guess.iter_mut()) {
+        let Some(slot) = ops.solver().surface(rail)? else {
+            return Ok(None);
+        };
+        let drop = slot.surface.base_surface().drop_point::<NoObject>(
+            k,
+            point,
+            domain,
+            &DropPointOptions::default(),
+        )?;
+        if !drop.success {
+            return Ok(None);
+        }
+        *g = drop.result_uv;
+    }
+    let [g0, g1] = guess;
+    let mut section = TsectPnt::new();
+    let found = ops.point_on_plane_solve(
+        k,
+        Some(brep),
+        point,
+        normal,
+        &domains[0],
+        &domains[1],
+        g0,
+        g1,
+        &mut section,
+    )?;
+    Ok(found.then_some(section))
 }
 
 #[cfg(test)]
