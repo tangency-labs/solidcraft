@@ -445,7 +445,9 @@ const MISS_SAMPLES: u32 = 16;
 /// How far `net` strays from the class's `surface`, sampled over its domain. A guard, not a
 /// certificate: [`check_exact_net`] is the proof, and a net that passes only this keeps no
 /// definition. It tells a net that the class's rounding leaves off the surface from one
-/// built wrongly.
+/// built wrongly. Being sampled ([`MISS_SAMPLES`] intervals each way), it can miss a
+/// deviation between its samples; it bounds nothing, and decides only whether a net its
+/// certificate refused is kept bare or is an error.
 ///
 /// # Errors
 ///

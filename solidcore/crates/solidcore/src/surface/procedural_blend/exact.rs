@@ -360,7 +360,9 @@ impl ExactRound {
     }
 
     /// How far `net` strays from the surface of the class its supports give
-    /// ([`net_miss`]); `None` where they give it none.
+    /// ([`net_miss`]): the surface [`Self::recertify`] checks it against (a chord's plane
+    /// through its contacts, any other class's surface from the supports); `None` where they
+    /// give it none.
     ///
     /// # Errors
     ///
@@ -368,7 +370,12 @@ impl ExactRound {
     pub fn miss(&self, k: &Kernel, net: &Surface) -> Result<Option<f64>> {
         let [a, b] = &self.supports;
         let blend = classify_supports(k, [a, b], &self.inputs)?;
-        match class_surface(&blend, self.leader.as_ref(), &self.map) {
+        let surface = if self.class == ExactClass::Chord {
+            chord_implicit(&blend).map(ClassSurface::Implicit)
+        } else {
+            class_surface(&blend, self.leader.as_ref(), &self.map)
+        };
+        match surface {
             Some(surface) => net_miss(k, net, &surface).map(Some),
             None => Ok(None),
         }
