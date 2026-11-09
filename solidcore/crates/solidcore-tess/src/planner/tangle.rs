@@ -61,12 +61,28 @@ pub(crate) fn crossing(
         if n < 3 {
             continue;
         }
+        // Each node is on a pole or not whichever two chords it ends: asked once.
+        let mut on_pole: Vec<Option<bool>> = vec![None; n];
+        let mut node_pole = |k: usize, q: [f64; 2]| -> Result<bool, super::Unclassified> {
+            if let Some(p) = on_pole.get(k).copied().flatten() {
+                return Ok(p);
+            }
+            let p = pole(q)?;
+            if let Some(slot) = on_pole.get_mut(k) {
+                *slot = Some(p);
+            }
+            Ok(p)
+        };
         for k in 0..n {
             // Proven: n = l.uv.len() >= 3, checked above
-            let (Some(&a), Some(&b)) = (l.uv.get(k), l.uv.get((k + 1) % n)) else {
+            let next = (k + 1) % n;
+            let (Some(&a), Some(&b)) = (l.uv.get(k), l.uv.get(next)) else {
                 continue;
             };
-            if !(a.iter().chain(&b).all(|x| x.is_finite())) || pole(a)? || pole(b)? {
+            if !(a.iter().chain(&b).all(|x| x.is_finite()))
+                || node_pole(k, a)?
+                || node_pole(next, b)?
+            {
                 continue;
             }
             // The loop's closing chord of a loop that winds round the surface ends at the copy of

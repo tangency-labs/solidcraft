@@ -32,7 +32,9 @@
 //! - `KERNEL_CASES_TIMEOUT_S`: a case's time limit, 180 s by default; one past it is a hang, and
 //!   the cases after it are not run (it holds the process kernel);
 //! - `KERNEL_CASES_REPORT`: a file to write the per-area table and the lists to;
-//! - `KERNEL_CASES_REPORT_ONLY`: set, the test reports without failing.
+//! - `KERNEL_CASES_REPORT_ONLY`: set, the test reports without failing;
+//! - `KERNEL_CASES_SMB`: a directory to write each run case's bodies to as `<case>.smb`, for
+//!   its render (`solidcore-diag`): the final bodies, or the inputs of the refusal that ends it.
 
 #![allow(
     clippy::unwrap_used,
@@ -231,31 +233,38 @@ fn f64s<const N: usize>(v: &Value) -> Option<[f64; N]> {
     (a.len() == N).then_some(out)
 }
 
-/// A pick's record indices, optionally bounded by its record order's length.
+/// A pick's record indices, optionally bounded by its record order's length. Every pick's shape
+/// and range is checked first, so bad data fails wherever it sits; only then is a traced miss
+/// reported as unsupported (#2993).
 fn picked(op: &str, selection: &Value, length: Option<usize>) -> Result<Vec<usize>, Stop> {
     let bad = |what: &str| Stop::Fail(format!("{op}: parameter {what}"));
-    selection["picked"]
+    let picks = selection["picked"]
         .as_array()
-        .ok_or_else(|| bad("picked"))?
-        .iter()
-        .map(|pick| {
-            if let Some(miss) = pick.get("miss") {
-                let why = miss.as_str().ok_or_else(|| bad("miss"))?;
-                if pick.get("index").is_some() {
-                    return Err(bad("pick must hit or miss"));
-                }
-                return Err(Stop::Unsupported(format!("{op}: pick missed: {why}")));
+        .ok_or_else(|| bad("picked"))?;
+    let mut indices = Vec::with_capacity(picks.len());
+    let mut missed = None;
+    for pick in picks {
+        if let Some(miss) = pick.get("miss") {
+            let why = miss.as_str().ok_or_else(|| bad("miss"))?;
+            if pick.get("index").is_some() {
+                return Err(bad("pick must hit or miss"));
             }
-            let index = pick["index"]
-                .as_u64()
-                .and_then(|i| usize::try_from(i).ok())
-                .ok_or_else(|| bad("index"))?;
-            if length.is_some_and(|length| index >= length) {
-                return Err(bad("pick outside record order"));
-            }
-            Ok(index)
-        })
-        .collect()
+            missed.get_or_insert(why);
+            continue;
+        }
+        let index = pick["index"]
+            .as_u64()
+            .and_then(|i| usize::try_from(i).ok())
+            .ok_or_else(|| bad("index"))?;
+        if length.is_some_and(|length| index >= length) {
+            return Err(bad("pick outside record order"));
+        }
+        indices.push(index);
+    }
+    match missed {
+        Some(why) => Err(Stop::Unsupported(format!("{op}: pick missed: {why}"))),
+        None => Ok(indices),
+    }
 }
 
 /// Parses typed record picks without reordering them: misses are unsupported; bad data fails.
@@ -1197,6 +1206,21 @@ fn grade_seams(result: &[Slot], expected: &Value) -> Result<(), Stop> {
     Ok(())
 }
 
+/// With `KERNEL_CASES_SMB` set, writes `bodies` there as `<case>.smb`, `<case>-1.smb`, ...
+fn write_smb(e: &Value, bodies: &[Slot]) {
+    let Some(dir) = std::env::var_os("KERNEL_CASES_SMB") else {
+        return;
+    };
+    let case = e["case"].as_str().unwrap();
+    for (i, s) in bodies.iter().enumerate() {
+        let name = match i {
+            0 => format!("{case}.smb"),
+            _ => format!("{case}-{i}.smb"),
+        };
+        std::fs::write(Path::new(&dir).join(name), s.body.to_smb(true).unwrap()).unwrap();
+    }
+}
+
 /// Runs a case's calls and grades the result against `rig` (or, for a hand-written case
 /// without one, `expected`): `Ok(deviation)` for a match.
 fn run_case(entry: &Path, e: &Value) -> Result<Option<f64>, Stop> {
@@ -1298,7 +1322,10 @@ fn run_case_with_records(
             // A handled refusal is an attempt, not the case's outcome. Keep checking the
             // later operations and final geometry; an unmarked refusal still ends the case.
             (Err(_), Some(_)) if continued => {}
-            (Err(_), Some(_)) => return Ok(None),
+            (Err(_), Some(_)) => {
+                write_smb(e, &ins);
+                return Ok(None);
+            }
             (Err(x), None) => return Err(Stop::Fail(format!("call {i} ({op}) refused: {x}"))),
             (Ok(_), Some(want)) => {
                 return Err(Stop::Fail(format!(
@@ -1321,6 +1348,7 @@ fn run_case_with_records(
                 .ok_or_else(|| Stop::Fail(format!("no final body {n}")))?,
         );
     }
+    write_smb(e, &result);
     let got = measure(&result).map_err(Stop::Fail)?;
     if let Some(seams) = e["expected"].get("seams") {
         grade_seams(&result, seams)?;
@@ -1422,7 +1450,16 @@ fn seam_gaps_are_limited_independently_of_stored_tolerances() {
 
     let body = solidcore_ops::make_box([0.0; 3], [10.0; 3]).unwrap();
     let (mut record, _) = body.to_record().unwrap();
+    // every stored tolerance inflated, not the body's alone: the import keeps each edge's and
+    // vertex's own and takes the body's as the least of them (#3187, as SolidCraft's flat
+    // import does), so a body tolerance alone no longer reaches the edges the grade reads
     record.tolerance = 0.01;
+    for edge in &mut record.edges {
+        edge.tolerance = 0.01;
+    }
+    for vertex in &mut record.vertices {
+        vertex.tolerance = 0.01;
+    }
     for face in &mut record.faces {
         match &mut face.surface {
             Surface::Plane { origin, .. } => {
@@ -3904,6 +3941,36 @@ fn record_picks_preserve_order_and_duplicate_parameter_alignment() {
     assert!(matches!(
         record_picks("blend", &picks, "vertex", 2),
         Err(Stop::Fail(_))
+    ));
+}
+
+/// Bad pick data fails wherever it sits in the list; a traced miss is unsupported only when
+/// every other pick is well formed (#2993).
+#[test]
+fn a_traced_miss_is_unsupported_only_among_well_formed_picks() {
+    let list = |picked: Value| serde_json::json!({"kind": "edge", "picked": picked});
+    for bad in [
+        serde_json::json!([{"miss": "none"}, {"index": 999}]),
+        serde_json::json!([{"index": 999}, {"miss": "none"}]),
+        serde_json::json!([{"miss": "none"}, {}]),
+        serde_json::json!([{"miss": "none"}, {"miss": "none", "index": 0}]),
+    ] {
+        assert!(
+            matches!(
+                record_picks("blend", &list(bad.clone()), "edge", 2),
+                Err(Stop::Fail(_))
+            ),
+            "{bad}"
+        );
+    }
+    assert!(matches!(
+        record_picks(
+            "blend",
+            &list(serde_json::json!([{"index": 0}, {"miss": "none"}])),
+            "edge",
+            2
+        ),
+        Err(Stop::Unsupported(_))
     ));
 }
 
