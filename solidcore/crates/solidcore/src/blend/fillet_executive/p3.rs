@@ -2188,6 +2188,15 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
     /// # Errors
     /// The sizing's own errors; the adapter over [`ExecutiveAccess`] has no solvers.
     fn creation_bands_meet(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<Vec<(f64, O)>>;
+
+    /// Not the fork's (#3190's finding): the band refusal's fit as a scale of both blends,
+    /// from the band check's own quantities, where that is exact (two chamfers on a plane
+    /// face between parallel lines), with the first blend's edge; `None` elsewhere. The
+    /// session's `band_scale` says how.
+    ///
+    /// # Errors
+    /// Those of the topology and geometry lookups.
+    fn creation_band_scale(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<Option<(f64, O)>>;
 }
 
 /// Where a solver's convex blend would cut the part
@@ -2309,6 +2318,11 @@ where
 
     fn creation_bands_meet(&mut self, _k: &mut Kernel, _solvers: &[O]) -> Result<Vec<(f64, O)>> {
         Err(invalid("a refusal's fit needs a live fillet session"))
+    }
+
+    fn creation_band_scale(&mut self, _k: &mut Kernel, _solvers: &[O]) -> Result<Option<(f64, O)>> {
+        // the adapter over ExecutiveAccess holds no solver geometry: no chamfer to judge
+        Ok(None)
     }
 }
 
@@ -3194,6 +3208,14 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     if self.fit_radius < 0.0 || meet < self.fit_radius {
                         self.note_fit_radius(meet, Some(edge), FitKind::Radius);
                     }
+                }
+            }
+            // (not the fork's, #3190's finding) where no radius is common to both, the scale
+            // of both that leaves the face the fit margin, where that is exact
+            if self.fit_radius < 0.0 {
+                let solvers = self.solvers.clone();
+                if let Some((scale, edge)) = access.creation_band_scale(k, &solvers)? {
+                    self.note_fit_radius(scale, Some(edge), FitKind::Scale);
                 }
             }
             return self.record_no_room(

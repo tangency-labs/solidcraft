@@ -2826,6 +2826,44 @@ impl<'target> FilletSession<'target> {
         })
     }
 
+    /// The chamfer's first distance (its setback along its first face) at which a chamfer
+    /// refused as too large builds: the fit `fit` ([`Self::fit_size`], or a refusal's) read
+    /// through the chamfer's definition on its edge ([`FilletSolver::chamfer`]). At the
+    /// edge's wedge the offsets are linear in the sizes, `r_1 = (d_2 - d_1 cos a) / sin a`,
+    /// `r_2 = (d_1 - d_2 cos a) / sin a` ([`ChamferDefinition`]), so the chamfer whose offsets
+    /// are `lambda` times the asked ones is the asked chamfer scaled by `lambda`
+    /// ([`ChamferDefinition::scaled`]): exact in the maps, the distance named to the rounding
+    /// of the fit and of the offset and distance conversions. A fit of a radius
+    /// (`FitKind::Radius`, an equal chamfer's one offset) is `lambda = fit / r_1`; a fit of a
+    /// scale on two unequal offsets (`FitKind::Scale`) is `lambda` itself. `None` for a fit on
+    /// no edge or a chord, an edge whose solver keeps no chamfer, or a radius fit of a chamfer
+    /// whose two offsets differ (the fit is then a scale).
+    ///
+    /// [`FilletSolver::chamfer`]: crate::blend::fillet_solver::p1::FilletSolver::chamfer
+    /// [`ChamferDefinition`]: crate::surface::procedural_blend::chamfer::ChamferDefinition
+    /// [`ChamferDefinition::scaled`]: crate::surface::procedural_blend::chamfer::ChamferDefinition::scaled
+    #[must_use]
+    pub fn chamfer_fit(&self, fit: crate::blend::fillet_executive::FitSize<EdgeId>) -> Option<f64> {
+        use crate::blend::fillet_executive::p3::FitKind;
+        let edge = fit.edge?;
+        let target = self.target();
+        let chamfer = self.objects.solvers.iter().flatten().find_map(|solver| {
+            let base = solver.base();
+            let eu = base.edgeuse(0).ok()??;
+            (crate::topology::edgeuse::p1::edge(target, eu).ok()? == Some(edge))
+                .then_some(base.chamfer)?
+        })?;
+        let [r1, _] = chamfer.offsets().ok()?;
+        let lambda = match fit.kind {
+            // an equal chamfer's one offset: both offsets are r_1, to the conversion's rounding
+            FitKind::Radius if chamfer.holds([r1, r1]) => fit.size / r1,
+            FitKind::Scale => fit.size,
+            FitKind::Radius | FitKind::Chord => return None,
+        };
+        let [d1, _] = chamfer.scaled(lambda).setbacks();
+        (lambda.is_finite() && lambda > 0.0).then_some(d1)
+    }
+
     /// `SetDoGlobalMerge`.
     pub fn set_do_global_merge(&mut self, do_global_merge: bool) {
         self.executive.set_do_global_merge(do_global_merge);
@@ -3987,6 +4025,14 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         Ok(out)
     }
 
+    fn creation_band_scale(
+        &mut self,
+        k: &mut Kernel,
+        solvers: &[FilletObject],
+    ) -> Result<Option<(f64, FilletObject)>> {
+        band_scale(self, k, solvers)
+    }
+
     fn creation_bands_meet(
         &mut self,
         k: &mut Kernel,
@@ -4048,6 +4094,267 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         }
         Ok(out)
     }
+}
+
+/// One solver's rails for the band check: per rail, the face it rolls on, its curve and its
+/// kept interval.
+type SolverRails = Vec<(
+    FaceId,
+    crate::curve::curve::Curve,
+    crate::geom::extent1d::Extent1d,
+)>;
+
+/// Each solver's rails, its filleted edge with its ends, and the largest solver tolerance:
+/// what the band check (`BandsClearOtherRails`) and its fit ([`band_scale`]) read.
+#[allow(clippy::type_complexity)]
+fn band_rails(
+    objects: &SessionObjects<'_>,
+    k: &Kernel,
+    solvers: &[FilletObject],
+) -> Result<(Vec<SolverRails>, Vec<(EdgeId, [Option<VertexId>; 2])>, f64)> {
+    use crate::blend::fillet_geom::p1::FilletGeomType;
+    use crate::geom::global_solver::SolverOperation;
+    use crate::topology::edgeuse::p1 as eu;
+    let this = objects;
+    // each solver's rails (the face each rolls on and its curve), its filleted edge
+    // (with its ends and curve), and the largest solver tolerance
+    // (and, with the band between the rail's end vertices, its kept interval)
+    let mut rails: Vec<
+        Vec<(
+            FaceId,
+            crate::curve::curve::Curve,
+            crate::geom::extent1d::Extent1d,
+        )>,
+    > = Vec::new();
+    let mut edges = Vec::new();
+    let mut tol = 0.0;
+    for &solver in solvers {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let base = this.solver(id)?.base();
+        if base.approx_tol_3d > tol {
+            tol = base.approx_tol_3d;
+        }
+        let mut own = Vec::new();
+        for geom in base.fillet_geoms() {
+            let geom = this.pseudo.geom(geom)?;
+            if geom.fillet_geom_type() != FilletGeomType::Default {
+                continue;
+            }
+            for ii in 0..2 {
+                let rail = geom
+                    .rail(ii)
+                    .ok_or_else(|| invalid("geometry without rail"))?;
+                let curve = crate::topology::edge::curve(this.pseudo.brep(), rail)?
+                    .ok_or_else(|| invalid("rail without curve"))?
+                    .clone();
+                let Some(face) = this.pseudo.fillet_edge(rail)?.original_face() else {
+                    continue;
+                };
+                // The rail runs on past its ends (the surfaces are not trimmed yet),
+                // as far as a mitre at a corner needs and beyond: the band is the
+                // rail's part between the vertices that end it, where the corners have
+                // placed them (an end no corner has placed is the rail's own; a rail
+                // whose ends are one vertex is closed and whole). The fork's
+                // tangency-labs/smlib@d548305 (WR-649).
+                let ivl = curve.natural_interval();
+                let pseudo = this.pseudo.brep();
+                let prim = eu::primary_edgeuse(pseudo, rail)?
+                    .ok_or_else(|| invalid("rail without primary edgeuse"))?;
+                let mate =
+                    eu::mate(pseudo, prim)?.ok_or_else(|| invalid("rail edgeuse without mate"))?;
+                let mut ends = [None; 2];
+                for (slot, use_) in ends.iter_mut().zip([prim, mate]) {
+                    let vu = eu::vertexuse(pseudo, use_)?
+                        .ok_or_else(|| invalid("rail edgeuse without vertexuse"))?;
+                    *slot = crate::topology::vertexuse::vertex(pseudo, vu)?;
+                }
+                let [Some(end0), Some(end1)] = ends else {
+                    return Err(invalid("rail end without vertex"));
+                };
+                let mut t_ends = [ivl.min(), ivl.max()];
+                if end0 != end1 {
+                    for (t_end, end) in t_ends.iter_mut().zip([end0, end1]) {
+                        if !this.pseudo.fillet_vertex(end)?.is_processed() {
+                            continue;
+                        }
+                        let at = crate::topology::vertex::point(pseudo, end)?;
+                        let dropped = curve.drop_point(
+                            k,
+                            &ivl,
+                            at,
+                            None,
+                            crate::math::BIG_DOUBLE,
+                            None,
+                            SolverOperation::Minimize,
+                        )?;
+                        if dropped.success {
+                            *t_end = dropped.parameter;
+                        }
+                    }
+                }
+                let [t0, t1] = t_ends;
+                let kept = crate::geom::extent1d::Extent1d::from_min_max(t0, t1);
+                own.push((face, curve, kept));
+            }
+        }
+        rails.push(own);
+        let fil_eu = base
+            .edgeuse(0)?
+            .ok_or_else(|| invalid("solver without first edgeuse"))?;
+        let edge =
+            eu::edge(this.target, fil_eu)?.ok_or_else(|| invalid("solver edgeuse without edge"))?;
+        let ends = [
+            crate::topology::edge::start_vertex(this.target, edge)?,
+            crate::topology::edge::end_vertex(this.target, edge)?,
+        ];
+        edges.push((edge, ends));
+    }
+    Ok((rails, edges, tol))
+}
+
+/// The band refusal's fit as a scale of both blends (not the fork's; #3190's finding), from the
+/// band check's own quantities ([`band_rails`]): where the check refuses a pair of chamfers
+/// whose bands on a face they share overlap, the scale `lambda` of both at which the bands
+/// leave the face the fit margin, a thousand of the edges' tolerances (an open bound: at the
+/// face's width it keeps none, docs/generic-blend.md section 3.5). At a point `p` of the
+/// first's rail the check measures, as it does: the second's edge's foot `e`, its rail's foot
+/// `r` (the second's band width `|e - r|`); and, one drop more, the first's edge's foot `f`
+/// (its band width `|p - f|`). The face's width is `W = |f - e|`, and
+/// `lambda = (W - margin) / (|p - f| + |e - r|)`, the least over the check's points along the
+/// rail and its kept interval's two ends.
+///
+/// Named only where that is exact, decided from the geometry's kinds, not from the points:
+/// both blends chamfers, their shared face a plane, both edges lines, parallel (a band between
+/// planes along a line has one width, and scales with the chamfer, so the feet's distances
+/// scale and `W` stays); elsewhere `None`, as before. The check refuses only bands overlapping
+/// by more than its `apart` (ten of the solvers' tolerances), so between this size and the
+/// size the check refuses, `(W + apart) / (|p - f| + |e - r|)`, lie the margin and `apart`,
+/// about 1010 tolerances: this is the bound section 3.5 names, the check the fork's.
+///
+/// `lambda` is rounded down by `gamma_7`: its three operations (a difference, a sum and a
+/// quotient) and the three a check of the chamfers scaled by it adds (each setback scaled, their
+/// sum, and the width less the margin), so the scaled chamfers' sum stays within `W - margin`
+/// through the rounding; the feet's own accuracy (the drops') lies within the margin and
+/// `apart` between this size and the check's.
+fn band_scale(
+    objects: &SessionObjects<'_>,
+    k: &Kernel,
+    solvers: &[FilletObject],
+) -> Result<Option<(f64, FilletObject)>> {
+    use crate::curve::curve::CurveKind;
+    use crate::geom::global_solver::SolverOperation;
+    use crate::surface::surface::SurfaceKind;
+    let (rails, edges, _) = band_rails(objects, k, solvers)?;
+    let target: &Brep = &*objects.target;
+    // an edge's curve and interval where it is a line, with the line's unit direction
+    let line = |e: EdgeId| -> Result<
+        Option<(
+            crate::curve::curve::Curve,
+            crate::geom::extent1d::Extent1d,
+            crate::math::Vec3,
+        )>,
+    > {
+        let edge = target.edge(e)?;
+        let Some(curve) = edge.curve.clone() else {
+            return Ok(None);
+        };
+        if !matches!(curve.kind(), CurveKind::Line(_)) {
+            return Ok(None);
+        }
+        let ivl = edge.interval;
+        let d = curve.evaluate_point(k, ivl.max())? - curve.evaluate_point(k, ivl.min())?;
+        Ok(d.unitize().ok().map(|d| (curve, ivl, d)))
+    };
+    let drop = |curve: &crate::curve::curve::Curve,
+                ivl: &crate::geom::extent1d::Extent1d,
+                p: crate::math::Point3|
+     -> Result<Option<crate::math::Point3>> {
+        let d = curve.drop_point(
+            k,
+            ivl,
+            p,
+            None,
+            crate::math::BIG_DOUBLE,
+            None,
+            SolverOperation::Minimize,
+        )?;
+        if !d.success {
+            return Ok(None);
+        }
+        curve.evaluate_point(k, d.parameter).map(Some)
+    };
+    let mut least: Option<(f64, FilletObject)> = None;
+    for (a, &(edge_a, ends_a)) in edges.iter().enumerate() {
+        for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
+            if a == b || edge_a == edge_b || ends_a.iter().any(|v| ends_b.contains(v)) {
+                continue;
+            }
+            let (FilletObject::Solver(ia), FilletObject::Solver(ib)) = (
+                *solvers.get(a).ok_or_else(|| invalid("a solver"))?,
+                *solvers.get(b).ok_or_else(|| invalid("a solver"))?,
+            ) else {
+                return Err(invalid("object is not a solver"));
+            };
+            if objects.solver(ia)?.base().chamfer.is_none()
+                || objects.solver(ib)?.base().chamfer.is_none()
+            {
+                continue;
+            }
+            let (Some((curve_ea, ivl_ea, da)), Some((curve_eb, ivl_eb, db))) =
+                (line(edge_a)?, line(edge_b)?)
+            else {
+                continue;
+            };
+            if da.cross(db).length() > crate::math::EFF_ZERO {
+                continue;
+            }
+            let margin = 1000.0
+                * crate::topology::edge::tolerance(target, edge_a)?
+                    .max(crate::topology::edge::tolerance(target, edge_b)?);
+            let (Some(rails_a), Some(rails_b)) = (rails.get(a), rails.get(b)) else {
+                continue;
+            };
+            for (face_a, curve_a, kept_a) in rails_a {
+                for (face_b, curve_b, _) in rails_b {
+                    if face_a != face_b {
+                        continue;
+                    }
+                    let planar = crate::topology::face::p2::surface(target, *face_a)?
+                        .is_some_and(|s| matches!(s.kind(), SurfaceKind::Plane(_)));
+                    if !planar {
+                        continue;
+                    }
+                    let ivl_rb = curve_b.natural_interval();
+                    for s in 0..=16_u32 {
+                        let p = curve_a.evaluate_point(k, kept_a.evaluate(f64::from(s) / 16.0))?;
+                        let (Some(e), Some(r), Some(f)) = (
+                            drop(&curve_eb, &ivl_eb, p)?,
+                            drop(curve_b, &ivl_rb, p)?,
+                            drop(&curve_ea, &ivl_ea, p)?,
+                        ) else {
+                            // a foot not found: no size is named for this pair
+                            return Ok(None);
+                        };
+                        let w = f.distance(e);
+                        let bands = p.distance(f) + e.distance(r);
+                        let scale = (w - margin) / bands * (1.0 - crate::nurbs::math::gamma(7));
+                        if !scale.is_finite() {
+                            return Ok(None);
+                        }
+                        if least.is_none_or(|(l, _)| scale < l) {
+                            least = Some((
+                                scale.max(0.0),
+                                FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge_a)),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(least)
 }
 
 impl FaceShrinkAccess<FilletObject> for SessionObjects<'_> {
@@ -5228,105 +5535,9 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         k: &mut Kernel,
         solvers: &[FilletObject],
     ) -> Result<bool> {
-        use crate::blend::fillet_geom::p1::FilletGeomType;
         use crate::geom::global_solver::SolverOperation;
         use crate::intersect::point_class::{PointClassType, PointClassification};
-        use crate::topology::edgeuse::p1 as eu;
-        // each solver's rails (the face each rolls on and its curve), its filleted edge
-        // (with its ends and curve), and the largest solver tolerance
-        // (and, with the band between the rail's end vertices, its kept interval)
-        let mut rails: Vec<
-            Vec<(
-                FaceId,
-                crate::curve::curve::Curve,
-                crate::geom::extent1d::Extent1d,
-            )>,
-        > = Vec::new();
-        let mut edges = Vec::new();
-        let mut tol = 0.0;
-        for &solver in solvers {
-            let FilletObject::Solver(id) = solver else {
-                return Err(invalid("object is not a solver"));
-            };
-            let base = self.solver(id)?.base();
-            if base.approx_tol_3d > tol {
-                tol = base.approx_tol_3d;
-            }
-            let mut own = Vec::new();
-            for geom in base.fillet_geoms() {
-                let geom = self.pseudo.geom(geom)?;
-                if geom.fillet_geom_type() != FilletGeomType::Default {
-                    continue;
-                }
-                for ii in 0..2 {
-                    let rail = geom
-                        .rail(ii)
-                        .ok_or_else(|| invalid("geometry without rail"))?;
-                    let curve = crate::topology::edge::curve(self.pseudo.brep(), rail)?
-                        .ok_or_else(|| invalid("rail without curve"))?
-                        .clone();
-                    let Some(face) = self.pseudo.fillet_edge(rail)?.original_face() else {
-                        continue;
-                    };
-                    // The rail runs on past its ends (the surfaces are not trimmed yet),
-                    // as far as a mitre at a corner needs and beyond: the band is the
-                    // rail's part between the vertices that end it, where the corners have
-                    // placed them (an end no corner has placed is the rail's own; a rail
-                    // whose ends are one vertex is closed and whole). The fork's
-                    // tangency-labs/smlib@d548305 (WR-649).
-                    let ivl = curve.natural_interval();
-                    let pseudo = self.pseudo.brep();
-                    let prim = eu::primary_edgeuse(pseudo, rail)?
-                        .ok_or_else(|| invalid("rail without primary edgeuse"))?;
-                    let mate = eu::mate(pseudo, prim)?
-                        .ok_or_else(|| invalid("rail edgeuse without mate"))?;
-                    let mut ends = [None; 2];
-                    for (slot, use_) in ends.iter_mut().zip([prim, mate]) {
-                        let vu = eu::vertexuse(pseudo, use_)?
-                            .ok_or_else(|| invalid("rail edgeuse without vertexuse"))?;
-                        *slot = crate::topology::vertexuse::vertex(pseudo, vu)?;
-                    }
-                    let [Some(end0), Some(end1)] = ends else {
-                        return Err(invalid("rail end without vertex"));
-                    };
-                    let mut t_ends = [ivl.min(), ivl.max()];
-                    if end0 != end1 {
-                        for (t_end, end) in t_ends.iter_mut().zip([end0, end1]) {
-                            if !self.pseudo.fillet_vertex(end)?.is_processed() {
-                                continue;
-                            }
-                            let at = crate::topology::vertex::point(pseudo, end)?;
-                            let dropped = curve.drop_point(
-                                k,
-                                &ivl,
-                                at,
-                                None,
-                                crate::math::BIG_DOUBLE,
-                                None,
-                                SolverOperation::Minimize,
-                            )?;
-                            if dropped.success {
-                                *t_end = dropped.parameter;
-                            }
-                        }
-                    }
-                    let [t0, t1] = t_ends;
-                    let kept = crate::geom::extent1d::Extent1d::from_min_max(t0, t1);
-                    own.push((face, curve, kept));
-                }
-            }
-            rails.push(own);
-            let fil_eu = base
-                .edgeuse(0)?
-                .ok_or_else(|| invalid("solver without first edgeuse"))?;
-            let edge = eu::edge(self.target, fil_eu)?
-                .ok_or_else(|| invalid("solver edgeuse without edge"))?;
-            let ends = [
-                crate::topology::edge::start_vertex(self.target, edge)?,
-                crate::topology::edge::end_vertex(self.target, edge)?,
-            ];
-            edges.push((edge, ends));
-        }
+        let (rails, edges, tol) = band_rails(self, k, solvers)?;
         let apart = 10.0 * tol;
         for (a, &(edge_a, ends_a)) in edges.iter().enumerate() {
             for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
