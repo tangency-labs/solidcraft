@@ -8,13 +8,13 @@ use crate::RenderLimits;
 const MIB: u64 = 1024 * 1024;
 const GIB: u64 = 1024 * MIB;
 /// Native CPU reservations, including retained frames, share this finite ceiling.
-pub const NATIVE_CPU_POOL_BYTES: u64 = 16 * GIB;
+pub const NATIVE_CPU_POOL_BYTES: u64 = 256 * GIB;
 /// Hard implementation ceilings; individual requests retain their selected envelope.
-pub const MAX_CPU_WORK: u64 = 16_000_000_000_000;
+pub const MAX_CPU_WORK: u64 = 1 << 60;
 pub const MAX_CPU_TRIANGLES: usize = 8_000_000;
 pub const MAX_CPU_BODIES: usize = 262_144;
 /// Maximum admitted primary-film samples, shared with the display resolver.
-pub const MAX_CPU_SAMPLES_PER_PIXEL: u32 = 4096;
+pub const MAX_CPU_SAMPLES_PER_PIXEL: u32 = super::MAX_SAMPLES_PER_PIXEL;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -74,14 +74,14 @@ impl CpuBudget {
             },
             Self::Workstation => CpuBudgetLimits {
                 max_dimension: 16_384,
-                max_pixels: 67_108_864,
-                max_progressive_pixels: 67_108_864,
+                max_pixels: 134_217_728,
+                max_progressive_pixels: 134_217_728,
                 max_samples_per_pixel: MAX_CPU_SAMPLES_PER_PIXEL,
-                max_camera_samples: 68_719_476_736,
+                max_camera_samples: super::MAX_TRACE_PIXELS * MAX_CPU_SAMPLES_PER_PIXEL as u64,
                 max_triangles: MAX_CPU_TRIANGLES as u64,
                 max_bodies: MAX_CPU_BODIES,
                 max_geometry_bytes: 4 * GIB,
-                max_job_bytes: 12 * GIB,
+                max_job_bytes: 128 * GIB,
                 max_work_units: MAX_CPU_WORK,
             },
         }
@@ -206,8 +206,10 @@ mod tests {
             assert!(budget.validate_samples(limits.max_samples_per_pixel + 1).is_err());
             assert!(budget.validate_samples(limits.max_samples_per_pixel).is_ok());
         }
-        let p = Some(CpuProgressiveOptions { samples_per_pixel: 4096, seed: 0 });
-        assert!(CpuBudget::Workstation.validate_image(8192, 8192, p).is_err());
+        let p = Some(CpuProgressiveOptions { samples_per_pixel: MAX_CPU_SAMPLES_PER_PIXEL, seed: 0 });
+        assert!(CpuBudget::Workstation.validate_image(8192, 8192, p).is_ok());
+        assert!(CpuBudget::Workstation.validate_image(16_384, 8192, p).is_ok());
+        assert_eq!(CpuBudget::Workstation.limits().max_camera_samples, 1 << 43);
         assert!(CpuBudget::Workstation.validate_image(3840, 2160, p).is_ok());
     }
 

@@ -303,6 +303,7 @@ pub(crate) struct Panel<'a> {
     frame: egui::Frame,
     width: f32,
     body_rows: Option<f32>,
+    body_height: Option<f32>,
     ok: &'a str,
     cancel: &'a str,
     reset_scroll: bool,
@@ -632,6 +633,7 @@ impl<'a> Panel<'a> {
             frame,
             width: Tokens::get().form_card_width,
             body_rows: None,
+            body_height: None,
             ok: "OK",
             cancel: "Cancel",
             reset_scroll: false,
@@ -684,6 +686,25 @@ impl<'a> Panel<'a> {
             self.body_rows = Some(rows.clamp(1.0, 32.0));
         }
         self
+    }
+
+    /// Hold the scrolling body at a height the user chose by resizing the card, in points.
+    /// It replaces `body_rows`; short viewports still take precedence.
+    pub(crate) fn body_height(mut self, height: Option<f32>) -> Self {
+        self.body_height = height.filter(|h| h.is_finite() && *h > 0.0);
+        self
+    }
+
+    /// The scrolling body's height on the last frame, for a card the user resizes.
+    pub(crate) fn last_body_height(&self, ctx: &egui::Context) -> Option<f32> {
+        ctx.data(|d| d.get_temp(self.id.with("body_height")))
+    }
+
+    /// The body's viewport on the last frame when its content overflowed it, i.e. when a
+    /// vertical scrollbar is drawn along the viewport's right edge; `None` while nothing scrolls.
+    /// A resize grip on that edge must stay out of this rectangle (#13422 review).
+    pub(crate) fn last_body_scrollbar(&self, ctx: &egui::Context) -> Option<egui::Rect> {
+        ctx.data(|d| d.get_temp(self.id.with("body_scrollbar")))
     }
 
     /// The painted anchor also drives dragging, including the shell's edge clearance.
@@ -794,6 +815,9 @@ impl<'a> Panel<'a> {
         self.feature_impl(ui, heading, disabled, valid, Some(collapsed), body)
     }
 
+    /// The feature card behind `feature` and `feature_collapsible`: title band (and drag target),
+    /// a scrolling body held to the viewport, `body_rows` or `body_height`, then the footer or top
+    /// actions; returns whether the card closed and the action taken.
     fn feature_impl(
         &self,
         ui: &mut Ui,
@@ -829,7 +853,10 @@ impl<'a> Panel<'a> {
                 - self.frame.stroke.width;
             let footer_height = if top.is_some() { 0.0 } else { t.form_footer_height };
             let fields_height = (bottom - ui.cursor().top() - footer_height - ui.spacing().item_spacing.y).max(0.0);
-            let fields_height = self.body_rows.map_or(fields_height, |rows| fields_height.min(rows * t.control_height + t.space_12 * 2.0));
+            let fields_height = match self.body_height {
+                Some(height) => fields_height.min(height),
+                None => self.body_rows.map_or(fields_height, |rows| fields_height.min(rows * t.control_height + t.space_12 * 2.0)),
+            };
             let fields_rect = egui::Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), fields_height));
             let state = if collapsed.as_deref().copied().unwrap_or(false) {
                 solidcraft_ui_registry::publish_count("dialog:body:content_height", 0.0);
@@ -840,8 +867,12 @@ impl<'a> Panel<'a> {
                         // Clear persisted offset, animation and momentum once per opening.
                         egui::scroll_area::State::default().store(ui.ctx(), ui.make_persistent_id(egui::IdSalt::new("feature_fields")));
                     }
-                    let scroll =
-                        egui::ScrollArea::vertical().id_salt("feature_fields").min_scrolled_height(0.0).max_height(fields_height).show(ui, |ui| {
+                    let scroll = egui::ScrollArea::vertical()
+                        .id_salt("feature_fields")
+                        .min_scrolled_height(0.0)
+                        .max_height(fields_height)
+                        .auto_shrink([true, self.body_height.is_none()])
+                        .show(ui, |ui| {
                             if disabled {
                                 ui.disable();
                             }
@@ -855,6 +886,11 @@ impl<'a> Panel<'a> {
                                 .show(ui, body)
                                 .inner
                         });
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(self.id.with("body_height"), scroll.inner_rect.height());
+                        let scrolls = scroll.content_size.y > scroll.inner_rect.height() + 0.5;
+                        d.insert_temp(self.id.with("body_scrollbar"), scrolls.then_some(scroll.inner_rect));
+                    });
                     solidcraft_ui_registry::publish_count("dialog:body:content_height", f64::from(scroll.content_size.y));
                     solidcraft_ui_registry::publish_count("dialog:body:scroll_y", f64::from(scroll.state.clamped_offset().y));
                     solidcraft_ui_registry::publish_rect("dialog:body:viewport", scroll.inner_rect);

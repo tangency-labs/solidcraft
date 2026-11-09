@@ -186,9 +186,10 @@ impl JsonSchema for PresentationParam {
     }
 }
 
-/// The file format Export Render Image writes: `png`, the finished image as shown, or `exr`,
-/// the raw linear FLOAT32 master, which the job must have kept (`linear_exr`). The handler
-/// reads it as this type.
+/// The file format Export Render Image writes: `png`, the finished image as shown; `exr`,
+/// the raw linear FLOAT32 master, which the job must have kept (`linear_exr`); or
+/// `denoise_mask`, the categorical PNG guide mask kept with `denoise_diagnostics`.
+/// The handler reads it as this type.
 // The variants have no doc comments on purpose: with them, schemars publishes `oneOf` and
 // `const` instead of a plain `enum`, which the schema checks in the tests don't read.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -197,13 +198,14 @@ pub enum ExportFormat {
     #[default]
     Png,
     Exr,
+    DenoiseMask,
 }
 
 impl ExportFormat {
     /// The file extension the path must end with.
     pub fn extension(self) -> &'static str {
         match self {
-            Self::Png => "png",
+            Self::Png | Self::DenoiseMask => "png",
             Self::Exr => "exr",
         }
     }
@@ -397,17 +399,22 @@ pub struct ImageExported {
     /// How many bytes were written.
     pub bytes: usize,
     pub format: ExportFormat,
-    /// The file's colour encoding: `srgb` for a PNG, `scene_linear_srgb_d65` for an EXR.
+    /// The file's colour encoding: `srgb` for a colour PNG, `scene_linear_srgb_d65` for an
+    /// EXR, or `categorical_srgb` for a guide mask.
     pub encoding: &'static str,
-    /// The file's alpha: `straight` for a PNG, `coverage_premultiplied` for an EXR.
+    /// The file's alpha: `straight` for a colour PNG, `coverage_premultiplied` for an EXR,
+    /// or `opaque` for a guide mask.
     pub alpha: &'static str,
-    /// The finished image.
+    /// The parent finished colour image, including its colour PNG hash when a guide mask
+    /// is exported. The separate mask metadata describes the exported mask bytes.
     pub frame: Frame,
     /// The linear master the job kept, as the render crate describes it, or `null`.
     pub linear_master: Option<Map<String, Value>>,
     /// How a regraded image was presented, as the render crate describes it, or `null` for an
     /// image rendered directly.
     pub presentation: Option<Map<String, Value>>,
+    /// The guide mask the job kept, including its PNG byte count, dimensions and SHA, or `null`.
+    pub denoise_mask: Option<Map<String, Value>>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

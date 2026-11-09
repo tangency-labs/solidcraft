@@ -577,6 +577,9 @@ jobs:
       # would skip for want of an adapter fails instead.
       SOLIDCRAFT_GPU: software
       SOLIDCRAFT_REQUIRE_GPU: "1"
+      # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
+      VIEWPORT_TEST_GPU: software
+      VIEWPORT_TEST_REQUIRE_GPU: "1"
       ACTION_MATRIX_JOBS: "12"
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -686,6 +689,9 @@ jobs:
       # As in Native Linux tests: lavapipe draws, and a test without an adapter fails.
       SOLIDCRAFT_GPU: software
       SOLIDCRAFT_REQUIRE_GPU: "1"
+      # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
+      VIEWPORT_TEST_GPU: software
+      VIEWPORT_TEST_REQUIRE_GPU: "1"
       # lavapipe's own shader cache (below).
       MESA_SHADER_CACHE_DIR: /home/runner/.cache/mesa-gpu
       CARGO_INCREMENTAL: "0"
@@ -992,6 +998,9 @@ jobs:
       # WARP is a software (Cpu) adapter.
       SOLIDCRAFT_GPU: software
       SOLIDCRAFT_REQUIRE_GPU: "1"
+      # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
+      VIEWPORT_TEST_GPU: software
+      VIEWPORT_TEST_REQUIRE_GPU: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
