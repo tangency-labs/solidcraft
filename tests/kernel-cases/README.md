@@ -6,8 +6,8 @@ of them. `cargo xtask kernel-cases` runs them and writes
 [`docs/kernel-cases.md`](../../docs/kernel-cases.md).
 
 **This folder takes no new cases.** New kernel cases go to solidcore's corpus,
-`crates/solidcore/tests/kernel_cases/<area>/` in
-[tangency-labs/solidcore](https://github.com/tangency-labs/solidcore) (see
+`solidcore/crates/solidcore/tests/kernel_cases/<area>/` in this repository (the vendored
+kernel, mirrored to [tangency-labs/solidcore](https://github.com/tangency-labs/solidcore); see
 [Exporting to solidcore](#exporting-to-solidcore)). `CASES` lists every case here and only
 shrinks: `cargo xtask lists` fails on a case it does not list, and on a listed case that is gone.
 
@@ -32,8 +32,8 @@ once), `each_step` (after every sweep, boolean and blend, as before) or `off`; t
 - **No user designs.** A crash report or a repro design becomes a small synthetic recipe that
   shows the same geometry. Check for private content before committing anything.
 - **No workaround on SolidCraft's side.** A case that fails stays failing until the kernel is
-  fixed. SMLib defects go to tangency-labs/solidcore as issues (`priority: high`,
-  `bug`), and the fix goes into the fork.
+  fixed. File SMLib defects as issues here with the `area:kernel` label; the fix goes into
+  `solidcore`, and the mirror workflow pushes it to tangency-labs/solidcore.
 
 ## Layout
 
@@ -144,7 +144,7 @@ cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli \
 
 `<area>/KNOWN_FAILING` lists the cases of that area that fail today, sorted, one a line with its
 cause (`<case> <why it fails today>`; `#` starts a comment; the header names the baseline: the
-solidcore pin it was taken from). The gate fails on a **regression**, a
+SolidCore commit it was taken from). The gate fails on a **regression**, a
 case that fails (or crashes, hangs, or is not supported yet) and is not listed, and on a
 **fixed** case, one listed that passes. With `--known-failing` the run writes no report;
 `docs/kernel-cases.md` stays the full run's.
@@ -152,9 +152,9 @@ case that fails (or crashes, hangs, or is not supported yet) and is not listed, 
 **Updating a list.** The pull request that changes an outcome changes the list in the same pull
 request, so the list only shrinks and never goes stale:
 
-- a fix (yours, or a solidcore pin bump): remove the line of each case the shard reports as
+- a fix (yours, or a SolidCore update): remove the line of each case the shard reports as
   `FIXED`;
-- a case here that starts failing for a reason the kernel owns (a solidcore pin bump): add its
+- a case here that starts failing for a reason the kernel owns (a SolidCore update): add its
   line, sorted, with the cause from its result (`results.json` in the shard's
   `kernel-rig-results-<area>` artifact, or a local run);
 - a regression: fix it in the same pull request.
@@ -241,7 +241,8 @@ the timeout).
 ## Exporting to solidcore
 
 solidcore holds the kernel cases as a corpus of kernel operations,
-`crates/solidcore/tests/kernel_cases/<area>/<case>.json`, described in that folder's README.
+`solidcore/crates/solidcore/tests/kernel_cases/<area>/<case>.json`, described in that
+folder's README.
 `cargo xtask kernel-cases [--ladder] [--area AREA] --export DIR` writes each case here as such
 an entry: the kernel operations that made its result, their operand records
 (`<case>.bodies.json.gz`), the fix set and the expected values, with `DIR/manifest.json` listing
@@ -249,7 +250,8 @@ every case that is not expressible as kernel input and why.
 
 A new kernel case: draft it here as `<area>/<id>/recipe.json` and `expected.json` (the format
 above, answers in closed form or exact), export it with `--area <area> --export DIR`, add
-`DIR/<area>/<id>.json` and its `.bodies.json.gz` to solidcore's corpus in a pull request there,
-and delete the draft (it is not in `CASES`, so it cannot be committed here). An entry can also be
-written by hand as solidcore's README describes. A case about a command, the UI or a product
-rule stays in SolidCraft as a test in its area's existing test file.
+`DIR/<area>/<id>.json` and its `.bodies.json.gz` under `solidcore`, and delete the draft
+(it is not in `CASES`, so it cannot be committed here). An entry can also be written by hand as
+solidcore's README describes. The mirror workflow pushes the change to tangency-labs/solidcore. A
+case about a command, the UI or a product rule stays in SolidCraft as a test in its area's
+existing test file.

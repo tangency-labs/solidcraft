@@ -30,9 +30,7 @@ pub fn rough_specular(surface: OpaqueSurface, normal: Vec3, view: Vec3, u: [f64;
     let n = unit_direction(normal).map_err(|_| TraceError::InvalidInput("GGX normal"))?;
     let axis = if n.z.abs() < 0.9 { Vec3::Z } else { Vec3::X };
     let frame = VisualFrame::new(n, axis.cross(n)).map_err(|_| TraceError::InvalidInput("GGX visible frame"))?;
-    let matched =
-        AnisotropicSurface::new(surface.base_color(), surface.metallic(), surface.roughness(), surface.roughness(), surface.dielectric_ior())
-            .map_err(|_| TraceError::InvalidInput("GGX visible surface"))?;
+    let matched = AnisotropicSurface::from_isotropic_optical(surface);
     matched
         .sample_visible_reflection(frame, n, view, u)
         .map(|s| s.map(|s| ReflectionSample { direction: s.direction, weight: s.weight, pdf: s.pdf }))

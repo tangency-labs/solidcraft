@@ -1,7 +1,7 @@
 //! Appearance inheritance selector. The caller owns selection and commands.
 use super::{Sphere, sphere::paint_sphere};
-use crate::{scenario, theme::Tokens};
 use egui::{Rect, Sense, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LookStep {
@@ -74,15 +74,15 @@ pub fn look_chain(ui: &mut Ui, id: &str, labels: [&str; 4], looks: [Option<Spher
         if step == active {
             painter.circle_stroke(center, radius + ring_width, Stroke::new(ring_width, t.render_accent));
         }
-        let font = if step == active { crate::fonts::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
+        let font = if step == active { crate::ui_kit::type_face::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
         let label_width = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), t.form_ink).size().x;
         let label_left = (cell.center().x - label_width / 2.0).max(cell.left());
         let label_rect = Rect::from_min_max(pos2(label_left, cell.top() + side + t.space_2), cell.max);
         super::text::paint_text(ui, label_rect, label, font, if step == active { t.render_accent } else { t.form_dim }, false);
-        scenario::publish_rect(&key, cell);
-        scenario::publish_handle(&key, cell.center());
+        solidcraft_ui_registry::publish_rect(&key, cell);
+        solidcraft_ui_registry::publish_handle(&key, cell.center());
     }
-    scenario::publish_rect(id, rect);
+    solidcraft_ui_registry::publish_rect(id, rect);
     clicked
 }
 

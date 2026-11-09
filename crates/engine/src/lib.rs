@@ -27,6 +27,7 @@ pub mod product_scene;
 pub mod recovery;
 pub mod render_jobs;
 pub mod render_lights;
+pub mod render_preparation;
 pub mod sample;
 pub mod schema;
 #[cfg(not(target_arch = "wasm32"))]
@@ -518,6 +519,10 @@ pub struct Session {
     pub(crate) followed: Option<cmd::inspect::Followed>,
     /// Project a face's edges into a sketch created on it (the default; `sketch.auto_project`).
     pub auto_project: bool,
+    /// Project, Intersect, Include 3D Geometry and the face edges projected into a new sketch
+    /// make construction geometry rather than normal geometry (off by default; #13142). A
+    /// preference, kept like `auto_project` when another design is opened or started.
+    pub project_construction: bool,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
@@ -633,8 +638,7 @@ pub struct Session {
     /// Record this session's top-level commands in the crash journal (the app's own design;
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
-    /// Full model evaluations (`refresh`), for tests.
-    #[cfg(test)]
+    /// Live-model evaluations after this session's initialization; never serialized.
     pub(crate) evaluations: usize,
     /// Resolved associative trace inputs, independent of the document revision and view state.
     pub(crate) motion_traces: cmd::motion::associative::Cache,
@@ -827,6 +831,7 @@ impl Session {
             document_id: cmd::inspect::new_document_id(),
             followed: None,
             auto_project: true,
+            project_construction: false,
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             live_links: None,
@@ -870,7 +875,6 @@ impl Session {
             camera: None,
             render_viewport: None,
             render_jobs: Default::default(),
-            #[cfg(test)]
             evaluations: 0,
             motion_traces: Default::default(),
             command_check: None,
@@ -891,6 +895,7 @@ impl Session {
             self.stop_computing();
         }
         let auto_project = self.auto_project;
+        let project_construction = self.project_construction;
         let validation = self.validation();
         let single_surface_analysis = self.single_surface_analysis;
         let param_check = self.param_check;
@@ -908,6 +913,7 @@ impl Session {
         self.crash_journal = crash_journal;
         self.command_check = command_check;
         self.auto_project = auto_project;
+        self.project_construction = project_construction;
         // The user's, like `auto_project`: the commands that open a design evaluate it under it
         // already (`Session::opened_validating`).
         self.set_validation(validation);
@@ -1276,12 +1282,17 @@ impl Session {
         self.doc.find_component(key).or_else(|| self.doc.occurrences.iter().find(|o| o.name == key).map(|o| o.component)).filter(|id| *id != 0)
     }
 
+    /// Number of live-model evaluations after this session's initialization.
+    /// Construction, other sessions and trial evaluations of cloned models are
+    /// excluded. This is not a count of all geometry work. Reading the counter
+    /// never evaluates geometry or warms display meshes.
+    pub fn evaluation_count(&self) -> usize {
+        self.evaluations
+    }
+
     pub fn refresh(&mut self) {
         if self.model.evaluate_shared(&self.doc) {
-            #[cfg(test)]
-            {
-                self.evaluations += 1;
-            }
+            self.evaluations = self.evaluations.saturating_add(1);
         }
         self.revision += 1;
         self.prune_occurrence_state();
@@ -1306,10 +1317,7 @@ impl Session {
                     break;
                 }
                 self.model.evaluate(&self.doc);
-                #[cfg(test)]
-                {
-                    self.evaluations += 1;
-                }
+                self.evaluations = self.evaluations.saturating_add(1);
             }
         }
         cmd::motion::associative::refresh(self);
@@ -1799,6 +1807,11 @@ impl Session {
                 Err(e)
             }
         };
+        // A sketch open for editing that failed (a projected edge lost by name) is still shown, its
+        // lost link marked, so it can be repaired from inside it (#12085).
+        if outermost {
+            self.model.hold_failed_sketch(&self.doc, self.active_sketch);
+        }
         if let Some((before, changed, failed)) = crash_outcome {
             // Refresh and body-name pinning can copy the shared document. Remember the final
             // document, so the next command does not mistake that work for an outside edit
@@ -1813,7 +1826,14 @@ impl Session {
     fn define_inline(&mut self, id: &str, mut v: Value) -> Result<Value> {
         let mut doc = (*self.doc).clone();
         let defined = doc.define_inline().map_err(|e| EngineError::BadParams { cmd: id.to_string(), msg: e.to_string() })?;
-        let Some(first) = defined.first() else { return Ok(v) };
+        let Some(first) = defined.first() else {
+            // Only definitions of parameters that already exist, typed again as they were made:
+            // nothing new to report, but the text now names the parameter.
+            if doc != *self.doc {
+                self.doc = Arc::new(doc);
+            }
+            return Ok(v);
+        };
         if let Some(out) = v.as_object_mut() {
             out.insert("defined".into(), serde_json::json!(first.name));
             out.insert("definitions".into(), serde_json::json!(defined));
@@ -1932,6 +1952,7 @@ impl Session {
             document_id: self.document_id.clone(),
             followed: None,
             auto_project: self.auto_project,
+            project_construction: self.project_construction,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             live_links: None,
@@ -1977,7 +1998,6 @@ impl Session {
             render_viewport: self.render_viewport.clone(),
             render_jobs: self.render_jobs.scratch(),
             saved_visibility: self.saved_visibility.clone(),
-            #[cfg(test)]
             evaluations: 0,
             motion_traces: self.motion_traces.clone(),
             command_check: self.command_check.clone(),
@@ -2309,16 +2329,7 @@ impl Session {
     }
 
     fn run_script_with(&mut self, script: &Value, profile: Option<bool>, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Option<Value>)> {
-        let list = match script {
-            Value::Array(a) => a.clone(),
-            Value::Object(o) => {
-                o.get("commands").and_then(Value::as_array).cloned().ok_or_else(|| EngineError::Other("script: missing `commands` array".into()))?
-            }
-            _ => return Err(EngineError::Other("script must be a JSON array or {\"commands\": [...]}".into())),
-        };
-        if list.len() > 100_000 {
-            return Err(EngineError::Other("script too long".into()));
-        }
+        let list = script_steps(script)?;
         let mut out = Vec::new();
         let mut steps = Vec::new();
         let clock = timing::Clock::start();
@@ -2344,6 +2355,21 @@ impl Session {
         let timings = profile.map(|_| serde_json::json!({"timings": steps, "total_ms": timing::round_ms(clock.ms())}));
         Ok((out, timings))
     }
+}
+
+/// A script's steps: the JSON array itself, or the `commands` array of an object; at most 100 000.
+pub fn script_steps(script: &Value) -> Result<&Vec<Value>> {
+    let list = match script {
+        Value::Array(a) => a,
+        Value::Object(o) => {
+            o.get("commands").and_then(Value::as_array).ok_or_else(|| EngineError::Other("script: missing `commands` array".into()))?
+        }
+        _ => return Err(EngineError::Other("script must be a JSON array or {\"commands\": [...]}".into())),
+    };
+    if list.len() > 100_000 {
+        return Err(EngineError::Other("script too long".into()));
+    }
+    Ok(list)
 }
 
 #[cfg(test)]
@@ -2440,6 +2466,7 @@ fn image_host_availability(host: Option<&render::job::ImageHost>, expected: &ren
 /// to be decided on here.
 fn same_but_features(a: &Document, b: &Document) -> bool {
     let Document {
+        newer_file: _,
         render,
         format,
         format_pending,

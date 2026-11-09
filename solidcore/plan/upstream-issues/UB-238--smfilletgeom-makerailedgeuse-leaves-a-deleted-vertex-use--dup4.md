@@ -1,0 +1,10 @@
+#### UB-238. `SmFilletGeom::MakeRailEdgeuse` leaves a deleted vertex use linked in the fillet vertex when `NER(pBaseEU)` fails
+- **Severity:** Crash / undefined behaviour
+- **Area:** Topology
+- **Location:** `source/SMLib/src/SmFilletGeom.cpp:10042-10052` (the allocation and `pFilletVertex->PostInsert(pNewVU)`), `:10076-10077` (`SmEdgeuse *pBaseEU = pFilletSolver->GetEdgeuse(lRailIndex); NER(pBaseEU);`), `:10089-10090` (`pBaseEU1->GetFace()`), `SmFilletGeom::MakeRailEdgeuse`.
+- **What happens:** the new edge use and vertex use are created under `SmObjDelete sClean3` / `sClean2`, and the vertex use is inserted into `pFilletVertex`'s use list (`SER(pFilletVertex->PostInsert(pNewVU))`) before the base edge use is looked up. When the solver has no edge use for `lRailIndex`, `NER(pBaseEU)` returns and the clean-up deletes the vertex use while it is still linked; a vertex use's destructor does not unlink it, so `~SmFilletVertex` deletes the same object a second time (double free). When `GetEdgeuse(lRailIndex)` is set but `GetEdgeuse(1-lRailIndex)` is not, `pBaseEU1->GetFace()` dereferences a null pointer.
+- **Trigger:** `MakeRailEdgeuse` with a non-null fillet solver and fillet vertex whose solver lacks one of its two base edge uses (a solver the executive has not set up).
+- **How found:** line-by-line reading of `MakeRailEdgeuse` while adding its op to the `blend.fillet_geom_p5` shim (PR #264); `~SmFilletVertex` (`:1333-1342`) deletes every vertex use in its list and `~SmFilletVertexuse` (`SmFilletGeom.h:180`) / `~SmVertexuse` (`SmVertexuse.h:149`) do not unlink the use from the vertex.
+- **Confirmed:** no (source inspection; the shim refuses the input rather than running it).
+- **Severity:** UB (double free, null dereference).
+- **Rust port:** `FilletBrep::make_rail_edgeuse` checks `NER(pFilletSolver)` and `NER(pFilletVertex)` and then defers at the edge-use constructor (`UNPORTED(topology.brep_p3)`); the shim refuses (`SC_ERR_ARG`) a solver without both base edge uses once those two checks pass, so the harness only compares the two defined early exits.

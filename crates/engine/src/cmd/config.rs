@@ -136,10 +136,12 @@ fn column_of(s: &Session, p: &Value, cmd: &str) -> Result<Column> {
     for (key, appearance) in [("material", false), ("appearance", true)] {
         if let Some(body) = str_(p, key) {
             let c = if appearance { Column::Appearance(body.to_string()) } else { Column::Material(body.to_string()) };
-            if !s.doc.configs.columns.contains(&c) && s.model.state().body(body).is_none() {
-                return Err(bad(cmd, format!("no body `{body}`")));
+            if s.doc.configs.columns.contains(&c) {
+                return Ok(c);
             }
-            return Ok(c);
+            // A placed copy's name means the body it shows (#9740); the column is keyed by that body's own name.
+            let body = s.own_body_name(body).ok_or_else(|| bad(cmd, format!("no body `{body}`")))?;
+            return Ok(if appearance { Column::Appearance(body) } else { Column::Material(body) });
         }
     }
     if let Some(n) = str_(p, "param") {
@@ -537,6 +539,20 @@ mod tests {
     use serde_json::{Value, json};
 
     use crate::Session;
+
+    /// A placed copy's body name (`KB (K:2)`, as inspect.measure lists it) means the body it
+    /// shows: the column is keyed by that body's own name, for every placement.
+    #[test]
+    fn a_column_by_a_placed_copys_name_is_keyed_by_the_body_it_shows() {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "K"}));
+        run(&mut s, "solid.box", json!({"body_name": "KB", "length": 10, "width": 10, "height": 10}));
+        run(&mut s, "occurrence.copy", json!({"component": "K", "translate": [30, 0, 0]}));
+        run(&mut s, "config.column", json!({"material": "KB (K:2)"}));
+        assert!(s.doc.configs.columns.contains(&super::Column::Material("KB".into())), "{:?}", s.doc.configs.columns);
+        let err = s.execute("config.column", &json!({"material": "KB (K:9)"})).unwrap_err().to_string();
+        assert!(err.contains("no body `KB (K:9)`"), "{err}");
+    }
 
     fn run(s: &mut Session, id: &str, p: Value) -> Value {
         match s.execute(id, &p) {

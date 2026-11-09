@@ -17,6 +17,10 @@ pub const MAX_TRIANGLES: u64 = 262_144;
 pub const MAX_GEOMETRY_BYTES: u64 = 128 * 1024 * 1024;
 pub const MAX_JOB_BYTES: u64 = 384 * 1024 * 1024;
 pub const MAX_PIXEL_TESTS: u64 = 128_000_000;
+// Existing source/task/host fixed preparation allowance. Cursor backing is
+// charged separately; this value is unchanged by prepared submission metadata.
+pub(crate) const PREPARATION_METADATA_BYTES: u64 = 262_144;
+
 const MAX_STEP: usize = 16_384;
 const SS: usize = 2;
 
@@ -27,6 +31,16 @@ pub struct Admission {
     /// Supersampled raster work only; absent for ray tracing and registered executors.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub projected_pixel_tests: Option<u64>,
+    /// Present when the job explicitly refreshes its photon map every pass.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caustic_work: Option<super::caustics::CausticWork>,
+    /// CPU worker count selected during admission and retained through execution.
+    /// Auto records the available parallelism at admission; other producers omit it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_workers: Option<u16>,
+    /// Native host RAM snapshot and shared reservations; absent without a native host.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_memory: Option<super::HostMemoryAdmission>,
     pub geometry_bytes: u64,
     pub pixel_scratch_bytes: u64,
     pub preparation_bytes: u64,
@@ -53,6 +67,18 @@ fn add_bytes(sum: &mut u64, count: usize, size: usize, maximum: u64) -> Result<(
 /// counted even when another owner already holds them. Allocator and codec internals are estimates.
 /// Includes the CPU raster work estimate and its 384 MiB per-job check.
 pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
+    admit_inner(scene, request, true)
+}
+
+/// Internal byte/header estimate, never a successful public preflight. A host
+/// must finish the strict certificate under its reserved envelope before use.
+pub(crate) fn admit_layout(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
+    admit_inner(scene, request, false)
+}
+
+fn admit_inner(scene: &ProductScene, request: &ImageRequest, certify: bool) -> Result<Admission> {
+    #[cfg(not(feature = "raytrace-cpu"))]
+    let _ = certify;
     if request.environment.is_some() || (request.textures.is_some() && request.integrator != super::Integrator::Raytrace) {
         return Err(JobError::new(ErrorCode::InvalidRequest, "captured GPU environments and raster textures require a registered image executor"));
     }
@@ -72,7 +98,11 @@ pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> 
                 let defaults = super::RaytraceOptions::default();
                 let options = request.raytrace.as_ref().unwrap_or(&defaults);
                 options.validate()?;
-                crate::raytrace::image::admit(scene, request, options)
+                if certify {
+                    crate::raytrace::image::admit(scene, request, options)
+                } else {
+                    crate::raytrace::image::admit_layout(scene, request, options)
+                }
             }
             #[cfg(not(feature = "raytrace-cpu"))]
             {
@@ -112,13 +142,33 @@ fn admit_source(scene: &ProductScene, request: &ImageRequest, max_triangles: u64
 /// Ray tracing has no raster projected-triangle lists. Keep a conservative
 /// pixel/codec allowance, then let the ray tracer charge its actual BVH and film.
 #[cfg(feature = "raytrace-cpu")]
-pub(crate) fn admit_raytrace_source(scene: &ProductScene, request: &ImageRequest, budget: super::CpuBudget) -> Result<Admission> {
+pub(crate) fn admit_raytrace_source(
+    scene: &ProductScene,
+    request: &ImageRequest,
+    budget: super::CpuBudget,
+    dimensions: (u32, u32),
+) -> Result<Admission> {
     budget.validate_execution()?;
-    budget.validate_image(request.width, request.height, request.raytrace.as_ref().and_then(|o| o.progressive))?;
-    let source = admit_source_with_budget(scene, request, budget.limits().max_triangles, budget)?;
+    budget.validate_image(
+        dimensions.0,
+        dimensions.1,
+        request.raytrace.as_ref().map(super::RaytraceOptions::camera_sampling).transpose()?.flatten(),
+    )?;
+    let limits = budget.limits();
+    let source = admit_source_with_dimensions(
+        scene,
+        request,
+        limits.max_triangles,
+        limits.max_bodies,
+        limits.max_geometry_bytes,
+        budget.image_limits(false),
+        dimensions,
+    )?;
     let mut a = source.admission;
+    // The codec and retained previews have the requested final dimensions.
+    a.encoded_limit = u64::from(request.width) * u64::from(request.height) * 8 + 65_536;
     a.pixel_scratch_bytes = source.raster_scratch_bytes;
-    a.preparation_bytes = 262_144;
+    a.preparation_bytes = PREPARATION_METADATA_BYTES;
     a.estimated_total_bytes = a
         .geometry_bytes
         .checked_add(a.pixel_scratch_bytes)
@@ -152,7 +202,7 @@ pub fn admit_geometry_with_limits(
         || max_geometry_bytes == 0
         || max_geometry_bytes > 4 * 1024 * 1024 * 1024
         || image_limits.max_dimension > 16_384
-        || image_limits.max_pixels > 67_108_864
+        || image_limits.max_pixels > 134_217_728
         || image_limits.max_scratch_bytes > super::NATIVE_CPU_POOL_BYTES
     {
         return Err(limit("registered source envelope exceeds implementation bounds"));
@@ -167,6 +217,19 @@ fn admit_source_with_limits(
     max_bodies: usize,
     max_geometry_bytes: u64,
     image_limits: crate::RenderLimits,
+) -> Result<Source> {
+    admit_source_with_dimensions(scene, request, max_triangles, max_bodies, max_geometry_bytes, image_limits, (request.width, request.height))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn admit_source_with_dimensions(
+    scene: &ProductScene,
+    request: &ImageRequest,
+    max_triangles: u64,
+    max_bodies: usize,
+    max_geometry_bytes: u64,
+    image_limits: crate::RenderLimits,
+    dimensions: (u32, u32),
 ) -> Result<Source> {
     if !request.camera.is_valid() {
         return Err(JobError::new(ErrorCode::InvalidRequest, "invalid image camera"));
@@ -190,8 +253,8 @@ fn admit_source_with_limits(
             backend: None,
             mode: RenderMode::Preview,
             operation: RenderOperation::Image,
-            width: u64::from(request.width),
-            height: u64::from(request.height),
+            width: u64::from(dimensions.0),
+            height: u64::from(dimensions.1),
             format: Some(RenderFormat::Png),
             features: Vec::new(),
             policy: Default::default(),
@@ -232,12 +295,15 @@ fn admit_source_with_limits(
             return Err(invalid("invalid body opacity"));
         }
     }
-    let encoded_limit = u64::from(request.width) * u64::from(request.height) * 8 + 65_536;
+    let encoded_limit = u64::from(dimensions.0) * u64::from(dimensions.1) * 8 + 65_536;
     Ok(Source {
         admission: Admission {
             triangles,
             face_appearances: faces,
             projected_pixel_tests: None,
+            caustic_work: None,
+            cpu_workers: None,
+            host_memory: None,
             geometry_bytes: geometry,
             pixel_scratch_bytes: 0,
             preparation_bytes: 0,
@@ -257,7 +323,7 @@ fn admit_raster(source: Source) -> Result<Admission> {
         .triangles
         .checked_mul(48)
         .and_then(|n| a.face_appearances.checked_mul(160).and_then(|f| n.checked_add(f)))
-        .and_then(|n| n.checked_add(source.bodies * 128 + 262_144))
+        .and_then(|n| n.checked_add(source.bodies * 128 + PREPARATION_METADATA_BYTES))
         .ok_or_else(|| limit("work list size overflow"))?;
     let total = a
         .geometry_bytes

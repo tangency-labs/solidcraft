@@ -182,9 +182,10 @@ does deleting that file.
 
 ## A design saved by 0.10 won't open in an older version
 
-Designs saved by a newer SolidCraft use a newer file format. Older versions refuse them with
-"this design was saved by a newer SolidCraft" and don't change the file. Open them with the
-current version.
+Designs saved by a newer SolidCraft use a newer file format. Older versions may refuse them with
+"this design was saved by a newer SolidCraft" and don't change the file: open them with the current
+version. Recent versions open them with a notice, and a feature they can't read shows an error
+on the timeline; update to build it.
 
 ## Save As says the file can't be found (Windows)
 

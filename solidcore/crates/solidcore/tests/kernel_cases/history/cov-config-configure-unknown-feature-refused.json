@@ -1,0 +1,45 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-config-configure-unknown-feature-refused",
+  "expected": {
+    "method": "no feature Nope: refused naming it",
+    "outcome": "refused",
+    "refusal": "no feature `Nope`",
+    "source": "invariants",
+    "sources": [],
+    "what": "config.configure of a feature the design does not have"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 6 (config.configure): invalid parameters for `config.configure`: no feature `Nope`",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 6 (config.configure): invalid parameters for `config.configure`: no feature `Nope`",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "config.configure of a feature the design does not have",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 6 (config.configure): invalid parameters for `config.configure`: no feature `Nope`"
+  ]
+}

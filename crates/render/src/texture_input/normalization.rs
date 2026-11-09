@@ -179,7 +179,7 @@ impl NormalizationSource {
                     let linear = match conversion {
                         ColorConversion::RawData => bounded,
                         ColorConversion::PngGammaSrgbPrimaries { encoding_gamma } => bounded.powf(1.0 / encoding_gamma),
-                        _ => solidcraft_geom::srgb::decode(bounded),
+                        _ => solidcraft_color::srgb::decode(bounded),
                     };
                     if !linear.is_finite() || !(0.0..=1.0).contains(&linear) {
                         return Err(invalid("normalization produced invalid linear/data channels"));

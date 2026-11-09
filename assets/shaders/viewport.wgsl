@@ -16,6 +16,9 @@ struct U {
     ana_c: array<vec4<f32>, 8>,
     ana_f: vec4<f32>,  // x = 1: stripe the negative draft and blocked faces
     depth: vec4<f32>,  // x = 1: reversed depth (1 near, 0 far); y, z: the faces' push (`FACE_BIAS`)
+    // Where the drawn geometry is moved in the world: identity, or a dragged component's move
+    // from where its scene was built (`MovingLayer`)
+    model: mat4x4<f32>,
     tint: vec4<f32>,   // xyz added to a whole hovered body's colour before lighting
     sel: vec4<f32>,    // xyz a whole selected body's colour before lighting
     // the section hatch colours by part (`solidcraft_render::hatch`), the first the cap's own
@@ -24,6 +27,16 @@ struct U {
     product_lights: array<vec4<f32>,84>, // position/kind, radiance, axis/cone, attenuation
     sky: vec4<f32>,    // xyz = world up; w = 1: shade in linear light with a sky fill (#7974)
 };
+
+/// A scene's point in the world (see `U.model`).
+fn placed(p: vec3<f32>) -> vec3<f32> {
+    return (u.model * vec4<f32>(p, 1.0)).xyz;
+}
+
+/// A scene's direction in the world (see `placed`).
+fn turned(n: vec3<f32>) -> vec3<f32> {
+    return (u.model * vec4<f32>(n, 0.0)).xyz;
+}
 
 fn reversed() -> bool {
     return u.depth.x > 0.5;
@@ -83,10 +96,11 @@ struct TOut {
 };
 
 @vertex
-fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
+fn vs_tri(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
     var o: TOut;
+    let p = placed(local);
     o.pos = u.vp * vec4<f32>(p, 1.0);
-    o.n = n;
+    o.n = turned(n);
     let e = palette_entry(c);
     o.c = unpack_color(e.x);
     o.h = e.y;
@@ -95,7 +109,8 @@ fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: 
 }
 
 /// Shared triangles (in their part's own frame) drawn at one placement: the rows of its rigid
-/// move (`r0`..`r2`, a point's coordinates are their dot products with (p, 1)) and its colour.
+/// move (`r0`..`r2`, a point's coordinates are their dot products with (p, 1)) and its colour,
+/// then moved like the rest of its scene (`placed`: a dragged component's layer).
 /// The vertex colour (location 2) is not read.
 @vertex
 fn vs_tri_inst(
@@ -107,10 +122,11 @@ fn vs_tri_inst(
     @location(6) c: u32,
 ) -> TOut {
     let q = vec4<f32>(p, 1.0);
-    let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
+    let wp = placed(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
+    let pn = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
     var o: TOut;
     o.pos = u.vp * vec4<f32>(wp, 1.0);
-    o.n = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
+    o.n = turned(pn);
     let e = palette_entry(c);
     o.c = unpack_color(e.x);
     o.h = e.y;
@@ -140,7 +156,7 @@ fn vs_tri_inst_flat(
     @location(6) c: u32,
 ) -> FOut {
     let q = vec4<f32>(p, 1.0);
-    let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
+    let wp = placed(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
     var o: FOut;
     o.pos = u.vp * vec4<f32>(wp, 1.0);
     o.rp = wp - u.eye.xyz;
@@ -700,14 +716,20 @@ fn lit_color(i: TOut, visibility: f32, base: vec4<f32>) -> vec4<f32> {
     if (dot(n, v) < 0.0) { n = -n; }
     if u.product_lights_meta.x>0.0 {
         var radiance=vec3<f32>(0.0);
+        let albedo=srgb_decode(base.rgb);
         for (var k=0u;k<min(u32(u.product_lights_meta.y),21u);k+=1u) {
-            if u.product_lights[k*4u].w == 4.0 {radiance+=to_linear(base.rgb)*u.product_lights[k*4u+1u].xyz/3.141592653589793;continue;}
+            if u.product_lights[k*4u].w == 4.0 {radiance+=albedo*u.product_lights[k*4u+1u].xyz/3.141592653589793;continue;}
             let sample=product_light_sample(k,i.wp);
-            radiance+=to_linear(base.rgb)*sample[1]*(max(dot(n,sample[0]),0.0)/3.141592653589793);
+            radiance+=albedo*sample[1]*(max(dot(n,sample[0]),0.0)/3.141592653589793);
         }
         let mapped=radiance/(vec3<f32>(1.0)+radiance);
+        // A linear attachment takes linear light as it is; any other is encoded once, as the CPU
+        // image is (decoding the encoded value again through `out_color` would flatten the dark end).
+        if (u.back.w > 0.5) {
+            return vec4<f32>(mapped,base.a);
+        }
         let encoded=select(mapped*12.92,1.055*pow(mapped,vec3<f32>(1.0/2.4))-vec3<f32>(0.055),mapped>vec3<f32>(0.0031308));
-        return out_color(vec4<f32>(encoded,base.a));
+        return vec4<f32>(encoded,base.a);
     }
     let key = normalize(v * 0.8 + vec3<f32>(-0.3, 0.2, 0.6));
     let diff = max(dot(n, key), 0.0);
@@ -785,7 +807,9 @@ fn lifted_z(p: vec3<f32>, c: vec4<f32>, px: f32, half: vec2<f32>) -> f32 {
 }
 
 @vertex
-fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(1) b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
+fn vs_line(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, @location(1) local_b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
+    let a = placed(local_a);
+    let b = placed(local_b);
     var pa = a;
     var pb = b;
     var ca = u.vp * vec4<f32>(a, 1.0);
@@ -832,7 +856,7 @@ fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(
     var z = base.z;
     if (lifted && base.w > 1e-6) {
         let p = select(pa, pb, t > 0.5);
-        let g = grazing(p, octahedral(wbits & 4095u), octahedral((wbits >> 12u) & 4095u));
+        let g = grazing(p, turned(octahedral(wbits & 4095u)), turned(octahedral((wbits >> 12u) & 4095u)));
         z = lifted_z(p, base, wd * 0.5 * g + 1.0, half);
     }
     var o: LOut;
