@@ -2508,7 +2508,7 @@ impl GraphicsChoice {
             parts.push(graphics_api_label(&self.api));
         }
         if self.msaa != other.msaa {
-            parts.push(crate::i18n::format("settings.graphics_msaa", &[("samples", &self.msaa.to_string())]));
+            parts.push(solidcraft_ui_text::format("settings.graphics_msaa", &[("samples", &self.msaa.to_string())]));
         }
         parts.join(", ")
     }
@@ -2550,7 +2550,7 @@ pub struct GraphicsTrial {
 /// An API's name as people know it; Automatic in the interface language.
 pub fn graphics_api_label(api: &str) -> String {
     match api {
-        "auto" => crate::i18n::tr("ui.graphics_api_auto").to_string(),
+        "auto" => solidcraft_ui_text::tr("ui.graphics_api_auto").to_string(),
         "dx12" => "Direct3D 12".into(),
         "vulkan" => "Vulkan".into(),
         "gl" => "OpenGL".into(),
@@ -2564,7 +2564,7 @@ pub fn graphics_api_label(api: &str) -> String {
 fn freeze_warning(app: &SolveApp) -> Option<String> {
     let api = app.preferences.graphics_api.as_str();
     (app.graphics.env_override.is_none() && app.graphics.freezes.contains(&api))
-        .then(|| crate::i18n::format("settings.graphics_api_freezes", &[("api", &graphics_api_label(api))]))
+        .then(|| solidcraft_ui_text::format("settings.graphics_api_freezes", &[("api", &graphics_api_label(api))]))
 }
 
 /// The graphics settings chosen in the preferences.
@@ -9700,7 +9700,7 @@ mod tests {
         std::fs::write(&path, r#"{"backend":"dx12","msaa":4,"other":1}"#).unwrap();
 
         // The window: a trial, next to the saved settings; back to them, no trial.
-        app.prefs_window.open = true;
+        app.prefs_window.shell.open = true;
         let snapshot = Snapshot::take(&app);
         (app.preferences.graphics_api, app.preferences.msaa) = ("vulkan".into(), 8);
         save_graphics(&mut app, true);

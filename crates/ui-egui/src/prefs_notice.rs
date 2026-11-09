@@ -65,11 +65,11 @@ pub fn graphics_trial(app: &mut SolveApp, ctx: &egui::Context) {
     ctx.request_repaint_after(std::time::Duration::from_millis(250));
     let previous = trial.previous.clone();
     let current = crate::prefs::selected_graphics(app);
-    let body = crate::i18n::format(
+    let body = solidcraft_ui_text::format(
         "settings.graphics_trial_body",
         &[("settings", &current.describe(&previous)), ("previous", &previous.describe(&current)), ("seconds", &format!("{}", left.ceil()))],
     );
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_graphics_trial"), "settings", app.tr("settings.graphics_trial_title"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_graphics_trial"), "settings", app.tr("settings.graphics_trial_title"))
         .actions(app.tr("settings.graphics_trial_keep"), app.tr("settings.graphics_trial_revert"), None)
         .show(ctx, true, |ui| {
             ui_kit::text(ui, &body, ui_kit::Text::Report("graphics_trial", false));

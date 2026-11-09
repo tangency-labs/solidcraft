@@ -583,7 +583,7 @@ fn field_of_view_row(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// `WGPU_BACKEND` decides it when set, and settings on trial are kept or dropped first.
 fn graphics_api(app: &mut SolveApp, ui: &mut egui::Ui, on_trial: bool) {
     if let Some(value) = app.graphics.env_override.clone() {
-        let note = crate::i18n::format("settings.graphics_api_env", &[("value", &value)]);
+        let note = solidcraft_ui_text::format("settings.graphics_api_env", &[("value", &value)]);
         ui.add_enabled_ui(false, |ui| ui_kit::dropdown_menu(ui, "pref_graphics_api", &value, |_| {})).response.on_disabled_hover_text(note);
         return;
     }
@@ -613,7 +613,7 @@ fn restart_now(app: &mut SolveApp, ui: &mut egui::Ui, on_trial: bool) {
         && ui_kit::button(ui, app.tr("settings.graphics_restart_now"), ui_kit::Button::Normal).clicked()
     {
         // The choice stays (as OK keeps it) and is tried by the start that follows.
-        close(app, false);
+        crate::prefs_window::close(app, false);
         restart_for_graphics(app);
     }
 }
