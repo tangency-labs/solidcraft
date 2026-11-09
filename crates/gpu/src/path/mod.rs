@@ -1456,7 +1456,7 @@ impl Task {
             height: self.request.height,
             exposure: 2.0f64.powf(self.options.exposure_ev),
             tone_map: self.options.tone_map,
-            background: self.request.background.map(solidcraft_render::surface::srgb8_to_linear),
+            background: self.request.background.map(solidcraft_viewport::surface::srgb8_to_linear),
             transparent: self.request.transparent_background,
         };
         // Pixels are independent: encode contiguous chunks on every core.

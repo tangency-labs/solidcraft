@@ -51,8 +51,8 @@ fn scene(face_override: bool) -> ProductScene {
 }
 
 fn task(samples: u8, selected: bool, face_override: bool, shadows: bool) -> ImageTask {
-    let mut camera = crate::Camera { distance: 50.0, ..Default::default() };
-    camera.set_view(crate::StandardView::Top);
+    let mut camera = solidcraft_viewport::Camera { distance: 50.0, ..Default::default() };
+    camera.set_view(solidcraft_viewport::StandardView::Top);
     let options = RaytraceOptions {
         lights: Some(Vec::new()),
         shadows,
@@ -215,8 +215,8 @@ fn request_admission_and_task_slot_caps_are_not_expanded() {
 // Fixed spatial-generator reuse regressions. Source written; execution pending.
 
 fn spatial_reuse_fixture(s: u8, r: u8, selected: bool, face_override: bool, shadows: bool) -> ImageTask {
-    let mut camera = crate::Camera { distance: 50.0, ..Default::default() };
-    camera.set_view(crate::StandardView::Top);
+    let mut camera = solidcraft_viewport::Camera { distance: 50.0, ..Default::default() };
+    camera.set_view(solidcraft_viewport::StandardView::Top);
     let options = RaytraceOptions {
         primary_samples: s,
         lights: Some(Vec::new()),

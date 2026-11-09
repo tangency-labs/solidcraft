@@ -73,7 +73,7 @@ pub(crate) struct Lens {
 
 impl Lens {
     /// The view of `cam` in a viewport `height_px` physical pixels high.
-    pub fn new(cam: &solidcraft_engine::render::Camera, height_px: f64) -> Lens {
+    pub fn new(cam: &solidcraft_viewport::Camera, height_px: f64) -> Lens {
         let perspective = cam.fov > 0.0;
         let scale = if perspective { height_px / (2.0 * (cam.fov * 0.5).tan()) } else { height_px / (2.0 * cam.half_height()) };
         Lens { eye: cam.eye(), back: cam.back(), scale, perspective, near: (cam.distance * 1e-2).max(1e-3) }
@@ -412,7 +412,7 @@ fn mesh_bytes(m: &Mesh) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_engine::render::Camera;
+    use solidcraft_viewport::Camera;
 
     fn cylinder() -> ModelBody {
         let body = solidcraft_engine::kernel::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 20.0).unwrap();

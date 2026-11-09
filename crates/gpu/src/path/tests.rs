@@ -1,7 +1,8 @@
 use super::*;
 use solidcraft_geom::MeshGeom;
 use solidcraft_geom::{Aabb3, Mesh};
-use solidcraft_render::{Camera, ProductMesh, StandardView, surface::OpaqueSurface};
+use solidcraft_render::ProductMesh;
+use solidcraft_viewport::{Camera, StandardView, surface::OpaqueSurface};
 
 fn executor() -> Option<Executor> {
     let (adapter, device, queue) = match open_headless() {
@@ -2592,7 +2593,7 @@ fn gpu_clear_coat_brdf_matches_f64_surface_oracle() {
             for ior in [1.5, 3.0] {
                 let surface = OpaqueSurface::new(Vec3::new(0.8, 0.5, 0.2), metallic, 0.3, 1.5)
                     .unwrap()
-                    .with_clear_coat(solidcraft_render::clear_coat::ClearCoat::new(1.0, roughness, ior).unwrap());
+                    .with_clear_coat(solidcraft_viewport::clear_coat::ClearCoat::new(1.0, roughness, ior).unwrap());
                 let mut task = Task::new(context.clone(), sphere(surface), request(1), JobOptions::default(), CancelToken::default()).unwrap();
                 for (view, light) in [
                     (Vec3::Z, Vec3::Z),
@@ -2652,7 +2653,7 @@ fn gpu_clear_coat_pdf_matches_f64_surface_oracle() {
             for ior in [1.5, 3.0] {
                 let surface = OpaqueSurface::new(Vec3::new(0.8, 0.5, 0.2), metallic, 0.3, 1.5)
                     .unwrap()
-                    .with_clear_coat(solidcraft_render::clear_coat::ClearCoat::new(1.0, roughness, ior).unwrap());
+                    .with_clear_coat(solidcraft_viewport::clear_coat::ClearCoat::new(1.0, roughness, ior).unwrap());
                 let mut task = Task::new(context.clone(), sphere(surface), request(1), JobOptions::default(), CancelToken::default()).unwrap();
                 for (view, light) in [
                     (Vec3::Z, Vec3::Z),
@@ -2677,7 +2678,7 @@ fn gpu_clear_coat_pdf_matches_f64_surface_oracle() {
                     context.queue.submit([encoder.finish()]);
                     task.sample = 1;
                     let actual = task.read_linear().unwrap()[0];
-                    let expected = solidcraft_render::clear_coat::surface_pdf(surface, Vec3::Z, view, light).unwrap();
+                    let expected = solidcraft_viewport::clear_coat::surface_pdf(surface, Vec3::Z, view, light).unwrap();
                     for (a, b) in actual.iter().zip([expected, 0.0, 0.0]) {
                         assert!((f64::from(*a) - b).abs() <= 3e-3 * b.abs() + 2e-5, "m={metallic}, r={roughness}, ior={ior}: {a} vs {b}");
                     }
@@ -2710,7 +2711,7 @@ fn gpu_clear_coat_samples_the_pdf_mixture_components() {
     for weight in [0.0, 0.4, 1.0] {
         let surface = OpaqueSurface::new(Vec3::new(0.02, 0.02, 0.02), 0.0, 0.45, 1.5)
             .unwrap()
-            .with_clear_coat(solidcraft_render::clear_coat::ClearCoat::new(weight, 0.12, 1.5).unwrap());
+            .with_clear_coat(solidcraft_viewport::clear_coat::ClearCoat::new(weight, 0.12, 1.5).unwrap());
         let mut task = Task::new(context.clone(), sphere(surface), request(1), JobOptions::default(), CancelToken::default()).unwrap();
         let p = weight * 0.5;
         // One variate strictly inside each nonempty mixture interval.
@@ -4646,7 +4647,7 @@ fn packed_gpu_mips_preserve_odd_size_linear_color_and_data_means() {
         let expected = (0..15)
             .map(|i| {
                 let value = if i & 1 == 0 { 64 } else { 192 };
-                if linear { solidcraft_render::surface::srgb8_to_linear(value) } else { f64::from(value) / 255. }
+                if linear { solidcraft_viewport::surface::srgb8_to_linear(value) } else { f64::from(value) / 255. }
             })
             .sum::<f64>()
             / 15.;
@@ -5776,11 +5777,10 @@ fn gpu_ui_box_coat_and_color_map_keep_every_raw_sample_finite() {
     use image::ImageEncoder;
     use serde_json::json;
     use solidcraft_render::{
-        clear_coat::ClearCoat,
         job::textures::{PlanarFrame, RuntimeTextures, TextureBinding, TextureMap},
-        surface::srgb8_to_linear,
         texture_input::MapRole,
     };
+    use solidcraft_viewport::{clear_coat::ClearCoat, surface::srgb8_to_linear};
     let Some(executor) = executor() else { return };
     let mut session = solidcraft_engine::Session::default();
     session.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
@@ -5798,7 +5798,7 @@ fn gpu_ui_box_coat_and_color_map_keep_every_raw_sample_finite() {
         roll: 0.0,
         distance: 61.06594959585294,
         fov: 0.0,
-        up: solidcraft_render::UpAxis::Z,
+        up: solidcraft_viewport::UpAxis::Z,
     };
     let options: JobOptions = serde_json::from_value(json!({
         "samples":4,"max_depth":3,"seed":7,"exposure_ev":0.5,"tone_map":"aces_fitted",

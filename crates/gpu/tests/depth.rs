@@ -10,11 +10,11 @@ use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::geom::Mesh;
-use solidcraft_engine::render::{Camera, Rgb, Scene, SceneLine, SceneMesh, StandardView};
 use solidcraft_engine::view::{self, Guides};
 use solidcraft_geom::prelude::*;
 use solidcraft_gpu::GpuError;
 use solidcraft_gpu::capture::{self, Capturer};
+use solidcraft_viewport::{Camera, Rgb, Scene, SceneLine, SceneMesh, StandardView};
 use std::sync::{Arc, OnceLock};
 
 fn or_skip(c: Result<&'static Capturer, &'static GpuError>) -> Option<&'static Capturer> {
@@ -592,7 +592,7 @@ fn touching_caps_are_hatched_apart_and_keep_their_hatch() {
         let by_part = c.rgba(&Scene { grid: Vec::new(), ..view::scene(&s, &cam).unwrap() }, &cam, w, h).unwrap();
         let (la, lb) = (hatch_seen(&by_part, w, &a), hatch_seen(&by_part, w, &b));
         assert_ne!(la, lb, "{mode} depth: the touching caps look alike");
-        let expect = |hatch: solidcraft_engine::render::hatch::Hatch| hatch.turned();
+        let expect = |hatch: solidcraft_viewport::hatch::Hatch| hatch.turned();
         assert_eq!((la.1, lb.1), (expect(first[0]), expect(first[1])), "{mode} depth: the caps' angles");
         let one = c.rgba(&Scene { grid: Vec::new(), part_hatch: None, ..view::scene(&s, &cam).unwrap() }, &cam, w, h).unwrap();
         let (oa, ob) = (hatch_seen(&one, w, &a), hatch_seen(&one, w, &b));

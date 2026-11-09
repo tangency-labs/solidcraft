@@ -4802,7 +4802,7 @@ fn look_at_sketch_from(app: &mut SolveApp, again: bool) {
 /// be (#9029). Facing the plane alone left a sketch on a turned component tilted on screen.
 /// Along world up/down, yaw turns the image (roll stays 0, as Top/Bottom views do); elsewhere
 /// roll squares the axes.
-pub(crate) fn square_sketch_axes(mut cam: solidcraft_engine::render::Camera, sketch_x: Vec3, sketch_y: Vec3) -> solidcraft_engine::render::Camera {
+pub(crate) fn square_sketch_axes(mut cam: solidcraft_viewport::Camera, sketch_x: Vec3, sketch_y: Vec3) -> solidcraft_viewport::Camera {
     let b = cam.back();
     let in_view = |v: Vec3| v - b * v.dot(b);
     let Some(mut x) = in_view(sketch_x).normalized() else {
@@ -4834,7 +4834,7 @@ pub(crate) fn square_sketch_axes(mut cam: solidcraft_engine::render::Camera, ske
 /// zoomed out when that would not fit in the view; it never zooms in, so a zoom the user chose
 /// stays. A sketch without geometry keeps its plane's origin. Centring on the origin alone left a
 /// sketch drawn away from it (a part placed far from the origin, as imports often are) out of view.
-pub(crate) fn onto_sketch(mut to: solidcraft_engine::render::Camera, ss: &solidcraft_engine::doc::SolvedSketch) -> solidcraft_engine::render::Camera {
+pub(crate) fn onto_sketch(mut to: solidcraft_viewport::Camera, ss: &solidcraft_engine::doc::SolvedSketch) -> solidcraft_viewport::Camera {
     let Some((lo, hi)) = ss.sketch.bounds() else {
         to.target = ss.plane.origin;
         return to;

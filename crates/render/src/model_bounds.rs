@@ -4,7 +4,7 @@
 
 use solidcraft_geom::Aabb3;
 
-use crate::vec::Bounds;
+use solidcraft_viewport::vec::Bounds;
 
 /// The renderer's box with the corners of `b`; an empty box stays empty.
 pub fn view_bounds(b: &Aabb3) -> Bounds {

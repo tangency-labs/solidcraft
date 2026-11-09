@@ -27,7 +27,7 @@ fn emission_fixture(reverse: bool) -> (ProductScene, ImageRequest, RaytraceOptio
     request.height = 1;
     request.camera.distance = 25.0;
     request.camera.fov = 0.0;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     let options = RaytraceOptions {
         lights: Some(Vec::new()),
         emissions: Some(vec![job::SurfaceEmission {
@@ -227,7 +227,7 @@ fn thin_shadow_occluder_survives_large_unrelated_translation() {
 #[test]
 fn primary_intervals_follow_camera_clip_planes_for_both_projections_and_up_axes() {
     for fov in [0.0, 0.7] {
-        for up in [crate::UpAxis::Z, crate::UpAxis::Y] {
+        for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
             let mut request = request();
             request.camera.fov = fov;
             request.camera.up = up;
@@ -293,7 +293,7 @@ fn actual_png_has_analytic_lit_and_cast_shadow_pixels() {
     request.width = 40;
     request.height = 40;
     request.camera.distance = 50.0;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     let options = RaytraceOptions {
         lights: Some(vec![job::DirectionalLightOptions { direction: [-1.0, 0.0, 1.0], color: [1.0; 3], intensity: 1.0 }]),
         ..Default::default()
@@ -347,7 +347,7 @@ fn triangle_task(cancel: CancelToken) -> ImageTask {
     };
     let mut request = request();
     request.camera.distance = 50.0;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     ImageTask::new(scene, request, cancel, Default::default()).unwrap()
 }
 #[test]
@@ -390,7 +390,7 @@ fn face_looks_cost_one_unit_per_triangle_and_the_first_entry_wins() {
     };
     let mut request = request();
     request.camera.distance = 60.0;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     let mut task = ImageTask::new(scene, request, CancelToken::default(), Default::default()).unwrap();
     let before = task.work.used();
     for _ in 0..10_000 {
@@ -603,7 +603,7 @@ fn reflected_hit_adds_surface_emission_with_the_current_path_throughput() {
     request.height = 1;
     request.camera.distance = 50.0;
     request.camera.fov = 0.0;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     let options = RaytraceOptions {
         lights: Some(Vec::new()),
         shadows: false,
@@ -667,7 +667,7 @@ fn procedural_effects_change_completed_pngs_independently_and_zero_is_byte_ident
         request.width = 32;
         request.height = 32;
         request.camera.distance = 40.0;
-        request.camera.set_view(crate::StandardView::Top);
+        request.camera.set_view(solidcraft_viewport::StandardView::Top);
         let options = RaytraceOptions { surface_effects: effect.map(|e| vec![e]), shadows: false, ..Default::default() };
         request.raytrace = Some(options.clone());
         let mut task = ImageTask::new(scene.clone(), request, CancelToken::default(), options).unwrap();
@@ -748,7 +748,7 @@ fn surface_consumer_fixture() -> (ProductScene, ImageRequest, RaytraceOptions) {
     request.width = 1;
     request.height = 1;
     request.camera.distance = 40.0;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     request.raytrace = Some(options.clone());
     (scene, request, options)
 }
@@ -979,7 +979,7 @@ fn reflected_surface_effect_uses_changed_shading_and_resets_before_emitting_seco
     request.height = 1;
     request.camera.distance = 50.0;
     request.camera.fov = 0.0;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     for mode in [job::ReflectionMode::Mirror, job::ReflectionMode::RoughSpecular] {
         let options = RaytraceOptions {
             surface_effects: Some(vec![effect.clone()]),
@@ -1442,7 +1442,7 @@ fn optical_admission_bills_capacity_and_refuses_ambiguous_effect_and_environment
 #[test]
 fn captured_clear_coat_keeps_direct_shading_but_refuses_unmatched_cpu_transport() {
     let (mut scene, mut request, mut options) = emission_fixture(false);
-    let coat = crate::clear_coat::ClearCoat::new(0.8, 0.2, 1.5).unwrap();
+    let coat = solidcraft_viewport::clear_coat::ClearCoat::new(0.8, 0.2, 1.5).unwrap();
     let surface = OpaqueSurface::new(Vec3::new(0.4, 0.3, 0.2), 0.0, 0.4, 1.5).unwrap().with_clear_coat(coat);
     scene.meshes[0].surface = Some(surface);
     request.raytrace = Some(options.clone());
@@ -1931,11 +1931,10 @@ fn cpu_denoise_production_guides_use_exact_body_and_material_bypass_policy() {
             }
             2 | 3 => {
                 for body in &mut source.meshes {
-                    body.surface = Some(
-                        OpaqueSurface::new(Vec3::new(0.4, 0.6, 0.8), 0.0, 0.5, 1.5)
-                            .unwrap()
-                            .with_clear_coat(crate::clear_coat::ClearCoat::new(1.0, if case == 2 { 0.045 } else { 0.1 }, 1.5).unwrap()),
-                    );
+                    body.surface =
+                        Some(OpaqueSurface::new(Vec3::new(0.4, 0.6, 0.8), 0.0, 0.5, 1.5).unwrap().with_clear_coat(
+                            solidcraft_viewport::clear_coat::ClearCoat::new(1.0, if case == 2 { 0.045 } else { 0.1 }, 1.5).unwrap(),
+                        ));
                 }
             }
             4 => {
@@ -2259,7 +2258,7 @@ fn mapped_wood_fixture() -> (ProductScene, ImageRequest, RaytraceOptions) {
     }])
     .unwrap();
     let mut request = request();
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     request.camera.distance = 1.25;
     request.textures = Some(Arc::new(textures));
     let options = RaytraceOptions {

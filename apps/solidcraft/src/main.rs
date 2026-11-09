@@ -1229,7 +1229,7 @@ fn main() -> eframe::Result {
                 app.session.undo.clear();
                 // Built straight into the session, so nothing asked for a fit: frame it at the
                 // home view as any opened design is (#9195). The fit waits for the first layout.
-                app.cam.set_view(solidcraft_engine::render::StandardView::Iso);
+                app.cam.set_view(solidcraft_viewport::StandardView::Iso);
                 app.fit_view();
             }
             // Lock files next to open designs: a design open on another computer says so (#5467),

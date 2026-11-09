@@ -1,7 +1,8 @@
 use super::*;
+use crate::ProductMesh;
 use crate::job::{AnisotropicFaceOptions, CancelToken, ImageRequest, Integrator, TaskPoll};
-use crate::{Camera, ProductMesh, StandardView};
 use solidcraft_geom::Mesh;
+use solidcraft_viewport::{Camera, StandardView};
 use std::sync::Arc;
 
 fn body(name: &str, x: f64) -> ProductMesh {

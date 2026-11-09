@@ -80,6 +80,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("control", Class::Shared),
     // the window's own control requests over egui: ui.screenshot and ui.resize (#12946)
     ("control-egui", Class::Shared),
+    // the viewport renderer: camera, picture description and CPU rasterizer, shading models, hatches (#12943)
+    ("viewport", Class::Shared),
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),

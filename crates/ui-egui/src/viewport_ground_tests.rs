@@ -1,5 +1,6 @@
 use super::*;
-use solidcraft_engine::{Session, geom::Aabb3, render::UpAxis};
+use solidcraft_engine::{Session, geom::Aabb3};
+use solidcraft_viewport::UpAxis;
 
 #[test]
 fn ground_ao_shares_the_selected_ground_plane_in_both_up_axes() {

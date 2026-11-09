@@ -2,7 +2,7 @@
 use crate::Session;
 use solidcraft_geom::Aabb3;
 use solidcraft_geom::MeshGeom;
-use solidcraft_render::{Camera, Rgb, Scene, SceneMesh, StandardView};
+use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
 
 pub(super) fn saved(s: &Session) -> Option<Vec<u8>> {
     let (scene, camera) = scene(s)?;

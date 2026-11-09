@@ -69,8 +69,7 @@ impl OpaqueSurface {
     /// The public appearance constructor keeps its historical 0.045 minimum. This
     /// explicit internal route preserves authored values without a clamp, retains
     /// IOR/coat identity and validates every newly supplied component.
-    #[cfg(any(feature = "raytrace-cpu", test))]
-    pub(crate) fn with_authored_finish(mut self, base_color: Vec3, metallic: f64, roughness: f64) -> Result<Self, SurfaceError> {
+    pub fn with_authored_finish(mut self, base_color: Vec3, metallic: f64, roughness: f64) -> Result<Self, SurfaceError> {
         if !base_color.is_finite() || ![base_color.x, base_color.y, base_color.z].into_iter().all(|c| (0.0..=1.0).contains(&c)) {
             return Err(SurfaceError::BaseColor);
         }
@@ -115,7 +114,7 @@ impl OpaqueSurface {
 
     /// Schlick approximation with the exact index-matched dielectric limit.
     /// A conductor retains its own grazing response, including in a metal mix.
-    pub(crate) fn specular_fresnel(self, cosine: f64) -> Vec3 {
+    pub fn specular_fresnel(self, cosine: f64) -> Vec3 {
         let f0 = self.normal_reflectance();
         let grazing = if self.dielectric_ior == 1.0 { self.metallic } else { 1.0 };
         f0 + (Vec3::new(grazing, grazing, grazing) - f0) * (1.0 - cosine.clamp(0.0, 1.0)).powi(5)

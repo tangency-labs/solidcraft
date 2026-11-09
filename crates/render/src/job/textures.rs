@@ -7,7 +7,6 @@ pub mod cpu_preparation;
 use super::{CancelToken, ErrorCode, JobError, Result};
 use crate::{
     ProductScene,
-    surface::{srgb8_to_linear, unit_direction},
     texture_input::{MapRole, TextureSource},
     texture_sampling::TextureView,
 };
@@ -15,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
+use solidcraft_viewport::surface::{srgb8_to_linear, unit_direction};
 
 pub const MAX_TEXTURE_BINDINGS: usize = 128;
 pub const MAX_TEXTURE_PIXELS_BYTES: u64 = 96 * 1024 * 1024;
@@ -697,7 +697,8 @@ mod tests {
     #[test]
     #[cfg(feature = "raytrace-cpu")]
     fn cpu_map_material_roles_preserve_coat_ior_and_apply_normal_frame_and_flip_explicitly() {
-        use crate::{clear_coat::ClearCoat, surface::OpaqueSurface, surface_patterns::ShadingSurface};
+        use crate::surface_patterns::ShadingSurface;
+        use solidcraft_viewport::{clear_coat::ClearCoat, surface::OpaqueSurface};
         let source = OpaqueSurface::new(Vec3::new(0.8, 0.6, 0.4), 0.2, 0.5, 1.7).unwrap().with_clear_coat(ClearCoat::new(0.7, 0.2, 1.4).unwrap());
         let original = ShadingSurface { surface: source, shading_normal: Vec3::Z };
         for role in [MapRole::BaseColor, MapRole::Roughness, MapRole::Metallic, MapRole::NormalOpenGl] {
@@ -816,7 +817,7 @@ mod tests {
                 .unwrap()
                 .surface
                 .roughness(),
-            crate::surface::MIN_ROUGHNESS
+            solidcraft_viewport::surface::MIN_ROUGHNESS
         );
         binding.flip_v = true;
         assert_eq!(
@@ -887,7 +888,7 @@ mod tests {
         let mut binding = binding();
         binding.normal = Some(map);
         let original = crate::surface_patterns::ShadingSurface {
-            surface: crate::surface::OpaqueSurface::new(Vec3::new(0.5, 0.5, 0.5), 0.0, 0.5, 1.5).unwrap(),
+            surface: solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.5, 0.5, 0.5), 0.0, 0.5, 1.5).unwrap(),
             shading_normal: Vec3::Z,
         };
         binding.normal_strength = f64::NAN;

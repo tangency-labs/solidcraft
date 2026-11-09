@@ -171,7 +171,7 @@ fn weathering_reference(@builtin(global_invocation_id) gid:vec3<u32>){
         seen.push(pixels);
         stack.move_layer(0, 1).unwrap();
     }
-    let expected = dust.color_srgb.map(solidcraft_render::surface::srgb8_to_linear);
+    let expected = dust.color_srgb.map(solidcraft_viewport::surface::srgb8_to_linear);
     for (actual, expected) in seen[0][0][..3].iter().zip(expected) {
         assert!((f64::from(*actual) - expected).abs() < 1e-6);
     }

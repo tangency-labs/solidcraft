@@ -9,10 +9,11 @@
 //! from those publications is incorporated here.
 //! Shading-normal measures follow Veach (1997), sections 5.3.3--5.3.4:
 //! https://graphics.stanford.edu/papers/veach_thesis/thesis.pdf.
-use crate::{surface::unit_direction, transmission};
+use crate::transmission;
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcraft_geom::Vec3Geom;
+use solidcraft_viewport::surface::unit_direction;
 use std::f64::consts::{PI, TAU};
 
 /// Fixed R, G, B representative bands. Thin films can alias in this approximation.

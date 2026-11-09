@@ -4,10 +4,10 @@ use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
 use solidcraft_geom::MeshGeom;
 use solidcraft_render::{
-    Camera, ProductMesh, ProductScene, StandardView,
+    ProductMesh, ProductScene,
     job::{CancelToken, ImageRequest, ImageWork, TaskPoll},
-    surface::OpaqueSurface,
 };
+use solidcraft_viewport::{Camera, StandardView, surface::OpaqueSurface};
 use std::sync::Arc;
 
 type Guide = [[f64; 4]; 3];

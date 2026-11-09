@@ -7,10 +7,10 @@
 use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::Session;
-use solidcraft_engine::render::{Camera, Rgb, Scene, SceneLine};
 use solidcraft_engine::view::{self, Guides, colors};
 use solidcraft_gpu::GpuError;
 use solidcraft_gpu::capture::{self, Capturer};
+use solidcraft_viewport::{Camera, Rgb, Scene, SceneLine};
 
 fn capturer() -> Option<&'static Capturer> {
     match capture::shared() {
@@ -353,7 +353,7 @@ fn colors_of(c: [[f32; 3]; 2]) -> [[u8; 3]; 2] {
 #[test]
 fn an_empty_picture_is_the_background() {
     let Some(c) = capturer() else { return };
-    let sc = solidcraft_engine::render::Scene { background: Some((colors::BG_TOP, colors::BG_BOTTOM)), ..Default::default() };
+    let sc = solidcraft_viewport::Scene { background: Some((colors::BG_TOP, colors::BG_BOTTOM)), ..Default::default() };
     let img = c.rgba(&sc, &Camera::default(), 64, 64).unwrap();
     let at = |row: usize| pixels(&img).nth(row * 64 + 32).unwrap_or_default();
     let near = |p: [u8; 4], c: Rgb| [p[0], p[1], p[2]].iter().zip([c.0, c.1, c.2]).all(|(a, b)| a.abs_diff(b) <= 3);
@@ -364,7 +364,7 @@ fn an_empty_picture_is_the_background() {
 #[test]
 fn bad_picture_sizes_are_errors() {
     let Some(c) = capturer() else { return };
-    let sc = solidcraft_engine::render::Scene::default();
+    let sc = solidcraft_viewport::Scene::default();
     for (w, h) in [(0, 10), (10, 0), (capture::MAX_SIDE + 1, 10), (u32::MAX, u32::MAX)] {
         assert!(c.rgba(&sc, &Camera::default(), w, h).is_err(), "{w} x {h}");
     }
@@ -395,7 +395,7 @@ fn pictures_read_back_while_another_thread_uses_the_device() {
     }))
     .unwrap();
     let c = Capturer::new(&adapter, device.clone(), queue).unwrap();
-    let sc = solidcraft_engine::render::Scene::default();
+    let sc = solidcraft_viewport::Scene::default();
     const PICTURES: usize = 2000;
     let done = AtomicBool::new(false);
     let failed: Vec<String> = std::thread::scope(|t| {

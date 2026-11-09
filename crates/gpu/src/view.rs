@@ -9,7 +9,7 @@
 //! evaluated on the GPU into the vertex buffer the pass draws (see [`PlannedBody`]), with nothing
 //! built or read back on the CPU.
 
-use solidcraft_render::vec::Vec3Ops;
+use solidcraft_viewport::vec::Vec3Ops;
 use std::sync::{Arc, Mutex};
 
 use solidcore_record::Vec3;
@@ -57,7 +57,7 @@ pub const MAX_PALETTE: usize = 1 << 20;
 /// interned per build for ephemeral geometry (grids, highlights, sketch, previews).
 ///
 /// A stable entry also carries the section hatch of the body it colours
-/// (`solidcraft_render::hatch`): none, the cap's own hatch, unless the scene hatches by part.
+/// (`solidcraft_viewport::hatch`): none, the cap's own hatch, unless the scene hatches by part.
 #[derive(Clone, Debug, Default)]
 pub struct Palette {
     entries: Vec<[u8; 4]>,
@@ -128,7 +128,7 @@ impl Palette {
 
     /// Give stable entry `i` (a body's colour) that body's section hatch; `false` when `i` is not
     /// a stable entry.
-    pub fn set_hatch(&mut self, i: PaletteIndex, hatch: solidcraft_render::hatch::Hatch) -> bool {
+    pub fn set_hatch(&mut self, i: PaletteIndex, hatch: solidcraft_viewport::hatch::Hatch) -> bool {
         let at = i.0 as usize;
         if at >= self.stable_len {
             return false;
@@ -146,8 +146,8 @@ impl Palette {
     }
 
     /// The section hatch entry `i` was given ([`Palette::set_hatch`]), if any.
-    pub fn hatch(&self, i: PaletteIndex) -> Option<solidcraft_render::hatch::Hatch> {
-        self.hatches.get(i.0 as usize).and_then(|h| h.checked_sub(1)).map(solidcraft_render::hatch::Hatch)
+    pub fn hatch(&self, i: PaletteIndex) -> Option<solidcraft_viewport::hatch::Hatch> {
+        self.hatches.get(i.0 as usize).and_then(|h| h.checked_sub(1)).map(solidcraft_viewport::hatch::Hatch)
     }
 
     /// Entry `i` as the shader's `Rg32Uint` texel: the rgba bytes packed little-endian, then
@@ -189,7 +189,7 @@ fn octahedral6(n: [f32; 3]) -> u32 {
 /// occlusion radius), the 8 analysis colours, their flags, the depth direction, the model
 /// matrix, the two whole-body highlight colours, then the section hatch colours, the product
 /// lights, and the sky (`uniform_bytes`).
-const UNIFORM_SIZE: u64 = 480 + 16 * solidcraft_render::hatch::HATCH_COLOURS as u64 + 16 + 21 * 64 + 16;
+const UNIFORM_SIZE: u64 = 480 + 16 * solidcraft_viewport::hatch::HATCH_COLOURS as u64 + 16 + 21 * 64 + 16;
 
 /// The identity, column-major: a scene drawn where it was built.
 const IDENTITY: [[f32; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
@@ -859,7 +859,7 @@ impl BlockBuilder {
 }
 
 impl GpuScene {
-    pub fn pbr_tri(&mut self, p: [f32; 3], n: [f32; 3], surface: solidcraft_render::surface::OpaqueSurface) {
+    pub fn pbr_tri(&mut self, p: [f32; 3], n: [f32; 3], surface: solidcraft_viewport::surface::OpaqueSurface) {
         let base = surface.base_color().to_f32();
         let parameters = [surface.metallic() as f32, surface.roughness() as f32, surface.dielectric_ior() as f32];
         for value in p.into_iter().chain(n).chain(base).chain(parameters) {
@@ -1027,7 +1027,7 @@ pub struct Frame {
     pub pv_hide: bool,
     /// World bounds of the active preview. Ground effects update their small receiver without
     /// changing the model scene's key or re-uploading model geometry/colours.
-    pub preview_bounds: Option<solidcraft_render::vec::Bounds>,
+    pub preview_bounds: Option<solidcraft_viewport::vec::Bounds>,
     /// Column-major view-projection.
     pub view_proj: [[f32; 4]; 4],
     /// Direction toward the eye (for lighting).
@@ -1069,7 +1069,7 @@ pub struct Frame {
     pub selection_tint: [f32; 3],
     /// The section hatch colours by part (straight sRGB, 0..1; the first the cap's own): what a
     /// cut body whose palette entries carry a hatch ([`Palette::set_hatch`]) is tinted toward.
-    pub hatch: [[f32; 3]; solidcraft_render::hatch::HATCH_COLOURS],
+    pub hatch: [[f32; 3]; solidcraft_viewport::hatch::HATCH_COLOURS],
     /// The world's up direction and 1 to shade in linear light with a sky fill that follows it
     /// (#7974); 0 shades as before.
     pub sky: [f32; 4],
@@ -1180,8 +1180,8 @@ impl AccessMap {
 
 /// The shader's surface analysis uniform (see [`Frame::analysis`]) for `mode`; Accessibility
 /// reads its depth map's scale and size from `access`.
-pub fn analysis_uniform(mode: Option<solidcraft_render::AnalysisMode>, access: Option<&AccessMap>) -> [f32; 8] {
-    use solidcraft_render::AnalysisMode as A;
+pub fn analysis_uniform(mode: Option<solidcraft_viewport::AnalysisMode>, access: Option<&AccessMap>) -> [f32; 8] {
+    use solidcraft_viewport::AnalysisMode as A;
     match mode {
         Some(A::Zebra { stripes }) => [1.0, stripes as f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
         Some(A::Draft { pull, angle }) => [2.0, angle as f32, 0.0, 0.0, pull.x as f32, pull.y as f32, pull.z as f32, 0.0],
@@ -5530,7 +5530,7 @@ mod glass_tests {
         };
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let background = wgpu::Color { r: 17.0 / 255.0, g: 33.0 / 255.0, b: 65.0 / 255.0, a: 1.0 };
-        let surface = solidcraft_render::surface::OpaqueSurface::new(Vec3::new(0.8, 0.1, 0.1), 0.0, 0.6, 1.5).unwrap();
+        let surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.8, 0.1, 0.1), 0.0, 0.6, 1.5).unwrap();
         for depth in [wgpu::TextureFormat::Depth24PlusStencil8, crate::depth_format(&device, true)] {
             for samples in [1, 4] {
                 let target = GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false };

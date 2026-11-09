@@ -59,6 +59,7 @@ mod tests {
     use crate::render::*;
     use serde_json::json;
     use solidcore_record::Vec3;
+    use solidcraft_viewport::{Camera, UpAxis};
     use std::sync::Arc;
 
     #[test]

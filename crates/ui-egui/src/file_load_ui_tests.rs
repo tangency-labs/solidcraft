@@ -886,11 +886,11 @@ fn cancelling_a_step_open_releases_the_slot_before_the_worker_returns() {
 /// before (which left the design wherever the camera happened to be).
 #[test]
 fn an_opened_design_comes_up_at_the_home_view() {
-    use solidcraft_engine::render::StandardView;
+    use solidcraft_viewport::StandardView;
     let dir = scratch("home-view");
     let path = large_design(&dir, 4);
     let home_angles = {
-        let mut cam = solidcraft_engine::render::Camera::default();
+        let mut cam = solidcraft_viewport::Camera::default();
         cam.set_view(StandardView::Iso);
         (cam.yaw, cam.pitch, cam.roll)
     };

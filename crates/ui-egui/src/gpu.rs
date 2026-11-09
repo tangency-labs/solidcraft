@@ -196,8 +196,8 @@ fn install_capturer(capturer: solidcraft_gpu::capture::Capturer) {
 #[cfg(not(target_arch = "wasm32"))]
 fn picture(
     capturer: &solidcraft_gpu::capture::Capturer,
-    scene: &solidcraft_engine::render::Scene,
-    cam: &solidcraft_engine::render::Camera,
+    scene: &solidcraft_viewport::Scene,
+    cam: &solidcraft_viewport::Camera,
     w: u32,
     h: u32,
 ) -> Result<solidcraft_engine::capture::Picture, String> {
@@ -215,13 +215,8 @@ pub fn install_cpu_picture_renderer() {
     solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| Ok(cpu_picture(scene, cam, w, h))));
 }
 
-fn cpu_picture(
-    scene: &solidcraft_engine::render::Scene,
-    cam: &solidcraft_engine::render::Camera,
-    w: u32,
-    h: u32,
-) -> solidcraft_engine::capture::Picture {
-    let canvas = solidcraft_engine::render::render(scene, cam, w as usize, h as usize);
+fn cpu_picture(scene: &solidcraft_viewport::Scene, cam: &solidcraft_viewport::Camera, w: u32, h: u32) -> solidcraft_engine::capture::Picture {
+    let canvas = solidcraft_viewport::render(scene, cam, w as usize, h as usize);
     solidcraft_engine::capture::Picture { rgba: canvas.rgba, renderer: "cpu" }
 }
 
@@ -1733,7 +1728,7 @@ mod tests {
         };
         let lost = egui_wgpu::DeviceLost::watch(&device);
         let capturer = solidcraft_gpu::capture::Capturer::new(&adapter, device.clone(), queue.clone()).unwrap().watching(lost.flag());
-        let (scene, cam) = (solidcraft_engine::render::Scene::default(), solidcraft_engine::render::Camera::default());
+        let (scene, cam) = (solidcraft_viewport::Scene::default(), solidcraft_viewport::Camera::default());
         assert_ne!(super::picture(&capturer, &scene, &cam, 16, 16).unwrap().renderer, "cpu");
         assert!(!lost.probe(&device, &queue), "a working device isn't lost");
 
@@ -1776,7 +1771,7 @@ mod tests {
         let mut renderer = egui_wgpu::Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, Default::default());
         let image = egui::ImageData::Color(std::sync::Arc::new(egui::ColorImage::filled([4, 4], egui::Color32::WHITE)));
         let delta = egui::epaint::ImageDelta::full(image, egui::TextureOptions::LINEAR);
-        let (scene, cam) = (solidcraft_engine::render::Scene::default(), solidcraft_engine::render::Camera::default());
+        let (scene, cam) = (solidcraft_viewport::Scene::default(), solidcraft_viewport::Camera::default());
         for frame in 0..3 {
             // As the painter: the probe, then the frame's first queue write.
             let (was_lost, error) = egui_wgpu::capture_errors(&device, || {

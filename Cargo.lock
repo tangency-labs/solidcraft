@@ -4253,6 +4253,7 @@ dependencies = [
  "solidcraft-theme",
  "solidcraft-ui-egui",
  "solidcraft-ui-text",
+ "solidcraft-viewport",
  "ureq",
  "windows-sys 0.61.2",
  "winit",
@@ -4277,6 +4278,7 @@ dependencies = [
  "solidcraft-gpu",
  "solidcraft-kernel",
  "solidcraft-mcp",
+ "solidcraft-viewport",
 ]
 
 [[package]]
@@ -4330,6 +4332,7 @@ dependencies = [
  "solidcraft-profile",
  "solidcraft-render",
  "solidcraft-sketch",
+ "solidcraft-viewport",
  "thiserror 2.0.21",
  "web-time",
 ]
@@ -4365,6 +4368,7 @@ dependencies = [
  "solidcraft-profile",
  "solidcraft-render",
  "solidcraft-sketch",
+ "solidcraft-viewport",
  "thiserror 2.0.21",
  "toml_edit",
  "web-time",
@@ -4402,6 +4406,7 @@ dependencies = [
  "solidcraft-io",
  "solidcraft-kernel",
  "solidcraft-render",
+ "solidcraft-viewport",
  "thiserror 2.0.21",
  "wgpu",
 ]
@@ -4463,6 +4468,7 @@ dependencies = [
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-mcp-server",
+ "solidcraft-viewport",
 ]
 
 [[package]]
@@ -4496,6 +4502,7 @@ dependencies = [
  "solidcore-tess",
  "solidcraft-color",
  "solidcraft-geom",
+ "solidcraft-viewport",
  "web-time",
  "weezl 0.1.12",
 ]
@@ -4587,6 +4594,7 @@ dependencies = [
  "solidcraft-theme",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",
+ "solidcraft-viewport",
  "syn 2.0.119",
  "tiny-skia",
  "toml",
@@ -4611,6 +4619,18 @@ dependencies = [
  "serde_json",
  "sys-locale",
  "unicode-bidi",
+]
+
+[[package]]
+name = "solidcraft-viewport"
+version = "0.40.0-rc.3"
+dependencies = [
+ "image",
+ "serde",
+ "serde_json",
+ "solidcore-record",
+ "solidcore-tess",
+ "solidcraft-color",
 ]
 
 [[package]]

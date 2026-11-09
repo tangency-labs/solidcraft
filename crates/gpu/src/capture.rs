@@ -7,14 +7,14 @@
 //! renderer that drew it (`gpu`, `gpu-software` or `cpu`); `hardware` and `software` fail with an
 //! error that names the policy.
 
-use solidcraft_render::vec::Vec3Ops;
+use solidcraft_viewport::vec::Vec3Ops;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use solidcore_record::Vec3;
-use solidcraft_render::hatch::Hatch;
-use solidcraft_render::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene, SceneMesh};
+use solidcraft_viewport::hatch::Hatch;
+use solidcraft_viewport::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene, SceneMesh};
 use wgpu::util::DeviceExt;
 
 use crate::view::{AccessMap, DrawStats, Frame, GpuScene, GpuTarget, Palette, PaletteIndex, Renderer, analysis_colors, analysis_uniform};
@@ -326,7 +326,7 @@ impl Capturer {
     /// [`Capturer::rgba`] as PNG bytes.
     pub fn png(&self, scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<Vec<u8>> {
         let rgba = self.rgba(scene, cam, width, height)?;
-        solidcraft_render::png(width as usize, height as usize, rgba).ok_or_else(|| GpuError::Render("PNG encoding failed".into()))
+        solidcraft_viewport::png(width as usize, height as usize, rgba).ok_or_else(|| GpuError::Render("PNG encoding failed".into()))
     }
 }
 
@@ -376,7 +376,7 @@ pub fn headless_rgba(scene: &Scene, cam: &Camera, width: u32, height: u32) -> st
             if !(1..=MAX_SIDE).contains(&width) || !(1..=MAX_SIDE).contains(&height) {
                 return Err(format!("a picture is 1 to {MAX_SIDE} pixels a side, not {width} × {height}"));
             }
-            let canvas = solidcraft_render::render(scene, cam, width as usize, height as usize);
+            let canvas = solidcraft_viewport::render(scene, cam, width as usize, height as usize);
             Ok((canvas.rgba, "cpu"))
         }
     }
@@ -429,7 +429,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
 /// A scene's meshes and lines as the viewport's model scene: faces in their colours (smooth
 /// normals; a face normal where a vertex has none), lines as wide lines (over everything when
 /// `on_top`), the grid under everything. A body whose appearance is see-through
-/// ([`solidcraft_render::SceneMesh::glass`]) goes into the scene's glass, drawn as the viewport
+/// ([`solidcraft_viewport::SceneMesh::glass`]) goes into the scene's glass, drawn as the viewport
 /// draws glass: far sides first, then near sides, so what lies inside it shows through. When the
 /// scene hatches its cut by part ([`Scene::part_hatch`]), each body's colours are palette entries
 /// of its own, carrying its hatch.

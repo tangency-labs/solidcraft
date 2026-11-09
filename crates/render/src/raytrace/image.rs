@@ -9,14 +9,12 @@ use super::progressive;
 use super::progressive::{CameraFilm, Progressive};
 use super::reflection;
 use super::{BuildLimits, Bvh, BvhBuilder, Ray, TraceError, Triangle, WorkBudget};
+use crate::ProductScene;
 use crate::job::{self, Admission, CancelToken, ErrorCode, ImageRequest, JobError, Phase, Progress, RaytraceOptions, TaskPoll};
-use crate::{
-    ProductScene,
-    surface::{OpaqueSurface, srgb8_to_linear},
-};
 use solidcore_record::Vec3;
 use solidcraft_color::srgb::encode8;
 use solidcraft_geom::prelude::*;
+use solidcraft_viewport::surface::{OpaqueSurface, srgb8_to_linear};
 
 #[cfg(test)]
 #[path = "environment_image_tests.rs"]

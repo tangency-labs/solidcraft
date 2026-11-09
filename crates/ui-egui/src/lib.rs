@@ -341,7 +341,7 @@ use std::sync::mpsc::Receiver;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
-use solidcraft_engine::render::{Camera, CameraAnim, StandardView};
+use solidcraft_viewport::{Camera, CameraAnim, StandardView};
 
 pub(crate) use control::ControlRequest;
 
@@ -399,7 +399,7 @@ pub struct UiState {
     /// A soft shadow on the ground under the model (seen from above).
     pub ground_shadow: bool,
     /// The world's up axis (Z or Y; #3): the camera, axis view, home view and ground follow it.
-    pub up_axis: solidcraft_engine::render::UpAxis,
+    pub up_axis: solidcraft_viewport::UpAxis,
     /// The agent cursor: shown, speed, follow camera (#35).
     pub agent_cursor: agent_cursor::Settings,
     /// The running tool's icon rides beside the pointer in the viewport (View settings; off by
@@ -2874,7 +2874,7 @@ impl SolveApp {
     /// Frame the model at once (programmatic use; the toolbar animates).
     /// Make `up` the world's up axis: the camera turns to the same standard view in that world
     /// (home) and frames the model.
-    pub fn set_up_axis(&mut self, up: solidcraft_engine::render::UpAxis) {
+    pub fn set_up_axis(&mut self, up: solidcraft_viewport::UpAxis) {
         self.ui.up_axis = up;
         self.cam_anim = None;
         self.cam.up = up;

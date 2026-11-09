@@ -2660,7 +2660,7 @@ mod retained_request_tests {
         let surface = if mapped {
             Vec3::new(0.5, 0.5, 0.5)
         } else {
-            let v = [128, 64, 255].map(|v| crate::surface::srgb8_to_linear(v) as f32 as f64);
+            let v = [128, 64, 255].map(|v| solidcraft_viewport::surface::srgb8_to_linear(v) as f32 as f64);
             Vec3::new(v[0], v[1], v[2])
         };
         let mesh = Arc::new(Mesh {
@@ -2678,7 +2678,7 @@ mod retained_request_tests {
                 color: [255; 3],
                 opacity: 1.0,
                 transmission: None,
-                surface: Some(crate::surface::OpaqueSurface::new(surface, 0.0, 1.0, 1.0).unwrap()),
+                surface: Some(solidcraft_viewport::surface::OpaqueSurface::new(surface, 0.0, 1.0, 1.0).unwrap()),
                 faces: vec![],
             }],
         };
@@ -2695,7 +2695,7 @@ mod retained_request_tests {
         let request = ImageRequest {
             width: 1,
             height: 1,
-            camera: crate::Camera { distance: 1.0, fov: 0.0, yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() },
+            camera: solidcraft_viewport::Camera { distance: 1.0, fov: 0.0, yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() },
             background: [0; 3],
             transparent_background: false,
             integrator: Integrator::Raytrace,
@@ -2758,7 +2758,7 @@ mod retained_request_tests {
         assert_eq!(frame.linear_exr(), expected.linear_exr());
         assert!(frame.linear_exr().is_some());
         let color = [128, 64, 255].map(|v| {
-            let x = crate::surface::srgb8_to_linear(v) as f32 as f64;
+            let x = solidcraft_viewport::surface::srgb8_to_linear(v) as f32 as f64;
             solidcraft_color::srgb::encode8(x / (1.0 + x))
         });
         assert_eq!(image::load_from_memory(frame.png()).unwrap().to_rgba8().get_pixel(0, 0).0, [color[0], color[1], color[2], 255]);

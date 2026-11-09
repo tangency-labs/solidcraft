@@ -1,12 +1,10 @@
 //! Original f64 opaque path proposals and finite rectangular emitter geometry.
 //! Evaluation remains the shared surface BRDF; no radiance clamp or changed material model.
 use super::{Ray, Result, TraceError};
-use crate::{
-    job::RectangleLightOptions,
-    surface::{OpaqueSurface, unit_direction},
-};
+use crate::job::RectangleLightOptions;
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
+use solidcraft_viewport::surface::{OpaqueSurface, unit_direction};
 use std::f64::consts::{PI, TAU};
 
 fn invalid(message: &'static str) -> TraceError {
@@ -31,7 +29,7 @@ pub(super) fn power_weight(a: f64, b: f64) -> Result<f64> {
     Ok(1.0 / (1.0 + ratio * ratio))
 }
 pub(super) fn surface_pdf(surface: OpaqueSurface, n: Vec3, v: Vec3, l: Vec3) -> Result<f64> {
-    crate::clear_coat::surface_pdf(surface, n, v, l).map_err(|_| invalid("invalid CPU path mixture PDF"))
+    solidcraft_viewport::clear_coat::surface_pdf(surface, n, v, l).map_err(|_| invalid("invalid CPU path mixture PDF"))
 }
 fn from_local(n: Vec3, local: Vec3) -> Result<Vec3> {
     let axis = if n.z.abs() > 0.9 { Vec3::Y } else { Vec3::Z };

@@ -4,10 +4,11 @@
 #![cfg(not(target_arch = "wasm32"))]
 use serde_json::json;
 use solidcore_record::Vec3;
-use solidcraft_engine::{geom::Aabb3, render::Camera};
+use solidcraft_engine::geom::Aabb3;
 use solidcraft_geom::MeshGeom;
 use solidcraft_gpu as gpu;
 use solidcraft_gpu::view::{Frame, GpuScene, GpuTarget, Renderer};
+use solidcraft_viewport::Camera;
 use std::{
     sync::Arc,
     time::{Duration, Instant},

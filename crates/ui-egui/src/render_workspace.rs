@@ -12,9 +12,10 @@ use solidcraft_engine::doc::render_settings::RenderSetup;
 use solidcraft_engine::render::job::LightingPreset;
 use solidcraft_engine::render::job::{ImageHost, Integrator, PreviewInfo, RaytraceOptions};
 use solidcraft_engine::render::{
-    Availability, Camera, ExecutorDescriptor, ExecutorId, ProductScene, RenderLimits, RenderMode, RenderOperation, RenderProfile, RenderRequest,
+    Availability, ExecutorDescriptor, ExecutorId, ProductScene, RenderLimits, RenderMode, RenderOperation, RenderProfile, RenderRequest,
     ScratchLayout,
 };
+use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
 use crate::gpu::{Frame, GpuScene, SceneSlot, ViewportCallback};
@@ -2930,7 +2931,7 @@ fn gpu_scene_with_budget(scene: &ProductScene, budget: u64) -> Result<(u64, GpuS
             let vertices = triangle.map(|i| {
                 let p = body.mesh.positions.get(i as usize)?.to_f32();
                 let n = *body.mesh.normals.get(i as usize)?;
-                let n = if surface.is_some() { solidcraft_engine::render::surface::unit_direction(n).ok()? } else { n }.to_f32();
+                let n = if surface.is_some() { solidcraft_viewport::surface::unit_direction(n).ok()? } else { n }.to_f32();
                 p.into_iter().chain(n).all(f32::is_finite).then_some((p, n))
             });
             let [Some(a), Some(b), Some(c)] = vertices else {
@@ -2958,7 +2959,7 @@ fn gpu_scene_with_budget(scene: &ProductScene, budget: u64) -> Result<(u64, GpuS
     Ok((hash.finish(), gpu))
 }
 
-fn hash_surface(surface: Option<solidcraft_engine::render::surface::OpaqueSurface>, hash: &mut impl Hasher) {
+fn hash_surface(surface: Option<solidcraft_viewport::surface::OpaqueSurface>, hash: &mut impl Hasher) {
     surface.is_some().hash(hash);
     if let Some(s) = surface {
         let c = s.base_color();
@@ -3162,14 +3163,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
-fn product_projection(camera: Camera, radius: f64, canvas: egui::Rect, image: Option<egui::Rect>) -> solidcraft_engine::render::Mat4 {
+fn product_projection(camera: Camera, radius: f64, canvas: egui::Rect, image: Option<egui::Rect>) -> solidcraft_viewport::Mat4 {
     let image = image.unwrap_or(canvas);
     let projection = camera.view_proj(f64::from(image.width() / image.height().max(1.0)), radius);
     let sx = f64::from(image.width() / canvas.width().max(1.0));
     let sy = f64::from(image.height() / canvas.height().max(1.0));
     let tx = f64::from(2.0 * (image.center().x - canvas.center().x) / canvas.width().max(1.0));
     let ty = f64::from(2.0 * (canvas.center().y - image.center().y) / canvas.height().max(1.0));
-    solidcraft_engine::render::Mat4([[sx, 0.0, 0.0, 0.0], [0.0, sy, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [tx, ty, 0.0, 1.0]]).mul(&projection)
+    solidcraft_viewport::Mat4([[sx, 0.0, 0.0, 0.0], [0.0, sy, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [tx, ty, 0.0, 1.0]]).mul(&projection)
 }
 
 fn paint_product(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera: Camera, image: Option<egui::Rect>) {

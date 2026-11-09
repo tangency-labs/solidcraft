@@ -5,7 +5,8 @@ use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
 use solidcraft_geom::MeshGeom;
 use solidcraft_render::job::{CpuBudget, CpuHost, DirectionalLightOptions, ImageRequest, Integrator, JobId, JobOptions, Phase, RaytraceOptions};
-use solidcraft_render::{Camera, ProductMesh, ProductScene, StandardView, surface::OpaqueSurface};
+use solidcraft_render::{ProductMesh, ProductScene};
+use solidcraft_viewport::{Camera, StandardView, surface::OpaqueSurface};
 use std::{error::Error, fs, path::PathBuf, sync::Arc, time::Duration};
 
 fn scene() -> Result<ProductScene, Box<dyn Error>> {
