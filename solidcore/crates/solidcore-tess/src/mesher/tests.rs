@@ -271,13 +271,13 @@ fn a_box_is_two_triangles_a_face() {
 }
 
 /// SolidCraft's coil from SMLib, its lower half: the counts the bake-off recorded for
-/// `793-coil-split-by-a-plane-across-its-axis` at the display and export tolerances, plus the
-/// 18 triangles its flat cut face gains from shaping.
+/// `793-coil-split-by-a-plane-across-its-axis` at the display and export tolerances, plus what
+/// shaping adds (18 triangles on its flat cut face, and at display 10 on its curved faces).
 #[test]
 fn the_spline_coil_keeps_its_triangles() {
     let name = "smlib_coil_lower_half";
     let (b, size) = (crate::fixtures::fixture(name), crate::fixtures::size_of(name));
-    for (t, want) in [(crate::MeshTolerance::display_of(size), 30_648), (crate::MeshTolerance::export_of(size), 30_680)] {
+    for (t, want) in [(crate::MeshTolerance::display_of(size), 30_658), (crate::MeshTolerance::export_of(size), 30_680)] {
         let Ok((p, _)) = plan(&b, &t, size) else { panic!("plans") };
         assert_eq!(p.evaluate().0.triangles.len(), want);
     }

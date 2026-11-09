@@ -25,6 +25,14 @@ const LONG: f64 = 1.5;
 /// boundary nodes are already there; a seed beside them makes a sliver).
 const CLEARANCE: f64 = 0.5;
 
+/// The smallest triangle (mm²) shaping still splits, for the chord tolerance `tol`: a side a
+/// thousandth of the tolerance (as [`super::sag`] stops), squared. Round a corner sharper than the
+/// angle aimed for, refinement would otherwise crowd points ever closer to it, down to triangles
+/// with no area; a larger floor leaves the slivers of flat faces with no size unshaped.
+pub(crate) fn smallest_area(tol: f64) -> f64 {
+    if tol.is_finite() && tol > 0.0 { (1e-3 * tol).powi(2) } else { 0.0 }
+}
+
 /// Rounds of sag refinement.
 const SAG_ROUNDS: usize = 16;
 
@@ -66,8 +74,7 @@ pub(crate) struct Flat {
     pub min_angle: f64,
     /// The most interior points that may take.
     pub max_points: usize,
-    /// Triangles smaller than this (mm²) are left as they are: around a corner sharper than
-    /// `min_angle` the refinement would otherwise crowd points ever closer to it.
+    /// Triangles smaller than this (mm²) are left as they are ([`smallest_area`]).
     pub min_area: f64,
 }
 
@@ -153,9 +160,8 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
                 .exclude_outer_faces(true)
                 .with_angle_limit(AngleLimit::from_deg(MIN_ANGLE_DEG))
                 // Around a corner sharper than the angle (where two pieces' cuts meet) the
-                // refinement would crowd points ever closer to it, down to triangles too small to
-                // keep their area.
-                .with_min_required_area(sag.tol * sag.tol)
+                // refinement would crowd points ever closer to it, down to triangles with no area.
+                .with_min_required_area(smallest_area(sag.tol))
                 .with_max_additional_vertices(budget.saturating_sub(added));
             let before = cdt.num_vertices();
             cdt.refine(params);

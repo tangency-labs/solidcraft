@@ -1248,7 +1248,7 @@ fn plan_face(
             refine: if bare { None } else { Some((sag, MAX_REFINE)) },
             shape: !matches!(**s, EvalSurface::Plane { .. }),
             lenient: lenient == Lenient::Yes,
-            flat: (bare && lenient == Lenient::No).then(|| cdt::Flat { min_angle: FLAT_MIN_ANGLE_DEG, max_points: uvs.len(), min_area: if tol.is_finite() { tol * tol } else { 0.0 } }),
+            flat: (bare && lenient == Lenient::No).then(|| cdt::Flat { min_angle: FLAT_MIN_ANGLE_DEG, max_points: uvs.len(), min_area: cdt::smallest_area(tol) }),
         };
         cdt::triangulate(&uvs, &ranges, fill).ok_or_else(|| fail("boundary crosses itself"))
     };
