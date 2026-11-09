@@ -19,30 +19,34 @@
 //! Library code never panics, unwraps or indexes on input-derived data: a face the planner
 //! cannot mesh is named in its [`PlanStats`], and the rest of the body is meshed.
 
+#[cfg(test)]
+mod fixtures;
 mod mesh;
+// SolidCraft's mesher, moved here (RFC 0003, item 1.1) and kept in SolidCraft's formatting so it
+// reads the same as its history.
+#[rustfmt::skip]
+mod mesher;
 mod par;
 mod plan;
-mod planner;
 mod pole;
 pub mod preview;
 mod ring;
 pub mod simplify;
+mod stats;
 mod tolerance;
 mod vec;
 
 pub use mesh::Mesh;
+pub use mesher::{MAX_ANGLE_BOUNDARY, plan};
 pub use par::guarded;
 pub use plan::{FacePlan, TessPlan};
-pub use planner::{
-    Cap, CappedEdge, EdgeCap, MAX_ANGLE_BOUNDARY, OverTolerance, PlanStats, RefusedEdge,
-    RefusedFace, plan,
-};
 pub use pole::{AveragedPole, PoleNode, PoleRule};
+pub use stats::{Cap, CappedEdge, EdgeCap, OverTolerance, PlanStats, RefusedEdge, RefusedFace};
 pub use tolerance::{DISPLAY_ANGLE, MeshTolerance};
 
-/// The kernel evaluator's curve and surface forms a [`TessPlan`] holds (its `surfaces`), so a
+/// The plan evaluator's curve and surface forms a [`TessPlan`] holds (its `surfaces`), so a
 /// client that builds or reads a plan names them through this crate, not the kernel's.
-pub use solidcore::eval::{EvalCurve, EvalSurface};
+pub use solidcore::eval::plan::{EvalCurve, EvalSurface};
 /// The vector conversions between the record and the evaluator that plan surfaces are built with.
 pub use solidcore_convert::{record_vec3, vec3};
 

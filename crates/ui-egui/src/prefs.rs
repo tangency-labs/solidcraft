@@ -1129,6 +1129,8 @@ preference_settings! {
     insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
+    /// Ask separately when closing several unsaved designs, as before grouped saving.
+    save_prompt_one_at_a_time: bool = false, PAGE_GENERAL => check_id("prefs.save_prompt_one_at_a_time");
     /// Those designs' files, in tab order, as the last quit left them.
     open_designs: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// Web app (#10220): keep each open design's unsaved changes current in the browser's
@@ -4078,6 +4080,11 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
 }
 
 #[cfg(test)]
+pub(crate) fn keep_search_reveal_visible(app: &mut SolveApp) -> bool {
+    app.prefs_window.shell.keep_reveal_visible()
+}
+
+#[cfg(test)]
 pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) {
     // Keep small scroll steps so a target cannot be skipped on a long Preferences page.
     for _ in 0..32 {
@@ -6459,6 +6466,20 @@ mod tests {
     }
 
     #[test]
+    fn save_prompt_preference_defaults_persists_and_resets_on_general() {
+        let mut a = SolveApp::new(Default::default(), Default::default());
+        assert!(!a.preferences.save_prompt_one_at_a_time);
+        control(&mut a, &serde_json::json!({"save_prompt_one_at_a_time":true})).unwrap();
+        let mut b = SolveApp::new(Default::default(), Default::default());
+        b.load_prefs(&a.prefs());
+        assert!(b.preferences.save_prompt_one_at_a_time);
+        defaults(&mut b, PAGE_DESIGN);
+        assert!(b.preferences.save_prompt_one_at_a_time);
+        defaults(&mut b, PAGE_GENERAL);
+        assert!(!b.preferences.save_prompt_one_at_a_time);
+    }
+
+    #[test]
     fn preferences_session_resets_follow_their_new_pages_only() {
         for page in 0..PAGES.len() {
             let mut app = SolveApp::new(Default::default(), Default::default());
@@ -6804,6 +6825,7 @@ mod tests {
             let raw = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))),
                 system_theme: Some(system),
+                time: Some(h.ctx.input(|input| input.time)),
                 ..Default::default()
             };
             let app = &mut h.app;
@@ -9587,12 +9609,9 @@ mod tests {
 
     /// The texts one frame paints.
     fn painted_texts(h: &mut crate::scenario::Harness) -> Vec<String> {
-        let output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(h.ctx.content_rect()), focused: true, ..Default::default() }, |ui| {
-            h.app.logic(ui.ctx());
-            h.app.ui(ui);
-        });
-        output
-            .shapes
+        // Use the harness clock and consume its texture updates like every other frame.
+        h.frame();
+        h.shapes
             .iter()
             .filter_map(|s| match &s.shape {
                 egui::Shape::Text(t) => Some(t.galley.job.text.clone()),
@@ -11823,6 +11842,8 @@ mod settings_search_tests {
         assert!(!matches_text("dark", &["Units of new designs"]));
     }
 
+    /// A multi-word right-to-left label reaches the search in display order while the query is
+    /// typed in reading order: typing the label's words as written must find the row (#10471).
     #[test]
     fn search_finds_right_to_left_labels_typed_in_reading_order() {
         crate::i18n::install();
@@ -12557,6 +12578,12 @@ mod settings_search_tests {
         }
     }
 
+    // These tests check navigation and scrolling, independent of machine load and the
+    // highlight's wall-clock deadline. Keep the real reveal alive while frames settle.
+    fn keep_reveal_visible(h: &mut crate::scenario::Harness) {
+        assert!(crate::prefs::keep_search_reveal_visible(&mut h.app));
+    }
+
     #[test]
     fn collapsed_shortcut_results_enter_reveals_the_command_despite_an_old_page_filter() {
         use serde_json::json;
@@ -12579,6 +12606,7 @@ mod settings_search_tests {
             set_cursor(&h.ctx, matches[0].0);
             h.frames(2);
             h.step(&json!({"key":"Enter"})).unwrap();
+            keep_reveal_visible(&mut h);
             h.frames(30);
             assert!(h.app.prefs_window.shell.filter.is_empty());
             assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_SHORTCUTS);
@@ -12615,6 +12643,7 @@ mod settings_search_tests {
                 set_cursor(&h.ctx, matches[0].0);
                 h.frames(2);
                 h.step(&json!({"key":"Enter"})).unwrap();
+                keep_reveal_visible(&mut h);
                 h.frames(30);
                 assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_ASSISTANT);
                 let rect = crate::scenario::rect_of(target).unwrap();

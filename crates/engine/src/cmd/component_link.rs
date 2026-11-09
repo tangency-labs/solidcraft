@@ -538,7 +538,7 @@ fn component_key(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<u64> {
         Some(Value::String(x)) => x.clone(),
         _ => return Err(bad(cmd, format!("`{key}` must be a component id or name"))),
     };
-    s.doc.find_component(&k).ok_or_else(|| bad(cmd, format!("no component `{k}`")))
+    s.doc.resolve_component(&k).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{k}`")))
 }
 
 /// A command's reply as JSON: they build their replies from the types their output schemas

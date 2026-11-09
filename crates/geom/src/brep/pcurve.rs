@@ -335,7 +335,8 @@ impl On {
         let at = |t: f64| curve.point(t).ok_or_else(|| Error::Failed(format!("the curve has no point at {t}")));
         Ok(match (&self.surface, record) {
             (SurfaceEval::Eval(plane @ crate::tess::EvalSurface::Plane { .. }, dom), _) => {
-                let map = |p: Vec3| uv::project(plane, dom, p, None, 0.0).ok_or_else(|| Error::Invalid("degenerate plane".into()));
+                let map =
+                    |p: Vec3| uv::project(plane, dom, crate::tess::to_kernel(p), None, 0.0).ok_or_else(|| Error::Invalid("degenerate plane".into()));
                 match record {
                     // The line's own ends where the interval reaches them.
                     Curve::Line { start, end } => {

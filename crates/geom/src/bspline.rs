@@ -11,6 +11,7 @@
 //! Input is hostile: every constructor checks finiteness and sizes and returns
 //! [`SplineError`] instead of panicking; no function here indexes with an unchecked number.
 
+pub use solidcore::eval::plan::basis::{Side, basis_derivatives, binomial, local_basis, local_basis_array};
 use std::ops::{Add, AddAssign, Mul, Sub};
 
 use solidcore_record::Vec3;
@@ -126,15 +127,6 @@ pub fn weighted_points(points: &[Vec3], weights: &[f64]) -> SplineResult<Vec<HPo
     Ok(points.iter().zip(weights).map(|(p, w)| HPoint::weighted(*p, *w)).collect())
 }
 
-/// Which one-sided limit a basis evaluation takes at a knot. Basis functions live on half-open
-/// spans `[uᵢ, uᵢ₊₁)` ([`Side::Right`]); at the right end of a domain the left limit on
-/// `(uᵢ, uᵢ₊₁]` ([`Side::Left`]) keeps the closing span.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Side {
-    Right,
-    Left,
-}
-
 /// Check a knot vector: finite, non-decreasing, not too long.
 pub fn check_knots(knots: &[f64]) -> SplineResult<()> {
     if knots.len() > MAX_KNOTS {
@@ -147,82 +139,6 @@ pub fn check_knots(knots: &[f64]) -> SplineResult<()> {
         return invalid("knots must not decrease");
     }
     Ok(())
-}
-
-/// One B-spline basis function of degree `p = knots.len() − 2` given by its local knot vector
-/// `[ξ₀ … ξₚ₊₁]`, and its derivatives up to order `n`: element `k` is the `k`-th derivative at
-/// `u`. Cox–de Boor recursion (NURBS Book eq. 2.5) with the 0/0 = 0 convention, derivatives by
-/// eq. 2.9 applied repeatedly (`dᵏNᵢ,ₚ = p·(dᵏ⁻¹Nᵢ,ₚ₋₁/(uᵢ₊ₚ−uᵢ) − dᵏ⁻¹Nᵢ₊₁,ₚ₋₁/(uᵢ₊ₚ₊₁−uᵢ₊₁))`).
-/// A knot vector shorter than two knots gives zeros.
-pub fn local_basis(knots: &[f64], u: f64, side: Side, n: usize) -> Vec<f64> {
-    let mut out = vec![0.0; n + 1];
-    let ders = local_basis_array(knots, u, side, n);
-    for (o, d) in out.iter_mut().zip(ders) {
-        *o = d;
-    }
-    out
-}
-
-/// The `degree + 1` basis functions of a B-spline with `knots` and `count` control points alive
-/// at `t`, with their derivatives up to `order`: the index of the first of them and, for each,
-/// its value and derivatives (element `k` the `k`-th). Each comes from its own local knots
-/// ([`local_basis`]), on the span used at `t` (the last non-empty span starting at or before it,
-/// the domain's last span at its end, from the left).
-pub fn basis_derivatives(knots: &[f64], degree: usize, count: usize, t: f64, order: usize) -> Option<(usize, Vec<Vec<f64>>)> {
-    if degree == 0 || count <= degree || knots.len() != count + degree + 1 || !t.is_finite() {
-        return None;
-    }
-    let span = crate::tess::span_of(knots, degree, count, t);
-    let side = if t >= *knots.get(count)? { Side::Left } else { Side::Right };
-    let first = span.checked_sub(degree)?;
-    let ders = (first..=span).map(|i| Some(local_basis(knots.get(i..=i + degree + 1)?, t, side, order))).collect::<Option<Vec<_>>>()?;
-    Some((first, ders))
-}
-
-/// [`local_basis`] into a fixed array (no allocation): element `k` is the `k`-th derivative,
-/// for `k ≤ min(n, MAX_SPLINE_DEGREE)`, the rest zero.
-pub(crate) fn local_basis_array(knots: &[f64], u: f64, side: Side, n: usize) -> [f64; MAX_SPLINE_DEGREE + 1] {
-    const W: usize = MAX_SPLINE_DEGREE + 1;
-    let mut out = [0.0; W];
-    let Some(p) = knots.len().checked_sub(2) else { return out };
-    if p > MAX_SPLINE_DEGREE || !u.is_finite() {
-        return out;
-    }
-    let kn = |i: usize| knots.get(i).copied().unwrap_or(0.0);
-    let ratio = |num: f64, den: f64| if den > 0.0 { num / den } else { 0.0 };
-    // table[k][j]: k-th derivative of N_{j,q} for the current degree q (j = 0..=p−q), updated
-    // in place: k descending (level k reads level k−1 of the previous degree), j ascending
-    // (N_{j,q} reads N_{j+1,q−1}, not yet overwritten). Derivatives above p are zero.
-    let levels = n.min(p);
-    let mut table = [[0.0f64; W]; W];
-    for (j, slot) in table[0].iter_mut().enumerate().take(p + 1) {
-        let (a, b) = (kn(j), kn(j + 1));
-        let inside = match side {
-            Side::Right => a <= u && u < b,
-            Side::Left => a < u && u <= b,
-        };
-        *slot = if inside { 1.0 } else { 0.0 };
-    }
-    for q in 1..=p {
-        for k in (0..=levels).rev() {
-            for j in 0..=p - q {
-                let (d1, d2) = (kn(j + q) - kn(j), kn(j + q + 1) - kn(j + 1));
-                let at = |k: usize, j: usize| table.get(k).and_then(|r| r.get(j)).copied().unwrap_or(0.0);
-                let v = if k == 0 {
-                    ratio(u - kn(j), d1) * at(0, j) + ratio(kn(j + q + 1) - u, d2) * at(0, j + 1)
-                } else {
-                    q as f64 * (ratio(at(k - 1, j), d1) - ratio(at(k - 1, j + 1), d2))
-                };
-                if let Some(slot) = table.get_mut(k).and_then(|r| r.get_mut(j)) {
-                    *slot = v;
-                }
-            }
-        }
-    }
-    for (k, o) in out.iter_mut().enumerate().take(levels + 1) {
-        *o = table.get(k).map_or(0.0, |r| r[0]);
-    }
-    out
 }
 
 /// The coefficients `(c₁, c₂)` of knot insertion into one basis function: inserting `k`
@@ -407,14 +323,6 @@ pub fn segment(p: usize, knots: &[f64], ctrl: &[HPoint], a: f64, b: f64) -> Spli
         return invalid("segment counts");
     }
     Ok((out, points))
-}
-
-/// The binomial coefficient `(n k)` (zero for `k > n`).
-pub(crate) fn binomial(n: usize, k: usize) -> f64 {
-    if k > n {
-        return 0.0;
-    }
-    (0..k).fold(1.0, |c, m| c * (n - m) as f64 / (m + 1) as f64)
 }
 
 /// Bernstein polynomial `Bᵢ,ₚ(x)`.
@@ -1000,8 +908,8 @@ impl<const N: usize> CurveN<N> {
         // N · P = Q, dense with partial pivoting (the matrix is banded; m is small here).
         let mut a = vec![vec![0.0f64; m]; m];
         for (row, &t) in a.iter_mut().zip(params) {
-            let span = crate::tess::span_of(&knots, degree, m, t);
-            let Some(b) = crate::tess::basis_ders(&knots, span, degree, t) else { return invalid("basis") };
+            let span = solidcore::eval::plan::span_of(&knots, degree, m, t);
+            let Some(b) = solidcore::eval::plan::basis_ders(&knots, span, degree, t) else { return invalid("basis") };
             for (x, n) in row.iter_mut().skip(span - degree).zip(&b[0][..=degree]) {
                 *x = *n;
             }
@@ -1050,8 +958,8 @@ impl<const N: usize> CurveN<N> {
             return None;
         }
         let t = t.clamp(*self.knots.get(p)?, *self.knots.get(n)?);
-        let span = crate::tess::span_of(&self.knots, p, n, t);
-        let b = crate::tess::basis_ders(&self.knots, span, p, t)?;
+        let span = solidcore::eval::plan::span_of(&self.knots, p, n, t);
+        let b = solidcore::eval::plan::basis_ders(&self.knots, span, p, t)?;
         let (mut x, mut dx) = ([0.0; N], [0.0; N]);
         let ctrl = self.ctrl.get(span - p..=span)?;
         for ((c, n), dn) in ctrl.iter().zip(&b[0]).zip(&b[1]) {
@@ -1182,5 +1090,43 @@ mod curve_n_tests {
         assert!(q.iter().zip(w).all(|(a, b)| (a - b).abs() < 1e-3), "{q:?} vs {w:?}");
         assert!((d[3] - 2.0).abs() < 1e-6 && (d[2] - 0.3).abs() < 1e-3, "{d:?}");
         assert!(CurveN::interpolate(&[0.0, 0.0, 1.0, 2.0], &points[..4], 3).is_err(), "repeated parameter");
+    }
+
+    #[test]
+    fn cubic_nurbs_matches_the_geom_surface() {
+        // Cross-check the plan evaluator (the kernel's, solidcore::eval::plan) against `bspline::NurbsSurface::eval` on a weighted patch.
+        let knots = [vec![0.0, 0.0, 0.0, 0.0, 0.4, 1.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0]];
+        let (nu, nv) = (5, 4);
+        let mut pts = Vec::new();
+        let mut wts = Vec::new();
+        for j in 0..nv {
+            for i in 0..nu {
+                pts.push(Vec3::new(i as f64, j as f64, ((i * 7 + j * 3) % 5) as f64 * 0.3));
+                wts.push(1.0 + ((i + 2 * j) % 3) as f64 * 0.25);
+            }
+        }
+        let Ok(reference) = NurbsSurface::new([3, 2], knots.clone(), &pts, &wts) else { panic!("valid surface") };
+        use crate::prelude::*;
+        use crate::tess::from_kernel;
+        let ctrl = reference.homogeneous().iter().map(|h| [h.x, h.y, h.z, h.w]).collect();
+        let s = crate::tess::EvalSurface::nurbs([3, 2], knots, [nu, nv], ctrl);
+        for i in 0..=8 {
+            for j in 0..=8 {
+                let (u, v) = (i as f64 / 8.0, j as f64 / 4.0);
+                let Ok(want) = reference.eval(u, v) else { panic!("in domain") };
+                let Some((p, du, dv)) = s.derivs(u, v).map(crate::tess::from_kernel3) else { panic!("evaluates") };
+                assert!(p.dist(want) <= 1e-12, "({u}, {v}): {p:?} vs {want:?}");
+                // Derivatives against central differences (one-sided at the domain ends).
+                let h = 1e-6;
+                let fd = |a: (f64, f64), b: (f64, f64)| {
+                    let (Some(pa), Some(pb)) = (s.derivs(a.0, a.1), s.derivs(b.0, b.1)) else { panic!("evaluates") };
+                    from_kernel(pb.0 - pa.0) * (1.0 / (b.0 - a.0 + b.1 - a.1))
+                };
+                let fu = fd((u.max(h) - h, v), ((u + h).min(1.0), v));
+                let fv = fd((u, v.max(h) - h), (u, (v + h).min(2.0)));
+                assert!(du.dist(fu) <= 1e-4 * (1.0 + du.len()), "du at ({u}, {v}): {du:?} vs {fu:?}");
+                assert!(dv.dist(fv) <= 1e-4 * (1.0 + dv.len()), "dv at ({u}, {v}): {dv:?} vs {fv:?}");
+            }
+        }
     }
 }

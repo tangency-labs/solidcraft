@@ -1,7 +1,7 @@
 //! How closely a display or export mesh follows the exact surfaces: the chord tolerance and the
 //! facet angle, and how the planner reads them for a body of a given size.
 
-use crate::planner::size::Turn;
+use crate::mesher::size::Turn;
 
 /// The most one facet of the display mesh turns (radians): a curved face or edge is divided
 /// until no facet spans more of it than this, however small its radius is beside the body.
