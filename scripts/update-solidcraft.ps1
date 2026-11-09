@@ -232,6 +232,11 @@ try {
         Write-Host "[STEP 3] Running workspace tests ($Profile mode)..."
         try {
             Invoke-Native -Command 'cargo' -Arguments (@('test', '--workspace') + $CargoProfileFlag + $JobsArg)
+            
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "ERROR: Workspace tests failed with exit code $LASTEXITCODE! Recording error and continuing." -ForegroundColor Red
+                $targetFailed = $true
+            }
         }
         catch {
             Write-Host "ERROR: Workspace tests failed: $_" -ForegroundColor Red
@@ -290,7 +295,8 @@ try {
     }
 
     if ($targetFailed) {
-        throw "One or more build/deployment targets failed. State file update skipped."
+        Write-Host "ERROR: One or more targets or tests failed during execution." -ForegroundColor Red
+        exit 2
     }
 
     $StateTemp = "$StateFile.new.$PID"
