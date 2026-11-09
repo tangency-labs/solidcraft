@@ -233,7 +233,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_torus_span_from_start_section = true;
     k.fixes.fillet_trace_from_tangent_point_toward_next = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_trace_rejects_short_step = true;
     k.fixes.fillet_trim_inside_by_best_dot = true;
     k.fixes.fillet_trim_status = true;
     k.fixes.fillet_variable_span_follows_fillet = true;

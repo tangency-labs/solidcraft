@@ -33,6 +33,9 @@ pub struct Body {
     /// The last volume measured for this record and the tolerance it was measured at, shared by
     /// clones because they share the record.
     pub(crate) volume: Option<std::sync::Arc<std::sync::Mutex<Option<(u64, f64)>>>>,
+    /// The exact box ([`Body::exact_bounds`]), measured on first use and shared by clones
+    /// because they share the record.
+    pub(crate) bounds: std::sync::Arc<std::sync::Mutex<Option<Aabb3>>>,
     /// Set for mesh bodies (`record` is then empty).
     pub(crate) mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>,
     /// Display colour (linear RGB 0..1) from an imported file; operations drop it.
@@ -432,6 +435,7 @@ impl Body {
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
+            bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
             mesh,
             color: None,
             paint: None,
@@ -995,13 +999,21 @@ impl Body {
     }
 
     /// The exact box of the body's faces, edges and vertices (SMLib's tight box); a mesh body's
-    /// is its triangles'.
+    /// is its triangles'. Measured once per record: a boolean asks for the box of every body it
+    /// meets, and the same bodies come back feature after feature. A failure is not kept.
     pub fn exact_bounds(&self) -> Result<Aabb3> {
         if self.is_mesh() {
             return Ok(self.outline_bounds());
         }
+        // Held while measuring, so callers on other threads wait for this measurement.
+        let mut slot = self.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(b) = *slot {
+            return Ok(b);
+        }
         let (lo, hi) = self.smlib()?.bounds().map_err(|e| KernelError::smlib("SMLib bounds", e))?;
-        Ok(Aabb3 { min: v3(lo), max: v3(hi) })
+        let b = Aabb3 { min: v3(lo), max: v3(hi) };
+        *slot = Some(b);
+        Ok(b)
     }
 
     /// The body's volume from a mesh at `tol`, measured once per (record, tolerance): clones of
@@ -1034,7 +1046,12 @@ impl Body {
     /// makes a kept timeline snapshot expensive, so it dominates the estimate.
     pub fn retained_bytes(&self) -> usize {
         if let Some(m) = &self.mesh {
-            return m.positions.len() * 24 + m.triangles.len() * 12;
+            return m
+                .positions
+                .len()
+                .saturating_mul(24)
+                .saturating_add(m.triangles.len().saturating_mul(12))
+                .saturating_add(m.corner_normals.len().saturating_mul(72));
         }
         let uses: usize = self.record.faces.iter().flat_map(|f| &f.loops).map(|l| if let Loop::Edges { edges } = l { edges.len() } else { 1 }).sum();
         self.record.faces.len() * 2048 + uses * (512 + 96)

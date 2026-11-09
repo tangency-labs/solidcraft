@@ -127,7 +127,7 @@
 //!   evaluations of `SetIntersectionCurveThroughPoint` (a failed one leaves upstream's
 //!   default-constructed vectors, [`Vec3::UNDEF`]).
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -511,9 +511,9 @@ pub fn approx_circ_arc(
 
     // N_ApproxCircArcWithCrvData rejects nc < deg first (a negative nc included)
     let nc = usize::try_from(nc).map_err(|_| {
-        SolidError::nlib(
+        SolidError::nurbs(
             "nurbs::crv_approx::approx_circ_arc_with_crv_data",
-            NlibCode::Input,
+            NurbsFailure::Input,
         )
     })?;
     let data = CircArcData {

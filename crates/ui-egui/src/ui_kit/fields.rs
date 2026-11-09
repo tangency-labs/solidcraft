@@ -1187,8 +1187,9 @@ pub(crate) fn value_pair(ui: &mut Ui, label: &str, values: [&mut String; 2], axe
     })
 }
 
-/// Paired bounded numeric fields in the shared value-pair row geometry.
-pub(crate) fn number_pair<T: egui::emath::Numeric>(
+/// Paired fields that retain authored out-of-range values until an explicit edit.
+/// Uses the same row geometry; typing and dragging still respect the current bounds.
+pub(crate) fn number_pair_preserving<T: egui::emath::Numeric>(
     ui: &mut Ui,
     label: &str,
     values: [&mut T; 2],
@@ -1203,7 +1204,7 @@ pub(crate) fn number_pair<T: egui::emath::Numeric>(
         values.map(|value| {
             ui.allocate_ui_with_layout(vec2(width, row_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
-                number_field(ui, value, range.clone(), speed, suffix)
+                number_field_preserving(ui, value, range.clone(), speed, suffix)
             })
             .inner
         })
