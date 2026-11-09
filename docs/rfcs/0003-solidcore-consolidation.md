@@ -12,7 +12,7 @@
 
 ## Goals
 
-**solidcore is a general-purpose kernel that any application can use, like OpenCASCADE, and the best one.** "Like OpenCASCADE" means comparable scope, nothing more. For this plan, that means:
+**solidcore was vendored into `solidcore/` on 2026-11-08. This RFC lists which SolidCraft geometry code moves into `solidcore/`, where it lands per `solidcore/docs/layers.md`, and in what order. Nothing already in `solidcore/` moves out.** For this plan, that means:
 - **ops is the complete public modelling API, not SolidCraft's API.** It covers every operation a CAD app needs: primitives, booleans, fillets and chamfers, shell and offset, sweeps and lofts, surface construction, sewing and healing, measuring, import and export. Nothing SolidCraft-specific goes in it (no defaults, command ids or UI; layers.md's "never in it" column).
 - **Stable and versioned:** semver on ops, tess and record, with `cargo-semver-checks` in CI and a changelog.
 - **Documented with examples:** rustdoc on every public item, and a small `examples/` set that runs in CI.
@@ -58,7 +58,7 @@ Sizes are non-test lines on main `1c8fdde4ba` (tests in brackets). "Callers" cou
 | Hidden lines, sections, projections | `geom/src/hlr/` (4.5k, own ray/surface intersection and inversion), `geom/src/section.rs`; `doc/src/project.rs` silhouettes and sections by mesh, `project3d.rs` | kernel (silhouettes, sections, visibility); tess (the drawable polylines); ops ("make a drawing view") | kernel has `surface_silhouette`; drawings work is on the `drawings` branch | kernel, doc |
 | Sheet metal | `doc/src/sheet.rs` (10.3k: flat pattern, bend zones, fold maps), `sheet_convert.rs` | kernel (unfold and fold maths); ops (flange, bend, unfold commands); the app keeps the sheet settings (K-factor, gauge) and passes them in | no counterpart | doc, engine |
 | IGES | `kernel/src/{iges_in,iges_in/assembly,iges_out}.rs` (2.7k) | record (model, parser), ops (build): "every other importer (IGES, STL and so on) follows the same split" (layers §2) | no counterpart | kernel |
-| Mesh-body tools | `kernel/src/{meshbody,mesh_convert,polybool}.rs` (1.0k); `geom/src/{mesh,bvh,mesh_distance,compare}.rs` (2.4k); mesh formats in `io` (STL, 3MF, glTF, PLY, OBJ) | app, for now: layers.md covers B-reps, and SolidCraft may keep mesh bodies. Their uses on B-rep bodies go with the mesh decisions above | none needed | kernel, engine, io |
+| Mesh-body tools | `kernel/src/{meshbody,mesh_convert,polybool}.rs` (1.0k); `geom/src/{mesh,bvh,mesh_distance,compare}.rs` (2.4k); mesh formats in `io` (STL, 3MF, glTF, PLY, OBJ) | mesh formats: record (model, parser) and ops (build), as with IGES (layers §2). Mesh-body tools: app, for now: layers.md covers B-reps, and SolidCraft may keep mesh bodies. Their uses on B-rep bodies go with the mesh decisions above | none needed | kernel, engine, io |
 
 Out of scope for this RFC: `crates/sketch` (the 2D constraint solver, 32k), `crates/dynamics`, and the camera and lighting maths in `render` and `gpu`.
 
@@ -159,14 +159,6 @@ jyviko's commit in SolidCraft's kernel crate: about 100 places that reach into t
 The remaining lines of `app-geometry.txt` and `mesh-decisions.txt`, one cluster per PR, until both are empty and `mesh-decisions` retires (layers §6).
 
 ## 3. Rules for the agents doing it
-
-- **Scope: like OpenCASCADE.** solidcore covers what OpenCASCADE's published module list covers: modelling algorithms, surface construction and filling, meshing, data exchange (STEP, IGES), hidden-line removal, shape healing, sections and projections, distance and measure, mass properties. Anything outside that list stays in SolidCraft unless the owner says otherwise. Only the public module overview is used as the yardstick. Never OpenCASCADE's source or headers, nor OCP or pythonOCC.
-
-  Under this rule these rows would change placement. They're left unchanged in §1 until the owner decides:
-  - **Mesh file formats** (STL, OBJ, glTF in `io`): OpenCASCADE's data exchange covers them, so they would move to solidcore (record + ops). Mesh repair and mesh booleans stay in the app, as the row says.
-  - **Sheet metal:** there's no such module in the list, so fold and unfold would stay in SolidCraft as recipes over ops calls, not kernel and ops.
-  - **T-splines** (`geom/src/tspline/`, `kernel/src/tspline.rs`): not in the list's surface construction, so they would stay in SolidCraft. Fills, curve networks, bridge, match and fair stay in solidcore.
-  - **Lip and emboss** (in "Local surface commands"): these are SolidCraft product features, so they would stay as app recipes over ops. Trim, untrim, extend, ruled, split, delete face and repair stay ops (local operations, shape healing).
 
 - **Literature first.** Show the problem, read the papers that solve it, and say in the issue how the design follows them (solidcore `AGENTS.md` §1).
 - **No fallbacks or try-chains.** One construction per job. An old path is deleted when its replacement lands, never kept behind it (§4b).
