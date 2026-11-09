@@ -19,7 +19,7 @@ use crate::SimError;
 use crate::sweep::{AXIS_EPS, ArcFixedAxis, EPS_MM, FlatTool, LinearFixedAxis, Sweep, chord_open, perp, push_clipped};
 
 /// The most tip samples one piece takes. A guard against a pitch far below the piece length, not a
-/// shortcut: the simulator cuts round-tool pieces of at most 2 mm, so this is 2 mm / 3e-5 mm.
+/// shortcut: the simulator cuts round-tool pieces of at most 2 mm, so this refuses pitches below about 3.05e-5 mm.
 pub const MAX_TIP_SAMPLES: usize = 1 << 16;
 
 /// A round-nosed end mill with its tip at the origin and its axis along `+Z`.
@@ -110,11 +110,7 @@ impl RoundPiece {
 /// The samples a piece of length `len` takes, `pitch` apart and at least one step.
 fn samples(len: f64, pitch: f64) -> Result<usize, SimError> {
     let n = (len / pitch).ceil().max(1.0);
-    if n.is_finite() && n <= MAX_TIP_SAMPLES as f64 {
-        Ok(n as usize)
-    } else {
-        Err(SimError::BadInput(format!("a round tool piece of {len} mm is too long for a sample every {pitch} mm")))
-    }
+    if n.is_finite() && n <= MAX_TIP_SAMPLES as f64 { Ok(n as usize) } else { Err(SimError::Samples { len, pitch }) }
 }
 
 /// The swept volume of one piece of a round tool's move, for the stock's rays.
@@ -128,8 +124,9 @@ fn samples(len: f64, pitch: f64) -> Result<usize, SimError> {
 /// shortcut: the chord of each sample is one interval (the rounded part is convex), and consecutive
 /// chords are joined. For a straight piece the swept region is convex, so the join is inside it: exact
 /// from inside, no overcut. For an arc the swept region is not convex, so the join overcuts by at most
-/// the arc's sagitta over one pitch, `pitch^2 / (8 r)` for an arc of radius `r`. Upgrade: join only
-/// across windows the true arc sweep proves.
+/// the arc's sagitta over one pitch, `s = pitch^2 / (8 r)` for an arc of radius `r`. That overcut is
+/// normal to the surface, at most `s`. Along a ray that grazes the surface it can reach about
+/// `sqrt(2 R s)` for a tool of radius `R`. Upgrade: join only across windows the true arc sweep proves.
 ///
 /// shortcut: rays are cut along the tool axis or across it, the only directions the dexel stock casts
 /// (its rays run along X, Y and Z with a 3-axis tool). An oblique ray gets no rounded part. Upgrade:

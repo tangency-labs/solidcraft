@@ -22,6 +22,9 @@ pub enum SimError {
     Budget { need: u64, budget: u64 },
     #[error("more than {max} segments on one ray")]
     SegmentCap { max: usize },
+    /// A round-tool piece is too long to sample every `pitch` mm: the move is reported and not cut.
+    #[error("a round-tool piece of {len} mm is too long to sample every {pitch} mm")]
+    Samples { len: f64, pitch: f64 },
     #[error("more than {max} moves")]
     TooManyMoves { max: usize },
     /// A cut failed at move `index` (0-based), from G-code line or CAM op `line`.

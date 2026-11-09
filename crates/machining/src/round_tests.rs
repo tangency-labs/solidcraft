@@ -422,15 +422,32 @@ fn a_round_tool_arc_is_cut_in_pieces_of_at_most_two_millimetres() {
 }
 
 #[test]
-fn a_round_tool_straight_move_over_two_metres_is_reported_not_cut() {
+fn a_round_tool_move_of_three_metres_is_cut_without_a_diagnostic() {
+    // 1024 pieces of about 2.9 mm each; the part past the 60 mm stock cuts nothing and is not refused.
     let program = Program {
         tools: vec![Tool { id: 0, shape: Shape::Ball, diameter: 5.0, flute_length: 10.0, shank: Vec::new(), holder: Vec::new(), stickout: 30.0 }],
         ..parse("T0 M6\nG0 X0 Y0 Z5\nG1 Z-3\nG1 X3000 F100", &CodeTable::default())
     };
-    assert_eq!(step_count(&program, 2), 0, "not cut");
+    assert_eq!(step_count(&program, 2), 1024);
     let mut stock = Stock::new_box(Vec3::new(0.0, -10.0, -10.0), Vec3::new(60.0, 10.0, 0.0), 0.5, BUDGET).expect("stock");
     let diags = crate::sim::simulate(&program, &mut stock).expect("simulate");
-    assert!(diags.iter().any(|d| d.msg.contains("round tool")), "{diags:?}");
+    assert!(diags.is_empty(), "{diags:?}");
+    assert!(stock.volume() < 60.0 * 20.0 * 10.0, "the move cut the stock");
+}
+
+#[test]
+fn a_round_piece_too_long_to_sample_is_reported_and_skipped() {
+    // A 1e7 mm feed makes pieces of about 9.8 km, too long to sample every 0.1 mm within the sample guard.
+    // (A tiny resolution is not the way to reach it: the stock budget refuses the grid first.) The plunge
+    // before it is cut; the feed is reported and not cut; the run is not aborted.
+    let program = Program {
+        tools: vec![Tool { id: 0, shape: Shape::Ball, diameter: 5.0, flute_length: 10.0, shank: Vec::new(), holder: Vec::new(), stickout: 30.0 }],
+        ..parse("T0 M6\nG0 X10 Y10 Z5\nG1 Z-2 F100\nG1 X10000000 F300", &CodeTable::default())
+    };
+    let mut stock = Stock::new_box(Vec3::new(0.0, 0.0, -10.0), Vec3::new(60.0, 20.0, 0.0), 0.1, BUDGET).expect("stock");
+    let diags = crate::sim::simulate(&program, &mut stock).expect("the run goes on");
+    assert!(diags.iter().any(|d| d.msg.contains("too long to sample")), "{diags:?}");
+    assert!(stock.volume() < 60.0 * 20.0 * 10.0, "the plunge was cut");
 }
 
 #[test]

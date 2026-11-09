@@ -24,9 +24,6 @@ const LINE_STEP_MM: f64 = 2.0;
 /// The most pieces a straight move is cut in. A longer line gets longer pieces, so a hostile length
 /// costs a bounded number of steps.
 const MAX_LINE_STEPS: usize = 1024;
-/// The longest move a round tool cuts. Its pieces are at most `LINE_STEP_MM` long, so a longer move would
-/// need more pieces than `MAX_LINE_STEPS`; it is reported instead of cut.
-const ROUND_MAX_MM: f64 = LINE_STEP_MM * MAX_LINE_STEPS as f64;
 
 fn finite(p: &[f64; 3]) -> bool {
     p.iter().all(|x| x.is_finite())
@@ -161,6 +158,13 @@ impl Cutter {
                 self.report(cut.tool, "segments", Diag::error(cut.source, 0, msg));
                 Ok(Progress::Skipped)
             }
+            Err(SimError::Samples { len, pitch }) => {
+                cut.revert(stock);
+                let msg =
+                    format!("the move at line {} has a round-tool piece of {len:.1} mm, too long to sample every {pitch} mm; not cut", cut.source);
+                self.report(cut.tool, "samples", Diag::error(cut.source, 0, msg));
+                Ok(Progress::Skipped)
+            }
             Err(e) => {
                 cut.revert(stock);
                 Err(SimError::AtMove { index: cut.index, line: cut.source, cause: e.to_string() })
@@ -240,24 +244,15 @@ fn plan(program: &Program, index: usize) -> Result<Cut, Stop> {
             Err(why) => return Err(refuse("corner", Diag::error(m.source, 0, format!("tool {}: {why}", m.tool)))),
         },
     };
-    let too_long = |len: f64| {
-        let msg = format!("a move of {len:.0} mm at line {} is over {ROUND_MAX_MM:.0} mm, not simulated with a round tool", m.source);
-        refuse("round_length", Diag::error(m.source, 0, msg))
-    };
     let steps = match &m.kind {
         MoveKind::Rapid | MoveKind::Feed => {
             let (from, to) = (Vec3::from(start), Vec3::from(m.tip));
             match round {
                 None => line_steps(from, to, flat),
-                Some(tool) => {
-                    if (to - from).len() > ROUND_MAX_MM {
-                        return Err(too_long((to - from).len()));
-                    }
-                    split_line(from, to)
-                        .into_iter()
-                        .map(|(a, b)| Step::Round(RoundPiece { path: RoundPath::Line { from: a, to: b }, tool }))
-                        .collect()
-                }
+                Some(tool) => split_line(from, to)
+                    .into_iter()
+                    .map(|(a, b)| Step::Round(RoundPiece { path: RoundPath::Line { from: a, to: b }, tool }))
+                    .collect(),
             }
         }
         MoveKind::Arc { centre, normal, ccw, turns } => {
@@ -269,10 +264,9 @@ fn plan(program: &Program, index: usize) -> Result<Cut, Stop> {
             match (arc, round) {
                 (Some(arc), None) => arc.pieces(STEP_SWEEP).into_iter().map(Step::Arc).collect(),
                 (Some(arc), Some(tool)) => {
-                    if arc.length() > ROUND_MAX_MM {
-                        return Err(too_long(arc.length()));
-                    }
-                    arc.pieces_by_length(LINE_STEP_MM).into_iter().map(|p| Step::Round(RoundPiece { path: RoundPath::Arc(p), tool })).collect()
+                    // Pieces of at most 2 mm, longer only past 2048 mm of arc, so the count stays bounded.
+                    let max_len = LINE_STEP_MM.max(arc.length() / MAX_LINE_STEPS as f64);
+                    arc.pieces_by_length(max_len).into_iter().map(|p| Step::Round(RoundPiece { path: RoundPath::Arc(p), tool })).collect()
                 }
                 (None, _) => return Err(refuse("arc", Diag::error(m.source, 0, format!("degenerate arc at line {} skipped", m.source)))),
             }
