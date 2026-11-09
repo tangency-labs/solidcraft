@@ -22,7 +22,7 @@ Each consolidation PR below keeps ops free of shapes that only fit SolidCraft: p
 
 ## 1. Inventory
 
-Sizes are non-test lines on main `1c8fdde4ba` (tests in brackets). "Callers" counts the source files that use the code, by crate. Measured comparisons come from the mesher bake-off (#13625: 1,267 bodies, display and export settings) and the STEP bake-off (#13624: 320 files, 219 with a solid).
+Sizes are non-test lines on main `1c8fdde4ba` (tests in brackets). "Callers" counts the source files that use the code, by crate. Measured comparisons come from the mesher bake-off (#13625: run 2026-11-07 on SolidCraft main `11abdba1b` and solidcore `a445bda`; 1,267 bodies, display and export settings) and the STEP bake-off (#13624: run 2026-11-07 on SolidCraft main `dc679cae3` and solidcore main `f2bbc48ab`; 320 files, 219 with a solid).
 
 ### 1a. Jobs solidcore already has
 
