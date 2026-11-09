@@ -1761,6 +1761,8 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let doc = s.doc_mut();
     let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) else { return Err(bad(cmd, "joint")) };
+    // As they were: Edit Joint sends the type, offset and flip with every edit, changed or not.
+    let (was_kind, was_offset, was_flip) = (j.kind, j.offset, j.flip);
     if let Some(a) = a {
         j.a = a;
     }
@@ -1809,8 +1811,19 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             j.angle = turn;
         }
     }
-    // A relation whose type, offset, tilt or flip changes starts again from where its parts are.
-    let reseat = kind.is_some() || offset.is_some() || angle.is_some() || p.get("flip").is_some() || sides;
+    // An Angle relation whose tilt alone changes turns on from the values it has, so its part
+    // keeps to its side and a tilt past 180 degrees carries on round. Starting again from where
+    // the parts are would take the nearer of the two sides each time: the way back past 180, and
+    // either side from straight up (#12426).
+    let tilt_only = angle.is_some()
+        && was_kind == JointKind::Angle
+        && !sides
+        && kind.is_none_or(|k| k == was_kind)
+        && offset.is_none_or(|o| (o - was_offset).abs() <= 1e-9)
+        && bool_(p, "flip").is_none_or(|f| f == was_flip);
+    // Otherwise a relation whose type, offset, tilt or flip changes, or whose sides move, starts
+    // again from where its parts are.
+    let reseat = !tilt_only && (kind.is_some() || offset.is_some() || angle.is_some() || p.get("flip").is_some() || sides);
     if reseat {
         let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| j.kind.is_relation()).cloned();
         if let Some(q) = edited.and_then(|j| joints::relation_values(&s.doc, &s.model.state(), &j))
@@ -1823,7 +1836,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     // An edit that places the joint again (Edit Joint's OK, Unsuppress) meets a loop it closes as
     // joint.create does: a joint saved as a conflict before create turned its part (#9687), or
     // unsuppressed after its part was turned away, is met then. A rename alone moves nothing.
-    let placed = reseat || bool_(p, "suppressed") == Some(false);
+    let placed = reseat || tilt_only || bool_(p, "suppressed") == Some(false);
     if placed && sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
         sol = resolve(s);
     }
