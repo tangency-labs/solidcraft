@@ -2073,6 +2073,36 @@ fn align_takes_sketch_frames_and_joint_origins() {
     assert!(app.session.model.result(id).is_some_and(|r| r.error.is_none()));
 }
 
+/// #13502: X, Y and Z limit a move between points. With a face pick the dialog says so in its own
+/// words, and with points the axes are sent.
+#[test]
+fn align_with_cleared_axes_and_a_face_pick_says_what_axes_are_for() {
+    let mut app = boxed();
+    let mut d = start(&mut app, vec![], "solid.align");
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.inputs[1].items = vec![face(&app, Vec3::new(20.0, 15.0, 0.0))];
+    d.inputs[2].items = vec![face(&app, Vec3::new(20.0, 15.0, 10.0))];
+    if let Kind::Align { axes, .. } = &mut d.kind {
+        *axes = [false, true, false];
+    }
+    let error = apply_commands(&app, &d).unwrap_err();
+    assert!(error.contains("X, Y and Z limit a move between points"), "{error}");
+    assert!(!error.contains("from_face"), "{error}");
+    // Both ends points: the axes go to the command.
+    d.extra.insert("from_snap".into(), json!("center"));
+    d.extra.insert("to_snap".into(), json!("center"));
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!(p["axes"], json!([false, true, false]));
+    // All three ticked: faces align as before.
+    d.extra.remove("from_snap");
+    d.extra.remove("to_snap");
+    if let Kind::Align { axes, .. } = &mut d.kind {
+        *axes = [true; 3];
+    }
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert!(p.get("axes").is_none() && p["from_face"].is_array(), "{p}");
+}
+
 /// The Align dialog takes a plane (viewport or browser click) and the origin plane stays a plane
 /// in the command, so the bodies follow it when it moves.
 #[test]
