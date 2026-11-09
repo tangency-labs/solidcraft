@@ -1827,6 +1827,8 @@ preference_settings! {
     /// so a step neither meshes the dragged bodies where they stand nor looks up the Browser row a
     /// highlight follows (`drag_layer::holds_pointer`).
     move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
+    /// Temporarily hide an active feature preview for reselect. Missing settings retain
+    /// platform-primary matching with extra modifiers; other bindings are explicit choices.
     preview_reselect_modifier: crate::tool_modifiers::PreviewModifier = Default::default(), PAGE_SHORTCUTS;
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
@@ -11377,9 +11379,9 @@ mod tests {
     fn preview_modifier_persists_and_follows_shortcut_dialog_buttons() {
         use crate::tool_modifiers::PreviewModifier;
         let old: Prefs = serde_json::from_value(json!({})).unwrap();
-        assert_eq!(old.preview_reselect_modifier, PreviewModifier::Control);
+        assert_eq!(old.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        for (value, binding) in [("alt", PreviewModifier::Alt), ("disabled", PreviewModifier::Disabled)] {
+        for (value, binding) in [("control", PreviewModifier::Control), ("alt", PreviewModifier::Alt), ("disabled", PreviewModifier::Disabled)] {
             control(&mut app, &json!({"open":"Keyboard Shortcuts", "preview_reselect_modifier":value})).unwrap();
             control(&mut app, &json!({"button":"apply"})).unwrap();
             let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
@@ -11389,7 +11391,7 @@ mod tests {
             control(&mut app, &json!({"button":"cancel"})).unwrap();
             assert_eq!(app.preferences.preview_reselect_modifier, binding);
             control(&mut app, &json!({"open":"Keyboard Shortcuts", "button":"defaults"})).unwrap();
-            assert_eq!(app.preferences.preview_reselect_modifier, PreviewModifier::Control);
+            assert_eq!(app.preferences.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
             control(&mut app, &json!({"button":"cancel"})).unwrap();
             assert_eq!(app.preferences.preview_reselect_modifier, binding);
         }

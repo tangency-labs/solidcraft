@@ -1023,6 +1023,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `parameters_apply_live` (default true: the Parameters dialog applies an expression when its field is left; false: edits wait for Apply or OK, which set them together in one rebuild and one undo step)
 - `perspective_fov` (Perspective view's vertical field of view in radians, 0.2618…1.5708 (15°…90°), default 0.6; when it changes, the camera's distance scales so the view keeps its size)
 - `placement_handles` (default false: handles on the preview of a Rest, Boss, Snap Fit, Box, Cylinder, Cone, Sphere, Torus or Coil that move it across the model and turn it where it can turn)
+- `preview_reselect_modifier` (`primary_at_least` (default: Command on macOS or Control elsewhere, with extra modifiers allowed), `control` (physical Control alone), `primary` (Command on macOS or Control elsewhere, alone), `alt`, `shift`, or `disabled`: temporarily hide the feature preview for geometry reselect; see Preview Reselect Modifier below)
 - `print_face_highlight` (0…1, default 0.2: how strongly a print face is tinted and outlined in the view, #8429; 0 draws no highlight)
 - `quick_measure` (default false: the selection's length, area or distance in the view's bottom right corner, the rect `measure:quick`; #7000)
 - `remember_stand_up` (default true: reuse the stand-up or Leave it answer per SHA-256 of the original file bytes, at most 500 answers with oldest-first eviction; false restores asking on every open)
@@ -1161,15 +1162,20 @@ document edits, undo steps or a success-log entry per movement.
 ### Preview Reselect Modifier
 
 Preferences > Keyboard Shortcuts > Modifier Keys controls **Hide preview for reselect**.
-The default is physical Control on every platform, including macOS, leaving Command-based
-screenshots unchanged. The modifier temporarily hides an active feature preview so obscured
-geometry can be selected; it does not suppress the saved feature. Extra modifiers and active
-manipulator drags prevent this temporary rollback.
+The default keeps the old platform-primary behaviour: Command on macOS or Control elsewhere
+hides the preview even when extra modifiers are held. The modifier temporarily hides an active
+feature preview so obscured geometry can be selected; it does not suppress the saved feature.
+Manipulator drags prevent rollback for every choice.
 
-`ui.prefs {"preview_reselect_modifier":"control"}` selects the default. Other values are
-`primary` (Command on macOS, Control elsewhere), `alt` (Option on macOS), `shift`, and
-`disabled`. The setting follows Apply/OK/Cancel and Keyboard Shortcuts' Reset All and Restore
-Defaults, and is included in shortcut exports. Older settings without it use Control.
+`ui.prefs {"preview_reselect_modifier":"primary_at_least"}` selects the default, labelled
+**Cmd + modifiers** or **Ctrl + modifiers**. It retains the old interaction with macOS
+screenshot chords. To avoid that interaction, select `control` (physical Control alone),
+`primary` (Command on macOS or Control elsewhere, alone), `alt` (Option on macOS), `shift`,
+or `disabled`. These opt-in key choices require an exact match: extra modifiers, including
+physical Control with Command on macOS, prevent rollback.
+
+The setting follows Apply/OK/Cancel, the per-row Reset button and Restore page defaults, and
+is included in shortcut exports. Older settings without it retain `primary_at_least`.
 
 ## MCP
 

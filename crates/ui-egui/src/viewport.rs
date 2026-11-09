@@ -5617,8 +5617,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             false
         };
         crate::tool_modifiers::set_target_midpoint(mid);
+        let preview_held = crate::tool_modifiers::Held::for_preview(mods, platform);
         let busy_dragging = manipulator_dragging || crate::ui_kit::is_scrubbing(ui.ctx());
-        app.preview.rolled_back = preview_should_roll_back(app, held, platform, busy_dragging);
+        app.preview.rolled_back = preview_should_roll_back(app, preview_held, platform, busy_dragging);
     }
     let proj = projection(app, rect);
     if let Ok(mut cache) = app.viewport.display.lock() {
@@ -15672,8 +15673,21 @@ mod grid_plane_tests {
         let ctx = crate::fonts::test_context();
         let scrub_id = egui::Id::unique("test_scrub");
         crate::ui_kit::set_scrubbing(&ctx, scrub_id, true);
+        assert_eq!(app.preferences.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
+        let modifiers = egui::Modifiers { command: true, mac_cmd: true, ..Default::default() };
+        let command = Held::for_preview(modifiers, Platform::Mac);
+        let command_control = Held::for_preview(egui::Modifiers { ctrl: true, ..modifiers }, Platform::Mac);
+        for held in [command, Held { shift: true, ..command }, command_control] {
+            assert!(preview_should_roll_back(&app, held, Platform::Mac, false), "legacy default permits Command with extra modifiers");
+            assert!(!preview_should_roll_back(&app, held, Platform::Mac, true));
+            assert!(
+                !preview_should_roll_back(&app, held, Platform::Mac, crate::ui_kit::is_scrubbing(&ctx)),
+                "the default modifier must not roll the preview back while scrubbing a value label"
+            );
+        }
+        app.preferences.preview_reselect_modifier = PreviewModifier::Control;
         for platform in [Platform::Mac, Platform::Other] {
-            let control = Held::new(egui::Modifiers::CTRL, platform);
+            let control = Held::for_preview(egui::Modifiers::CTRL, platform);
             assert!(preview_should_roll_back(&app, control, platform, false));
             assert!(!preview_should_roll_back(&app, control, platform, true));
             assert!(
@@ -15681,11 +15695,11 @@ mod grid_plane_tests {
                 "the configured modifier must not roll the preview back while scrubbing a value label"
             );
         }
-        let command = Held::new(egui::Modifiers { command: true, mac_cmd: true, ..Default::default() }, Platform::Mac);
         assert!(!preview_should_roll_back(&app, command, Platform::Mac, false));
         assert!(!preview_should_roll_back(&app, Held { shift: true, ..command }, Platform::Mac, false));
         app.preferences.preview_reselect_modifier = PreviewModifier::Primary;
         assert!(preview_should_roll_back(&app, command, Platform::Mac, false));
+        assert!(!preview_should_roll_back(&app, command_control, Platform::Mac, false));
         app.preferences.preview_reselect_modifier = PreviewModifier::Disabled;
         assert!(!preview_should_roll_back(&app, command, Platform::Mac, false));
         app.preferences.preview_reselect_modifier = PreviewModifier::Control;

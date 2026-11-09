@@ -611,9 +611,9 @@ pub fn reset(app: &mut SolveApp, id: Option<&str>) {
 fn modifier_keys(app: &mut SolveApp, ui: &mut egui::Ui, query: &str) {
     use crate::tool_modifiers::{Platform, PreviewModifier};
     let platform = Platform::of(ui.ctx());
-    let label = crate::i18n::tr_label("Hide preview for reselect");
+    let label = app.tr("prefs.preview_reselect_modifier");
     let binding = app.preferences.preview_reselect_modifier;
-    let key = binding.label(platform);
+    let key = binding.shown_label(platform, app);
     if !query.is_empty() && ![label, "preview_reselect", key, "Modifier Keys"].iter().any(|text| text.to_lowercase().contains(query)) {
         return;
     }
@@ -621,22 +621,18 @@ fn modifier_keys(app: &mut SolveApp, ui: &mut egui::Ui, query: &str) {
     ui.horizontal_wrapped(|ui| {
         ui.label(label);
         if app.keymap.read_only {
-            ui.label(egui::RichText::new(app.tr_label(key)).strong());
+            ui.label(egui::RichText::new(key).strong());
             return;
         }
-        let combo = ui.allocate_ui(egui::vec2(110.0, ui_kit::row_height()), |ui| {
-            ui_kit::dropdown_menu(ui, "preview_reselect_modifier", app.tr_label(key), |ui| {
+        let combo = ui.allocate_ui(egui::vec2(160.0, ui_kit::row_height()), |ui| {
+            ui_kit::dropdown_menu(ui, "preview_reselect_modifier", key, |ui| {
                 for choice in PreviewModifier::CHOICES {
                     if platform != Platform::Mac && choice == PreviewModifier::Primary {
                         continue;
                     }
                     let handle = format!("prefs:preview_modifier:{choice:?}");
-                    let response = ui_kit::list_picker(
-                        ui,
-                        &handle,
-                        crate::i18n::tr_label(choice.label(platform)),
-                        app.preferences.preview_reselect_modifier == choice,
-                    );
+                    let response =
+                        ui_kit::list_picker(ui, &handle, choice.shown_label(platform, app), app.preferences.preview_reselect_modifier == choice);
                     if response.clicked() {
                         app.preferences.preview_reselect_modifier = choice;
                         ui.close();
@@ -2050,18 +2046,18 @@ mod tests {
         let mut harness = crate::scenario::Harness::new();
         harness.call("ui.prefs", json!({"open":"Keyboard Shortcuts"}));
         harness.step(&json!({"shot":"preview-modifier-settings"})).unwrap();
-        for (choice, binding) in [("Alt", PreviewModifier::Alt), ("Disabled", PreviewModifier::Disabled)] {
+        for (choice, binding) in [("Control", PreviewModifier::Control), ("Alt", PreviewModifier::Alt), ("Disabled", PreviewModifier::Disabled)] {
             harness.step(&json!({"click":{"handle":"prefs:preview_modifier"}})).unwrap();
             harness.step(&json!({"click":{"handle":format!("prefs:preview_modifier:{choice}")}})).unwrap();
             assert_eq!(harness.app.preferences.preview_reselect_modifier, binding);
         }
         harness.step(&json!({"widget":"Reset", "near":"Hide preview for reselect"})).unwrap();
-        assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::Control);
+        assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
         harness.app.preferences.preview_reselect_modifier = PreviewModifier::Shift;
         harness.step(&json!({"widget":"Restore page defaults"})).unwrap();
-        assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::Control);
+        assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
         harness.call("ui.prefs", json!({"button":"cancel"}));
-        assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::Control);
+        assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
     }
 
     #[test]

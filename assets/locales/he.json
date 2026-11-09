@@ -2893,7 +2893,6 @@
   "prefs.plugins_show_folder": "להציג את תיקיית התוספים",
   "prefs.prefer_free_sketch_points": "העדפת נקודות סקיצה ניתנות להזזה כשנקודות חופפות",
   "prefs.preview_choices": "תצוגה מקדימה של הבחירות שלך",
-  "prefs.preview_reselect_modifier": "הסתרת תצוגה מקדימה לבחירה מחדש",
   "prefs.preview_tint_new_faces": "צביעת משטח חדש בתצוגה מקדימה",
   "prefs.preview_tint_new_faces_help": "תצוגה מקדימה של פעולה שמשנה גוף יכולה לצבוע את המשטח שנוסף בצבע התצוגה המקדימה. כשהאפשרות כבויה הגוף מצויר בצבעו שלו.",
   "prefs.print_face_highlight": "הדגשת פאת ההדפסה",

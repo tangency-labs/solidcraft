@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "prefs.preview_reselect_modifier": "إخفاء المعاينة لإعادة التحديد",
+    "prefs.preview_reselect_primary_at_least": "Ctrl مع مفاتيح التعديل",
+    "prefs.preview_reselect_primary_at_least_mac": "Cmd مع مفاتيح التعديل"
+  },
+  "de": {
+    "prefs.preview_reselect_modifier": "Vorschau zur Neuauswahl ausblenden",
+    "prefs.preview_reselect_primary_at_least": "Strg + Modifikatortasten",
+    "prefs.preview_reselect_primary_at_least_mac": "Cmd + Modifikatortasten"
+  },
+  "en": {
+    "prefs.preview_reselect_modifier": "Hide preview for reselect",
+    "prefs.preview_reselect_primary_at_least": "Ctrl + modifiers",
+    "prefs.preview_reselect_primary_at_least_mac": "Cmd + modifiers"
+  },
+  "he": {
+    "prefs.preview_reselect_modifier": "הסתרת תצוגה מקדימה לבחירה מחדש",
+    "prefs.preview_reselect_primary_at_least": "Ctrl עם מקשי שינוי",
+    "prefs.preview_reselect_primary_at_least_mac": "Cmd עם מקשי שינוי"
+  },
+  "ja": {
+    "prefs.preview_reselect_modifier": "再選択のためにプレビューを非表示",
+    "prefs.preview_reselect_primary_at_least": "Ctrl＋修飾キー",
+    "prefs.preview_reselect_primary_at_least_mac": "Cmd＋修飾キー"
+  },
+  "ko": {
+    "prefs.preview_reselect_modifier": "다시 선택할 때 미리보기 숨기기",
+    "prefs.preview_reselect_primary_at_least": "Ctrl + 보조 키",
+    "prefs.preview_reselect_primary_at_least_mac": "Cmd + 보조 키"
+  },
+  "vi": {
+    "prefs.preview_reselect_modifier": "Ẩn bản xem trước để chọn lại",
+    "prefs.preview_reselect_primary_at_least": "Ctrl + phím bổ trợ",
+    "prefs.preview_reselect_primary_at_least_mac": "Cmd + phím bổ trợ"
+  },
+  "zh": {
+    "prefs.preview_reselect_modifier": "隐藏预览以重新选择",
+    "prefs.preview_reselect_primary_at_least": "Ctrl + 修饰键",
+    "prefs.preview_reselect_primary_at_least_mac": "Cmd + 修饰键"
+  }
+}
