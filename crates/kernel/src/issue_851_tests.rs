@@ -1,6 +1,7 @@
 //! Fillets and chamfers where a curved wall runs out into a flat face in a knife edge (#851).
 use crate::*;
 use solidcore_record::Vec3;
+use solidcraft_geom::MeshGeom;
 use solidcraft_geom::tess::EvaluateMesh as _;
 use std::f64::consts::PI;
 

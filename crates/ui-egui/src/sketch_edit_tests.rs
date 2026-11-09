@@ -254,7 +254,7 @@ fn ribbon_edit_sketch_handles_an_empty_design_without_running_a_command() {
 mod exit_keeps_view {
     use crate::scenario::Harness;
     use serde_json::json;
-    use solidcraft_engine::render::Camera;
+    use solidcraft_viewport::Camera;
 
     /// Start a sketch on XY from the iso view, then orbit and pan into a 3D view of the user's own.
     fn sketching_in_3d() -> (Harness, Camera) {
@@ -438,7 +438,7 @@ mod exit_view_preference {
     use crate::prefs::SketchExitView;
     use crate::scenario::Harness;
     use serde_json::json;
-    use solidcraft_engine::render::Camera;
+    use solidcraft_viewport::Camera;
 
     /// A sketch on XY started from the iso view with `choice` set, and that iso view.
     fn sketching(choice: SketchExitView) -> (Harness, Camera) {
@@ -568,7 +568,7 @@ mod exit_view_preference {
 mod extrude_view_preference {
     use crate::scenario::Harness;
     use serde_json::json;
-    use solidcraft_engine::render::{Camera, StandardView};
+    use solidcraft_viewport::{Camera, StandardView};
 
     /// A finished sketch on XY, seen from the top, with the two preferences set; and that view.
     fn from_the_top(isometric: bool, back: bool) -> (Harness, Camera) {
