@@ -208,7 +208,7 @@ fn sag_refinement_across_an_inflection_ends_without_slivers() {
     let fixed: Vec<Vec3> = Vec::new();
     let tol = 0.5;
     let start = uv.len();
-    sag::refine(&s, tol, 1e-9, &fixed, &mut uv, &mut tris, 20_000);
+    sag::refine(&s, tol, &sag::Poles::new(&s, 1e-9), &fixed, &mut uv, &mut tris, 20_000);
     assert!(uv.len() - start < 1_000, "{} points added: refinement ran to its budget", uv.len() - start);
     for t in &tris {
         let [p, q, r] = t.map(|i| uv[i as usize]);
@@ -248,7 +248,7 @@ fn triangles_standing_across_a_curved_sheet_are_flipped_along_it() {
             .sum()
     };
     let before = area(&tris);
-    sag::flip(&s, 0.1, 1e-9, &[], &uv, &mut tris);
+    sag::flip(&s, 0.1, &sag::Poles::new(&s, 1e-9), &[], &uv, &mut tris);
     let after = area(&tris);
     let sides: Vec<(u32, u32)> = tris.iter().flat_map(|t| (0..3).map(move |k| (t[k].min(t[(k + 1) % 3]), t[k].max(t[(k + 1) % 3])))).collect();
     assert!(sides.contains(&(2, 3)) && !sides.contains(&(0, 1)), "{tris:?}");
