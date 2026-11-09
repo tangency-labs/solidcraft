@@ -622,7 +622,7 @@ form_case!(midplane, "construct.plane.midplane", []);
 form_case!(mesh_convert, "mesh.convert", ["Tolerance"]);
 form_case!(axis_two_planes, "construct.axis.two_planes", []);
 form_case!(point_along_path, "construct.point.along_path", ["Position (0 to 1)"]);
-form_case!(angle_plane, "construct.plane.at_angle", ["Angle"]);
+form_case!(angle_plane, "construct.plane.at_angle", ["Angle", "Offset"]);
 form_case!(path_plane, "construct.plane.along_path", ["Position (0 to 1)"]);
 form_case!(split, "solid.split_body", []);
 form_case!(scale, "solid.scale", ["Type", "Scale factor"]);

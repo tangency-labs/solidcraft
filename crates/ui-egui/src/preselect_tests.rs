@@ -3257,7 +3257,49 @@ fn plane_tool_opens_as_the_method_its_picks_call_for() {
     let (_, _, pl) =
         solidcraft_engine::view::construction_planes(&h.app.session).into_iter().find(|(_, name, _)| name != "Shelf").expect("the midplane");
     assert!(pl.normal().cross(Vec3::Z).len() < 1e-6 && (pl.origin.z - 10.0).abs() < 1e-6, "{pl:?}");
-}
+
+/// Plane at Angle with an Offset builds one nested feature and restores Offset on edit (#12038).
+#[test]
+fn plane_at_angle_offset_applies_and_reopens() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.start("construct.plane.at_angle");
+    h.frames(2);
+    let d = h.app.dialog.as_mut().unwrap();
+    assert!(matches!(&d.kind, Kind::AnglePlane { offset, .. } if offset.is_empty()), "{:?}", d.kind);
+    assert!(d.inputs.iter().any(|i| i.label == "Through point"), "{:?}", d.inputs);
+    d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    if let Kind::AnglePlane { angle, offset, .. } = &mut d.kind {
+        *angle = "45 deg".into();
+        *offset = "25 mm".into();
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        commands.first().map(|c| c.1.clone()),
+        Some(json!({
+            "base": "XY",
+            "axis": "X",
+            "angle": "45 deg",
+            "direction_only": false,
+            "offset": "25 mm"
+        }))
+    );
+    let (cmd, params) = commands.into_iter().next().unwrap();
+    h.app.dialog = None;
+    let id = h.app.run(&cmd, params).unwrap()["feature"].as_u64().unwrap();
+    assert_eq!(solidcraft_engine::view::construction_planes(&h.app.session).len(), 1);
+    let pl = solidcraft_engine::view::construction_planes(&h.app.session)
+        .into_iter()
+        .find(|(fid, _, _)| *fid == id)
+        .map(|(_, _, pl)| pl)
+        .expect("the plane");
+    // Offset 25 mm then 45° about X: origin stays on X, z and y split by √2/2.
+    let h45 = 25.0_f64 / 2.0_f64.sqrt();
+    assert!((pl.origin - Vec3::new(0.0, -h45, h45)).len() < 1e-3, "{pl:?}");
+    let reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert!(matches!(&reopened.kind, Kind::AnglePlane { offset, .. } if offset == "25 mm"), "{:?}", reopened.kind);
+    assert!(matches!(reopened.inputs[0].items.as_slice(), [Sel::Plane { name }] if name == "XY"), "{:?}", reopened.inputs[0].items);
+    assert!(matches!(reopened.inputs[1].items.as_slice(), [Sel::Axis { name }] if name == "X"), "{:?}", reopened.inputs[1].items);
 
 /// Plane at Angle draws the tilted plane while its dialog is open, when created and when edited,
 /// and redraws it when the angle changes (it used to show only the picked plane and the label).

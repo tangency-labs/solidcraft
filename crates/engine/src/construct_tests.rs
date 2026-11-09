@@ -842,6 +842,82 @@ fn plane_at_angle_direction_only_projects_the_axis_and_pivots() {
     assert!(near(plane(&reopened, "Pivoted").origin, Vec3::new(5.0, 0.0, 5.0)));
 }
 
+/// Plane at Angle with an offset (or through point) builds the offset-and-angled plane in one
+/// feature, matching Offset Plane then Plane at Angle (#12038).
+#[test]
+fn plane_at_angle_with_offset_matches_two_step_and_skips_the_middle_plane() {
+    let mut s = Session::default();
+    // Two-step reference: offset XY by 25 mm, then turn 45° about X.
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "25 mm", "name": "Shelf"}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": "Shelf", "axis": "X", "angle": "45 deg", "name": "TwoStep"}));
+    let two_step = plane(&s, "TwoStep");
+
+    // One feature with offset+angle: same geometry, and only that one construction plane for it.
+    let before = construction_planes(&s).len();
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": "X", "angle": "45 deg", "offset": "25 mm", "name": "Combined"}));
+    assert_eq!(construction_planes(&s).len(), before + 1, "one construction plane, no intermediary");
+    let combined = plane(&s, "Combined");
+    assert!(near(combined.origin, two_step.origin), "origin {combined:?} vs {two_step:?}");
+    assert!(parallel(combined.normal(), two_step.normal()), "normal {combined:?} vs {two_step:?}");
+    assert!(parallel(combined.x, two_step.x), "x {combined:?} vs {two_step:?}");
+
+    // Through a point instead of a distance: parallel to XY through (0,0,10), then 90° about Y.
+    run(
+        &mut s,
+        "construct.plane.at_angle",
+        json!({
+            "base": "XY",
+            "axis": "Y",
+            "angle": "90 deg",
+            "through": {"point": [0, 0, 10]},
+            "name": "ThroughAngled"
+        }),
+    );
+    let through = plane(&s, "ThroughAngled");
+    assert!(near(through.origin, Vec3::new(10.0, 0.0, 0.0)), "{through:?}");
+    assert!(parallel(through.normal(), Vec3::X), "{through:?}");
+
+    // Offset + direction_only: project axis onto the offset plane, pivot at its origin.
+    run(
+        &mut s,
+        "construct.plane.at_angle",
+        json!({
+            "base": "XY",
+            "axis": {"origin": [10, 0, 5], "dir": [0, 1, 1]},
+            "angle": "90 deg",
+            "offset": "10 mm",
+            "direction_only": true,
+            "name": "OffsetDirOnly"
+        }),
+    );
+    let dir_only = plane(&s, "OffsetDirOnly");
+    assert!(near(dir_only.origin, Vec3::new(0.0, 0.0, 10.0)), "{dir_only:?}");
+    assert!(parallel(dir_only.normal(), Vec3::X), "{dir_only:?}");
+
+    // Offset and through together are refused; document unchanged.
+    let before = s.doc.to_json();
+    let error = s
+        .execute(
+            "construct.plane.at_angle",
+            &json!({"base": "XY", "axis": "X", "angle": "10 deg", "offset": "5 mm", "through": {"point": [0, 0, 1]}}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("offset") && error.contains("through"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+
+    // Without offset/through, behaviour is unchanged (no nested Offset).
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": "X", "angle": "30 deg", "name": "Plain"}));
+    let plain = s.doc.features.iter().find(|f| f.name == "Plain").expect("Plain");
+    let solidcraft_doc::FeatureKind::ConstructionPlane { plane: plain_ref } = &plain.kind else { panic!("plane") };
+    assert!(matches!(plain_ref, solidcraft_doc::PlaneRef::AtAngle { base, .. } if matches!(base.as_ref(), solidcraft_doc::PlaneRef::Origin { .. })));
+
+    // Saved combined plane reopens.
+    let saved = s.doc.to_json();
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert!(near(plane(&reopened, "Combined").origin, two_step.origin));
+}
+
 /// A construction plane named like an origin plane, as an older saved design can hold.
 fn legacy_plane_name(s: &mut Session, id: u64, name: &str) {
     s.doc_mut().feature_mut(id).unwrap().name = name.to_string();
