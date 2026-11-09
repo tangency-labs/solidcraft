@@ -2087,6 +2087,14 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(k) = kind {
         let was = j.kind;
         j.kind = k;
+        // A constraint changed to another kind of joint is a plain joint now: its tag would keep
+        // restarting it, and a tangent's gap expression would leave the radius out of its offset.
+        if k != was {
+            if j.constraint == Some(joints::Constraint::Tangent) {
+                j.exprs.offset = None;
+            }
+            j.constraint = None;
+        }
         j.values.resize(k.dofs().len(), 0.0);
         j.limits.resize(k.dofs().len(), None);
         j.exprs.values.truncate(k.dofs().len());

@@ -169,7 +169,8 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         m.remove("value");
         m.remove("limits");
         m.insert("flip".into(), Value::Bool(flip));
-        if !m.contains_key("name") {
+        // No name, `null` or blank text: the rule's own name (`Mate1`), not a joint's.
+        if !m.get("name").and_then(Value::as_str).is_some_and(|n| !n.trim().is_empty()) {
             m.insert("name".into(), Value::String(default_name(s, c)));
         }
     }

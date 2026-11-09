@@ -594,6 +594,35 @@ fn a_rule_with_the_wrong_references_is_refused() {
 
 /// A roller tangent on the panel keeps resting on it as its radius changes, and a gap edited in as
 /// a number stays a gap above the face, not the axis's height.
+/// A constraint given a blank or `null` name is named after its rule, as one given no name is. A
+/// joint.edit to another kind of joint makes it a plain joint: the tag goes, and a former tangent's
+/// offset no longer follows its face's radius.
+#[test]
+fn a_constraint_edited_to_another_joint_type_is_a_plain_joint() {
+    let mut s = panel();
+    run(&mut s, "parameters.add", json!({"name": "R", "expression": "4 mm"}));
+    run(&mut s, "component.create", json!({"name": "Roller"}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 600, 50], "axis": [1, 0, 0], "radius": "R", "height": 30, "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = constrain(&mut s, "tangent", json!("Top"), json!({"occurrence": "Roller", "circle": [0, 604, 50]}), json!({"name": null}));
+    assert!(clean(&r), "{r}");
+    let r = constrain(&mut s, "parallel", json!("Top"), json!("Bottom"), json!({"name": "  "}));
+    assert!(clean(&r), "{r}");
+    let names: Vec<&str> = s.doc.assembly.joints.iter().map(|j| j.name.as_str()).collect();
+    assert_eq!(names, ["Tangent1", "Parallel1"]);
+    run(&mut s, "joint.edit", json!({"joint": "Tangent1", "type": "revolute"}));
+    let j = s.doc.assembly.joints.iter().find(|j| j.name == "Tangent1").cloned().unwrap();
+    assert_eq!((j.kind, j.constraint, j.exprs.offset.clone()), (solidcraft_doc::joints::JointKind::Revolute, None, None));
+    let list = run(&mut s, "joint.list", json!({}));
+    let listed = list["joints"].as_array().and_then(|js| js.iter().find(|x| x["name"] == "Tangent1")).cloned().unwrap_or_default();
+    assert!(listed.get("constraint").is_none(), "{listed}");
+    // The radius no longer moves it.
+    run(&mut s, "parameters.change", json!({"name": "R", "expression": "7 mm"}));
+    run(&mut s, "joint.solve", json!({}));
+    let after = s.doc.assembly.joints.iter().find(|j| j.name == "Tangent1").map(|j| j.offset);
+    assert_eq!(after, Some(j.offset));
+}
+
 #[test]
 fn a_tangent_constraint_follows_its_faces_radius() {
     let mut s = panel();
