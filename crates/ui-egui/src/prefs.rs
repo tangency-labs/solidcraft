@@ -916,6 +916,19 @@ pub fn apply_file_limits(p: &Prefs) {
     }
 }
 
+/// The most points or curves one sketch holds, as the preferences ask (Preferences › Sketch ›
+/// Largest sketch, #10874); a value outside the accepted range (a hand edit) reads as the default.
+pub fn sketch_limit(p: &Prefs) -> usize {
+    if accepted::max_sketch_points(p) { p.max_sketch_points } else { solidcraft_engine::sketch::limits::DEFAULT_POINTS }
+}
+
+/// Every sketch built from now on holds up to [`sketch_limit`] points.
+pub fn apply_sketch_limit(p: &Prefs) {
+    if let Err(e) = solidcraft_engine::sketch::limits::set_max_points(sketch_limit(p)) {
+        log::warn!("preferences: largest sketch: {e}");
+    }
+}
+
 /// Perspective view's default field of view (about 34°), in radians.
 const PERSPECTIVE_FOV: f64 = 0.6;
 
@@ -1641,6 +1654,10 @@ preference_settings! {
     sketch_align_points: bool = false, PAGE_SKETCH;
     /// Open Project's options before picking; off restores its previous direct-pick workflow.
     project_options_dialog: bool = true, PAGE_SKETCH;
+    /// The most points or curves one sketch holds (#10874): from the default (20000), which
+    /// sketches have always had, up to 200000, so a dense SVG or DXF drawing fits in one sketch.
+    max_sketch_points: usize = solidcraft_engine::sketch::limits::DEFAULT_POINTS, PAGE_SKETCH,
+        accept(solidcraft_engine::sketch::limits::DEFAULT_POINTS..=solidcraft_engine::sketch::limits::CEILING_POINTS);
     /// Whether Alt/Option also frees gizmo / canvas manipulator arrows (Primary always does).
     manipulator_free_alt: bool = true, PAGE_SKETCH;
     /// A sketch's icon in History and the browser takes the colour of its solve state, and its
@@ -2351,6 +2368,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
         app.prefs_window.applied_profile = Some(profile);
     }
     apply_file_limits(&app.preferences);
+    apply_sketch_limit(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
         solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default(),
@@ -4016,6 +4034,10 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     let mb = solidcraft_engine::io::limits::MB;
     (p.max_step_file_mb, p.max_design_file_mb) =
         if solidcraft_engine::io::limits::ADJUSTABLE { (limits.step / mb, limits.design / mb) } else { (DEFAULT_STEP_MB, DEFAULT_DESIGN_MB) };
+    // A hand-edited largest sketch out of range reads as the default (#10874).
+    if !accepted::max_sketch_points(&p) {
+        p.max_sketch_points = Prefs::default().max_sketch_points;
+    }
     p.disabled_plugins.retain(|id| crate::plugins::valid_id(id));
     if p.disabled_plugins.len() > crate::plugins::MAX_DISABLED {
         p.disabled_plugins = p.disabled_plugins.into_iter().take(crate::plugins::MAX_DISABLED).collect();
@@ -4223,6 +4245,10 @@ fn prepare_preferences(
     if !accepted::dimension_step_mm(&new) || !accepted::dimension_step_deg(&new) {
         return Err("`dimension_step_mm` must be 0.001…1000 and `dimension_step_deg` 0.001…180".into());
     }
+    if !accepted::max_sketch_points(&new) {
+        use solidcraft_engine::sketch::limits::{CEILING_POINTS, DEFAULT_POINTS};
+        return Err(format!("`max_sketch_points` must be {DEFAULT_POINTS}…{CEILING_POINTS}"));
+    }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());
     }
@@ -4261,6 +4287,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     app.preferences = new;
     sync_surface_analysis(app);
     apply_file_limits(&app.preferences);
+    apply_sketch_limit(&app.preferences);
     if units_changed {
         default_units_changed(app);
     }
@@ -8907,6 +8934,34 @@ mod tests {
         assert!(crate::scenario::rect_of("prefs:max_design_file_mb").is_some());
         h.call("ui.prefs", json!({"button": "defaults"}));
         assert_eq!(super::file_limits(&h.app.preferences), FileLimits::DEFAULT);
+        h.call("ui.prefs", json!({"button": "cancel"}));
+    }
+
+    /// #10874: Preferences › Sketch › Largest sketch starts at the limit sketches have always had,
+    /// raises the limit every sketch is built to, refuses a value out of range, reads a hand-edited
+    /// one back as the default, and Sketch's Restore Defaults puts it back.
+    #[test]
+    fn the_largest_sketch_defaults_raises_and_refuses_out_of_range() {
+        use serde_json::json;
+        use solidcraft_engine::sketch::limits::{CEILING_POINTS, DEFAULT_POINTS};
+        let mut h = crate::scenario::Harness::new();
+        assert_eq!(h.app.preferences.max_sketch_points, DEFAULT_POINTS);
+        let out = h.call("ui.prefs", json!({"max_sketch_points": 50_000}));
+        assert_eq!(out["result"]["max_sketch_points"].as_u64(), Some(50_000), "{out}");
+        assert_eq!(super::sketch_limit(&h.app.preferences), 50_000);
+        for bad in
+            [json!({"max_sketch_points": DEFAULT_POINTS - 1}), json!({"max_sketch_points": CEILING_POINTS + 1}), json!({"max_sketch_points": "lots"})]
+        {
+            assert!(h.call("ui.prefs", bad.clone())["error"].is_string(), "{bad}");
+        }
+        assert_eq!(super::sketch_limit(&h.app.preferences), 50_000, "a refused value changes nothing");
+        assert_eq!(super::lenient(&json!({"max_sketch_points": 5})).max_sketch_points, DEFAULT_POINTS);
+
+        h.call("ui.prefs", json!({"open": "Sketch"}));
+        h.frames(2);
+        super::reveal_preference(&mut h, "prefs:max_sketch_points");
+        h.call("ui.prefs", json!({"button": "defaults"}));
+        assert_eq!(h.app.preferences.max_sketch_points, DEFAULT_POINTS);
         h.call("ui.prefs", json!({"button": "cancel"}));
     }
 
