@@ -339,8 +339,9 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   does not fit or does not certify is refused, naming the size that does. Beside a curved
   face each spring curve must also stay inside its trimmed face, kept clear of the face's
   other edges on the control points of both. A setback that takes one off is refused,
-  naming the largest common scale that keeps every one on: found by the same bisection,
-  then halved in its last thousandth down to the corner's tolerance. That search assumes
+  naming the largest common scale that keeps every one on (where none at or above the
+  rails' crossing does, no setback builds): found by the same bisection, then halved in its
+  last thousandth down to the corner's tolerance. That search assumes
   a spring curve on its face stays on it at every smaller setback; this too is checked on
   cases, not proved. The size it names is always one the check itself found clear, so a
   failure of the assumption can only make it smaller than need be. No uncertified fill is ever

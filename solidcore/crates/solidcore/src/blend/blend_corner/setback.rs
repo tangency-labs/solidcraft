@@ -146,7 +146,8 @@ pub struct SetbackCorner {
     /// Not the fork (solidcore#2343 (d)): beside a curved face, the spring curves the corner
     /// checked against its faces' other edges, one per face, at the setbacks it is built
     /// with (`corner_springs`, made again where the fill is kept, from the same vertices);
-    /// empty elsewhere. The fill's spring edges are these curves.
+    /// empty elsewhere, and where they are not made. The fill's spring edges are these
+    /// curves; only tests read them.
     pub springs: Vec<SpringCurve>,
     /// `m_pFill`: the fill, from the edge geometry until the patches take it.
     pub fill: Option<Fill>,
