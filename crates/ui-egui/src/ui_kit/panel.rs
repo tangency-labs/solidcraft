@@ -1151,7 +1151,7 @@ impl<'a> Window<'a> {
         self.surface(ctx, false, |ui| self.content(ui, valid, body, left))
     }
 
-    pub(super) fn content(&self, ui: &mut Ui, valid: bool, body: impl FnOnce(&mut Ui), left: impl FnOnce(&mut Ui)) -> (bool, super::Action) {
+    pub(crate) fn content(&self, ui: &mut Ui, valid: bool, body: impl FnOnce(&mut Ui), left: impl FnOnce(&mut Ui)) -> (bool, super::Action) {
         super::scope(ui, |ui| {
             let t = Tokens::get();
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -1345,7 +1345,7 @@ pub(crate) struct PageListHooks<'a, S> {
 }
 
 #[cfg(test)]
-pub(super) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<'_, S>], state: &mut S) {
+pub(crate) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<'_, S>], state: &mut S) {
     page_list_sized(ui, selected, pages, state, 16.0, egui::Margin::same(Tokens::get().space_16 as i8), None, None, false);
 }
 

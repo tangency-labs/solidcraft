@@ -74,7 +74,7 @@ impl<'a> Confirm<'a> {
         self.window.surface(ctx, true, |ui| self.content(ui, valid, message))
     }
 
-    pub(super) fn content(&self, ui: &mut Ui, valid: bool, message: impl FnOnce(&mut Ui)) -> (bool, Action) {
+    pub(crate) fn content(&self, ui: &mut Ui, valid: bool, message: impl FnOnce(&mut Ui)) -> (bool, Action) {
         super::scope(ui, |ui| {
             let t = Tokens::get();
             ui.spacing_mut().item_spacing.y = 0.0;

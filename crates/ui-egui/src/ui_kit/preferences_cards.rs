@@ -34,7 +34,7 @@ pub(crate) enum CardInk {
     Accent,
 }
 
-pub(super) fn card_look(selected: bool, enabled: bool, hovered: bool, focused: bool) -> CardLook {
+pub(crate) fn card_look(selected: bool, enabled: bool, hovered: bool, focused: bool) -> CardLook {
     CardLook {
         border: if selected { 2.0 } else { 1.0 },
         fill: if selected {
@@ -69,7 +69,7 @@ pub(crate) struct Card<'a> {
 }
 
 /// The width of one of `columns` cards in `available` points with `gap` between them.
-pub(super) fn card_width(available: f32, columns: usize, gap: f32) -> f32 {
+pub(crate) fn card_width(available: f32, columns: usize, gap: f32) -> f32 {
     let columns = columns.max(1) as f32;
     let available = dimension(available);
     ((available - gap.max(0.0) * (columns - 1.0)) / columns).max(0.0)

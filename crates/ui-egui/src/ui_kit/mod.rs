@@ -16,7 +16,7 @@ mod details;
 mod disclosure;
 mod drag;
 mod fields;
-mod file_view;
+pub(crate) mod file_view;
 mod framing;
 mod history;
 mod history_group;
@@ -33,12 +33,12 @@ mod panel_host;
 mod preferences;
 mod preferences_assistant;
 #[allow(dead_code, reason = "composed by the Preferences pages of #9875 to #9883")]
-mod preferences_cards;
+pub(crate) mod preferences_cards;
 #[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
-mod preferences_figure_data;
+pub(crate) mod preferences_figure_data;
 #[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
 mod preferences_figure_ops;
-mod preferences_figures;
+pub(crate) mod preferences_figures;
 mod preferences_layout;
 mod preferences_navigation;
 mod preferences_small;
@@ -138,12 +138,10 @@ pub(crate) use value_focus::*;
 pub(crate) use viewport_status::*;
 
 #[cfg(test)]
-mod gallery;
-#[cfg(test)]
 mod slider_tests;
 #[cfg(test)]
 #[path = "test_support_tests.rs"]
-mod test_support;
+pub(crate) mod test_support;
 
 pub(crate) use layout::label as row_label;
 
