@@ -21,12 +21,12 @@ Turn a sketch profile around an axis to make a round part: a shaft, a pin, a pul
 
 #### Try it: a stepped pin
 
-1. Start a sketch on the XY plane. If the document is in mm, type in after each value (for example 0.25in). Draw this closed outline from the origin along the X axis: up 0.25 in, over 1 in, up 0.125 in, over 0.5 in, down 0.375 in back to the X axis, and close it along the axis.
+1. Start a sketch on the XY plane. If the document is in mm, type in after each value (for example 0.25in). Draw this closed outline from the origin along the X axis: up 0.25 in, over 1 in, up 0.125 in, over 0.5 in, down 0.375 in back to the X axis, and close it along the axis. Click Finish Sketch.
 2. Click Revolve. Click the profile.
 3. Click Axis, then click the sketch line along the X axis. Check the Axis box: if it reads Y, you picked the wrong axis and the preview comes out flat. Pick again.
-4. Leave Type on Angle, Direction on One Side, and Angle at 360 deg.
+4. Leave Type on Angle, Direction on One Side, and Angle at 360 deg. Set Operation to New Body so the pin is its own part.
 5. Click OK. You have a pin 0.5 in diameter by 1 in long with a 0.75 in diameter head 0.5 in long.
-6. For a groove, sketch a small rectangle touching the outside of the pin and Revolve it with Operation set to Cut. For the Axis, click the same sketch line, or just click the round face of the pin; its centre line is used.
+6. For a groove, start a new sketch on the XY plane (it runs through the pin's centre line). Draw a rectangle that cuts into the shaft, with corners at (0.4 in, 0.20 in) and (0.5 in, 0.30 in), and click Finish Sketch. Revolve it with Operation set to Cut. For the Axis, click the sketch line along the X axis, or click the round side of the pin (not the flat end); its centre line is used. The result is a groove 0.1 in wide and 0.05 in deep.
 
 #### Tips and common mistakes
 
