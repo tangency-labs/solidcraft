@@ -622,7 +622,34 @@ form_case!(midplane, "construct.plane.midplane", []);
 form_case!(mesh_convert, "mesh.convert", ["Tolerance"]);
 form_case!(axis_two_planes, "construct.axis.two_planes", []);
 form_case!(point_along_path, "construct.point.along_path", ["Position (0 to 1)"]);
-form_case!(angle_plane, "construct.plane.at_angle", ["Angle", "Offset"]);
+form_case!(angle_plane, "construct.plane.at_angle", ["Offset", "Angle"]);
+
+/// Offset sits under Plane so the form matches offset-then-turn resolve order (#12038).
+#[test]
+fn angle_plane_offset_row_sits_under_plane() {
+    let mut h = fixture();
+    let mut d = representative(&h, "construct.plane.at_angle");
+    for _ in 0..3 {
+        scenario::clear_handles();
+        let mut out = h.ctx.run_ui(
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 1600.0))), ..Default::default() },
+            |ui| {
+                ui.set_width(264.0);
+                ui_kit::scope(ui, |ui| {
+                    rows(&mut h.app, &h.ctx, &mut d, ui);
+                });
+            },
+        );
+        out.textures_delta.clear();
+    }
+    let plane = scenario::rect_of("dialog:row:Plane").expect("Plane");
+    let offset = scenario::rect_of("dialog:row:Offset").expect("Offset");
+    let axis = scenario::rect_of("dialog:row:Axis").expect("Axis");
+    let angle = scenario::rect_of("dialog:row:Angle").expect("Angle");
+    assert!(plane.bottom() <= offset.top() + 0.5, "Offset under Plane: {plane:?} {offset:?}");
+    assert!(offset.bottom() <= axis.top() + 0.5, "Axis under Offset: {offset:?} {axis:?}");
+    assert!(axis.bottom() <= angle.top() + 0.5, "Angle after Axis: {axis:?} {angle:?}");
+}
 form_case!(path_plane, "construct.plane.along_path", ["Position (0 to 1)"]);
 form_case!(split, "solid.split_body", []);
 form_case!(scale, "solid.scale", ["Type", "Scale factor"]);
