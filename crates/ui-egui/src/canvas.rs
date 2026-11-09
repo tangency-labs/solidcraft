@@ -766,7 +766,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // While an extrude's arrow is dragged, the flat faces it can stop at (#2398).
     let arrow_id = egui::Id::unique("sc_manipulator");
     let stops = match dir {
-        Some(n) if ui.ctx().is_being_dragged(arrow_id) => crate::extrude_face_snap::stops(app, d, base, n * sign),
+        Some(n) if arrow_being_dragged(ui.ctx(), arrow_id) => crate::extrude_face_snap::stops(app, d, base, n * sign),
         _ => Vec::new(),
     };
     let Some((label, kind, value)) = d.primary() else { return };
@@ -1070,6 +1070,17 @@ fn box_size(ui: &egui::Ui, area: egui::Id, label: &str, note: Option<&str>) -> e
 
 /// How far (logical points) from an arrow's stem a press still takes the arrow.
 const ARROW_STEM_REACH: f32 = 6.0;
+/// Press areas along an arrow's stem, so a press with no hover before it (a finger, a pen) lands.
+const ARROW_STEM_PIECES: usize = 16;
+
+fn stem_piece_id(arrow: egui::Id, piece: usize) -> egui::Id {
+    arrow.with(("stem piece", piece))
+}
+
+/// The arrow `id` is being dragged, by its own area or by a piece of its stem.
+fn arrow_being_dragged(ctx: &egui::Context, id: egui::Id) -> bool {
+    ctx.is_being_dragged(id) || (0..ARROW_STEM_PIECES).any(|i| ctx.is_being_dragged(stem_piece_id(id, i)))
+}
 
 /// The distance from `p` to the segment from `a` to `b` on screen.
 fn to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
@@ -1153,11 +1164,25 @@ fn drag_arrow_to(
     } else {
         on_stem.map_or(at_tip, |p| egui::Rect::from_center_size(p, vec2(2.0 * ARROW_STEM_REACH, 2.0 * ARROW_STEM_REACH)))
     };
-    let r = ui.interact(area, id, egui::Sense::drag());
+    // A finger or a pen has no hover before it presses, and egui matches a press against the areas
+    // of the frame before. So the whole stem also takes presses, in pieces along it, wherever the
+    // pointer was. The arrow's own area comes last, on top.
+    let (s0, s1) = (start(ts), ts);
+    let side = (2.0 * ARROW_STEM_REACH).max((s1 - s0).length() / ARROW_STEM_PIECES as f32);
+    let pieces: Vec<egui::Response> = (0..ARROW_STEM_PIECES)
+        .map(|i| {
+            let centre = s0 + (s1 - s0) * ((i as f32 + 0.5) / ARROW_STEM_PIECES as f32);
+            // Only with no pointer over the view: a mouse hovers the stem first and keeps the old area.
+            let piece = if on_handle || hover.is_some() { egui::Rect::NOTHING } else { egui::Rect::from_center_size(centre, vec2(side, side)) };
+            ui.interact(piece, stem_piece_id(id, i), egui::Sense::drag())
+        })
+        .collect();
+    let r = pieces.into_iter().fold(ui.interact(area, id, egui::Sense::drag()), |r, piece| r.union(piece));
     // How far along the arrow the press was short of its end: the drag keeps that gap.
     let grab = id.with("stem grab");
     if r.drag_started() {
-        let gap = on_stem.zip(r.interact_pointer_pos()).and_then(|(_, p)| along(proj, p, base, n)).map(|v| v - l);
+        let press = ui.input(|i| i.pointer.press_origin()).or(r.interact_pointer_pos());
+        let gap = press.filter(|p| !at_tip.contains(*p)).and_then(|p| along(proj, p, base, n)).map(|v| v - l);
         ui.data_mut(|d| {
             if let Some(g) = gap.filter(|g| g.is_finite()) {
                 d.insert_temp(grab, g);

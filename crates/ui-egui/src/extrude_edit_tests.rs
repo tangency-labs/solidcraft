@@ -520,6 +520,48 @@ fn the_extrude_arrow_drags_from_its_stem() {
     assert!((bounds.max.z - 15.0).abs() < 1e-7, "{bounds:?}");
 }
 
+/// A finger or a pen drags the arrow from its stem too. A touch has no hover before the press, so
+/// the stem must take the press where it lands: pressed 4 mm along a 10 mm arrow with no pointer
+/// over the view before, and moved to 9 mm, the distance grows by 5 mm.
+#[test]
+fn a_touch_press_on_the_extrude_arrow_stem_drags_it() {
+    let mut h = make(json!({"distance":10}));
+    open(&mut h);
+    let screen = |h: &mut Harness, at: f64| {
+        let world = on_arrow(h, at);
+        let p = h.at(&world).unwrap();
+        egui::pos2(p[0] as f32, p[1] as f32)
+    };
+    let (from, to) = (screen(&mut h, 4.0), screen(&mut h, 9.0));
+    // The finger lifted somewhere else: egui knows no pointer over the view.
+    h.app.synthetic.push(egui::Event::PointerGone);
+    h.frame();
+    // What a browser's touch gives egui: a press and a touch at the same point, no hover before.
+    let press = |pressed: bool, pos: egui::Pos2| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let touch = |phase: egui::TouchPhase, pos: egui::Pos2| egui::Event::Touch {
+        device_id: egui::TouchDeviceId(0),
+        id: egui::TouchId(1),
+        phase,
+        pos,
+        force: Some(0.5),
+    };
+    h.app.synthetic.extend([press(true, from), touch(egui::TouchPhase::Start, from)]);
+    h.frame();
+    for i in 1..=6 {
+        let at = from + (to - from) * (i as f32 / 6.0);
+        h.app.synthetic.extend([egui::Event::PointerMoved(at), touch(egui::TouchPhase::Move, at)]);
+        h.frame();
+    }
+    h.app.synthetic.extend([press(false, to), egui::Event::PointerGone, touch(egui::TouchPhase::End, to)]);
+    h.frame();
+    assert!((dialog_distance(&h) - 15.0).abs() < 1e-6, "{}", dialog_distance(&h));
+}
+
 /// A click on the arrow's stem is the arrow's (#1740): a new extrude of a square sketched on a
 /// block keeps its profile picked and its distance. Before, the click went through to the square
 /// under the stem and unpicked it.
