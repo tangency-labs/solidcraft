@@ -2211,6 +2211,22 @@ fn edges_written_off_their_spline_face_carry_their_gap_as_their_tolerance() {
     assert!(refused, "{far:?}");
 }
 
+/// A vertex's tolerance is six times its gap (#11997) but never past SMLib's 1 mm: a vertex
+/// 0.19 mm off its edge's curve (#3352), and the ends of edges 0.2 mm off their face, take 1 mm and
+/// are kept, as they were at 1.5 times the gap.
+#[test]
+fn raised_vertex_tolerances_stay_within_smlib_limit() {
+    let slipped = step_import(include_str!("../../../../tests/kernel-cases/import/3352-vertex-off-its-edge-curve/input.step")).unwrap();
+    assert_eq!(slipped.bodies.len(), 1, "{:?}", slipped.warnings);
+    let imp = step_import(&dome_with_edges_bowed(0.3)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    for (what, imp) in [("slipped vertex", &slipped), ("bowed edges", &imp)] {
+        let r = imp.bodies[0].body.record();
+        let most = r.vertices.iter().map(|v| v.tolerance).chain(r.edges.iter().map(|e| e.tolerance)).fold(0.0, f64::max);
+        assert!(most > 0.2 && most <= 1.0, "{what}: {most}");
+    }
+}
+
 #[test]
 fn spline_edges_off_their_plane_by_less_than_the_file_states_get_their_closed_form() {
     // 0.8e-6 mm off, inside the file's 1e-6 mm but past the half of it a closed-form pcurve is

@@ -87,6 +87,16 @@ const MAX_TOLERANCE: f64 = 1.0;
 /// SMLib's intersection tolerance, twice the zone (the bridge halves it), and SMLib checks a
 /// vertex's gaps against half its zone, so a vertex covers its gap with margin at twice an edge's.
 const VERTEX_GAP_MARGIN: f64 = 2.0 * pcurve::SURFACE_GAP_MARGIN;
+/// The least margin a vertex is kept with: one whose gap [`VERTEX_GAP_MARGIN`] would carry past
+/// [`MAX_TOLERANCE`] takes that limit instead, and is refused only past this one, as before the
+/// margin was raised (a 0.19 mm slip in a file of 0.01 mm, #3352).
+const VERTEX_GAP_LEAST_MARGIN: f64 = 1.5;
+
+/// The tolerance a vertex `gap` mm off its curves and surfaces takes: [`VERTEX_GAP_MARGIN`] times
+/// it, at most SMLib's [`MAX_TOLERANCE`]; `None` when even [`VERTEX_GAP_LEAST_MARGIN`] would pass it.
+fn vertex_tolerance(gap: f64) -> Option<f64> {
+    (VERTEX_GAP_LEAST_MARGIN * gap <= MAX_TOLERANCE).then(|| (VERTEX_GAP_MARGIN * gap).min(MAX_TOLERANCE))
+}
 /// Intervals an edge's curve is measured over against each face's surface it bounds.
 const EDGE_GAP_SAMPLES: usize = 16;
 /// An edge's tolerance over the largest gap measured between its pcurves and its curve: SMLib's
@@ -581,11 +591,11 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// A vertex `gap` mm from where its edge's curve puts it: refused if far off, else its
     /// tolerance covers the gap.
     fn raise_vertex(&mut self, v: u32, gap: f64, edge: u64) -> R<()> {
-        if !(VERTEX_GAP_MARGIN * gap <= MAX_TOLERANCE) {
+        let Some(tolerance) = vertex_tolerance(gap) else {
             return Err(format!("edge #{edge}: a vertex lies {gap} mm off its curve"));
-        }
+        };
         if let Some(x) = self.vertices.get_mut(v as usize) {
-            x.tolerance = x.tolerance.max(VERTEX_GAP_MARGIN * gap);
+            x.tolerance = x.tolerance.max(tolerance);
         }
         Ok(())
     }
@@ -652,10 +662,12 @@ impl<'b, 'a> Builder<'b, 'a> {
         self.raised_edges.insert(e);
         self.widest_gap = self.widest_gap.max(gap);
         // A vertex's tolerance covers every edge that meets it, as in any tolerant record: its
-        // gap from the face at the edge's end is the edge's there, checked as a vertex's.
+        // gap from the face at the edge's end is the edge's there, checked as a vertex's (an edge
+        // kept at its margin is within a vertex's least one, so this is never refused).
+        let tolerance = vertex_tolerance(gap).unwrap_or(MAX_TOLERANCE);
         for v in ends {
             if let Some(vx) = self.vertices.get_mut(v as usize) {
-                vx.tolerance = vx.tolerance.max(VERTEX_GAP_MARGIN * gap);
+                vx.tolerance = vx.tolerance.max(tolerance);
             }
         }
         Ok(())
@@ -1198,10 +1210,10 @@ impl<'b, 'a> Builder<'b, 'a> {
                 {
                     let p = v3(x.point);
                     let gap = surface.project(p, None, f64::INFINITY).and_then(|q| surface.point(q)).map_or(f64::INFINITY, |s| s.dist(p));
-                    if !(VERTEX_GAP_MARGIN * gap <= MAX_TOLERANCE) {
+                    let Some(tolerance) = vertex_tolerance(gap) else {
                         return Err(format!("face #{}: a vertex loop's vertex lies {gap} mm off its surface", face.step));
-                    }
-                    x.tolerance = x.tolerance.max(VERTEX_GAP_MARGIN * gap);
+                    };
+                    x.tolerance = x.tolerance.max(tolerance);
                 }
             }
         }
