@@ -561,6 +561,26 @@ fn rectangular_pattern_takes_features_from_every_history_layout() {
     }
 }
 
+/// #13170: with the History in the Browser, a click on one of its feature rows goes to the open
+/// Pattern or Mirror dialog like a click in the bottom or left History.
+#[test]
+fn a_dialog_takes_features_from_the_browser_history_rows() {
+    let mut h = Harness::new();
+    h.app.preferences.history_in_browser = true;
+    h.app.run("solid.box", json!({"length": 80, "width": 60, "height": 20})).unwrap();
+    h.app.run("solid.cylinder", json!({"base": [20, 20, 20], "radius": 5, "height": 10, "operation": "join"})).unwrap();
+    let id = h.app.session.doc.find_feature("Cylinder1").unwrap().id;
+    h.app.run("select.clear", json!({})).unwrap();
+    h.app.start("solid.pattern.rectangular");
+    h.frames(4);
+    mirror_object_type(&mut h, "Features");
+    h.frames(3);
+    h.step(&json!({"click": {"handle": format!("row:browser-feature:c0:{id}")}})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::Feature { id }], "the dialog receives the Browser History feature");
+    assert!(h.app.session.selection.is_empty(), "a dialog pick does not replace the ordinary selection");
+}
+
 form_case!(loft, "solid.loft", ["Operation"]);
 form_case!(sweep, "solid.sweep", ["Orientation"]);
 form_case!(offset_plane, "construct.plane.offset", ["Distance"]);
