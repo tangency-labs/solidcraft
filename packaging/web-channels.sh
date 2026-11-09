@@ -15,8 +15,9 @@
 # (they changed: the kernel moved from SMLib to solidcore). The channels are not nested, because
 # the app's service worker controls everything under its own directory (apps/solidcraft-web/sw.js).
 #
-# No stable release or no web zip on it fails the deploy: Pages replaces the whole site, and an
-# empty /app/ would take the web app away. A missing, outdated or too-old release candidate
+# A repository with no published release yet (a new fork) gets this run's build at /app/ too, so
+# its site has a web app from the first deploy. A stable release without a web zip fails the
+# deploy: Pages replaces the whole site, and an empty /app/ would take the web app away. A missing, outdated or too-old release candidate
 # leaves a small page at /app-rc/ instead. Needs gh and GH_TOKEN; GITHUB_REPOSITORY names the repository.
 set -euo pipefail
 
@@ -60,11 +61,13 @@ HTML
 stable="$(gh api "repos/$repo/releases?per_page=100" \
   --jq '[.[] | select(.draft == false and .prerelease == false)][0].tag_name // empty')"
 if [ -z "$stable" ]; then
-  echo "error: no published release, so there is no stable web app to deploy" >&2
-  exit 1
+  echo "stable: no published release yet, /app/ gets this run's build"
+  mkdir -p "$site/app"
+  cp -R "$edge"/. "$site/app"/
+else
+  echo "stable: $stable"
+  fetch_build "$stable" "$site/app"
 fi
-echo "stable: $stable"
-fetch_build "$stable" "$site/app"
 
 # Edge: the build of this run.
 mkdir -p "$site/app-edge"
