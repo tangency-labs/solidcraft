@@ -3,6 +3,7 @@
 use std::f64::consts::PI;
 
 use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_geom::MeshGeom;
 
 use crate::{BoolOp, cylinder, faceted_boolean, sweep_helix_mesh};
 

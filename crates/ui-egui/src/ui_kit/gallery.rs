@@ -356,9 +356,9 @@ const ELEMENTS: &[Element] = &[
     element!("searchable_icon_dropdown", |ui, _| {
         searchable_icon_dropdown(ui, "spin", "Replace…", &mut String::new(), &[]);
     }),
-    element!("number_pair", |ui, _| {
+    element!("number_pair_preserving", |ui, _| {
         let (mut w, mut h) = (1920, 1080);
-        number_pair(ui, "Size", [&mut w, &mut h], 1..=16384, 1.0, "");
+        number_pair_preserving(ui, "Size", [&mut w, &mut h], 1..=16384, 1.0, "");
     }),
     element!("progress_action", |ui, _| {
         progress_action(ui, "gallery:progress", "Rendering", "· 62%", 0.62, "Cancel");
@@ -1239,11 +1239,11 @@ const ELEMENTS: &[Element] = &[
             &mut s.selected,
             &[WindowPage {
                 group: Some("prefs.input"),
-                icon: "settings",
+                icon: Icon::Kit("settings"),
                 label: "ui.general",
                 handle: "gallery:page",
                 scroll: true,
-                draw: |ui, _: &mut ()| {
+                draw: &|ui, _: &mut ()| {
                     text(ui, "General", Text::Inline);
                 },
             }],
@@ -1919,7 +1919,7 @@ const ELEMENTS: &[Element] = &[
         let t = Tokens::get();
         let (rect, response) = ui.allocate_exact_size(vec2(t.form_button_height * 3.0, t.form_button_height * 2.0), egui::Sense::click());
         ui.painter().add(persistent_button_shape(ui, &response, rect));
-        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Selected", crate::fonts::semibold(t.font_label), t.selected_ink);
+        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Selected", crate::ui_kit::type_face::semibold(t.font_label), t.selected_ink);
         solidcraft_ui_registry::publish_target("gallery:persistent_button", rect);
     }),
     element!("native_button_focus", "gallery:native_button_focus", Some("gallery:native_button_focus"), |ui, _| {

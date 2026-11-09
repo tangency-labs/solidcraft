@@ -9,7 +9,9 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+solidcraft-viewport = { workspace = true }
 solidcore-record = { workspace = true }
+solidcore-tess = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-sketch = { workspace = true }
