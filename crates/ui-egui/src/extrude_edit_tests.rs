@@ -466,7 +466,7 @@ fn extrusion_arrow_tracks_the_current_drag_frame() {
     open(&mut h);
     let at = h.at(&json!({"handle":"arrow"})).unwrap();
     let at = egui::pos2(at[0] as f32, at[1] as f32);
-    h.app.synthetic_mods.ctrl = true;
+    hold_free_drag_key(&mut h);
     h.app.synthetic.push(egui::Event::PointerMoved(at));
     h.frame();
     h.app.synthetic.push(egui::Event::PointerButton {
@@ -710,6 +710,16 @@ fn failed_face_extrusion_edit_keeps_context_until_escape_and_preserves_visibilit
     assert_eq!(h.app.session.visibility, visibility);
 }
 
+/// Hold the free-drag key, the platform's primary modifier: Ctrl on Windows and Linux, Cmd on
+/// macOS (#13274). Physical Ctrl alone is not the primary key on macOS.
+fn hold_free_drag_key(h: &mut Harness) {
+    use crate::tool_modifiers::{Held, Platform};
+    h.app.synthetic_mods.command = true;
+    for platform in [Platform::Mac, Platform::Other] {
+        assert!(Held::new(h.app.synthetic_mods, platform).primary, "{platform:?} sees no primary key in {:?}", h.app.synthetic_mods);
+    }
+}
+
 /// A block 12.345678 mm thick under XY (so no round step lands on its underside), a 10 mm
 /// square sketched on its top and cut 5 mm into it, a second block beside it whose underside is
 /// at -7.777 mm, and the cut open in its editor.
@@ -792,7 +802,7 @@ fn the_extrude_arrow_passes_faces_beside_the_profile_and_in_a_free_drag() {
     assert_eq!(hold_arrow_at(&mut h, json!({"world":[5,5,-7.75]})), None);
     assert!((dialog_distance(&h) - 7.777).abs() > 1e-6, "{}", dialog_distance(&h));
     let_go(&mut h);
-    h.app.synthetic_mods.ctrl = true;
+    hold_free_drag_key(&mut h);
     assert_eq!(hold_arrow_at(&mut h, json!({"world":[5,5,-12.2]})), None);
     assert!((dialog_distance(&h) - 12.345678).abs() > 1e-3, "{}", dialog_distance(&h));
     let_go(&mut h);

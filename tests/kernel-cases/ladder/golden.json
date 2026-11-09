@@ -1822,12 +1822,12 @@
     },
     "ladder/11-cumulative-parts/004-housing": {
       "measured": {
-        "area_mm2": 21105.287553425696,
+        "area_mm2": 21156.778657103445,
         "body_count": 1,
-        "edges": 210,
-        "faces": 78,
-        "vertices": 139,
-        "volume_mm3": 15138.519861452509
+        "edges": 218,
+        "faces": 81,
+        "vertices": 144,
+        "volume_mm3": 15111.545095719644
       },
       "seconds": 4.128625132,
       "status": "pass"

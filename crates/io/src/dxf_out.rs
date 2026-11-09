@@ -68,6 +68,12 @@ pub enum DxfShape {
     Polyline {
         points: Vec<Vec2>,
     },
+    /// A lightweight polyline (AutoCAD `LWPOLYLINE`) with bulges for arc segments.
+    /// Each entry in `verts` is `(position, bulge)`, where bulge is `tan(sweep / 4)`.
+    LwPolyline {
+        verts: Vec<(Vec2, f64)>,
+        closed: bool,
+    },
     Circle {
         c: Vec2,
         r: f64,
@@ -153,6 +159,54 @@ pub fn loop_shapes(lp: &Loop2) -> Vec<DxfShape> {
     lp.segs.iter().map(seg_shape).collect()
 }
 
+/// The closed loop as one AutoCAD `LWPOLYLINE` entity, with circular arc segments represented
+/// by their DXF bulge (tan of a quarter of the included angle). Free-form curves are sampled as lines.
+pub fn loop_lwpolyline_scaled(lp: &Loop2, scale: f64) -> DxfShape {
+    let mut verts: Vec<(Vec2, f64)> = Vec::new();
+    for s in &lp.segs {
+        match *s {
+            Seg2::Line { a, .. } => {
+                verts.push((a * scale, 0.0));
+            }
+            Seg2::Arc { center, radius, start, sweep } => {
+                if (sweep.abs() - TAU).abs() < 1e-9 {
+                    // Full circle: split into two 180° semicircles.
+                    let b = if sweep >= 0.0 { 1.0 } else { -1.0 };
+                    let p0 = (center + Vec2::from_angle(start) * radius) * scale;
+                    let p1 = (center + Vec2::from_angle(start + std::f64::consts::PI) * radius) * scale;
+                    verts.push((p0, b));
+                    verts.push((p1, b));
+                } else if sweep.abs() > std::f64::consts::PI + 1e-9 {
+                    // Arc larger than 180°: split into two pieces.
+                    let half = sweep * 0.5;
+                    let b = (half / 4.0).tan();
+                    let p0 = (center + Vec2::from_angle(start) * radius) * scale;
+                    let p1 = (center + Vec2::from_angle(start + half) * radius) * scale;
+                    verts.push((p0, b));
+                    verts.push((p1, b));
+                } else {
+                    let b = (sweep / 4.0).tan();
+                    let p0 = (center + Vec2::from_angle(start) * radius) * scale;
+                    verts.push((p0, b));
+                }
+            }
+            _ => {
+                let poly = s.polyline(0.01);
+                let count = poly.len().saturating_sub(1);
+                for p in poly.iter().take(count) {
+                    verts.push((*p * scale, 0.0));
+                }
+            }
+        }
+    }
+    DxfShape::LwPolyline { verts, closed: true }
+}
+
+/// [`loop_lwpolyline_scaled`] at scale 1.0 (millimetres).
+pub fn loop_lwpolyline(lp: &Loop2) -> DxfShape {
+    loop_lwpolyline_scaled(lp, 1.0)
+}
+
 /// A parameter reduced to [0, 2π); one within 1e-12 of a full turn is 0.
 fn wrap(t: f64) -> f64 {
     let r = t.rem_euclid(TAU);
@@ -221,6 +275,30 @@ impl DxfShape {
         match self {
             DxfShape::Line(a, b) => out.extend([*a, *b]),
             DxfShape::Polyline { points } => out.extend(points.iter().copied()),
+            DxfShape::LwPolyline { verts, closed } => {
+                for (i, (p0, b)) in verts.iter().enumerate() {
+                    out.push(*p0);
+                    if b.abs() > 1e-12 {
+                        let next_idx = if i + 1 < verts.len() {
+                            Some(i + 1)
+                        } else if *closed {
+                            Some(0)
+                        } else {
+                            None
+                        };
+                        if let Some(next) = next_idx
+                            && let Some((p1, _)) = verts.get(next)
+                        {
+                            let chord = *p1 - *p0;
+                            let mid = (*p0 + *p1) * 0.5;
+                            let arc_mid = mid + chord.perp() * (*b * 0.5);
+                            if arc_mid.x.is_finite() && arc_mid.y.is_finite() {
+                                out.push(arc_mid);
+                            }
+                        }
+                    }
+                }
+            }
             DxfShape::Circle { c, r } => out.extend([*c - Vec2::new(*r, *r), *c + Vec2::new(*r, *r)]),
             DxfShape::Arc { c, r, a0, a1 } => {
                 let sweep = (a1 - a0).rem_euclid(360.0);
@@ -349,6 +427,11 @@ fn text_value(s: &str) -> Result<String> {
 /// (layer `0` is always there). A TEXT character beyond U+FFFF returns an error naming the
 /// character, its position, the entity and its layer; no drawing is returned on failure.
 pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<String> {
+    write_dxf_drawing_units(layers, entities, 4)
+}
+
+/// [`write_dxf_drawing`], with explicit DXF `$INSUNITS` (1 in, 2 ft, 4 mm, 5 cm, 6 m).
+pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insunits: i32) -> Result<String> {
     let mut pts = Vec::new();
     for e in entities {
         e.shape.sample(&mut pts);
@@ -507,7 +590,7 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     for (index, e) in entities.iter().enumerate() {
         let kind = match &e.shape {
             DxfShape::Line(..) => "LINE",
-            DxfShape::Polyline { .. } => "LWPOLYLINE",
+            DxfShape::Polyline { .. } | DxfShape::LwPolyline { .. } => "LWPOLYLINE",
             DxfShape::Circle { .. } => "CIRCLE",
             DxfShape::Arc { .. } => "ARC",
             DxfShape::Ellipse { .. } => "ELLIPSE",
@@ -529,6 +612,19 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
                 for p in points {
                     o.num(10, p.x);
                     o.num(20, p.y);
+                }
+            }
+            DxfShape::LwPolyline { verts, closed } => {
+                o.code(100, "AcDbPolyline");
+                o.code(90, verts.len());
+                // Autodesk DXF reference: bit 1 closed, bit 128 (PLINEGEN) continues dash pattern.
+                o.code(70, 128 + if *closed { 1 } else { 0 });
+                for (p, b) in verts {
+                    o.num(10, p.x);
+                    o.num(20, p.y);
+                    if b.abs() > 1e-12 {
+                        o.num(42, *b);
+                    }
                 }
             }
             DxfShape::Line(a, b) => {
@@ -632,9 +728,9 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     head.code(9, "$HANDSEED");
     head.code(5, format!("{:X}", o.next));
     head.code(9, "$INSUNITS");
-    head.code(70, 4);
+    head.code(70, insunits);
     head.code(9, "$MEASUREMENT");
-    head.code(70, 1);
+    head.code(70, if insunits == 1 || insunits == 2 { 0 } else { 1 });
     head.code(9, "$EXTMIN");
     head.point(10, lo);
     head.code(9, "$EXTMAX");
@@ -1127,5 +1223,63 @@ mod tests {
         let after = |var: &str| &p[p.iter().position(|(c, v)| (*c, v.as_str()) == (9, var)).unwrap() + 1..];
         assert_eq!(&after("$EXTMIN")[..2], &[(10, "27.0".to_string()), (20, "6.0".to_string())]);
         assert_eq!(&after("$EXTMAX")[..2], &[(10, "30.0".to_string()), (20, "18.0".to_string())]);
+    }
+
+    #[test]
+    fn lwpolyline_with_bulge_and_units_round_trip() {
+        // Closed loop with a line and a 90° arc segment (bulge tan(pi / 8)).
+        let sweep = FRAC_PI_2;
+        let bulge = (sweep / 4.0).tan();
+        let loop2 = Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(10.0, 0.0), b: Vec2::new(0.0, 0.0) },
+                Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(0.0, 10.0) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: FRAC_PI_2, sweep: -FRAC_PI_2 },
+            ],
+        };
+        let shape = loop_lwpolyline(&loop2);
+        let DxfShape::LwPolyline { ref verts, closed } = shape else { panic!("expected LwPolyline") };
+        assert!(closed);
+        assert_eq!(verts.len(), 3);
+        // Third segment is clockwise (-90°), bulge is negative
+        assert!((verts[2].1 - (-bulge)).abs() < 1e-12, "bulge was {}", verts[2].1);
+
+        // Write with inch units (insunits = 1)
+        let dxf = write_dxf_drawing_units(
+            &[DxfLayer::new("CUT", 4)],
+            &[DxfEntity { layer: "CUT".into(), shape: loop_lwpolyline_scaled(&loop2, 1.0 / 25.4) }],
+            1,
+        )
+        .unwrap();
+        assert!(dxf.contains("LWPOLYLINE"));
+        assert!(dxf.contains("\n  8\nCUT\n") || dxf.contains("\n8\nCUT\n"));
+        assert!(dxf.contains("\n 70\n1\n") || dxf.contains("\n70\n1\n")); // $INSUNITS 1
+
+        // Read back via read_dxf: should scale from inches back to mm
+        let geom = read_dxf(&dxf).unwrap();
+        assert_eq!(geom.len(), 3);
+        // Arcs and lines should be recovered in millimetres
+        let Some((c, a, b)) = geom.iter().find_map(|g| match *g {
+            Geom2::Arc { c, a, b } => Some((c, a, b)),
+            _ => None,
+        }) else {
+            panic!("arc not recovered");
+        };
+        assert!(c.dist(Vec2::ZERO) < 1e-6);
+        assert!((c.dist(a) - 10.0).abs() < 1e-6);
+        assert!((c.dist(b) - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lwpolyline_open_sampling_does_not_wrap_around() {
+        // Unclosed polyline with 2 vertices: (0, 0) and (10, 0), with a bulge on the last vertex.
+        // For an unclosed polyline, the last vertex cannot form an arc segment to vertex 0.
+        let shape = DxfShape::LwPolyline { verts: vec![(Vec2::new(0.0, 0.0), 0.0), (Vec2::new(10.0, 0.0), 1.0)], closed: false };
+        let mut pts = Vec::new();
+        shape.sample(&mut pts);
+        // Only the two vertices should be sampled, not an arc chord back to (0, 0)
+        assert_eq!(pts.len(), 2);
+        assert_eq!(pts[0], Vec2::new(0.0, 0.0));
+        assert_eq!(pts[1], Vec2::new(10.0, 0.0));
     }
 }
