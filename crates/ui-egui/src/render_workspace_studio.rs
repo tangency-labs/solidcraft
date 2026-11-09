@@ -19,6 +19,8 @@ pub(super) struct View {
     pub caustics: Option<solidcraft_engine::render::job::CausticOptions>,
     pub aging: solidcraft_engine::doc::render_aging::SavedAgingStack,
     pub nested_media: bool,
+    pub texture_filtering: bool,
+    pub metal_energy_compensation: bool,
     pub volume: Option<solidcraft_engine::render::job::volume::HomogeneousVolume>,
     pub adaptive: Option<solidcraft_engine::render::job::adaptive::AdaptiveSampling>,
     pub transmission_samples: u32,
@@ -27,8 +29,12 @@ pub(super) struct View {
     pub backdrop: solidcraft_engine::render::job::finishing::Backdrop,
     pub linear_exr: bool,
     pub export_exr: bool,
+    pub export_denoise_mask: bool,
     pub tone_map: ToneMap,
     pub denoise: bool,
+    pub denoise_settings: solidcraft_engine::render::job::DenoiseSettings,
+    pub denoise_diagnostics: bool,
+    pub supersampling: u32,
     pub lens_enabled: bool,
     pub lens: ThinLens,
     pub environment: Environment,
@@ -52,6 +58,8 @@ impl Default for View {
             caustics: None,
             aging: Default::default(),
             nested_media: false,
+            texture_filtering: false,
+            metal_energy_compensation: false,
             volume: None,
             adaptive: None,
             transmission_samples: 1,
@@ -60,8 +68,12 @@ impl Default for View {
             backdrop: Default::default(),
             linear_exr: false,
             export_exr: false,
+            export_denoise_mask: false,
             tone_map: ToneMap::Reinhard,
             denoise: false,
+            denoise_settings: Default::default(),
+            denoise_diagnostics: false,
+            supersampling: 1,
             lens_enabled: false,
             lens: ThinLens { aperture_radius_mm: 1.0, focus_distance_mm: 100.0 },
             environment: Environment::None,
@@ -97,11 +109,18 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
     let view = &app.render_workspace.view.studio;
     params["tone_map"] = json!(view.tone_map);
     params["denoise"] = json!(view.denoise);
+    params["denoise_settings"] = json!(view.denoise_settings);
+    params["denoise_diagnostics"] = json!(view.denoise_diagnostics);
+    params["supersampling"] = json!(view.supersampling);
     params["finishing"] = json!(view.finishing);
     params["backdrop"] = json!(view.backdrop_enabled.then_some(view.backdrop));
     params["linear_exr"] = json!(view.linear_exr);
     params["aging"] = json!(view.aging);
     params["nested_media"] = json!(view.nested_media);
+    params["texture_filtering"] = json!(view.texture_filtering);
+    if view.metal_energy_compensation {
+        params["metal_energy_compensation"] = json!(true);
+    }
     params["caustics"] = json!(view.caustics);
     params["volume"] = json!(view.volume);
     params["adaptive"] = json!(view.adaptive);
@@ -428,7 +447,33 @@ pub(super) fn backdrop_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 pub(super) fn export_label(app: &SolveApp) -> &str {
-    app.tr(if app.render_workspace.view.studio.export_exr { "render.export_linear" } else { "render.output_export" })
+    app.tr(if app.render_workspace.view.studio.export_denoise_mask {
+        "render.denoise_export_mask"
+    } else if app.render_workspace.view.studio.export_exr {
+        "render.export_linear"
+    } else {
+        "render.output_export"
+    })
+}
+
+pub(super) fn export_format(app: &SolveApp) -> &'static str {
+    if app.render_workspace.view.studio.export_denoise_mask {
+        "denoise_mask"
+    } else if app.render_workspace.view.studio.export_exr {
+        "exr"
+    } else {
+        "png"
+    }
+}
+
+pub(super) fn export_format_label(app: &SolveApp) -> &str {
+    if app.render_workspace.view.studio.export_denoise_mask {
+        app.tr("render.denoise_format_mask")
+    } else if app.render_workspace.view.studio.export_exr {
+        "EXR"
+    } else {
+        "PNG"
+    }
 }
 
 pub(super) fn export_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -438,16 +483,20 @@ pub(super) fn export_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 pub(super) fn format_choices(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
     let available = linear_export_available(app);
+    let mask_available = super::quality::mask_available(app);
     ui.scope(|ui| {
-        let reason = app.tr("render.output_master_unavailable");
-        let mut format = usize::from(app.render_workspace.view.studio.export_exr);
+        let reason = app.tr("render.output_master_unavailable").to_string();
+        let mask_reason = app.tr("render.denoise_mask_unavailable").to_string();
+        let mask_label = app.tr("render.denoise_format_mask").to_string();
+        let mut format =
+            if app.render_workspace.view.studio.export_denoise_mask { 2 } else { usize::from(app.render_workspace.view.studio.export_exr) };
         if ui_kit::segmented(
             ui,
             &mut format,
-            &["PNG", "EXR"],
+            &["PNG", "EXR", &mask_label],
             ui_kit::Segments {
-                disabled_reasons: &[None, (!available).then_some(reason)],
-                targets: &["render:format-png", "render:format-exr"],
+                disabled_reasons: &[None, (!available).then_some(reason.as_str()), (!mask_available).then_some(mask_reason.as_str())],
+                targets: &["render:format-png", "render:format-exr", "render:format-denoise-mask"],
                 workspace_accent: true,
                 intrinsic: true,
                 compact: true,
@@ -455,6 +504,7 @@ pub(super) fn format_choices(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Res
             },
         ) {
             app.render_workspace.view.studio.export_exr = format == 1;
+            app.render_workspace.view.studio.export_denoise_mask = format == 2;
         }
     })
     .response

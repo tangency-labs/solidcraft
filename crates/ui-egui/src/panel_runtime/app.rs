@@ -965,7 +965,7 @@ pub(crate) fn sync_production_setting(app: &mut crate::SolveApp) -> PanelResult<
 pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     // Switching placement systems waits until Preferences Apply/Cancel settles
     // its snapshot. Content state itself always remains owned by the app.
-    if !app.prefs_window.open
+    if !app.prefs_window.shell.open
         && let Err(reason) = sync_production_setting(app)
     {
         app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);

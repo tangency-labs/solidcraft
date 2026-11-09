@@ -279,7 +279,7 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
 
 /// The Signed axes card: the navigator as the default view poses it.
 fn paint_signed_axes(p: &egui::Painter, rect: egui::Rect) {
-    ui_kit::paint_navigation_axes(p, rect, &crate::viewport::navigator_axes(&solidcraft_engine::render::Camera::default()));
+    ui_kit::paint_navigation_axes(p, rect, &crate::viewport::navigator_axes(&solidcraft_viewport::Camera::default()));
 }
 
 fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {

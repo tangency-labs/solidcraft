@@ -712,7 +712,7 @@ fn universal_header_reuses_title_font_and_six_dot_grip_without_idle_control_tile
         for clipped in &output.shapes {
             crate::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
                 egui::Shape::Text(text) if text.galley.job.text == "Shared title" => {
-                    assert_eq!(text.galley.job.sections.first().unwrap().format.font_id, crate::fonts::semibold(t.font_heading));
+                    assert_eq!(text.galley.job.sections.first().unwrap().format.font_id, crate::ui_kit::type_face::semibold(t.font_heading));
                     titles += 1;
                 }
                 egui::Shape::Text(text) if text.galley.job.text == "Shared tab" => {
@@ -754,9 +754,9 @@ fn universal_drag_source_changes_only_label_ink_and_keeps_existing_fonts() {
             t.form_ink
         };
         let font = if title {
-            crate::fonts::semibold(t.font_heading)
+            crate::ui_kit::type_face::semibold(t.font_heading)
         } else if selected {
-            crate::fonts::semibold(t.font_label)
+            crate::ui_kit::type_face::semibold(t.font_label)
         } else {
             egui::FontId::proportional(t.font_label)
         };
@@ -1358,12 +1358,12 @@ fn heading_weight_field_surfaces_and_disclosures_follow_tokens_in_both_themes() 
                     assert_eq!(text.galley.job.sections.first().unwrap().format.font_id.family, egui::FontFamily::Monospace);
                 }
                 if text.galley.job.text == "Fillet" {
-                    assert_eq!(text.galley.job.sections.first().unwrap().format.font_id, crate::fonts::semibold(t.font_heading));
+                    assert_eq!(text.galley.job.sections.first().unwrap().format.font_id, crate::ui_kit::type_face::semibold(t.font_heading));
                     *title += 1;
                 }
                 if text.galley.job.text == "OPTIONS" {
                     let format = &text.galley.job.sections.first().unwrap().format;
-                    assert_eq!(format.font_id, crate::fonts::semibold(t.font_caption));
+                    assert_eq!(format.font_id, crate::ui_kit::type_face::semibold(t.font_caption));
                     assert!(format.extra_letter_spacing > 0.0);
                     *section += 1;
                 }
@@ -1835,22 +1835,22 @@ fn window_pages_have_shared_metrics_callbacks_and_a_pinned_left_footer_action() 
         let pages = [
             WindowPage {
                 group: None,
-                icon: "settings",
+                icon: Icon::Kit("settings"),
                 label: "ui.general",
                 handle: "test:page:general",
                 scroll: true,
-                draw: |ui, state| {
+                draw: &|ui, state| {
                     *state = 1;
                     text(ui, "General", Text::Inline);
                 },
             },
             WindowPage {
                 group: None,
-                icon: "orbit",
+                icon: Icon::Kit("orbit"),
                 label: "ui.navigation",
                 handle: "test:page:navigation",
                 scroll: true,
-                draw: |ui, state| {
+                draw: &|ui, state| {
                     *state = 2;
                     text(ui, "Navigation", Text::Inline);
                 },
@@ -1924,11 +1924,11 @@ fn page_window_is_as_opaque_as_every_other_window_in_both_themes() {
         let ctx = crate::fonts::test_context();
         let list = [WindowPage {
             group: None,
-            icon: "settings",
+            icon: Icon::Kit("settings"),
             label: "ui.general",
             handle: "test:page:general",
             scroll: true,
-            draw: |ui, _: &mut ()| {
+            draw: &|ui, _: &mut ()| {
                 text(ui, "General", Text::Inline);
             },
         }];
@@ -2171,7 +2171,7 @@ fn preferences_preserves_every_page_and_footer_in_both_themes() {
         for (index, page) in crate::prefs::PAGES.iter().enumerate() {
             crate::prefs::open_at(&mut h.app, index);
             h.frames(3);
-            assert_eq!(h.app.prefs_window.section, index);
+            assert_eq!(h.app.prefs_window.shell.section, index);
             let nav = scenario::rect_of("dialog:pages").unwrap();
             let row = scenario::rect_of(&format!("prefs:page:{page}")).unwrap();
             assert!(nav.contains_rect(row), "{dark}: {page} stays visible");

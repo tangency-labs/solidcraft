@@ -185,9 +185,9 @@ pub(crate) fn panel_host_control_label_opacity(
     if !chrome.icon_only && !chrome.grip_only {
         let ink = ink.gamma_multiply(label_opacity);
         let font = if chrome.title {
-            crate::fonts::semibold(t.font_heading)
+            crate::ui_kit::type_face::semibold(t.font_heading)
         } else if chrome.selected {
-            crate::fonts::semibold(t.font_label)
+            crate::ui_kit::type_face::semibold(t.font_label)
         } else {
             egui::FontId::proportional(t.font_label)
         };

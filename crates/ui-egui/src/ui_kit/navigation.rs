@@ -192,7 +192,7 @@ pub(crate) fn navigation_button_editable(ui: &mut Ui, rect: Rect, button: Naviga
         );
     }
     let ink = navigation_ink(&t, fill);
-    let text = button.labels.then(|| ui.painter().layout_no_wrap(button.label.to_owned(), crate::fonts::medium(NAV_TEXT), ink));
+    let text = button.labels.then(|| ui.painter().layout_no_wrap(button.label.to_owned(), crate::ui_kit::type_face::medium(NAV_TEXT), ink));
     let mut x = if button.menu {
         rect.left() + NAV_MENU_LEFT + if editing { NAV_BORDER } else { 0.0 }
     } else {

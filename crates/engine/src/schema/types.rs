@@ -278,7 +278,7 @@ impl JsonSchema for AxisDir {
 /// `Camera`, with finite fields, a positive distance and a field of view in [0, π), and the
 /// handlers' message, "invalid camera", for anything else (#10898).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CameraParam(pub solidcraft_render::Camera);
+pub struct CameraParam(pub solidcraft_viewport::Camera);
 
 impl<'de> Deserialize<'de> for CameraParam {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {

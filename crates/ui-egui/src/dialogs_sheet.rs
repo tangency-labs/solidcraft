@@ -1399,7 +1399,7 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
 /// y up, millimetres), so the shared navigation moves it like any other camera. The Design
 /// camera is left alone while this has the viewport.
 pub struct FlatView {
-    pub cam: solidcraft_engine::render::Camera,
+    pub cam: solidcraft_viewport::Camera,
     /// The camera frames the pattern; cleared by Fit and Home, and whenever the dialog is closed.
     pub fitted: bool,
     /// Flat centres stay out of the command JSON and are reused while navigating.
@@ -1409,10 +1409,10 @@ pub struct FlatView {
 
 impl Default for FlatView {
     fn default() -> Self {
-        let mut cam = solidcraft_engine::render::Camera::default();
-        cam.set_view(solidcraft_engine::render::StandardView::Top);
+        let mut cam = solidcraft_viewport::Camera::default();
+        cam.set_view(solidcraft_viewport::StandardView::Top);
         cam.fov = 0.0;
-        cam.up = solidcraft_engine::render::UpAxis::Z;
+        cam.up = solidcraft_viewport::UpAxis::Z;
         FlatView { cam, fitted: false, perforation_key: None, perforations: Vec::new() }
     }
 }
