@@ -1,0 +1,58 @@
+{
+  "en": {
+    "ui.link_changed": "The file has changed since this design last read it.",
+    "ui.link_missing": "The file is missing.",
+    "ui.link_not_checked": "Not checked: this path was not looked at.",
+    "ui.link_not_checked_network": "Not checked: network location not allowed. You can allow it in Preferences › General.",
+    "ui.link_source": "Linked to:"
+  },
+  "ar": {
+    "ui.link_changed": "تغيّر الملف منذ آخر قراءة له في هذا التصميم.",
+    "ui.link_missing": "الملف مفقود.",
+    "ui.link_not_checked": "لم يتم الفحص: لم يتم الاطلاع على هذا المسار.",
+    "ui.link_not_checked_network": "لم يتم الفحص: موقع الشبكة غير مسموح به. يمكنك السماح به في التفضيلات › عام.",
+    "ui.link_source": "مرتبط بـ:"
+  },
+  "de": {
+    "ui.link_changed": "Die Datei wurde geändert, seit dieses Design sie zuletzt gelesen hat.",
+    "ui.link_missing": "Die Datei fehlt.",
+    "ui.link_not_checked": "Nicht geprüft: Dieser Pfad wurde nicht angesehen.",
+    "ui.link_not_checked_network": "Nicht geprüft: Netzwerkpfad nicht erlaubt. Du kannst ihn unter Einstellungen › Allgemein erlauben.",
+    "ui.link_source": "Verknüpft mit:"
+  },
+  "he": {
+    "ui.link_changed": "הקובץ השתנה מאז שתכן זה קרא אותו לאחרונה.",
+    "ui.link_missing": "הקובץ חסר.",
+    "ui.link_not_checked": "לא נבדק: הנתיב הזה לא נבדק.",
+    "ui.link_not_checked_network": "לא נבדק: מיקום רשת אינו מותר. אפשר להתיר אותו בהעדפות › כללי.",
+    "ui.link_source": "מקושר אל:"
+  },
+  "ja": {
+    "ui.link_changed": "このデザインが最後に読み込んだ後、ファイルが変更されています。",
+    "ui.link_missing": "ファイルが見つかりません。",
+    "ui.link_not_checked": "未確認: このパスは確認されていません。",
+    "ui.link_not_checked_network": "未確認: ネットワーク上の場所は許可されていません。環境設定 › 一般 で許可できます。",
+    "ui.link_source": "リンク先:"
+  },
+  "ko": {
+    "ui.link_changed": "이 디자인이 마지막으로 읽은 후 파일이 변경되었습니다.",
+    "ui.link_missing": "파일이 없습니다.",
+    "ui.link_not_checked": "확인되지 않음: 이 경로는 확인하지 않았습니다.",
+    "ui.link_not_checked_network": "확인되지 않음: 네트워크 위치가 허용되지 않았습니다. 환경 설정 › 일반에서 허용할 수 있습니다.",
+    "ui.link_source": "연결 대상:"
+  },
+  "vi": {
+    "ui.link_changed": "Tệp đã thay đổi kể từ lần cuối thiết kế này đọc nó.",
+    "ui.link_missing": "Không tìm thấy tệp.",
+    "ui.link_not_checked": "Chưa kiểm tra: đường dẫn này chưa được xem.",
+    "ui.link_not_checked_network": "Chưa kiểm tra: vị trí mạng không được phép. Bạn có thể cho phép trong Tùy chọn › Chung.",
+    "ui.link_source": "Liên kết tới:"
+  },
+  "zh": {
+    "ui.link_changed": "自此设计上次读取以来，该文件已更改。",
+    "ui.link_missing": "文件缺失。",
+    "ui.link_not_checked": "未检查：未查看此路径。",
+    "ui.link_not_checked_network": "未检查：不允许访问网络位置。可在 首选项 › 常规 中允许。",
+    "ui.link_source": "链接到："
+  }
+}

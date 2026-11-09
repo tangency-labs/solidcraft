@@ -18,6 +18,7 @@ pub mod blur;
 pub mod bom_panel;
 pub mod browser;
 pub mod browser_canvas;
+pub mod browser_links;
 pub mod browser_prompts;
 pub mod canvas;
 pub mod cli_link;
