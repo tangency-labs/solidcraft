@@ -1252,6 +1252,7 @@
   "cmd.timeline_stop": "기록 재생 중지",
   "cmd.timeline_suppress": "특성 비활성화",
   "cmd.ui.assistant": "도우미 표시 전환",
+  "cmd.ui.palette": "명령 검색",
   "cmd.view.navigator": "사용자 지정 뷰 탐색기",
   "cmd.view.render_browser": "렌더 브라우저",
   "cmd.view.render_dock": "렌더 도크 이동",

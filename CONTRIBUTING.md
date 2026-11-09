@@ -17,15 +17,28 @@ Before choosing a task, check the [command inventory](docs/features.md) and
 
 Questions, ideas or want to say what you're working on? Join the [Discord](https://discord.gg/FtU4NQNVDH).
 
-## Kernel work is paused
+## Kernel work goes in solidcore/
 
-We're moving to a new geometry kernel. Until that's done, please don't open pull requests that
-change `crates/kernel/`, `crates/geom/` or the vendored kernel in `solidcore/`, or issues and discussions about kernel
-work: booleans, fillets, chamfers, shell, offsets, sweeps and lofts, threads and holes, STEP/IGES
-import and export, or tessellation. The pinned issue on the tracker explains it. New ones get the
-`kernel-paused` label (`.github/workflows/kernel-paused.yml`) and a maintainer answers them. Crashes
-and data loss are still taken as issues. Pull requests outside those directories carry on as normal,
-including the dialogs and tools for these features.
+Kernel and geometry work is welcome: booleans, fillets, chamfers, shell, offsets, sweeps and lofts,
+threads and holes, STEP/IGES import and export, tessellation. It goes in `solidcore/`, the vendored
+solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.md) and
+`skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
+`crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
+
+A kernel-only pull request targets the `kernel` branch. A change that touches the kernel and the
+app goes to `main` as one pull request, with a code owner approving the `solidcore/` part.
+Crashes and data loss are still taken first.
+
+### Updating a PR that was moved from solidcore
+
+solidcore's open PRs were re-opened here on `moved/solidcore-N` branches in tangency-labs, so
+contributors without write access can't push to them. To update one:
+
+1. `git fetch https://github.com/tangency-labs/solidcraft moved/solidcore-N:moved/solidcore-N`, then
+   `git switch moved/solidcore-N`.
+2. Commit your changes on it and push it to your fork: `git push <your-fork> moved/solidcore-N`.
+3. Open a PR against `kernel` that says "Replaces #M" (M is the moved PR's number). The moved one
+   gets closed.
 
 ## Get it running (about 10 minutes on a fast machine)
 
@@ -429,9 +442,13 @@ owning one area, with a human setting direction and reporting bugs. Their workin
 [AGENTS.md](AGENTS.md). Human contributors are just as welcome. Use whatever tools you like, as
 long as the change meets the rules above.
 
+If you run an agent, keep one long-running session rather than restarting it, don't `--resume` one
+whose prompt cache has gone cold (it re-reads the whole history at full price), and act on CodeRabbit
+comments only when they're about crashes, wrong results, data loss or security.
+
 Two quick checks run on every pull request (`.github/workflows/pr-checks.yml`, not required): it
 fails when a lower-numbered open PR by someone else already closes the same issue (the label
-`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt).
+`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt). A default here is a UX default only: a control, setting, preference or tool behaviour a user sees by default; a changed kernel or geometry result is `Changes a default: no`.
 
 ## Labels and triage
 

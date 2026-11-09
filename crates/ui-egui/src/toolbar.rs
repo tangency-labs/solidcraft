@@ -1,8 +1,8 @@
 //! Application bar, the workspace toolbar (tabs and panels) and keyboard shortcuts.
 
-use crate::fonts::RichTextExt as _;
 use crate::icons::glyphs::pin_icon;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::type_face::RichTextExt as _;
 use crate::ui_kit::{self, Container, Edge, Surface};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
@@ -275,9 +275,9 @@ fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32, vers
 /// The closed search field in the application bar, ending `right`: whole when the document tabs
 /// keep the room Report a bug's label leaves them (`tabs_room`: theirs without the field), else
 /// just its magnifier.
-fn header_search_rect(ctx: &egui::Context, bar: Rect, right: f32, tabs_room: f32) -> Rect {
+fn header_search_rect(app: &SolveApp, ctx: &egui::Context, bar: Rect, right: f32, tabs_room: f32) -> Rect {
     let height = 26.0;
-    let full = crate::ui_kit::CommandSearch::closed_width(ctx);
+    let full = crate::ui_kit::CommandSearch::closed_width(ctx, crate::keymap::display_for(app, "ui.palette").as_deref());
     let whole = bar.width() >= 640.0 && tabs_room - full - HEADER_SEARCH_GAP >= 216.0;
     let width = if whole { full } else { crate::ui_kit::CommandSearch::compact_width(height) };
     Rect::from_min_size(pos2(right - width, bar.center().y - height / 2.0), vec2(width, height))
@@ -423,7 +423,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     pos2(left + 36.0, r.center().y),
                     Align2::LEFT_CENTER,
                     "SolidCraft",
-                    crate::fonts::semibold(t.font_heading),
+                    crate::ui_kit::type_face::semibold(t.font_heading),
                     t.app_bar_text,
                 );
             }
@@ -536,7 +536,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             // moves the assistant button and the end of the document tabs left by its width.
             let gear_left = report.left() - 68.0;
             let search = (search_in_header(app) && design_shown(app))
-                .then(|| header_search_rect(ui.ctx(), r, gear_left - HEADER_SEARCH_GAP, report.left() - CLUSTER_BUTTONS - tabs_start));
+                .then(|| header_search_rect(app, ui.ctx(), r, gear_left - HEADER_SEARCH_GAP, report.left() - CLUSTER_BUTTONS - tabs_start));
             let search_shift = search.map_or(0.0, |s| s.width() + HEADER_SEARCH_GAP);
             if let Some(search) = search {
                 // shortcut_box::show draws the one search editor wherever this rectangle is.
@@ -1287,7 +1287,7 @@ fn ribbon_button_galley_weight(painter: &egui::Painter, label: &str, width: f32,
     let size = solidcraft_theme::Tokens::get().font_body;
     let mut job = egui::text::LayoutJob::simple(
         lines.join("\n"),
-        if selected { crate::fonts::semibold(size) } else { FontId::proportional(size) },
+        if selected { crate::ui_kit::type_face::semibold(size) } else { FontId::proportional(size) },
         color,
         f32::INFINITY,
     );
@@ -1369,7 +1369,10 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
     let widths: Vec<_> = tabs
         .iter()
         .map(|tab| {
-            ui.painter().layout_no_wrap(ribbon_label(app, tab), crate::fonts::semibold(solidcraft_theme::Tokens::get().font_button), t.text).size().x
+            ui.painter()
+                .layout_no_wrap(ribbon_label(app, tab), crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_button), t.text)
+                .size()
+                .x
                 + 24.0
         })
         .collect();
@@ -1385,7 +1388,8 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
     // The application bar may hold the search field instead ([`HeaderLayout`]): the tabs then
     // run to the row's end.
     let in_ribbon = !search_in_header(app);
-    let search_width = if in_ribbon { crate::ui_kit::CommandSearch::closed_width(ui.ctx()) } else { 0.0 };
+    let search_width =
+        if in_ribbon { crate::ui_kit::CommandSearch::closed_width(ui.ctx(), crate::keymap::display_for(app, "ui.palette").as_deref()) } else { 0.0 };
     // The first tab and the search field sit the same distance from the card's top, left and right
     // edges, so their outer corners are concentric with the card's corners.
     let floating = Container::for_layout(app.ui.layout, Surface::Panel).floating();
@@ -1395,7 +1399,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
     let action_labels = [app.tr_label("Render").to_string(), app.tr_label("Cancel").to_string()];
     let action_widths = action_labels
         .each_ref()
-        .map(|label| ui.painter().layout_no_wrap(label.clone(), crate::fonts::semibold(t.font_button), t.text).size().x + 24.0);
+        .map(|label| ui.painter().layout_no_wrap(label.clone(), crate::ui_kit::type_face::semibold(t.font_button), t.text).size().x + 24.0);
     let action_width = if render { action_widths.iter().sum::<f32>() + 2.0 * t.space_2 } else { 0.0 };
     let search = Rect::from_min_size(
         pos2(row.right() - search_width - inset - action_width, row.top() + inset),
@@ -2195,7 +2199,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             let label = if finish { app.tr("ui.ribbon_exit").to_string() } else { ribbon_label(app, panel) };
             let panel_open = panel_open || hidden_running;
             let font = if panel_open || hot {
-                crate::fonts::semibold(solidcraft_theme::Tokens::get().font_caption)
+                crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_caption)
             } else {
                 FontId::proportional(solidcraft_theme::Tokens::get().font_caption)
             };
@@ -2578,8 +2582,11 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
     response.backing_on_hover_ui(|ui| {
         let t = Tokens::get();
         let name = app.tr_label(crate::render_workspace::interactive_command_info(app, command).label);
-        let name_width =
-            ui.painter().layout_no_wrap(name.to_string(), crate::fonts::semibold(solidcraft_theme::Tokens::get().font_heading), t.text).size().x;
+        let name_width = ui
+            .painter()
+            .layout_no_wrap(name.to_string(), crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_heading), t.text)
+            .size()
+            .x;
         let key_width = crate::keymap::display_for(app, command.id)
             .map(|key| {
                 ui.painter().layout_no_wrap(key.to_string(), FontId::monospace(solidcraft_theme::Tokens::get().font_body), t.text_dim).size().x + 24.0
@@ -2676,7 +2683,7 @@ fn reveal_tooltip(app: &SolveApp, ui: &egui::Ui, rect: Rect, command: &solidcraf
 /// the grid: a step below the drop-down's own header (`font_caption`) and written as named, not
 /// in capitals, so it reads as part of the menu rather than above it.
 fn group_heading_font() -> FontId {
-    crate::fonts::semibold(Tokens::get().font_micro)
+    crate::ui_kit::type_face::semibold(Tokens::get().font_micro)
 }
 
 /// A group heading's text: its name in the interface language, as written.
@@ -3742,9 +3749,6 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // A single Esc with nothing left to cancel keeps the sketch open (#1804); a quick
                 // second press finishes it (above).
             }
-            Key::S if !mods.shift && !mods.alt => {
-                app.start("ui.palette");
-            }
             // With a menu open, V runs that menu's Show/Hide on what the menu is for.
             Key::V => {
                 if !crate::context_menu::press_shortcut(app, "V") {
@@ -4474,7 +4478,7 @@ mod header_report_tests {
         let search = rect("ribbon:search");
         assert!(search.top() >= APP_BAR_HEIGHT, "search is in the ribbon: {search:?}");
         assert_eq!(search.height(), TAB_ROW_HEIGHT - 2.0 * RIBBON_TAB_INSET);
-        assert_eq!(search.width(), crate::ui_kit::CommandSearch::closed_width(&h.ctx));
+        assert_eq!(search.width(), crate::ui_kit::CommandSearch::closed_width(&h.ctx, Some("S")));
         assert!(crate::scenario::rect_of("titlebar:search").is_none());
         let report = rect("titlebar:report");
         // A pre-release's longer version takes more room than RIGHT_GROUP and moves the button left.
@@ -4507,7 +4511,7 @@ mod header_report_tests {
         let (search, prefs) = (rect("titlebar:search"), rect("titlebar:preferences"));
         assert_eq!(search.right(), prefs.left() - HEADER_SEARCH_GAP, "search sits immediately left of Settings");
         assert!(search.bottom() <= APP_BAR_HEIGHT && (search.center().y - prefs.center().y).abs() < 0.5);
-        assert_eq!(search.width(), crate::ui_kit::CommandSearch::closed_width(&h.ctx), "the whole field where there is room");
+        assert_eq!(search.width(), crate::ui_kit::CommandSearch::closed_width(&h.ctx, Some("S")), "the whole field where there is room");
         assert_eq!(rect("ribbon:search"), search, "the one search field is drawn in the bar");
         // Report a bug: an icon the size of Settings and Help, still named for assistive tools.
         let report = rect("titlebar:report");
@@ -5703,7 +5707,7 @@ mod ribbon_label_tests {
                 .collect();
             assert_eq!(text.len(), 1, "ribbon labels must never be drawn twice");
             let text = text[0];
-            assert_eq!(text.galley.job.sections[0].format.font_id, crate::fonts::semibold(13.0));
+            assert_eq!(text.galley.job.sections[0].format.font_id, crate::ui_kit::type_face::semibold(13.0));
             assert_eq!(text.galley.job.sections[0].format.color, ink);
             assert!((text.pos.x * scale - (text.pos.x * scale).round()).abs() < 0.001);
             assert!((text.pos.y * scale - (text.pos.y * scale).round()).abs() < 0.001);
@@ -6292,7 +6296,7 @@ mod persistent_ribbon_tests {
                 })
                 .unwrap_or_else(|| panic!("missing {id} label"));
             let font = &text.galley.job.sections[0].format.font_id;
-            assert_eq!(*font, if selected { crate::fonts::semibold(t.font_body) } else { FontId::proportional(t.font_body) });
+            assert_eq!(*font, if selected { crate::ui_kit::type_face::semibold(t.font_body) } else { FontId::proportional(t.font_body) });
             assert_eq!(text.galley.job.sections[0].format.color, if selected { t.selected_ink } else { t.text });
         }
     }

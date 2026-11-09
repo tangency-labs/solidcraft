@@ -1319,6 +1319,7 @@
   "cmd.timeline_stop": "Verlauf anhalten",
   "cmd.timeline_suppress": "Merkmal unterdrücken",
   "cmd.ui.assistant": "Assistenten ein-/ausblenden",
+  "cmd.ui.palette": "Befehle suchen",
   "cmd.view.navigator": "Eigener Ansichtsnavigator",
   "cmd.view.render_browser": "Render-Browser",
   "cmd.view.render_dock": "Render-Panel verschieben",

@@ -50,8 +50,11 @@ pub struct EdgeHit {
 }
 
 /// The edge of a body a stored edge name finds: the edge with that name; else the one edge
-/// between the faces it names exactly (see [`exactly`]). `Err` explains when there is none: no
-/// such edge, the named edge split into several, or a name saved before format 14.
+/// between the faces it names exactly (see [`exactly`]). A numbered name (`~k`) was one of
+/// several edges between its faces, told apart only by where they lay, so the one edge left
+/// between them is it only where the reference's point still lies on it. `Err` explains when
+/// there is none: no such edge, the named edge split into several, one of several edges whose
+/// faces now bound one edge elsewhere, or a name saved before format 14.
 pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
     if legacy_name(name).is_some() {
         return Err(format!("edge `{name}` was named by a build before format 14"));
@@ -81,7 +84,13 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
         keep_best(&mut best, level, i);
     }
     let (_, cands) = best.ok_or_else(|| format!("edge `{name}` no longer exists"))?;
+    // When the faces of several numbered edges bound one edge now, every one of their names
+    // finds the faces of that edge: taking it for each would put them all on one edge (#13332).
+    let numbered = wanted.len() != name.len();
     match cands.as_slice() {
+        [i] if numbered && !edge_near(b, &m, *i, near) => {
+            Err(format!("edge `{name}` was one of several between its faces, and the one left is elsewhere"))
+        }
         [i] => exact(*i),
         _ => Err(format!("edge `{name}` is no longer one edge")),
     }

@@ -74,7 +74,7 @@ pub fn look_chain(ui: &mut Ui, id: &str, labels: [&str; 4], looks: [Option<Spher
         if step == active {
             painter.circle_stroke(center, radius + ring_width, Stroke::new(ring_width, t.render_accent));
         }
-        let font = if step == active { crate::fonts::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
+        let font = if step == active { crate::ui_kit::type_face::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
         let label_width = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), t.form_ink).size().x;
         let label_left = (cell.center().x - label_width / 2.0).max(cell.left());
         let label_rect = Rect::from_min_max(pos2(label_left, cell.top() + side + t.space_2), cell.max);

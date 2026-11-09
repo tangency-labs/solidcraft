@@ -330,6 +330,7 @@ timeline.play                     plays the history back in the view: no new geo
 timeline.rename                   a feature name
 timeline.rename_group             a group name
 ui.assistant                      the view: camera, layout, display
+ui.palette                        the view: the command search; tested in crates/ui-egui/src/keymap.rs
 view.ambient_occlusion            the view: camera, layout, display
 view.angle_readout                the view: camera, layout, display
 view.apply                        the view: camera, layout, display

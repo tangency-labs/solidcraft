@@ -1821,6 +1821,32 @@ fn appearance_browser_selection_reaches_the_editor_without_other_bodies() {
     }
 }
 
+/// #12334: Save As Mesh and Send to Slicer on a selected browser row open their dialog with every
+/// selected body; a row outside the selection, or a lone selected one, opens it with that row only.
+#[test]
+fn mesh_export_from_a_selected_browser_body_takes_the_selected_bodies() {
+    let cases = [
+        ("One", vec!["One", "Two"], vec!["One", "Two"]),
+        ("Two", vec!["One", "Two"], vec!["One", "Two"]),
+        ("Other", vec!["One", "Two"], vec!["Other"]),
+        ("One", vec!["One"], vec!["One"]),
+    ];
+    for label in ["Send to Slicer", "Save As Mesh"] {
+        for (clicked, selected, expected) in &cases {
+            let mut app = appearance_selection_app();
+            // Send to Slicer needs a way to start a program.
+            app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+            let items: Vec<_> = selected.iter().map(|name| json!({"type":"body","name":name})).collect();
+            app.run("select.set", json!({ "items": items })).unwrap();
+            let item = find(&context_menu::items(&app, &Target::Body { name: (*clicked).into() }), label);
+            context_menu::run_item(&mut app, &item, pos2(0.0, 0.0));
+            let dialog = app.dialog.as_ref().unwrap_or_else(|| panic!("{label} opens its dialog"));
+            let bodies: Vec<_> = expected.iter().map(|name| solidcraft_engine::Sel::Body { name: (*name).into() }).collect();
+            assert_eq!(dialog.inputs[0].items, bodies, "{label}: clicked {clicked}, selected {selected:?}");
+        }
+    }
+}
+
 #[test]
 fn appearance_parent_click_opens_editor_after_hovering_quick_choices() {
     use crate::scenario::{Harness, rect_of};

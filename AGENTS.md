@@ -20,7 +20,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - A design-format change is ONE new file in `crates/doc/src/format/pending/`: `scripts/test-format-pending.sh`.
 - A command has input and output schemas (will become required; `schema/unconverted.txt` only shrinks): `skills/solidcraft-commands/SKILL.md`.
 - New UI strings go in `assets/locales/pending/<slug>.json`, ATTRIBUTION rows in `attribution/pending/<slug>.md`: `cargo xtask lists`.
-- A changed default keeps the old behaviour behind a preference and fills the PR's `Changes a default:` line: `pr-checks.yml`.
+- A changed default (existing UI, not kernel results) keeps the old behaviour behind a preference; fill the PR's `Changes a default:` line.
 - A regression test goes in the area's existing test file, never a per-bug file (#3226).
 - Look at open PRs first, claim with a draft PR (lowest number wins), one topic per PR: `skills/solidcraft-contributing/SKILL.md`.
 - A PR's title and first sentence make sense to someone who never saw your chat or the issue: `skills/solidcraft-contributing/SKILL.md`.

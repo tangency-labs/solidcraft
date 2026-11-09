@@ -484,7 +484,12 @@ fn viewport_status_kinds_keep_shape_outline_and_typography_across_themes() {
                             mono = text.galley.job.sections.first().is_some_and(|s| s.format.font_id.family == egui::FontFamily::Monospace);
                         }
                         Shape::Text(text) if text.galley.job.text == item.name => {
-                            name = text.galley.job.sections.first().is_some_and(|s| s.format.font_id == crate::fonts::semibold(t.font_label));
+                            name = text
+                                .galley
+                                .job
+                                .sections
+                                .first()
+                                .is_some_and(|s| s.format.font_id == crate::ui_kit::type_face::semibold(t.font_label));
                         }
                         _ => {}
                     });
@@ -702,7 +707,7 @@ fn compass_negative_ends_are_hollow_and_positive_ends_are_chunkier() {
                     .collect();
                 assert_eq!(letters.len(), 1, "each axis letter is painted once");
                 let letter = letters[0];
-                assert_eq!(letter.galley.job.sections[0].format.font_id, crate::fonts::bold(Tokens::get().font_compass));
+                assert_eq!(letter.galley.job.sections[0].format.font_id, crate::ui_kit::type_face::bold(Tokens::get().font_compass));
                 assert_eq!(letter.pos.x.fract(), 0.0);
                 assert_eq!(letter.pos.y.fract(), 0.0);
             } else {
@@ -991,7 +996,8 @@ fn the_shared_toast_draws_old_callers_exactly_as_before() {
             draw(&ctx, |ui| {
                 let t = Tokens::get();
                 let text = "A message that is long enough to wrap in the narrow cases, and not in the wide ones".to_string();
-                let galley = ui.painter().layout(text.clone(), crate::fonts::medium(t.font_label), t.text, (free.width() - 40.0).min(440.0));
+                let galley =
+                    ui.painter().layout(text.clone(), crate::ui_kit::type_face::medium(t.font_label), t.text, (free.width() - 40.0).min(440.0));
                 let size = galley.size() + vec2(40.0, 16.0);
                 let expected = Rect::from_center_size(pos2(free.center().x, free.bottom() - size.y * 0.5), size);
                 let got = paint_toast(ui, free, text, error, computing);

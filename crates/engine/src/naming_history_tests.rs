@@ -125,6 +125,47 @@ fn an_upstream_cut_that_splits_a_face_keeps_the_edge_that_bounded_it() {
     assert!(solid_at(&s, [0.1, 15.0, 9.9]), "the left one is not");
 }
 
+/// Three pockets of a pattern open onto the block's front wall, and a channel at their depth
+/// joins their floors into one face: the three edges between the wall and that floor share one
+/// name, numbered by where they lie, and a chamfer keeps all three. With the channel shallower,
+/// each pocket has its own floor again, and only the first pocket's edge lies between the wall
+/// and the floor the names name. The chamfer asks for its edges again instead of chamfering
+/// that one edge for all three (#13332); with the floors joined again, it finds all three.
+#[test]
+fn edges_numbered_between_two_faces_are_not_all_taken_for_the_one_left_there() {
+    let mut s = Session::default();
+    block(&mut s);
+    run(&mut s, "parameters.add", json!({"name": "channel_floor", "expression": "5 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "PocketSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [3, -5], "p1": [9, 6]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "PocketSketch", "distance": 12, "start_offset": 5, "operation": "cut", "name": "Pocket"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Pocket"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 12, "name": "Row"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "ChannelSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [3, 3], "p1": [33, 9]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let channel = json!({"sketch": "ChannelSketch", "distance": 12, "start_offset": "channel_floor", "operation": "cut", "name": "Channel"});
+    run(&mut s, "solid.extrude", channel);
+    run(&mut s, "solid.chamfer", json!({"edges": [[6, 0, 5], [18, 0, 5], [30, 0, 5]], "distance": 1, "name": "Chamfer"}));
+    let (block, pocket) = (id(&s, "Block"), id(&s, "Pocket"));
+    let chamfer = s.doc.find_feature("Chamfer").cloned().unwrap();
+    let mut stored = chamfer.edge_names.clone();
+    stored.sort();
+    assert_eq!(stored, (1..=3).map(|k| format!("F{block}:side:l1|F{pocket}:top~{k}")).collect::<Vec<_>>());
+    // Inside the block just below each pocket's floor, at the front: cut away by a chamfer there.
+    let chamfered = |s: &Session| [6.0, 18.0, 30.0].map(|x| !solid_at(s, [x, 0.2, 4.8]));
+    assert_eq!(chamfered(&s), [true; 3]);
+
+    change(&mut s, "channel_floor", "6 mm");
+    let asked = reselect(&s, "Chamfer");
+    assert!(asked.as_ref().is_some_and(|name| chamfer.edge_names.contains(name)), "{asked:?}, {:?}", error(&s, "Chamfer"));
+    assert_eq!(chamfered(&s), [false; 3], "no pocket's edge is chamfered for another's");
+
+    change(&mut s, "channel_floor", "5 mm");
+    assert_eq!(error(&s, "Chamfer"), None);
+    assert_eq!(chamfered(&s), [true; 3]);
+}
+
 #[test]
 fn a_blend_follows_its_named_edge_to_a_moved_lid_instead_of_the_body_below() {
     for (command, size, removed) in [("solid.fillet", "radius", (4.0 - std::f64::consts::PI) * 5.0), ("solid.chamfer", "distance", 2.0 * 5.0)] {
