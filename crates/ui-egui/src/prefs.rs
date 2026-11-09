@@ -4081,9 +4081,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
 
 #[cfg(test)]
 pub(crate) fn keep_search_reveal_visible(app: &mut SolveApp) -> bool {
-    let Some(reveal) = app.prefs_window.reveal.as_mut() else { return false };
-    reveal.until = f64::INFINITY;
-    true
+    app.prefs_window.shell.keep_reveal_visible()
 }
 
 #[cfg(test)]

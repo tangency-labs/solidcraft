@@ -1326,7 +1326,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
         })
         .show(ctx, true, |ui| {
             if let Some(group) = app.docs.group.as_mut() {
-                let t = Tokens::get();
+                let t = solidcraft_theme::Tokens::get();
                 let row_height = t.control_height + t.font_small + t.space_8 + t.space_8;
                 let chrome = t.form_close_size + t.form_footer_height + t.space_24 * 3.0;
                 let height = (row_height * 8.0).min((ctx.content_rect().height() - chrome).max(t.control_height));
@@ -1364,7 +1364,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
                                             ui.vertical(|ui| {
                                                 ui.spacing_mut().item_spacing.y = 0.0;
                                                 ui.spacing_mut().button_padding.x = 0.0;
-                                                let name = ui_kit::button(ui, &crate::i18n::tr_name(&session.doc.name), ui_kit::Button::Ghost);
+                                                let name = ui_kit::button(ui, crate::i18n::tr_name(&session.doc.name), ui_kit::Button::Ghost);
                                                 crate::scenario::publish_target(&format!("save_many:name:{index}"), name.rect);
                                                 if name.clicked() {
                                                     show_tab = Some(*index);
