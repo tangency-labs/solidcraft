@@ -1685,4 +1685,39 @@ fn fuzz_seed_73_boolean_join_builds() {
     assert!(m.volume > 0.0, "the union must be a real solid: {}", m.volume);
     println!("#10 seed 73: joined body volume {volume:.2} mm³", volume = m.volume);
 }
+
+/// Issue #10: fuzzer seed 141. Revolve a section, then cut a sphere. The boolean cut's result is
+/// refused as "SMLib's result is not a closed solid". Every failing seed of the boolean fuzzer is
+/// a reproducible bug, fixed with a regression test that fails without the fix.
+/// Root cause not yet found — topologically different from seed 73's "Bad Gap" tolerance issue.
+#[ignore = "fails until the boolean cut root cause for seed 141 is found (#10)"]
+#[test]
+fn fuzz_seed_141_boolean_cut_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_141_boolean_cut.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the cut must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the cut body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the cut must be a real solid: {}", m.volume);
+    println!("#10 seed 141: cut body volume {volume:.2} mm³", volume = m.volume);
+}
+
+/// Issue #10: fuzzer seed 158. Box, chamfer, join/cut cylinders, join box, join cylinder, then
+/// shell. The shell step fails with "SMLib shell: operation: SMLib failed (status 1001)".
+/// Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a regression test
+/// that fails without the fix.
+/// Root cause not yet found — shell result tolerance, topologically different from seed 73's
+/// "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the shell root cause for seed 158 is found (#10)"]
+#[test]
+fn fuzz_seed_158_shell_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_158_shell.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the shell must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the shelled body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the shell must be a real solid: {}", m.volume);
+    println!("#10 seed 158: shelled body volume {volume:.2} mm³", volume = m.volume);
 }
