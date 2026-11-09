@@ -34,9 +34,10 @@ use crate::curve::line::Line;
 use crate::error::{Result, SolidError};
 use crate::eval::{Curve as Record, Curve2 as Record2, Frame};
 use crate::geom::axis2_placement::Axis2Placement;
-use crate::geom::extent1d::Extent1d;
+use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
@@ -162,6 +163,16 @@ pub fn record_parameter(record: &Record, interval: [f64; 2], t: f64, at: Point3)
     let d = at - p3(frame.origin);
     let angle = (d.dot(p3(frame.y_axis)) / ry).atan2(d.dot(p3(frame.x_axis)) / rx);
     angle + TAU * ((near - angle) / TAU).round()
+}
+
+/// The record parameter `t` on `interval`, as the kernel classifies a parameter against an
+/// interval (`SmExtent1d::ClassifyPoint` at its default tolerance, `EFF_ZERO`): inside as it is,
+/// on an end moved onto that end (a solve's rounding past it), outside `None`.
+#[must_use]
+pub fn on_interval(interval: [f64; 2], t: f64) -> Option<f64> {
+    // not built yet: the kernel's classification comes in the next commit
+    let _ = (ExtentPointType::Inside, EFF_ZERO);
+    (interval[0] <= t && t <= interval[1]).then_some(t)
 }
 
 /// A circle or ellipse edge on its NURBS form `form` (a spline or rational spline, the
