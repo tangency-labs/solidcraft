@@ -207,7 +207,8 @@ fn fixed_cpu_volume_request_header_is_prepaid_on_completed_and_cancelled_regrade
     let header = ImageRequest::fixed_cpu_metadata_bytes();
     assert_eq!(
         header,
-        (std::mem::size_of::<Option<super::super::volume::HomogeneousVolume>>()
+        (std::mem::size_of::<Option<super::super::CausticOptions>>()
+            + std::mem::size_of::<Option<super::super::volume::HomogeneousVolume>>()
             + std::mem::size_of::<Option<Box<super::super::Sun>>>()
             + std::mem::size_of::<Option<Box<super::super::CpuSky>>>()) as u64
     );

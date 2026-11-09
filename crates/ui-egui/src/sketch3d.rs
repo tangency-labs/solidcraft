@@ -16,9 +16,9 @@ use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::tools::Tool;
 use crate::viewport::{Hit, Proj, pick_3d};
+use solidcraft_theme::Tokens;
 
 thread_local! {
     /// Points of the curve being drawn in 3D (with the tool they belong to).
@@ -256,7 +256,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
                 s + vec2(10.0, -14.0),
                 egui::Align2::LEFT_BOTTOM,
                 label,
-                egui::FontId::proportional(crate::theme::Tokens::get().font_micro),
+                egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro),
                 tk.text,
             );
         }
@@ -264,7 +264,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
             crate::tool_cursor::readout_at(painter, proj.rect, s),
             egui::Align2::LEFT_TOP,
             format!("{}, {}, {}", crate::prefs::show_mm(app, h.x, 1), crate::prefs::show_mm(app, h.y, 1), crate::prefs::show_mm(app, h.z, 1)),
-            egui::FontId::proportional(crate::theme::Tokens::get().font_small),
+            egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small),
             tk.text_dim,
         );
     }

@@ -28,7 +28,8 @@ remains schematic; it is not physical Glass, GI or an alternate path tracer.
 | Selected reflection/anisotropy overrides | Existing direct/legacy contracts remain. Selected overrides refuse with Path; no silent clearing or reinterpretation. | No equivalent CPU planar selected-anisotropy adapter. HG phase anisotropy is a different parameter. |
 | Guided denoising | Complete displayed passes are filtered; Glass and sharp specular first hits bypass. Raw EXR remains unfiltered. Active medium restrictions above remain. | Same distinction: surface guide filter, not a Glass/DOF ML denoiser; raw accumulation stays intact. |
 | Physical lens and output | Explicit lens; straight-alpha primary coverage PNG and compatible finishing; completed raw EXR. Glass is not a general transmissive compositing matte. | Explicit lens, compatible PNG/finishing and completed raw EXR under its own admission. |
-| Rough Glass and caustics | No rough BTDF or refracted-caustic solver. | Smooth delta Glass only; no rough BTDF or general refracted-caustic solver. |
+| Rough Glass, dispersion and coating interference | Optional isotropic GGX reflection/transmission, bounded Abbe/Cauchy dispersion and one lossless coherent coating; explicit Path. Three representative RGB bands. | Same authored models with f32 arithmetic and its precision refusals; three representative RGB bands. |
+| Hard-source caustics | Opt-in bounded photon paths and finite-radius density estimate. | Opt-in bounded photon paths and finite-radius density estimate; lazy seven-storage-buffer pipeline. |
 
 Stable Glass, opaque coats and built-in maps save with the shot and resolve exact
 definition/feature/component/occurrence targets. Glass cannot share a target with
@@ -43,6 +44,14 @@ will admit that request. No renderer or document-format cap is raised by this
 capability summary. See [CPU profiles](render-cpu-resource-profiles.md),
 [general Glass](render-cpu-general-glass.md), [GPU boundaries](render-glass-boundaries.md),
 [shadow connections](render-glass-shadows.md) and [clear coat](render-clear-coat.md).
+The [detailed Glass matrix](render-glass-complete.md) describes the current
+dielectric contract, charged Path sheet tessellations, actual uploaded-GPU
+geometry certification and reproducible CPU/GPU examples. The
+[material-model guide](render-glass-material-models.md) covers rough transmission,
+three-band dispersion, coherent single-layer films and finite-radius hard-source
+caustics. These are not dense spectral integration or an unbiased general
+specular-chain solver. Their new source and headless evidence are qualified
+separately from the historical results below.
 
 <a id="qualification"></a>
 
@@ -86,7 +95,7 @@ These are current source behaviors in this change. See
 qualification by exact source and executed scope. The historical 00ed/CI7 results
 and opaque native fixture above remain separate.
 
-Closed CPU shadow approximation, rough transmission, complete Path selected
-reflection/anisotropy parity, external-map import, refracted caustics and a
-production Glass denoiser remain separate work. Unsupported guards cannot be
-removed to manufacture those capabilities.
+Closed CPU shadow approximation, complete Path selected reflection/anisotropy
+parity, external-map import, dense spectral transport, general unbiased caustics
+and a production Glass denoiser remain separate work. Unsupported guards cannot
+be removed to manufacture those capabilities.

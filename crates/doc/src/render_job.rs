@@ -83,6 +83,8 @@ impl RenderJob {
 #[serde(default, deny_unknown_fields)]
 pub struct CpuJob {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub caustics: Option<solidcraft_render::job::CausticOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub volume: Option<solidcraft_render::job::volume::HomogeneousVolume>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sun: Option<Sun>,
@@ -127,6 +129,7 @@ pub struct CpuJob {
 impl Default for CpuJob {
     fn default() -> Self {
         Self {
+            caustics: None,
             volume: None,
             sun: None,
             sky: None,
@@ -197,6 +200,7 @@ impl CpuJob {
             })
             .transpose()?;
         let options = RaytraceOptions {
+            caustics: self.caustics,
             volume: self.volume,
             sun: self.sun.map(Box::new),
             sky,
@@ -229,6 +233,8 @@ impl CpuJob {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct GpuJob {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caustics: Option<solidcraft_render::job::CausticOptions>,
     #[serde(skip_serializing_if = "crate::render_aging::SavedAgingStack::is_empty")]
     pub aging: crate::render_aging::SavedAgingStack,
     pub nested_media: bool,
@@ -263,6 +269,7 @@ impl Default for GpuJob {
     fn default() -> Self {
         let options = JobOptions::default();
         Self {
+            caustics: None,
             aging: Default::default(),
             nested_media: options.nested_media,
             volume: options.volume,
@@ -310,6 +317,7 @@ impl GpuJob {
             environment.validate()?;
         }
         let options = JobOptions {
+            caustics: self.caustics,
             aging: self.aging.parameters_only()?,
             nested_media: self.nested_media,
             volume: self.volume,

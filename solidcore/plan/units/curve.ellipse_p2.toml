@@ -1,0 +1,12 @@
+id = "curve.ellipse_p2"
+upstream = ["source/SMLib/inc/SmEllipse.h", "source/SMLib/src/SmEllipse.cpp"]
+rust_module = "curve::ellipse::p2"
+depends_on = ["curve.curve_p2", "curve.line", "geom.axis2_placement", "geom.extent1d", "geom.geom_utility_p1", "geom.object", "geom.solution_array", "geom.tol", "geom.vector3d", "nurbs.b_spline_curve_p1"]
+soft_depends_on = ["geom.geom_utility_p2"]
+est_lines = 1916
+layer = 15
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-curve.ellipse_p2-a1"
+claimed_at = "2026-10-13T02:16:47Z"
+notes = "main CI e33985411 (2026-10-23): PASS curve.ellipse_p2 cases=2107 passed=2107 failed=0 deferred=0. GREEN (promoted by curve.curve_p5: 2102 cases, 0 deferred after its stubs were wired); PARTIAL: difftest 2102 cases (102 fixture: my_test_analytic_curves circle/ellipse, my_test_drop_curve_near_seam circle (inside-out), smCurveTest circle/circle and line/circle intersection configurations re-expressed as SmEllipse, edge cases: inside-out, negative/near-0/180/360 domains, tiny arcs, skewed axes, pOptNurb, SetSTEPInterval+SetUp, transforms, DropPointFast seams/sub-intervals + 2000 generated op programs), 2005 pass bit-identical (max_rel_err 0), 97 deferred (curve.curve_p5 97: LocalPropertyAnalysis and the curve solvers' Newton equations; curve.ellipse_p1 wiring cleared GlobalPointSolve, ConvertTo2D and GlobalCoincidenceChecker); 30k-seed run clean; --perturb SENSITIVE; co-ported SmEllipse constructor + MakeNurb from curve.ellipse_p1 (Ellipse not yet a CurveKind variant); wired UNPORTED(curve.ellipse_p2) in curve.line (Line::intersect_with_ellipse takes &Ellipse; curve.line deferred 2 -> 1). 44 fns; largest: SmEllipse::IntersectWithEllipse, SmPolarConversion::SetUpPolarConversion, SmEllipse::IntersectWithLine, SmEllipse::DropPointFast; cycle back-edges (call into later units; stub or co-port): curve.curve_p5(3), curve.curve_p1(2), curve.curve_p3(2), curve.curve_p6(1), curve.ellipse_p1(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"

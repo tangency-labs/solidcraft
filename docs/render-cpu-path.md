@@ -24,8 +24,10 @@ with Path; authored values are retained. Selected-medium subsurface scattering,
 bounded [Atmosphere](render-cpu-volume.md), Sun/Sky and independent-pilot adaptive
 sampling are implemented and included in the published test suites. Active
 Atmosphere cannot combine with Glass/SSS or surface Denoise. Active selected-medium
-scattering also requires disabled surface Denoise. Emissive-mesh next-event sampling,
-rough transmission and multithreading remain separate work. Every request still
+scattering also requires disabled surface Denoise. Optional [Glass material models](render-glass-material-models.md)
+add GGX rough transmission, three-band dispersion, one lossless coherent film and
+finite-radius hard-source photon caustics. Emissive-mesh next-event sampling and
+multithreading remain separate work. Every request still
 has its own geometry, memory, work and compatibility admission.
 The CPU Sampling control and CPU Glass transport entry point require explicit
 progressive adoption for saved fixed choices. Disabling path lighting preserves

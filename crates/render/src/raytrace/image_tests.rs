@@ -1013,6 +1013,7 @@ fn dielectric_triangle_task(cancel: CancelToken) -> ImageTask {
     let mut request = task.request;
     let options = RaytraceOptions {
         dielectrics: vec![job::DielectricOptions {
+            model: None,
             shadow_transmission: false,
             subsurface: None,
             body_index: 0,
@@ -1129,6 +1130,7 @@ fn optical_sheet(name: &str, x: f64, z: f64) -> crate::ProductMesh {
 
 fn optical_input(body_index: usize, body_name: &str, ior: f64) -> job::DielectricOptions {
     job::DielectricOptions {
+        model: None,
         shadow_transmission: false,
         subsurface: None,
         body_index,
@@ -1942,6 +1944,7 @@ fn cpu_denoise_production_guides_use_exact_body_and_material_bypass_policy() {
                     .iter()
                     .enumerate()
                     .map(|(body_index, body)| job::DielectricOptions {
+                        model: None,
                         shadow_transmission: false,
                         subsurface: None,
                         body_index,

@@ -15,6 +15,7 @@ use crate::{BackendId, Camera, ExecutorId};
 pub mod adaptive;
 pub mod aging;
 pub mod bloom;
+pub mod caustics;
 mod cpu_budget;
 mod cpu_path;
 mod cpu_sky;
@@ -44,6 +45,7 @@ mod rt2_tests;
 pub mod textures;
 pub mod volume;
 
+pub use caustics::CausticOptions;
 pub use cpu_budget::{CpuBudget, CpuBudgetLimits, MAX_CPU_BODIES, MAX_CPU_SAMPLES_PER_PIXEL, MAX_CPU_TRIANGLES, MAX_CPU_WORK, NATIVE_CPU_POOL_BYTES};
 pub use cpu_path::CpuPathOptions;
 pub use cpu_sky::CpuSky;
@@ -73,6 +75,8 @@ pub const MAX_GPU_DIELECTRICS: usize = 32;
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct JobOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caustics: Option<CausticOptions>,
     #[serde(skip_serializing_if = "aging::AgingStack::is_empty")]
     pub aging: aging::AgingStack,
     pub nested_media: bool,
@@ -103,6 +107,7 @@ pub struct JobOptions {
 impl Default for JobOptions {
     fn default() -> Self {
         Self {
+            caustics: None,
             aging: Default::default(),
             nested_media: false,
             volume: None,
@@ -165,6 +170,9 @@ impl JobOptions {
             .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "sampling pass target overflow"))
     }
     pub fn validate(&self) -> Result<()> {
+        if let Some(caustics) = self.caustics {
+            caustics.validate()?;
+        }
         self.aging.validate()?;
         if let Some(volume) = self.volume {
             volume.validate()?;
@@ -248,6 +256,12 @@ impl ImageWork for ImageTask {
 /// Device-independent executor boundary. The host owns admission leases and publication;
 /// an executor owns computation only. GPU implementations live above the render crate.
 pub trait ImageExecutor: Send + Sync {
+    fn supports_glass_models(&self) -> bool {
+        false
+    }
+    fn supports_caustics(&self) -> bool {
+        false
+    }
     /// Pure metadata: complete passes this request can publish (including adaptive pilots).
     /// The host prepays at most two immutable PNG snapshots in addition to executor work.
     fn preview_samples(&self, _options: JobOptions) -> Option<u32> {
@@ -655,6 +669,8 @@ pub enum DielectricBoundary {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DielectricOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<crate::glass_model::GlassModel>,
     /// Homogeneous elastic scattering inside a certified closed Path medium.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subsurface: Option<crate::transmission::subsurface::Subsurface>,
@@ -793,6 +809,8 @@ pub fn validate_cpu_denoise_image(width: u32, height: u32) -> Result<()> {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RaytraceOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caustics: Option<CausticOptions>,
     /// One bounded world-space participating medium, available with explicit Path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volume: Option<volume::HomogeneousVolume>,
@@ -850,6 +868,7 @@ pub struct RaytraceOptions {
 impl Default for RaytraceOptions {
     fn default() -> Self {
         Self {
+            caustics: None,
             volume: None,
             sun: None,
             sky: None,
@@ -1108,6 +1127,12 @@ impl RaytraceOptions {
     }
     pub fn validate(&self) -> Result<()> {
         let _ = self.retained_volume_bytes()?;
+        if let Some(caustics) = self.caustics {
+            caustics.validate()?;
+            if self.path.is_none() {
+                return Err(JobError::new(ErrorCode::InvalidRequest, "CPU caustics require explicit Indirect lighting"));
+            }
+        }
         if self.volume.as_ref().is_some_and(|v| v.active()) {
             if self.path.is_none() {
                 return Err(JobError::new(ErrorCode::InvalidRequest, "CPU Atmosphere requires explicit Indirect lighting"));
@@ -1194,6 +1219,15 @@ impl RaytraceOptions {
             return Err(JobError::new(ErrorCode::InvalidRequest, "at most eight dielectric overrides"));
         }
         for (index, input) in self.dielectrics.iter().enumerate() {
+            if let Some(model) = input.model {
+                model.validate(input.ior).map_err(|e| JobError::new(ErrorCode::InvalidRequest, e.to_string()))?;
+                if self.path.is_none() {
+                    return Err(JobError::new(ErrorCode::InvalidRequest, "advanced Glass models require CPU Indirect lighting"));
+                }
+                if input.boundary == DielectricBoundary::ThinSheet && input.shadow_transmission && model.roughness > 0.0 {
+                    return Err(JobError::new(ErrorCode::InvalidRequest, "rough thin-sheet Glass requires disabled straight transmitted shadows"));
+                }
+            }
             if let Some(scattering) = input.subsurface {
                 scattering.validate().map_err(|error| JobError::new(ErrorCode::InvalidRequest, error.to_string()))?;
                 if self.path.is_none() || input.boundary == DielectricBoundary::ThinSheet {
@@ -1403,7 +1437,8 @@ impl ImageRequest {
     /// Fixed inline request growth is prepaid even when raytrace is None.
     /// Queued/worker state cannot fund the retained Record after work release.
     pub const fn fixed_cpu_metadata_bytes() -> u64 {
-        (std::mem::size_of::<Option<volume::HomogeneousVolume>>()
+        (std::mem::size_of::<Option<CausticOptions>>()
+            + std::mem::size_of::<Option<volume::HomogeneousVolume>>()
             + std::mem::size_of::<Option<Box<Sun>>>()
             + std::mem::size_of::<Option<Box<CpuSky>>>()) as u64
     }
@@ -1504,6 +1539,7 @@ mod runtime_request_roundtrip_tests {
         };
         RaytraceOptions { progressive, area_lights: Some(vec![area]), ..Default::default() }.validate().unwrap();
         let dielectric = DielectricOptions {
+            model: None,
             shadow_transmission: false,
             subsurface: None,
             body_index: 0,

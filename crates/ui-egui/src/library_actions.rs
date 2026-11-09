@@ -24,13 +24,13 @@ pub(super) struct Dialog {
 
 fn label(action: Action) -> &'static str {
     match action {
-        Action::Open => crate::i18n::tr("library.action_open"),
-        Action::Insert => crate::i18n::tr("library.action_insert"),
-        Action::Rename => crate::i18n::tr("library.action_rename"),
-        Action::Move => crate::i18n::tr("library.action_move"),
-        Action::Copy => crate::i18n::tr("library.action_copy"),
-        Action::Trash => crate::i18n::tr("library.action_trash"),
-        Action::Reveal => crate::i18n::tr("library.action_reveal"),
+        Action::Open => solidcraft_ui_text::tr("library.action_open"),
+        Action::Insert => solidcraft_ui_text::tr("library.action_insert"),
+        Action::Rename => solidcraft_ui_text::tr("library.action_rename"),
+        Action::Move => solidcraft_ui_text::tr("library.action_move"),
+        Action::Copy => solidcraft_ui_text::tr("library.action_copy"),
+        Action::Trash => solidcraft_ui_text::tr("library.action_trash"),
+        Action::Reveal => solidcraft_ui_text::tr("library.action_reveal"),
     }
 }
 
@@ -84,7 +84,7 @@ pub(super) fn context_menu(app: &mut SolveApp, ui: &egui::Ui, response: &egui::R
 
 fn perform(app: &mut SolveApp, entry: Entry, action: Action) {
     let Some(path) = entry.path.to_str() else {
-        app.set_status(crate::i18n::tr("library.utf8"), true);
+        app.set_status(solidcraft_ui_text::tr("library.utf8"), true);
         return;
     };
     match action {
@@ -137,10 +137,10 @@ fn execute(app: &mut SolveApp, entry: &Entry, action: Action, destination: Optio
     let command_check = app.session.command_check();
     let scope = solidcraft_engine::io::vfs::current_scope();
     let (tx, rx) = std::sync::mpsc::channel();
-    let protected = crate::i18n::tr("library.close_using_file").to_owned();
-    let language = crate::i18n::language();
+    let protected = solidcraft_ui_text::tr("library.close_using_file").to_owned();
+    let language = solidcraft_ui_text::language();
     let spawned = std::thread::Builder::new().name("library-file-action".into()).spawn(move || {
-        let _language = crate::i18n::scope(language);
+        let _language = solidcraft_ui_text::scope(language);
         let result = solidcraft_engine::io::vfs::scoped(scope, || {
             if action != Action::Copy && guards.iter().any(|s| solidcraft_engine::session_uses_file(s, &path)) {
                 return (false, Err(protected));
@@ -152,20 +152,22 @@ fn execute(app: &mut SolveApp, entry: &Entry, action: Action, destination: Optio
         let _ = tx.send(result);
     });
     if let Err(error) = spawned {
-        app.library.error = Some(crate::i18n::format("library.worker_start_failed", &[("error", &error.to_string())]));
+        app.library.error = Some(solidcraft_ui_text::format("library.worker_start_failed", &[("error", &error.to_string())]));
         return false;
     }
     let entry = entry.clone();
     let destination = destination.map(std::path::Path::to_path_buf);
-    app.set_status(crate::i18n::tr("library.file_working"), false);
+    app.set_status(solidcraft_ui_text::tr("library.file_working"), false);
     app.begin_file_task(
         std::future::poll_fn(move |_| match rx.try_recv() {
             Ok(result) => std::task::Poll::Ready(result),
             Err(std::sync::mpsc::TryRecvError::Empty) => std::task::Poll::Pending,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => std::task::Poll::Ready((true, Err(crate::i18n::tr("library.worker_stopped").into()))),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                std::task::Poll::Ready((true, Err(solidcraft_ui_text::tr("library.worker_stopped").into())))
+            }
         }),
         move |app, (attempted, result)| {
-            let _language = crate::i18n::scope(&app.preferences.language);
+            let _language = solidcraft_ui_text::scope(&app.preferences.language);
             // A partial transfer may have written a destination even on failure.
             if attempted {
                 app.library.refresh();
@@ -202,7 +204,7 @@ fn finish(
                 }
                 app.home.recent.retain(|p| !p.is_empty());
             }
-            app.set_status(crate::i18n::format("library.completed", &[("action", label(action))]), false);
+            app.set_status(solidcraft_ui_text::format("library.completed", &[("action", label(action))]), false);
             true
         }
         Err(error) => {
@@ -218,7 +220,7 @@ pub(super) fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let mut confirm = false;
     let mut cancel = false;
     let (closed, action) = crate::ui_kit::Window::new(egui::Id::unique("library_file_action"), "folder", label(dialog.action))
-        .actions(label(dialog.action), crate::i18n::tr("ui.cancel"), None)
+        .actions(label(dialog.action), solidcraft_ui_text::tr("ui.cancel"), None)
         .fields()
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, true, |ui| {
@@ -232,14 +234,14 @@ pub(super) fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     dialog.error.is_some(),
                     255,
                 );
-                input.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, crate::i18n::tr("library.new_filename")));
+                input.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, solidcraft_ui_text::tr("library.new_filename")));
                 if dialog.focus {
                     input.request_focus();
                     dialog.focus = false;
                 }
                 confirm |= input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             } else {
-                ui.label(crate::i18n::tr("library.confirm_trash"));
+                ui.label(solidcraft_ui_text::tr("library.confirm_trash"));
             }
             if let Some(error) = &dialog.error {
                 ui.label(error);
@@ -255,7 +257,7 @@ pub(super) fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
         let destination = if dialog.action == Action::Rename {
             let name = dialog.name.trim();
             if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
-                dialog.error = Some(crate::i18n::tr("library.invalid_name").into());
+                dialog.error = Some(solidcraft_ui_text::tr("library.invalid_name").into());
                 app.library.action_dialog = Some(dialog);
                 return;
             }
@@ -371,7 +373,7 @@ mod tests {
             assert!(highlight_y < h.widget("Show in Folder").unwrap()[1]);
             h.step(&json!({"widget":"Highlight"})).unwrap();
             h.frames(3);
-            let label = crate::i18n::tr(choice.map(Highlight::label).unwrap_or("library.highlight_none"));
+            let label = solidcraft_ui_text::tr(choice.map(Highlight::label).unwrap_or("library.highlight_none"));
             assert!(h.widget(label).is_some(), "submenu must show {label}");
             h.step(&json!({"widget":label})).unwrap();
             h.frames(3);
@@ -406,7 +408,7 @@ mod tests {
 
     #[test]
     fn thumbnail_context_menu_has_supported_actions_and_escape_closes_it() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = Harness::new();
             h.call("ui.set", json!({"layout":mode}));
             h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));

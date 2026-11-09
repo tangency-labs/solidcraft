@@ -1,7 +1,8 @@
 //! Cooperative certification of the exact f64 boundary consumed by CPU Path.
 //! Coordinates are never tolerance-welded, snapped or repaired. Every shared edge must have
-//! identical finite endpoints (ClosedMesh canonicalises signed zero; declared boxes
-//! retain the legacy raw-bit edge policy); geometric contact is
+//! identical finite endpoints (ClosedMesh and sheets canonicalise signed zero; declared
+//! boxes retain the legacy raw-bit edge policy). Sheets may have manifold boundary
+//! edges, concavity and holes; geometric contact is
 //! permitted only along the same body's actual shared topological simplex.
 use super::{Bounds, Triangle, WorkBudget};
 use crate::{
@@ -229,9 +230,7 @@ fn selected_count(scene: &ProductScene, options: &RaytraceOptions) -> job::Resul
     let mut count = 0_usize;
     for input in &options.dielectrics {
         let body = scene.meshes.get(input.body_index).filter(|b| b.name == input.body_name).ok_or_else(|| invalid("CPU glass target changed"))?;
-        if input.boundary != DielectricBoundary::ThinSheet {
-            count = count.checked_add(body.mesh.triangles.len()).ok_or_else(memory)?;
-        }
+        count = count.checked_add(body.mesh.triangles.len()).ok_or_else(memory)?;
     }
     if count as u64 > options.budget.limits().max_triangles {
         return Err(memory());
@@ -327,9 +326,8 @@ impl Task {
                             region.primitive_begin = self.i;
                             region.primitive_end = self.i.checked_add(body.mesh.triangles.len()).ok_or_else(memory)?;
                             match input.boundary {
-                                DielectricBoundary::ThinSheet => {
-                                    super::dielectric::certify_sheet(&body.mesh).map_err(super::image::error)?;
-                                }
+                                // Path sheets use this task's charged planar/manifold proof.
+                                DielectricBoundary::ThinSheet => {}
                                 DielectricBoundary::ClosedBox => {
                                     if !(12..=super::dielectric::MAX_BOX_TRIANGLES).contains(&body.mesh.triangles.len()) {
                                         return Err(invalid("unsupported dielectric boundary tessellation"));
@@ -365,8 +363,8 @@ impl Task {
                 }
                 let Some(indices) = body.mesh.triangles.get(self.triangle) else {
                     region.end = self.faces.len();
-                    if input.boundary != DielectricBoundary::ThinSheet && region.end == region.begin {
-                        return Err(invalid("closed CPU glass has no triangles"));
+                    if region.end == region.begin {
+                        return Err(invalid("CPU glass boundary has no triangles"));
                     }
                     self.medium += 1;
                     self.triangle = 0;
@@ -381,14 +379,26 @@ impl Task {
                     return Err(invalid("CPU glass boundary contains a degenerate triangle"));
                 }
                 region.bounds = region.bounds.include(Triangle::new(p).map_err(super::image::error)?.bounds());
-                if input.boundary != DielectricBoundary::ThinSheet {
-                    if self.faces.len() == self.faces.capacity() {
-                        return Err(memory());
+                if input.boundary == DielectricBoundary::ThinSheet
+                    && let Some(first) = self.faces.get(region.begin)
+                {
+                    if !same_plane(first.p, p) {
+                        return Err(invalid("CPU thin sheet must have one exact planar boundary"));
                     }
-                    self.parents.push(self.faces.len());
-                    self.ranks.push(0);
-                    self.faces.push(Face { p, medium: self.medium });
+                    let drop = projection(first.p);
+                    let a = first.p.map(|p| project(p, drop));
+                    let b = p.map(|p| project(p, drop));
+                    let winding = orient2d(b[0], b[1], b[2]);
+                    if winding == 0.0 || opposite(orient2d(a[0], a[1], a[2]), winding) {
+                        return Err(invalid("CPU thin sheet triangles must have consistent winding"));
+                    }
                 }
+                if self.faces.len() == self.faces.capacity() {
+                    return Err(memory());
+                }
+                self.parents.push(self.faces.len());
+                self.ranks.push(0);
+                self.faces.push(Face { p, medium: self.medium });
                 self.triangle += 1;
             }
             Stage::BoxAxes => {
@@ -487,10 +497,16 @@ impl Task {
                     self.i = 0;
                     return Ok(());
                 };
-                let b = *self.edges.get(self.i + 1).ok_or_else(|| invalid("CPU glass requires closed edges"))?;
                 let group = |x: Edge| (x.medium, x.a, x.b);
-                if group(a) != group(b) || a.forward == b.forward || self.edges.get(self.i + 2).is_some_and(|x| group(*x) == group(a)) {
-                    return Err(invalid("CPU glass requires exactly two oppositely wound faces per edge"));
+                let Some(b) = self.edges.get(self.i + 1).copied().filter(|b| group(a) == group(*b)) else {
+                    if options.dielectrics.get(a.medium).is_some_and(|input| input.boundary == DielectricBoundary::ThinSheet) {
+                        self.i += 1;
+                        return Ok(());
+                    }
+                    return Err(invalid("CPU glass requires closed edges"));
+                };
+                if a.forward == b.forward || self.edges.get(self.i + 2).is_some_and(|x| group(*x) == group(a)) {
+                    return Err(invalid("CPU glass requires at most two oppositely wound faces per edge; closed boundaries require exactly two"));
                 }
                 let ra = self.root(a.face)?;
                 let rb = self.root(b.face)?;
@@ -501,7 +517,7 @@ impl Task {
                 if let Some(face) = self.faces.get(self.i) {
                     let region = self.regions.get(face.medium).ok_or_else(|| invalid("CPU glass region missing"))?;
                     if self.root(self.i)? != self.root(region.begin)? {
-                        return Err(invalid("each CPU closed glass body must contain one connected shell"));
+                        return Err(invalid("each CPU glass body must contain one edge-connected boundary"));
                     }
                     self.i += 1;
                 } else {
@@ -535,7 +551,13 @@ impl Task {
                     self.i = 0;
                     return Ok(());
                 };
-                let b = *self.edges.get(self.i + 1).ok_or_else(|| invalid("CPU glass corner edge pair"))?;
+                let Some(b) = self.edges.get(self.i + 1).copied().filter(|b| (a.medium, a.a, a.b) == (b.medium, b.a, b.b)) else {
+                    // Sheet boundary edges have one face and do not join two
+                    // corner records. Closed-edge completeness was proved above.
+                    self.i += 1;
+                    self.vertex = 0;
+                    return Ok(());
+                };
                 let coordinate = if self.vertex == 0 { a.a } else { a.b };
                 let corner = |edge: Edge| -> job::Result<usize> {
                     let face = self.faces.get(edge.face).ok_or_else(|| invalid("CPU glass corner face"))?;
@@ -582,7 +604,9 @@ impl Task {
                     && (a.medium, a.a) == (b.medium, b.a)
                     && self.root(a.face)? != self.root(b.face)?
                 {
-                    return Err(invalid("CPU glass vertex link must be one connected cycle; pinched or touching fans are unsupported"));
+                    return Err(invalid(
+                        "CPU glass vertex link must be one connected cycle or sheet boundary path; pinched or touching fans are unsupported",
+                    ));
                 }
                 self.i += 1;
             }

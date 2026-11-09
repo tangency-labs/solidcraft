@@ -247,6 +247,14 @@ fn gpu_origin_query_uses_only_closed_boundaries_and_refuses_surface_and_silhouet
     let source = [
         SHADER,
         r#"
+// Independent oracle for the production query's reuse of its root entry.
+fn origin_vacuum(o:vec3<f32>,d:vec3<f32>)->bool {
+    let root=nodes[0];
+    if root.first==0xffffffffu {return true;}
+    if all(o>=root.lo) && all(o<=root.hi) {return false;}
+    let entry=box_entry_padded(root,o,d,FAR,u.lighting.x);
+    return entry<0.0 || entry>u.lighting.x;
+}
 @compute @workgroup_size(1) fn origin_reference() {
     let boundary=origin_boundary(u.eye.xyz,u.right.xyz);
     var media:array<Medium,16>;var count=0u;var valid=boundary.valid;
@@ -255,7 +263,7 @@ fn gpu_origin_query_uses_only_closed_boundaries_and_refuses_surface_and_silhouet
     if valid && count>0u { sigma=media[count-1u].sigma;scatter=media[count-1u].scatter;outer=media[0].ior;top=media[count-1u].ior; }
     accumulation[0]=vec4<f32>(sigma,select(0.0,1.0,valid));
     accumulation[1]=vec4<f32>(outer,top,f32(count),select(0.0,1.0,boundary.hit.triangle!=0xffffffffu));
-    accumulation[2]=vec4<f32>(scatter,0.0,1.0);
+    accumulation[2]=vec4<f32>(scatter,select(0.0,1.0,origin_vacuum(u.eye.xyz,u.right.xyz)),1.0);
 }
 "#,
     ]
@@ -370,11 +378,11 @@ fn gpu_origin_query_uses_only_closed_boundaries_and_refuses_surface_and_silhouet
             (Vec3::new(0.25, 0.125, 1.0), -Vec3::Z, None),
             (Vec3::new(0.25, 0.125, 1.0), Vec3::Z, None),
             (Vec3::new(5.0, 5.0, 1.0), -Vec3::Z, None),
-            (Vec3::new(10.0, 0.0, 3.5), -Vec3::Z, None),
-            (Vec3::new(10.0, 10.0, 3.5), -Vec3::Z, None),
+            (Vec3::new(10.0, 0.0, 3.5), -Vec3::Z, Some((0, Vec3::ZERO, 0.0, 0.0))),
+            (Vec3::new(10.0, 10.0, 3.5), -Vec3::Z, Some((0, Vec3::ZERO, 0.0, 0.0))),
             (Vec3::new(0.25, 0.125, 1.0 + epsilon * 0.5), -Vec3::Z, None),
             (Vec3::new(0.25, 0.125, 1.0 - epsilon * 0.5), Vec3::Z, None),
-            (Vec3::new(0.25, 0.125, 1_000_000_000.0), -Vec3::Z, None),
+            (Vec3::new(0.25, 0.125, 1_000_000_000.0), -Vec3::Z, Some((0, Vec3::ZERO, 0.0, 0.0))),
             (Vec3::new(-8.0, 5.0, 0.25), Vec3::X, None),
             (Vec3::new(-8.0, 2.0, 0.0), Vec3::new(1.0, 1.0, 0.0) / 2.0_f64.sqrt(), None),
         ];
@@ -414,6 +422,49 @@ fn gpu_origin_query_uses_only_closed_boundaries_and_refuses_surface_and_silhouet
                     "an actual boundary/silhouette cannot certify an arbitrary incident normal: reverse={reverse} origin={origin:?} direction={direction:?}"
                 );
             }
+        }
+    }
+    // A future edge/vertex cannot make a provably outside origin ambiguous.
+    // The complete origin-to-primary-minimum interval must nevertheless remain
+    // clear: a just-outside entry cannot be skipped before an inside opaque hit.
+    let mut task =
+        Task::new(context.clone(), nested(), request(2), JobOptions { nested_media: true, samples: 1, ..Default::default() }, CancelToken::default())
+            .unwrap();
+    let epsilon = f64::from(task.epsilon);
+    for (origin, direction, vacuum, valid, count) in [
+        (Vec3::new(10.0, 0.0, 4.0), -Vec3::Z, true, true, 0.0),
+        (Vec3::new(10.0, 10.0, 4.0), -Vec3::Z, true, true, 0.0),
+        (Vec3::new(0.25, 0.125, 2.0 + epsilon * 4.0), -Vec3::Z, true, true, 0.0),
+        (Vec3::new(0.25, 0.125, 2.0 + epsilon * 0.5), -Vec3::Z, false, false, 0.0),
+        (Vec3::new(0.25, 0.125, 2.0 - epsilon * 0.5), Vec3::Z, false, false, 0.0),
+        (Vec3::new(0.25, 0.125, 2.0), -Vec3::Z, false, false, 0.0),
+        (Vec3::new(0.25, 0.125, 2.0), Vec3::Z, false, false, 0.0),
+        (Vec3::new(10.0, 0.0, 2.0), -Vec3::Z, false, false, 0.0),
+        (Vec3::new(0.25, 0.125, 0.0), -Vec3::Z, false, true, 2.0),
+    ] {
+        let mut params = task.parameters(1).unwrap();
+        let mut values = Vec::new();
+        scene::vector(&mut values, origin, 0.0);
+        scene::vector(&mut values, direction, 0.0);
+        params[32..64].copy_from_slice(&values);
+        context.queue.write_buffer(&task.uniform, 0, &params);
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &task.bind, &[]);
+            pass.dispatch_workgroups(1, 1, 1);
+        }
+        context.queue.submit([encoder.finish()]);
+        task.sample = 1;
+        let value = task.read_linear().unwrap();
+        assert_eq!(value[2][2] != 0.0, vacuum, "vacuum certificate origin={origin:?} direction={direction:?}: {value:?}");
+        assert_eq!(value[0][3] != 0.0, valid, "launch-interval certificate origin={origin:?} direction={direction:?}: {value:?}");
+        if valid {
+            assert_eq!(value[1][2], count);
+        }
+        if vacuum {
+            assert_eq!(value[1][3], 0.0, "vacuum proof must bypass future ambiguous crossings");
         }
     }
 }

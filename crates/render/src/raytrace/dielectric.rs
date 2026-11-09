@@ -99,6 +99,51 @@ pub(super) fn thin_sheet(direction: Vec3, normal: Vec3, material: &DielectricOpt
     Ok((Interface { transmitted: Some(direction), ..optics }, Vec3::new(rr, rg, rb), Vec3::new(tr, tg, tb)))
 }
 
+/// Three-band parallel-sheet closure. Smooth sheet directions are wavelength
+/// independent, so RGB coefficients share one scalar branch probability and the
+/// existing transmitted-shadow MIS chain; no hero wavelength is needed here.
+pub(super) fn modeled_sheet(direction: Vec3, normal: Vec3, material: &DielectricOptions) -> Result<(Interface, Vec3, Vec3)> {
+    let Some(model) = material.model.filter(|model| model.spectral()) else { return thin_sheet(direction, normal, material) };
+    if model.roughness > 0.0 {
+        return Err(TraceError::InvalidInput("rough thin-sheet transport requires its virtual interface walk"));
+    }
+    let direction = unit(direction).ok_or(TraceError::InvalidInput("modeled sheet incident direction"))?;
+    let normal = unit(normal).ok_or(TraceError::InvalidInput("modeled sheet normal"))?;
+    let optics = interface(direction, normal, 1.0, material.ior)?;
+    let mut reflection = [0.0; 3];
+    let mut transmission = [0.0; 3];
+    for (channel, wavelength) in crate::glass_model::WAVELENGTHS_NM.into_iter().enumerate() {
+        let ior = model.ior(material.ior, wavelength).map_err(|_| TraceError::InvalidInput("modeled sheet spectral IOR"))?;
+        let f = model
+            .fresnel((-direction.dot(normal)).clamp(0.0, 1.0), 1.0, ior, wavelength)
+            .map_err(|_| TraceError::InvalidInput("modeled sheet spectral Fresnel"))?;
+        let distance = if material.thickness_mm == 0.0 {
+            0.0
+        } else if let Some(cosine) = f.transmitted_cosine.filter(|cosine| *cosine > 0.0) {
+            material.thickness_mm / cosine
+        } else {
+            return Err(TraceError::InvalidInput("modeled sheet has no finite grazing optical distance"));
+        };
+        if !distance.is_finite() || !(0.0..=super::MAX_DISTANCE_MM).contains(&distance) {
+            return Err(TraceError::InvalidInput("modeled sheet optical distance exceeds finite bounds"));
+        }
+        let a = (-material.absorption_per_mm[channel] * distance).exp();
+        let series = |r: f64| {
+            let denominator = 1.0 - r * r * a * a;
+            if denominator <= 0.0 { (1.0, 0.0) } else { (r + (1.0 - r).powi(2) * r * a * a / denominator, (1.0 - r).powi(2) * a / denominator) }
+        };
+        let s = series(f.s);
+        let p = series(f.p);
+        reflection[channel] = (s.0 + p.0) * 0.5;
+        transmission[channel] = (s.1 + p.1) * 0.5;
+    }
+    Ok((
+        Interface { transmitted: Some(direction), ..optics },
+        Vec3::new(reflection[0], reflection[1], reflection[2]),
+        Vec3::new(transmission[0], transmission[1], transmission[2]),
+    ))
+}
+
 pub fn attenuation(sigma: [f64; 3], distance_mm: f64) -> Result<Vec3> {
     if !distance_mm.is_finite()
         || !(0.0..=super::MAX_DISTANCE_MM).contains(&distance_mm)

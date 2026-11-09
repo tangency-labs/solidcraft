@@ -42,7 +42,7 @@ impl Highlight {
     }
 
     fn color(self) -> egui::Color32 {
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         match self {
             Self::Red => t.library_highlights[0],
             Self::Orange => t.library_highlights[1],
@@ -155,13 +155,13 @@ impl LibraryState {
     fn set_highlight(&mut self, path: &Path, color: Option<Highlight>) {
         if let Some(color) = color {
             if path.to_str().is_none() {
-                self.error = Some(crate::i18n::tr("library.utf8").into());
+                self.error = Some(solidcraft_ui_text::tr("library.utf8").into());
                 return;
             }
             if self.highlights.contains_key(path) || self.highlights.len() < MAX_HIGHLIGHTS {
                 self.highlights.insert(path.to_path_buf(), color);
             } else {
-                self.error = Some(crate::i18n::tr("library.highlight_limit").to_string());
+                self.error = Some(solidcraft_ui_text::tr("library.highlight_limit").to_string());
             }
         } else {
             self.highlights.remove(path);
@@ -244,16 +244,16 @@ impl LibraryState {
             };
             let current = self.current.clone();
             let (tx, rx) = std::sync::mpsc::channel();
-            let language = crate::i18n::language();
+            let language = solidcraft_ui_text::language();
             match std::thread::Builder::new().name("document-library".into()).spawn(move || {
-                let _language = crate::i18n::scope(language);
+                let _language = solidcraft_ui_text::scope(language);
                 let _ = tx.send(read_folder(&root, &current));
             }) {
                 Ok(_) => self.pending = Some(rx),
                 Err(error) => {
                     self.listing = Listing::default();
                     self.filter_key = None;
-                    self.error = Some(crate::i18n::format("library.scan_failed", &[("error", &error.to_string())]));
+                    self.error = Some(solidcraft_ui_text::format("library.scan_failed", &[("error", &error.to_string())]));
                 }
             }
         }
@@ -283,7 +283,7 @@ impl LibraryState {
                     self.pending = None;
                     self.listing = Listing::default();
                     self.filter_key = None;
-                    self.error = Some(crate::i18n::tr("library.scan_stopped").into());
+                    self.error = Some(solidcraft_ui_text::tr("library.scan_stopped").into());
                 }
             }
         }
@@ -332,26 +332,27 @@ impl LibraryState {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn read_folder(root: &Path, current: &Path) -> Result<Listing, String> {
-    let canonical_root = root.canonicalize().map_err(|error| crate::i18n::format("library.root_unavailable", &[("error", &error.to_string())]))?;
+    let canonical_root =
+        root.canonicalize().map_err(|error| solidcraft_ui_text::format("library.root_unavailable", &[("error", &error.to_string())]))?;
     let canonical_current =
-        current.canonicalize().map_err(|error| crate::i18n::format("library.folder_unavailable", &[("error", &error.to_string())]))?;
+        current.canonicalize().map_err(|error| solidcraft_ui_text::format("library.folder_unavailable", &[("error", &error.to_string())]))?;
     if !canonical_current.starts_with(&canonical_root) {
-        return Err(crate::i18n::tr("library.outside").into());
+        return Err(solidcraft_ui_text::tr("library.outside").into());
     }
-    let contents = std::fs::read_dir(current).map_err(|error| crate::i18n::format("library.read_failed", &[("error", &error.to_string())]))?;
+    let contents = std::fs::read_dir(current).map_err(|error| solidcraft_ui_text::format("library.read_failed", &[("error", &error.to_string())]))?;
     let mut result = Listing::default();
     let mut entries = Vec::new();
     for (index, entry) in contents.enumerate() {
         if index >= MAX_ENTRIES {
-            result.warning = Some(crate::i18n::tr("library.limit").into());
+            result.warning = Some(solidcraft_ui_text::tr("library.limit").into());
             break;
         }
         let Ok(entry) = entry else {
-            result.warning = Some(crate::i18n::tr("library.partial_permissions").into());
+            result.warning = Some(solidcraft_ui_text::tr("library.partial_permissions").into());
             continue;
         };
         let Ok(kind) = entry.file_type() else {
-            result.warning = Some(crate::i18n::tr("library.partial").into());
+            result.warning = Some(solidcraft_ui_text::tr("library.partial").into());
             continue;
         };
         // Do not follow symlinks or list special files. Only enumerate this directory;
@@ -432,7 +433,7 @@ fn open_entry(app: &mut SolveApp, entry: Entry) {
     } else if let Some(path) = entry.path.to_str() {
         crate::home::open_recent(app, path);
     } else {
-        app.set_status(crate::i18n::tr("library.open_utf8"), true);
+        app.set_status(solidcraft_ui_text::tr("library.open_utf8"), true);
     }
 }
 
@@ -440,12 +441,12 @@ fn messages(state: &LibraryState, ui: &mut egui::Ui) {
     if state.loading() {
         ui.horizontal(|ui| {
             ui.spinner();
-            ui.label(crate::i18n::tr("library.reading"));
+            ui.label(solidcraft_ui_text::tr("library.reading"));
         });
     } else if let Some(error) = &state.error {
         ui.label(error);
     } else if state.filtered.is_empty() {
-        ui.label(if state.search.is_empty() { crate::i18n::tr("library.empty") } else { crate::i18n::tr("library.no_matches") });
+        ui.label(if state.search.is_empty() { solidcraft_ui_text::tr("library.empty") } else { solidcraft_ui_text::tr("library.no_matches") });
     }
     if let Some(warning) = &state.listing.warning {
         ui.label(warning);
@@ -470,7 +471,7 @@ fn thumbnail_card(
             egui::WidgetInfo::labeled(egui::Role::Button, true, name)
         }
     });
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     ui.painter().rect(
         rect,
         4.0,
@@ -573,7 +574,7 @@ fn rows(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
 
 /// Keep import shortcuts fixed below the scrolling cards, level with the timeline.
 fn insert_footer(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let container = Container::new(ui.ctx(), Surface::Panel);
     let gap = container.gap();
     container.edge("sc_library_insert", Edge::Bottom).exact_size(40.0 + gap * 2.0).show_separator_line(false).frame(egui::Frame::NONE).show(
@@ -624,20 +625,20 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
         if home.hovered() || home.has_focus() {
             ui.painter().rect_filled(rect, 4.0, ui.visuals().widgets.hovered.bg_fill);
         }
-        crate::icons::paint_ink(ui.painter(), rect.shrink(2.0), "home", crate::theme::Tokens::get().text);
+        crate::icons::paint_ink(ui.painter(), rect.shrink(2.0), "home", solidcraft_theme::Tokens::get().text);
         ui.painter().rect_stroke(
             rect,
-            crate::theme::Tokens::get().control_radius,
-            egui::Stroke::new(1.0, crate::theme::Tokens::get().border),
+            solidcraft_theme::Tokens::get().control_radius,
+            egui::Stroke::new(1.0, solidcraft_theme::Tokens::get().border),
             egui::StrokeKind::Inside,
         );
-        home.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr("library.home")));
+        home.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, solidcraft_ui_text::tr("library.home")));
         crate::scenario::publish_handle("library:home", home.rect.center());
-        if home.on_hover_text(crate::i18n::tr("library.home_hint")).clicked() {
+        if home.on_hover_text(solidcraft_ui_text::tr("library.home_hint")).clicked() {
             go_home(app);
         }
         let (chevron, _) = ui.allocate_exact_size(egui::vec2(12.0, 24.0), egui::Sense::hover());
-        crate::ui_kit::disclosure(ui.painter(), chevron.center(), app.library.folders_expanded, crate::theme::Tokens::get().text_dim);
+        crate::ui_kit::disclosure(ui.painter(), chevron.center(), app.library.folders_expanded, solidcraft_theme::Tokens::get().text_dim);
         let name = app
             .library
             .root
@@ -650,10 +651,15 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
         label_ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
         let picker = crate::ui_kit::list_picker(&mut label_ui, "library_folder_section", &name, app.library.folders_expanded);
         picker.widget_info(|| {
-            egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, true, app.library.folders_expanded, crate::i18n::tr("library.recent_folders"))
+            egui::WidgetInfo::selected(
+                egui::Role::DisclosureTriangle,
+                true,
+                app.library.folders_expanded,
+                solidcraft_ui_text::tr("library.recent_folders"),
+            )
         });
         crate::scenario::publish_target("library:folders", picker.rect);
-        if picker.on_hover_text(crate::i18n::tr("library.recent_folders")).clicked() {
+        if picker.on_hover_text(solidcraft_ui_text::tr("library.recent_folders")).clicked() {
             app.library.folders_expanded = !app.library.folders_expanded;
             app.library.folder_menu = None;
         }
@@ -661,15 +667,15 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
         if settings.hovered() || settings.has_focus() {
             ui.painter().rect_filled(rect, 4.0, ui.visuals().widgets.hovered.bg_fill);
         }
-        crate::icons::paint_ink(ui.painter(), rect.shrink(4.0), "settings", crate::theme::Tokens::get().text);
+        crate::icons::paint_ink(ui.painter(), rect.shrink(4.0), "settings", solidcraft_theme::Tokens::get().text);
         ui.painter().rect_stroke(
             rect,
-            crate::theme::Tokens::get().control_radius,
-            egui::Stroke::new(1.0, crate::theme::Tokens::get().border),
+            solidcraft_theme::Tokens::get().control_radius,
+            egui::Stroke::new(1.0, solidcraft_theme::Tokens::get().border),
             egui::StrokeKind::Inside,
         );
-        let settings = settings.on_hover_text(crate::i18n::tr("library.choose_folder"));
-        settings.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr("library.choose_folder")));
+        let settings = settings.on_hover_text(solidcraft_ui_text::tr("library.choose_folder"));
+        settings.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, solidcraft_ui_text::tr("library.choose_folder")));
         crate::scenario::publish_handle("library:settings", settings.rect.center());
         if settings.clicked() {
             choose_folder(app);
@@ -712,7 +718,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
             let pin_key = if pinned { "library.unpin_folder" } else { "library.pin_folder" };
             if crate::ui_kit::button(
                 ui,
-                crate::i18n::tr(pin_key),
+                solidcraft_ui_text::tr(pin_key),
                 crate::ui_kit::Button::Enabled(pinned || app.library.pinned_roots.len() < MAX_RECENT_FOLDERS),
             )
             .clicked()
@@ -725,7 +731,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
                 }
                 ui.close();
             }
-            if crate::ui_kit::button(ui, crate::i18n::tr("library.remove_folder"), crate::ui_kit::Button::Normal).clicked() {
+            if crate::ui_kit::button(ui, solidcraft_ui_text::tr("library.remove_folder"), crate::ui_kit::Button::Normal).clicked() {
                 app.library.remove_recent(&path);
                 ui.close();
             }
@@ -735,8 +741,8 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
         }
     }
     if app.library.root.is_none() {
-        egui::Frame::NONE.fill(crate::theme::Tokens::get().field).inner_margin(8.0).corner_radius(4.0).show(ui, |ui| {
-            ui.label(crate::i18n::tr("library.samples_note"));
+        egui::Frame::NONE.fill(solidcraft_theme::Tokens::get().field).inner_margin(8.0).corner_radius(4.0).show(ui, |ui| {
+            ui.label(solidcraft_ui_text::tr("library.samples_note"));
         });
         ui.add_space(6.0);
         egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 0)).show(ui, |ui| sample_rows(app, ui));
@@ -758,7 +764,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
             }
         });
     }
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     ui.horizontal(|ui| {
         let button_size = 32.0;
         let width = (ui.available_width() - button_size - ui.spacing().item_spacing.x).max(1.0);
@@ -774,9 +780,10 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
                             ui,
                             ui.scope_id().with("library_search"),
                             &mut app.library.search,
-                            crate::i18n::tr("library.search_hint"),
+                            solidcraft_ui_text::tr("library.search_hint"),
                         );
-                        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, crate::i18n::tr("library.search_label")));
+                        response
+                            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, solidcraft_ui_text::tr("library.search_label")));
                     })
                     .response
                     .rect
@@ -786,7 +793,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
         let rect =
             egui::Rect::from_center_size(egui::pos2(ui.cursor().left() + button_size / 2.0, search.center().y), egui::vec2(button_size, button_size));
         ui.allocate_rect(rect, egui::Sense::hover());
-        let refresh = crate::ui_kit::icon_button_colored(ui, rect, "refresh", crate::i18n::tr("library.refresh"), Some(t.text));
+        let refresh = crate::ui_kit::icon_button_colored(ui, rect, "refresh", solidcraft_ui_text::tr("library.refresh"), Some(t.text));
         crate::scenario::publish_rect("library:refresh", rect);
         ui.painter().rect_stroke(rect, t.control_radius, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
         if refresh.clicked() {
@@ -804,9 +811,9 @@ pub(super) fn app_bar_toggle(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::
     if !available(app) || app.home.open {
         return false;
     }
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let response = ui.interact(rect, ui.scope_id().with("document_browser_toggle"), egui::Sense::click());
-    let label = if app.library.collapsed { crate::i18n::tr("library.show") } else { crate::i18n::tr("library.hide") };
+    let label = if app.library.collapsed { solidcraft_ui_text::tr("library.show") } else { solidcraft_ui_text::tr("library.hide") };
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     crate::scenario::publish_handle("library:toggle", rect.center());
     crate::scenario::publish_rect("library:toggle", rect);
@@ -856,7 +863,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         .edge("sc_document_library", Edge::Left)
         .exact_size(width)
         .resizable(false)
-        .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(crate::theme::Tokens::get().panel))
+        .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(solidcraft_theme::Tokens::get().panel))
         .show(ui, |ui| {
             crate::scenario::publish_rect("library:panel", ui.max_rect());
             insert_footer(app, ui);
@@ -1135,10 +1142,10 @@ mod tests {
         for folder in [&first, &second] {
             assert_eq!(std::fs::read(folder.join("Model.solidcraft")).unwrap(), b"untouched design");
         }
-        for theme in [crate::theme::Tokens::light(), crate::theme::Tokens::dark()] {
+        for theme in [solidcraft_theme::Tokens::light(), solidcraft_theme::Tokens::dark()] {
             for color in theme.library_highlights {
                 for ground in [theme.field, theme.hover] {
-                    assert!(crate::theme::contrast_ratio(color, ground) >= 3.0);
+                    assert!(solidcraft_theme::contrast_ratio(color, ground) >= 3.0);
                 }
             }
         }
@@ -1426,7 +1433,7 @@ mod tests {
 
     #[test]
     fn insert_footer_stays_at_bottom_with_many_cards_and_hides_when_collapsed() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = Harness::new();
             h.call("ui.set", json!({"layout":mode}));
             folder_picker(&mut h, None);
@@ -1439,7 +1446,7 @@ mod tests {
             // Follow the shared History layout: floating inset or flush docked edge.
             let card = crate::scenario::rect_of("library:import_card").unwrap();
             assert!((card.height() - 40.0).abs() < 0.5, "card={card:?}, controls={before:?}/{step:?}");
-            let gap = if mode == crate::shell::LayoutMode::Floating { crate::shell::SHELL_GAP } else { 0.0 };
+            let gap = if mode == crate::ui_kit::LayoutMode::Floating { crate::ui_kit::SHELL_GAP } else { 0.0 };
             let panel = crate::scenario::rect_of("library:panel").unwrap();
             assert!((card.bottom() - (panel.bottom() - gap)).abs() < 0.5, "{mode:?}: {card:?} {panel:?}");
             assert!(card.contains(before) && card.contains(step) && card.contains(iges));
@@ -1464,7 +1471,7 @@ mod tests {
 
     #[test]
     fn home_owns_the_full_width_and_returning_preserves_browser_visibility() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for collapsed in [false, true] {
                 let mut h = Harness::new();
                 folder_picker(&mut h, None);
@@ -1513,7 +1520,7 @@ mod tests {
                     h.app.ui(ui);
                 },
             );
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             for label in ["CAD Files", "STEP", "IGES", "Mesh"] {
                 let text = output
                     .shapes

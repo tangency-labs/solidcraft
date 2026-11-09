@@ -1,0 +1,175 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/293",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/477",
+ "test": "crates/kernel/src/tests.rs: corner_rounds_larger_than_their_faces_are_too_large",
+ "summary": "The three edges at a 20 mm cube's corner rounded 20, as wide as the faces, must be refused as too large, so a fit can reduce them (PR #477, which refs #293; the fin case of #293 is 293-fin-round-past-its-thickness). Each round's corner end lies r from the corner along its edge, so at r 20 the corner takes the whole of every edge. SolidCraft refuses it and its fit_max reduces it to 19.99. The pinned SMLib refuses it too, with no size. With the generic blend's step 6 (the cliff overflow trimmed at its creases, fillet_overflow_trim_at_creases) and step 5's sizes (fillet_gn_section_generator), the trim refuses it because the corners take the whole edge, and it reports the largest radius that builds: the edge length over the corner's take per unit radius, 20 / 1, less the fit margin of a thousand edge tolerances (1e-5), 19.99. The fork's capi test scenario_cube_corner_rounds_as_wide_as_faces_refused expects the same, and a local build of tangency-labs/smlib 5e8c9c1 reports 19.989999999999998. Built at that fit, the rounds take 3 (1 - pi/4) r^2 (20 - r) along the edges past the corner cube and r^3 (1 - pi/6) from the cube less its sphere octant (SolidCraft's closed form; it checked 2e-4 relative on a mesh, this checks 1e-4 mm^3).",
+ "cases": [
+  {
+   "name": "corner_rounds_as_wide_as_faces_refused",
+   "note": "r 20 on the three edges at the origin corner, pinned SMLib: refused (Unable to Process Rollover), with no size.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "cube",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      20,
+      20,
+      20
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "cube",
+     "edges": [
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       0
+      ],
+      [
+       0,
+       0,
+       10
+      ]
+     ],
+     "radius": 20.0
+    }
+   ],
+   "expect": {
+    "refused": {
+     "step": "result",
+     "error": "status 1001"
+    }
+   }
+  },
+  {
+   "name": "corner_rounds_as_wide_as_faces_refused_with_their_fit",
+   "note": "r 20 with step 6's crease trim and step 5's sizes: refused because the corners take the whole edge, fit 20 - 0.01.",
+   "fixes": [
+    "fillet_refuse_rails_leaving_faces",
+    "fillet_cliff_overflow",
+    "fillet_overflow_trim_at_creases",
+    "fillet_gn_section_generator"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "cube",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      20,
+      20,
+      20
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "cube",
+     "edges": [
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       0
+      ],
+      [
+       0,
+       0,
+       10
+      ]
+     ],
+     "radius": 20.0
+    }
+   ],
+   "expect": {
+    "refused": {
+     "step": "result",
+     "error": "refused; the largest size that builds",
+     "fit_size": {
+      "value": 19.99,
+      "tol": 1e-06,
+      "source": "SolidCraft's fit_max reduces it to 19.99 (corner_rounds_larger_than_their_faces_are_too_large); the fork's sm_CornerTakesPerRadius bound, the edge's 20 over the corner's 1 per unit radius less FitMargin 0.01 (tangency-labs/smlib a3d6d81, capi scenario_cube_corner_rounds_as_wide_as_faces_refused, 19.989999999999998 on 5e8c9c1)"
+     }
+    }
+   }
+  },
+  {
+   "name": "corner_rounds_at_their_fit_build",
+   "note": "r 19.99, the reported fit, with the same flags: one closed solid.",
+   "fixes": [
+    "fillet_refuse_rails_leaving_faces",
+    "fillet_cliff_overflow",
+    "fillet_overflow_trim_at_creases",
+    "fillet_gn_section_generator"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "cube",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      20,
+      20,
+      20
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "cube",
+     "edges": [
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       0
+      ],
+      [
+       0,
+       0,
+       10
+      ]
+     ],
+     "radius": 19.99
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 4191.9315140872695,
+     "tol": 0.0001,
+     "formula": "20^3 - 3*(1 - pi/4)*r^2*(20 - r) - r^3*(1 - pi/6), r = 19.99"
+    }
+   }
+  }
+ ]
+}

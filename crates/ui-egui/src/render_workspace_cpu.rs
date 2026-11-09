@@ -491,6 +491,7 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
     options.sun = app.render_workspace.view.studio.sun_enabled.then(|| Box::new(app.render_workspace.view.studio.sun));
     options.sky = None;
     options.volume = app.render_workspace.view.studio.volume;
+    options.caustics = app.render_workspace.view.studio.caustics;
     options.output = super::studio::cpu_output(&app.render_workspace.view);
     options.adaptive = app.render_workspace.view.studio.adaptive.map(Box::new);
     options.denoise = app.render_workspace.view.studio.denoise;
@@ -499,7 +500,7 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
         lens.validate_camera(&app.cam).map_err(|error| error.to_string())?;
     }
     if options.area_samples.is_some_and(|n| !matches!(n, 1 | 4 | 16 | 64)) {
-        return Err(crate::i18n::tr("render.error_area_samples").into());
+        return Err(solidcraft_ui_text::tr("render.error_area_samples").into());
     }
     if options.area_lights.as_ref().is_none_or(Vec::is_empty) {
         options.area_samples = None;

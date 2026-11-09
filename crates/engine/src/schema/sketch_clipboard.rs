@@ -114,6 +114,44 @@ pub struct Pasted {
     pub param_warnings: Vec<String>,
 }
 
+/// Replace the contents of a sketch with a copy of another sketch's, in one undo step. The sketch
+/// keeps its plane, its place in the timeline and the features built on it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ReplaceParams {
+    /// The sketch to replace (default: the one being edited).
+    #[serde(default)]
+    pub sketch: Option<SketchRef>,
+    /// The sketch whose curves, points, constraints, dimensions and texts take its place.
+    pub from: SketchRef,
+    /// A design file `from` is in (default: this design).
+    #[serde(default)]
+    pub file: Option<String>,
+}
+
+/// What `sketch.replace` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Replaced {
+    /// The replaced sketch's feature id.
+    pub sketch_id: u64,
+    /// The sketch the contents came from.
+    pub from: String,
+    /// The design file it is in, when not this design.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// The sketch's new curves' ids.
+    pub curves: Vec<String>,
+    /// Its new lone points' ids.
+    pub points: Vec<String>,
+    /// Its new constraints' and dimensions' ids.
+    pub constraints: Vec<String>,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 #[cfg(test)]
 #[path = "sketch_clipboard_tests.rs"]
 mod tests;

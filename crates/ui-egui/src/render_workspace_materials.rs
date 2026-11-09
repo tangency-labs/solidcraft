@@ -18,9 +18,9 @@ use solidcraft_engine::{
     },
 };
 
-#[cfg(test)]
-use crate::theme::Tokens;
 use crate::{SolveApp, ui_kit};
+#[cfg(test)]
+use solidcraft_theme::Tokens;
 
 const MAX_BINDINGS: usize = 128;
 
@@ -51,6 +51,7 @@ impl Boundary {
 
 #[derive(Clone, Debug)]
 pub(super) struct Glass {
+    pub model: Option<solidcraft_engine::render::glass_model::GlassModel>,
     pub recipe: Option<&'static str>,
     pub ior: f64,
     pub absorption: [f64; 3],
@@ -61,19 +62,29 @@ pub(super) struct Glass {
 }
 impl Default for Glass {
     fn default() -> Self {
-        Self { recipe: None, ior: 1.5, absorption: [0.0; 3], boundary: Boundary::Closed, thickness: 1.0, shadows: false, subsurface: None }
+        Self {
+            model: None,
+            recipe: None,
+            ior: 1.5,
+            absorption: [0.0; 3],
+            boundary: Boundary::Closed,
+            thickness: 1.0,
+            shadows: false,
+            subsurface: None,
+        }
     }
 }
 impl Glass {
     pub(super) fn recipe(id: &str) -> Result<Self, String> {
-        let preset = appearance_pack::find(id).ok_or_else(|| crate::i18n::tr("render.error_glass_recipe").to_string())?;
-        let Recipe::Glass(recipe) = preset.recipe else { return Err(crate::i18n::tr("render.error_physical_glass").into()) };
+        let preset = appearance_pack::find(id).ok_or_else(|| solidcraft_ui_text::tr("render.error_glass_recipe").to_string())?;
+        let Recipe::Glass(recipe) = preset.recipe else { return Err(solidcraft_ui_text::tr("render.error_physical_glass").into()) };
         recipe.validate().map_err(|e| e.to_string())?;
         let (boundary, thickness) = match recipe.boundary {
             GlassBoundary::Thin { thickness_mm } => (Boundary::Thin, thickness_mm),
             GlassBoundary::Closed => (Boundary::Closed, 1.0),
         };
         Ok(Self {
+            model: None,
             subsurface: None,
             recipe: Some(preset.id),
             ior: recipe.dielectric_ior,
@@ -164,6 +175,7 @@ impl Binding {
         binding.saved_source = Some(optics);
         binding.glass_enabled = true;
         binding.glass = Glass {
+            model: optics.model,
             recipe: None,
             ior: optics.ior,
             absorption: optics.absorption_per_mm,
@@ -200,6 +212,7 @@ impl Binding {
     }
     fn optics(&self) -> solidcraft_engine::doc::render_optics::OpticalMaterial {
         solidcraft_engine::doc::render_optics::OpticalMaterial {
+            model: self.glass.model,
             ior: self.glass.ior,
             absorption_per_mm: self.glass.absorption,
             boundary: match self.glass.boundary {
@@ -277,9 +290,9 @@ struct PendingRemoval {
 
 pub(super) fn read_targets(app: &mut SolveApp) -> Result<Vec<Target>, String> {
     let reply = app.run("render.scene", json!({}))?;
-    let values = reply.get("bodies").and_then(Value::as_array).ok_or_else(|| crate::i18n::tr("render.error_scene_bodies").to_string())?;
+    let values = reply.get("bodies").and_then(Value::as_array).ok_or_else(|| solidcraft_ui_text::tr("render.error_scene_bodies").to_string())?;
     if values.len() > solidcraft_engine::render::job::MAX_GPU_PATH_BODIES {
-        return Err(crate::i18n::tr("render.error_scene_body_limit").into());
+        return Err(solidcraft_ui_text::tr("render.error_scene_body_limit").into());
     }
     let targets: Vec<Target> = serde_json::from_value(Value::Array(values.clone())).map_err(|e| e.to_string())?;
     if targets.iter().any(|t| {
@@ -288,7 +301,7 @@ pub(super) fn read_targets(app: &mut SolveApp) -> Result<Vec<Target>, String> {
             || t.name.len() > 1024
             || t.name.chars().any(char::is_control)
     }) {
-        return Err(crate::i18n::tr("render.error_scene_identity").into());
+        return Err(solidcraft_ui_text::tr("render.error_scene_identity").into());
     }
     Ok(targets)
 }
@@ -526,6 +539,10 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
             wire["boundary"] = json!(value.boundary.wire());
             wire["thickness_mm"] = json!(if value.boundary == Boundary::Thin { value.thickness } else { 0.0 });
             wire["shadow_transmission"] = json!(value.shadows);
+            if let Some(model) = value.model {
+                model.validate(value.ior).map_err(|e| e.to_string())?;
+                wire["model"] = json!(model);
+            }
             if let Some(subsurface) = value.subsurface {
                 Transmission::new(Vec3::new(r, g, b), (value.boundary == Boundary::Thin).then_some(value.thickness))
                     .map_err(|e| e.to_string())?
@@ -737,6 +754,7 @@ fn glass_controls(app: &mut SolveApp, ui: &mut egui::Ui, binding: &mut Binding) 
     let glass = &mut binding.glass;
     let mut changed = false;
     ui.add_enabled_ui(binding.glass_enabled, |ui| {
+        changed |= advanced_glass_controls(app, ui, glass);
         let mut boundary = match glass.boundary {
             Boundary::Closed => 0,
             Boundary::Thin => 1,
@@ -827,6 +845,57 @@ fn glass_controls(app: &mut SolveApp, ui: &mut egui::Ui, binding: &mut Binding) 
     }
     note(app, ui, "render.appearance_editor.glass_note");
     note(app, ui, if cpu { "render.cpu_material_certification" } else { "render.material_certification" });
+}
+
+fn advanced_glass_controls(app: &SolveApp, ui: &mut egui::Ui, glass: &mut Glass) -> bool {
+    use solidcraft_engine::render::glass_model::{Dispersion, GlassModel, ThinFilm};
+    let before = glass.model;
+    let mut enabled = before.is_some();
+    let toggle = ui_kit::checkbox(ui, app.tr("render.glass_model_enable"), &mut enabled);
+    crate::scenario::publish_target("render:glass:model-enable", toggle.rect);
+    if toggle.changed() {
+        glass.model = enabled.then(GlassModel::default);
+    }
+    if let Some(model) = &mut glass.model {
+        ui_kit::row(ui, app.tr("render.glass_roughness"), |ui| {
+            let field = ui_kit::number_field_preserving(ui, &mut model.roughness, 0.0..=1.0, 0.01, "");
+            crate::scenario::publish_target("render:glass:roughness", field.rect);
+            field
+        });
+        let mut dispersion = model.dispersion.is_some();
+        let toggle = ui_kit::checkbox(ui, app.tr("render.glass_dispersion"), &mut dispersion);
+        crate::scenario::publish_target("render:glass:dispersion-enable", toggle.rect);
+        if toggle.changed() {
+            model.dispersion = dispersion.then_some(Dispersion { abbe_number: 50.0 });
+        }
+        if let Some(dispersion) = &mut model.dispersion {
+            ui_kit::row(ui, app.tr("render.glass_abbe"), |ui| {
+                let field = ui_kit::number_field_preserving(ui, &mut dispersion.abbe_number, 5.0..=200.0, 0.5, "");
+                crate::scenario::publish_target("render:glass:abbe", field.rect);
+                field
+            });
+        }
+        let mut film = model.thin_film.is_some();
+        let toggle = ui_kit::checkbox(ui, app.tr("render.glass_film"), &mut film);
+        crate::scenario::publish_target("render:glass:film-enable", toggle.rect);
+        if toggle.changed() {
+            model.thin_film = film.then_some(ThinFilm { ior: 1.35, thickness_nm: 400.0 });
+        }
+        if let Some(film) = &mut model.thin_film {
+            ui_kit::row(ui, app.tr("render.glass_film_ior"), |ui| {
+                let field = ui_kit::number_field_preserving(ui, &mut film.ior, 1.0..=3.0, 0.01, "");
+                crate::scenario::publish_target("render:glass:film-ior", field.rect);
+                field
+            });
+            ui_kit::row(ui, app.tr("render.glass_film_thickness"), |ui| {
+                let field = ui_kit::number_field_preserving(ui, &mut film.thickness_nm, 0.0..=100000.0, 1.0, " nm");
+                crate::scenario::publish_target("render:glass:film-thickness", field.rect);
+                field
+            });
+        }
+        ui_kit::text(ui, app.tr("render.glass_model_help"), ui_kit::Text::Note("render.glass_model_help"));
+    }
+    before != glass.model
 }
 
 fn coat_controls(app: &mut SolveApp, ui: &mut egui::Ui, binding: &mut Binding) -> bool {
@@ -921,8 +990,13 @@ pub(super) fn install_library_surface(
     }
     let existing = app.render_workspace.view.materials.bindings.iter().position(|b| b.target == target);
     if let Some(index) = existing {
-        let binding =
-            app.render_workspace.view.materials.bindings.get(index).ok_or_else(|| crate::i18n::tr("render.error_material_binding").to_string())?;
+        let binding = app
+            .render_workspace
+            .view
+            .materials
+            .bindings
+            .get(index)
+            .ok_or_else(|| solidcraft_ui_text::tr("render.error_material_binding").to_string())?;
         if !binding.current(app) {
             return Err(app.tr("render.material_revalidate_needed").into());
         }
@@ -938,7 +1012,7 @@ pub(super) fn install_library_surface(
     )?;
     let texture = &reply["texture"];
     let frame: PlanarFrame = serde_json::from_value(texture["frame"].clone()).map_err(|e| e.to_string())?;
-    let path = |key: &str| texture[key].as_str().map(str::to_string).ok_or_else(|| crate::i18n::tr("render.error_surface_reply").to_string());
+    let path = |key: &str| texture[key].as_str().map(str::to_string).ok_or_else(|| solidcraft_ui_text::tr("render.error_surface_reply").to_string());
     let maps = Maps {
         color: path("base_color_srgb")?,
         normal: path("normal_opengl")?,
@@ -956,7 +1030,7 @@ pub(super) fn install_library_surface(
             .bindings
             .get(index)
             .cloned()
-            .ok_or_else(|| crate::i18n::tr("render.error_material_binding").to_string())?
+            .ok_or_else(|| solidcraft_ui_text::tr("render.error_material_binding").to_string())?
     } else {
         Binding::new(target, app)
     };
@@ -971,10 +1045,10 @@ pub(super) fn install_library_surface(
     binding.enabled = true;
     let view = &mut app.render_workspace.view.materials;
     if let Some(index) = existing {
-        *view.bindings.get_mut(index).ok_or_else(|| crate::i18n::tr("render.error_material_binding").to_string())? = binding;
+        *view.bindings.get_mut(index).ok_or_else(|| solidcraft_ui_text::tr("render.error_material_binding").to_string())? = binding;
         view.selected = Some(index);
     } else {
-        view.bindings.try_reserve(1).map_err(|_| crate::i18n::tr("render.error_binding_allocation").to_string())?;
+        view.bindings.try_reserve(1).map_err(|_| solidcraft_ui_text::tr("render.error_binding_allocation").to_string())?;
         view.bindings.push(binding);
         view.selected = Some(view.bindings.len() - 1);
     }
@@ -1176,7 +1250,7 @@ fn save_optics(app: &mut SolveApp, binding: &Binding) -> Result<(), String> {
         setup.camera = saved.camera;
     }
     let optics = json!({"ior":value.ior,"absorption_per_mm":value.absorption,"boundary":value.boundary.wire(),
-        "thickness_mm":if value.boundary==Boundary::Thin {value.thickness} else {0.0},"shadow_transmission":value.shadows,"subsurface":value.subsurface});
+        "thickness_mm":if value.boundary==Boundary::Thin {value.thickness} else {0.0},"shadow_transmission":value.shadows,"subsurface":value.subsurface,"model":value.model});
     app.run(
         "render.optics.bind",
         json!({"name":name,"set":setup,"body_index":binding.target.ordinal,"body_name":binding.target.name,

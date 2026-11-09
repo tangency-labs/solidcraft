@@ -1889,6 +1889,7 @@
   "material.editor.preserved_appearance": "Očuvani izgled",
   "material.editor.public_reference": "Javna referenca",
   "material.editor.reference": "Referenca",
+  "material.editor.remove": "Ukloni",
   "material.editor.save_or_discard": "Spremite ili odbacite nacrt materijala prije dodjele materijala.",
   "material.editor.saved": "Materijal je spremljen. Dodjele tijelima ostaju nepromijenjene.",
   "material.editor.scope": "Spremi pohranjuje ovaj materijal bez dodjele tijelima. Prazna svojstva i uvjeti ostaju nepoznati. Gustoća s kartice ne mijenja dodijeljenu gustoću ni masu.",

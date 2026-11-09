@@ -394,7 +394,7 @@ fn the_sketch_page_switches_dimension_values_to_a_window() {
     let mut h = Harness::new();
     h.call("ui.prefs", json!({"open": "Sketch"}));
     h.frames(4);
-    let handle = format!("dialog:{}:{}", crate::i18n::tr("prefs.dimension_values"), crate::i18n::tr("prefs.dimension_values_window"));
+    let handle = format!("dialog:{}:{}", solidcraft_ui_text::tr("prefs.dimension_values"), solidcraft_ui_text::tr("prefs.dimension_values_window"));
     crate::prefs::reveal_preference(&mut h, &handle);
     h.step(&json!({"click":{"handle": handle}})).unwrap();
     h.frames(2);
@@ -551,6 +551,31 @@ fn rectangle_side_and_fixed_origin_line_dimensions_preserve_other_constraints() 
         assert_eq!(h.app.session.undo.len(), undo + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), baseline);
+    }
+}
+
+/// With the Sketch preference off, the first dimension sizes only what it measures (#4109).
+#[test]
+fn the_first_dimension_scales_the_drawing_unless_the_preference_is_off() {
+    for (scales, side) in [true, false].into_iter().flat_map(|s| [2_f64, 30., 500.].map(|v| (s, v))) {
+        let mut h = Harness::new();
+        crate::dim_view::cancel();
+        assert!(h.app.preferences.first_dimension_scales, "on by default (#1365)");
+        h.app.preferences.first_dimension_scales = scales;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.;
+        h.app.cam.target = solidcore_record::Vec3::new(10., 5., 0.);
+        h.settle();
+        place(&mut h, &[[10., 0.]], [10., -5.]);
+        type_value(&mut h, &format!("{side} mm"));
+        h.step(&json!({"key":"Enter"})).unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let area = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().profiles[0].area;
+        // On: 20 × 10 scales to side × side / 2. Off: only the side changes, side × 10.
+        let want: f64 = if scales { side * side / 2. } else { side * 10. };
+        assert!((area - want).abs() < 1e-6 * want.max(1.), "scales: {scales}, side {side}, area {area}");
     }
 }
 
@@ -1242,7 +1267,7 @@ fn point_drawn(h: &mut Harness, world: [f64; 2]) -> bool {
 
 /// Is a sketch curve's hover highlight painted this frame?
 fn hover_painted(h: &Harness) -> bool {
-    let col = egui::epaint::ColorMode::Solid(crate::theme::Tokens::get().hover_profile_edge);
+    let col = egui::epaint::ColorMode::Solid(solidcraft_theme::Tokens::get().hover_profile_edge);
     h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Path(p) if p.stroke.width == 3.0 && p.stroke.color == col))
 }
 
@@ -1945,8 +1970,9 @@ fn editing_a_dimension_to_a_definition_names_its_parameter() {
 /// the parameter name kept as typed.
 #[test]
 fn the_status_after_a_dimension_is_in_the_interface_language() {
-    let pl = crate::i18n::Locale::for_language("pl");
-    let en = crate::i18n::Locale::for_language("en");
+    crate::i18n::install();
+    let pl = solidcraft_ui_text::Locale::for_language("pl");
+    let en = solidcraft_ui_text::Locale::for_language("en");
     let status = |h: &Harness| h.app.status.as_ref().map(|s| (s.0.clone(), s.2));
     let polish = |mut h: Harness| {
         h.app.preferences.language = "pl".into();
@@ -2036,7 +2062,7 @@ fn a_typed_value_hides_the_curvature_combs() {
     let id = solved(&h).curves[0].id.clone();
     h.app.run("inspect.curvature_comb", json!({"curves":[id]})).unwrap();
     h.step(&json!({"start":"sketch.dimension"})).unwrap();
-    let teeth = egui::epaint::Stroke::new(1.0, crate::theme::Tokens::get().comb_teeth);
+    let teeth = egui::epaint::Stroke::new(1.0, solidcraft_theme::Tokens::get().comb_teeth);
     let comb_drawn = |h: &Harness| h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if *stroke == teeth));
     h.frames(1);
     assert!(comb_drawn(&h), "the comb is drawn");

@@ -97,7 +97,7 @@ pub(super) struct RowPlan {
     pub contents: Vec<Vec<u64>>,
     /// By folder index: its own and nested folders' joints.
     pub joints: Vec<Vec<u64>>,
-    /// Each folder and parent id, with its fold key in the tree state.
+    /// Each folder and parent id, with its fold key in `history_folds`.
     fold_keys: Vec<(u64, String)>,
     /// Features with sketches listed under them, and their fold keys.
     host_keys: Vec<(u64, String)>,
@@ -184,7 +184,7 @@ impl RowPlan {
             trailing: Vec::new(),
             contents: Vec::new(),
             joints: Vec::new(),
-            fold_keys: fold_ids.into_iter().map(|id| (id, format!("timeline_group:{id}"))).collect(),
+            fold_keys: fold_ids.into_iter().map(|id| (id, format!("{}{id}", crate::timeline_folders::KEY))).collect(),
             host_keys: rows.rows.iter().filter(|row| !row.listed.is_empty()).map(|row| (row.feature, sketches_key(row.feature))).collect(),
             features,
             groups,
@@ -367,7 +367,8 @@ impl RowPlan {
 
     /// Which folders and folds are open now.
     pub(super) fn folds(&self, app: &SolveApp) -> Folds {
-        let closed = self.fold_keys.iter().filter(|(_, key)| app.tree.collapsed.contains(key)).map(|(id, _)| *id).collect();
+        // A folder shows open here until it is folded (`timeline_folders::is_open`).
+        let closed = self.fold_keys.iter().filter(|(_, key)| !crate::history_folds::is_open(app, key, true)).map(|(id, _)| *id).collect();
         let open_hosts = self.host_keys.iter().filter(|(_, key)| crate::browser::is_open(app, key, false)).map(|(feature, _)| *feature).collect();
         Folds { closed, open_hosts }
     }

@@ -1,0 +1,5 @@
+Updates: HANG-9
+
+- **New trigger (confirmed by a runtime backtrace):** `SmFilletNx2Corner::AdjustConcaveCornerTopology` (`SmFilletCorner.cpp:7185`) calls `pSideSurface->CreateExtendedSurface(m_crContext, 10.0*dGapDist, ...)`, where `dGapDist` (`:7106`) is the distance between the two rail points on the side edge. The only guard is `dGapDist < m_dThisApproxTol3d` (`:7107`), so with `m_dThisApproxTol3d == 0` and coincident rail points `dGapDist == 0` reaches the call and the `dExtDist = dExtDist/2.0; if (dExtDist < dDist/100.0)` loop of HANG-9 never ends.
+- **Evidence:** case `corner_adjust_concave_61` of `blend.fillet_corner_p2` with the shim guard disabled; a SIGALRM handler printing `backtrace()` after 15 s gave `N_CrvArcLength` <- `ST_curxcdr` <- `N_CrvExtendByDist` <- `ST_surxsdr` <- `N_SrfExtendByDist` <- `SmBSplineSurface::CreateExtendedSurface` <- `AdjustConcaveCornerTopology`, i.e. inside the retried `N_SrfExtendByDist` loop.
+- **Shim guard:** `blend_fillet_corner_p3_static.inc` refuses exactly `dGapDist == 0` (after the `< tol` early return).

@@ -560,14 +560,14 @@ fn design_path_error(path: &str, why: &Remote) -> Error {
     let text = match why {
         Remote::Network(host) => format!(
             "{path}: on the network location \\\\{host}, which designs may not reach until you allow that server \
-             (Update Links or Open Linked Design asks; or Preferences › Design › Network locations)"
+             (Update Links, Open Linked Design or Reload from file asks; or Preferences › Design › Network locations)"
         ),
         Remote::Device => format!("{path}: names a device, not a file"),
     };
     Error::new(ErrorKind::PermissionDenied, text)
 }
 
-/// Check a path a design names (a linked design, a font file) before anything reads it, judged
+/// Check a path a design names (a linked design, a font file, a point cloud's file) before anything reads it, judged
 /// from its text first: a network path whose host isn't allowed, or a device path, is refused
 /// without a filesystem call. An agent's scope ([`check`]) applies on top.
 pub fn check_design_path(path: &str, design: Option<&str>) -> Result<()> {

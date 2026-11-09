@@ -31,6 +31,7 @@ L0 `geom` -> L1 `sketch`, `kernel`, `render` -> L2 `doc` -> L3 `io` -> L4 `engin
 
 - Nothing below L5 depends on egui, eframe, winit, wgpu or rfd. The UI crate is swappable.
 - Only `crates/kernel` may use `truck`.
+- Solidcore only through `solidcore-ops` (STEP too; `solidcore_ops::Order`), `-tess`, `-record`; exceptions: `xtask/solidcore-seam.txt`, shrink only.
 - The UI is thin: panels read engine state and act through `app.run(id, params)` or `app.start(id)`.
 - A new module's `mod` line goes into the existing sorted group, not a new group at the end (`cargo fmt` keeps each group sorted).
 

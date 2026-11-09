@@ -47,8 +47,15 @@ Separated bounds use the existing fast disjoint test. Overlapping selected close
 bounds need a conservative nesting proof: each enclosing parent is convex and all
 child vertices are strictly behind every outward parent plane. The immediate
 parent is independent of body order; touching or crossing optical boundaries
-refuse. Nonconvex nested parents remain unsupported. Thin sheets retain their
-existing planar certificate and may not overlap another selected optical bound.
+refuse. Nonconvex nested parents remain unsupported. With Path, thin sheets accept
+connected exact planar tessellations, including concavity and holes, within the
+selected memory and cumulative work budget. All faces share one global winding;
+boundary edges have one face and interior edges have two opposite faces. Each
+vertex link forms one connected cycle or boundary path. Exact contact checks
+reject overlaps, T-junctions, duplicate faces and pinched or touching fans without
+repair. Signed zero has one coordinate identity. Without Path the original
+one/two-triangle sheet certificate remains unchanged. Sheets still may not
+overlap another selected optical bound.
 Optical contact with analytic rectangle emitters or point/spot source positions
 refuses explicitly. An ordinary opaque material wins an exact model-hit tie with
 Glass, preserving an opaque contact surface instead of stepping past it.
@@ -89,15 +96,20 @@ area connections retain geometry-wins-endpoint ties; point/spot connections reta
 their existing excluded-source endpoint. Closed refractive shadow connections are
 **not implemented**: authored `shadow_transmission:true` on a closed target refuses
 instead of silently using a straight-line approximation. Closed Glass still reaches
-HDR, area and mesh emission through actual sampled dielectric/GI paths. Point-light
-caustics and combining Glass with external participating volume remain unsupported.
+HDR, area and mesh emission through actual sampled dielectric/GI paths. Hard-source
+caustics require the separately authored photon prepass. Combining Glass with
+external participating volume remains unsupported.
 The independent [bounded Atmosphere](render-cpu-volume.md) is an opaque-Path
-route; it does not erase those limits. No rough BTDF is added because the existing
-GPU Glass consumer is smooth delta transport.
+route; it does not erase those limits. Optional [Glass material models](render-glass-material-models.md)
+add rough transmission, three-band dispersion, lossless thin-film interference and
+finite-radius hard-source photon caustics. Assignments without a model keep the
+smooth route. These newer source changes have separate qualification from the
+historical CI7 counts above.
 
 Certification is cooperative: exact edge merge sorting, connectivity, vertex links,
 one face-pair contact check, determinant term or containment predicate run under
-the existing cumulative work and cancel token. For N selected closed triangles its
+the existing cumulative work and cancel token. For N selected optical triangles,
+including Path sheets as well as closed boundaries, its
 prepaid peak is `sizeof(Task)+N*(sizeof(Face)+6*sizeof(Edge)+3*sizeof(usize)+3)`;
 all vectors fallibly reserve exact capacity. The 12-limb volume state is in
 `sizeof(Task)`. This change additionally bills one shared
@@ -123,29 +135,42 @@ work exhaustion, physical inside-eye and per-pupil nested Beer, first opaque and
 analytic emission, exact boundary/near-clip refusal, initial-medium TIR, saved/runtime capture and the real pointer preset→Render→Save→
 reopen workflow. The published source's tests executed in CI7; its exact counts
 and failures are linked from [the qualification record](render-parity.md#qualification).
-The mathematical source reviews supplement those tests. A native Glass scene and
-image-quality acceptance remain pending; the opaque native fixture supplies neither.
+The mathematical source reviews supplement those tests. This earlier
+qualification used an opaque native fixture, so it did not establish native
+Glass controls or Glass image-quality acceptance. Later native Glass authoring
+and Save/reopen evidence is recorded separately with the
+[current Glass matrix](render-glass-complete.md) and
+[advanced material guide](render-glass-material-models.md). Control and persistence
+checks do not establish Glass/scattering image-quality acceptance.
 
 ## Subsurface continuation
 
 The selected-medium continuation and its mathematical, producer, saved/runtime
-and pointer-UI regressions are part of the published source tested by CI7.
-Native Glass/scattering visual acceptance remains pending.
+and pointer-UI regressions are part of the earlier published source tested by CI7.
+Current native Glass control/persistence evidence has a separate scope; visual
+quality acceptance for Glass/scattering remains pending.
 It consumes the existing saved `OpticalMaterial.subsurface` for a selected certified
 closed CPU Path medium. The scalar collision rate is per millimetre; HG anisotropy
 uses propagation directions, so positive values favor forward scattering. Beer
-absorption stays separate. There is no RGB scattering albedo, new rough BTDF,
-heterogeneous density or general external-volume consumer in this increment.
+absorption stays separate. There is no RGB scattering albedo, heterogeneous
+density or general external-volume consumer in this selected-medium model.
+Advanced interface models are independently authored optical controls.
 
 Each actual inside-eye/pupil or post-surface segment samples free flight from the
 physical segment start, before its closest model or analytic-emitter endpoint.
 The primary near clip does not shorten that optical length. A collision consumes
 one finite Path vertex, validates its actual f64 position against the current
-certified nested chain and launches one HG direction. It adds no ray tree, image
-plane, new sampler seed or cap. No-collision events retain their probability in
-endpoint MIS; contained direct-light connections use matching scattering survival
-and Beer absorption. No next-event connection through a refracting boundary is
-invented. Independently authored closed transmitted shadows stay refused.
+certified nested chain and launches one HG direction. The current continuation
+also estimates hard directional, point and spot illumination at that collision,
+including implicit studio directions. Supported contained connections include
+matching scattering survival and Beer absorption. The optional photon map admits
+rough-interface and HG volume receivers, with the bounded receiver reservoir,
+camera-path partition and finite-radius bias described in the
+[advanced material guide](render-glass-material-models.md). It adds no ray tree
+or image plane. No-collision events retain their probability in endpoint MIS.
+No arbitrary next-event connection through a refracting closed boundary is
+invented; those source paths require the optional photon estimate. Independently
+authored closed transmitted shadows stay refused.
 
 Active scattering requires Path and disabled surface denoising, matching the
 existing GPU random-walk compatibility domain. Thin sheets and Path=None retain

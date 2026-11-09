@@ -680,10 +680,10 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
 "#;
     // The archived pre-GPU12 control fingerprint remains historical evidence:
     // f373400816e40e803691ceb847d8c9d7983fd4744c3874a322363810c14b6d6c.
-    // Upstream changed map filtering and producer specialization. Reconstruct
+    // Map filtering, optical transport and producer specialization can change. Reconstruct
     // each current producer, changing only this signed primary hook/helper.
     let old_pipeline = |opaque: bool| {
-        let shader = if opaque { SHADER } else { SINGLE_MEDIUM_SHADER };
+        let shader = scene_shader(opaque);
         assert_eq!(shader.matches(new_hook).count(), 1);
         assert_eq!(shader.matches(helper).count(), 1);
         let helper_block = format!("\n{helper}");
@@ -765,7 +765,7 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
             _ => panic!("unexpected unchanged-volume fixture mode"),
         }
         // None and zero extinction use the opaque producer. The active fog
-        // routes use the one-medium producer, with no maps or nested glass.
+        // routes use the general producer, with no maps or nested glass.
         let opaque = mode < 2;
         assert_eq!(use_opaque_pipeline(&source, options), opaque);
         assert!(image.textures.is_none() && !options.nested_media);

@@ -16,6 +16,7 @@ pub(super) enum Environment {
 
 #[derive(Clone, Debug)]
 pub(super) struct View {
+    pub caustics: Option<solidcraft_engine::render::job::CausticOptions>,
     pub aging: solidcraft_engine::doc::render_aging::SavedAgingStack,
     pub nested_media: bool,
     pub volume: Option<solidcraft_engine::render::job::volume::HomogeneousVolume>,
@@ -48,6 +49,7 @@ pub(super) struct View {
 impl Default for View {
     fn default() -> Self {
         Self {
+            caustics: None,
             aging: Default::default(),
             nested_media: false,
             volume: None,
@@ -100,6 +102,7 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
     params["linear_exr"] = json!(view.linear_exr);
     params["aging"] = json!(view.aging);
     params["nested_media"] = json!(view.nested_media);
+    params["caustics"] = json!(view.caustics);
     params["volume"] = json!(view.volume);
     params["adaptive"] = json!(view.adaptive);
     params["transmission_samples"] = json!(view.transmission_samples);
@@ -161,13 +164,14 @@ pub(super) fn tone_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::text(ui, app.tr("render.studio_tone_map"), ui_kit::Text::Inline);
     let selected = app.render_workspace.view.studio.tone_map;
     let label = match selected {
-        ToneMap::Reinhard => crate::i18n::tr("render.tone_reinhard"),
-        ToneMap::AcesFitted => crate::i18n::tr("render.tone_aces_fitted"),
+        ToneMap::Reinhard => solidcraft_ui_text::tr("render.tone_reinhard"),
+        ToneMap::AcesFitted => solidcraft_ui_text::tr("render.tone_aces_fitted"),
     };
     let response = ui_kit::dropdown_menu(ui, "render_tone_map", label, |ui| {
-        for (map, label) in
-            [(ToneMap::Reinhard, crate::i18n::tr("render.tone_reinhard")), (ToneMap::AcesFitted, crate::i18n::tr("render.tone_aces_fitted"))]
-        {
+        for (map, label) in [
+            (ToneMap::Reinhard, solidcraft_ui_text::tr("render.tone_reinhard")),
+            (ToneMap::AcesFitted, solidcraft_ui_text::tr("render.tone_aces_fitted")),
+        ] {
             if ui_kit::list_picker(ui, label, label, map == selected).clicked() {
                 app.render_workspace.view.studio.tone_map = map;
                 ui.close();

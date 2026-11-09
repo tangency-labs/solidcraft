@@ -105,7 +105,6 @@ fn scatter(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
     let event = optical.collision.ok_or_else(|| invalid("CPU subsurface collision missing"))?;
     let index = current(optical)?.ok_or_else(|| invalid("CPU subsurface collision lost its medium"))?;
     let input = task.options.dielectrics.get(index).ok_or_else(|| invalid("CPU subsurface material missing"))?;
-    let scattering = input.subsurface.filter(|s| s.active()).ok_or_else(|| invalid("CPU subsurface rate missing"))?;
     let factor = dielectric::attenuation(input.absorption_per_mm, event.distance).map_err(error)?;
     let throughput = multiply(state.throughput, factor);
     super::super::super::lighting::validate_radiance(throughput).map_err(error)?;
@@ -116,20 +115,38 @@ fn scatter(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
     if state.depth == 0 {
         task.primary_coverage = 1;
     }
-    if throughput == Vec3::ZERO || !continuing(task, state)? {
+    if throughput == Vec3::ZERO {
         state.stage = Stage::Commit;
         return Ok(());
     }
     let incoming = state.ray.ok_or_else(|| invalid("CPU subsurface incident ray missing"))?.direction();
+    if glass_lighting::begin(task, state, glass_lighting::Event::Medium { index, position: event.position, incoming }) {
+        return Ok(());
+    }
+    resume(task, state, index, event.position, incoming)
+}
+pub(super) fn resume(task: &ImageTask, state: &mut State, index: usize, position: Vec3, incoming: Vec3) -> job::Result<()> {
+    if !continuing(task, state)? {
+        state.stage = Stage::Commit;
+        return Ok(());
+    }
+    let scattering = task
+        .options
+        .dielectrics
+        .get(index)
+        .and_then(|input| input.subsurface)
+        .filter(|scattering| scattering.active())
+        .ok_or_else(|| invalid("CPU subsurface rate missing"))?;
     let uniform = variates(task, state, 0x5001)?;
     let direction = scattering.sample_direction(incoming, uniform).map_err(|e| JobError::new(ErrorCode::InvalidScene, e.to_string()))?;
-    let ray = Ray::new(event.position, direction, 0.0_f64.next_up(), super::super::super::MAX_DISTANCE_MM).map_err(error)?;
+    let ray = Ray::new(position, direction, 0.0_f64.next_up(), super::super::super::MAX_DISTANCE_MM).map_err(error)?;
     let optical = state.optical.as_mut().ok_or_else(|| invalid("CPU subsurface stack missing"))?;
-    optical.segment_start = event.position;
+    optical.segment_start = position;
     optical.source_plane = None;
     optical.delta = true;
     state.previous_pdf = 0.0;
-    state.previous_position = event.position;
+    state.previous_position = position;
+    state.sampled_continuous = true;
     state.ray = Some(ray);
     state.cursor = Some(TraceCursor::new(ray, false));
     state.hit = None;
