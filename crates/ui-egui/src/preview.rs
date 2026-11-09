@@ -1189,7 +1189,7 @@ mod tests {
         let svg = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="30mm" viewBox="0 0 40 30"><path d="{paths}"/></svg>"#);
         let session = Session::default();
         let built = compute(&session, &[("sketch.insert_svg".into(), json!({"text": svg}))], colors()).unwrap();
-        let camera = solidcraft_engine::render::Camera { distance: 60.0, ..Default::default() };
+        let camera = solidcraft_viewport::Camera { distance: 60.0, ..Default::default() };
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         let proj = crate::viewport::Proj { cam: camera, vp: camera.view_proj(800.0 / 600.0, 100.0), rect };
         let ctx = crate::fonts::test_context();

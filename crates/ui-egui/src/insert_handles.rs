@@ -400,7 +400,7 @@ mod tests {
         p.svg.diagnostics = std::sync::Arc::new(vec![issue; 601]);
         crate::scenario::clear_handles();
         let mut first = ctx.run_ui(Default::default(), |ui| {
-            let cam = solidcraft_engine::render::Camera::default();
+            let cam = solidcraft_viewport::Camera::default();
             let rect = egui::Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
             let proj = Proj { cam, vp: cam.view_proj(800.0 / 600.0, 100.0), rect };
             show_svg_diagnostics(&p, &Plane::XY, &proj, ui.painter());
@@ -414,7 +414,7 @@ mod tests {
         h.app.dialog = Some(crate::dialogs::Dialog::new(Kind::InsertDrawing(p.clone()), Vec::new()));
         crate::scenario::clear_handles();
         let mut output = ctx.run_ui(Default::default(), |ui| {
-            let cam = solidcraft_engine::render::Camera::default();
+            let cam = solidcraft_viewport::Camera::default();
             let rect = egui::Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
             let proj = Proj { cam, vp: cam.view_proj(800.0 / 600.0, 100.0), rect };
             show(&mut h.app, ui, &proj);

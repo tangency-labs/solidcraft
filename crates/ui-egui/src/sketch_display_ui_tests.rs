@@ -358,7 +358,7 @@ fn zoomed_in_ring_fill_fits_the_hover_highlight_budget() {
 }
 
 fn complex_fill_projection() -> Proj {
-    use solidcraft_engine::render::{Camera, Mat4};
+    use solidcraft_viewport::{Camera, Mat4};
     Proj {
         cam: Camera::default(),
         vp: Mat4([[0.0005, 0.0, 0.0, 0.0], [0.0, 0.005, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]),
