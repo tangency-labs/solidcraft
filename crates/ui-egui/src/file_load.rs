@@ -379,7 +379,7 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
 /// file would be read with whatever else was uploaded before.
 pub(crate) fn insert_board(app: &mut SolveApp, path: &str, web: bool) {
     if web && !solidcraft_engine::io::is_zip_path(path) {
-        app.set_status(crate::i18n::tr("ui.insert_pcb.web_zip"), true);
+        app.set_status(solidcraft_ui_text::tr("ui.insert_pcb.web_zip"), true);
         return;
     }
     let mut request = Request::new(path, Kind::Insert);
