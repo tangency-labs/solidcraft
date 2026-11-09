@@ -437,42 +437,49 @@ pub(crate) fn owns_keyboard_input(app: &mut SolveApp, ctx: &egui::Context) -> bo
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     poll(app, &ctx);
-    // Look for installed agents the first time the panel opens (in the background), before it
-    // is drawn, so its first frame says they are being looked for.
-    #[cfg(not(target_arch = "wasm32"))]
-    if shown(app) && app.agent_chat.open && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
-        refresh(app, &ctx);
-    }
-    let view = PanelView::of(app, &ctx);
     let mut prefs = AgentPanelPrefs::read(&app.preferences);
-    draw(&mut app.agent_chat, &view, &mut prefs, ui);
-    prefs.write(&mut app.preferences);
-    hand_over(app, ui);
+    let shown = shown(app);
+    if begin(&mut app.agent_chat, shown, &prefs, &ctx) {
+        // Look for installed agents the first time the panel opens (in the background), before
+        // it is drawn, so its first frame says they are being looked for.
+        #[cfg(not(target_arch = "wasm32"))]
+        if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
+            refresh(app, &ctx);
+        }
+        // Read only when the panel is drawn: a hidden or closed chat costs nothing.
+        let view = PanelView::of(app, &ctx);
+        draw(&mut app.agent_chat, &view, &mut prefs, ui);
+        prefs.write(&mut app.preferences);
+        hand_over(app, ui);
+    }
     run_actions(app, &ctx);
 }
 
-/// The panel drawn from the chat's state, the host's view and the panel's own preferences; what
-/// was asked is left in `chat.actions`.
-pub fn draw(chat: &mut AgentChat, view: &PanelView, prefs: &mut AgentPanelPrefs, ui: &mut egui::Ui) {
-    let ctx = ui.ctx().clone();
-    // Set again below if the chat is drawn this frame.
+/// The panel's frame before it is drawn: what is not drawn this frame is forgotten and the New
+/// chat shortcut is taken. `shown`: AI features are on. Whether the panel is drawn ([`draw`]).
+pub fn begin(chat: &mut AgentChat, shown: bool, prefs: &AgentPanelPrefs, ctx: &egui::Context) -> bool {
+    // Set again when the chat is drawn this frame.
     chat.drop_rect = None;
     // Retain the previous card for shortcut hover routing below; clear it when hidden.
-    if !view.shown || !chat.open {
+    if !shown || !chat.open {
         chat.panel_rect = None;
     }
     // With AI features off nothing of the chat is drawn, and the shortcut does nothing.
-    if !view.shown {
-        return;
+    if !shown {
+        return false;
     }
     // A window that isn't drawn this frame closes; the next one opens at the saved place.
     if !(chat.open && prefs.popped) {
         chat.window_placed = false;
     }
-    new_chat_shortcut(chat, &ctx);
-    if !chat.open {
-        return;
-    }
+    new_chat_shortcut(chat, ctx);
+    chat.open
+}
+
+/// The open panel drawn from the chat's state, the host's view and the panel's own preferences,
+/// once [`begin`] says it is drawn; what was asked is left in `chat.actions`.
+pub fn draw(chat: &mut AgentChat, view: &PanelView, prefs: &mut AgentPanelPrefs, ui: &mut egui::Ui) {
+    let ctx = ui.ctx().clone();
     #[cfg(not(target_arch = "wasm32"))]
     if prefs.popped {
         window(chat, view, &ctx, prefs);
@@ -561,7 +568,11 @@ pub(crate) fn finish_shared(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Existing Assistant controls and conversation, inside the shared host's body.
 pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow) {
+    if !shown(app) || !app.agent_chat.open {
+        return;
+    }
     let view = PanelView::of(app, ui.ctx());
+
     let prefs = AgentPanelPrefs::read(&app.preferences);
     draw_content(&mut app.agent_chat, &view, &prefs, ui, flow);
     hand_over(app, ui);
