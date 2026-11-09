@@ -719,7 +719,7 @@ fn rectangle_segment_ends(
     corners: &[Vec2; 4],
 ) -> Option<(Vec2, Vec2)> {
     use crate::curve::curve::CurveKind;
-    use crate::curve::native_affine::dyadic_four_products_zero;
+    use crate::curve::native_affine::exact_four_products_zero;
     use crate::nurbs::math::NOW;
     if let CurveKind::Line(line) = curve.kind() {
         let natural = line.natural_interval();
@@ -738,12 +738,12 @@ fn rectangle_segment_ends(
         let scale = line.line_scale();
         let component_matches = |origin, direction, parameter, target| {
             let scaled = scale * direction;
-            dyadic_four_products_zero([
+            exact_four_products_zero([
                 (scale, direction, false),
                 (scaled, 1.0, true),
                 (0.0, 0.0, false),
                 (0.0, 0.0, false),
-            ]) && dyadic_four_products_zero([
+            ]) && exact_four_products_zero([
                 (origin, 1.0, false),
                 (parameter, scaled, false),
                 (target, 1.0, true),

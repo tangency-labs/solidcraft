@@ -2,10 +2,12 @@
 //!
 //! Upstream: the stored Line parameter map; interval certificates are solidcore's.
 //! Deviations: no query solver, tolerance, or cache continuity is used. Exact
-//! product signs use fixed bounded integer storage; no input-driven recursion.
+//! product sums are error-free expansions ([`crate::geom::expansion`]): a product out of
+//! their range is not shown zero. No input-driven recursion.
 
 use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::curve::{Curve, CurveKind};
+use crate::geom::expansion;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::tol::is_zero;
 use crate::math::Vec3;
@@ -210,96 +212,22 @@ fn iv_lerp(a: [Ivl; 3], b: [Ivl; 3], t: Ivl) -> [Ivl; 3] {
     [ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t]
 }
 
-/// Test the exact zero of four signed binary64 products with bounded storage.
-pub(crate) fn dyadic_four_products_zero(terms: [(f64, f64, bool); 4]) -> bool {
-    dyadic_products_zero(&terms)
-}
-fn dyadic_products_zero(terms: &[(f64, f64, bool)]) -> bool {
-    if terms.len() > 8 {
-        return false;
-    }
-    let mut products = [([0.0; 2], false); 8];
-    for (slot, &(a, b, negative)) in products.iter_mut().zip(terms) {
-        *slot = ([a, b], negative);
-    }
-    products.get(..terms.len()).is_some_and(|products| {
-        dyadic_product_order::<2, 66>(products) == Some(std::cmp::Ordering::Equal)
-    })
-}
-fn dyadic_product_order<const FACTORS: usize, const WORDS: usize>(
-    terms: &[([f64; FACTORS], bool)],
-) -> Option<std::cmp::Ordering> {
-    fn parts(value: f64) -> Option<(bool, u64, i32)> {
-        if !value.is_finite() {
-            return None;
-        }
-        let bits = value.to_bits();
-        let exponent = ((bits >> 52) & 0x7ff) as i32;
-        let fraction = bits & ((1_u64 << 52) - 1);
-        Some((
-            bits >> 63 != 0,
-            if exponent == 0 {
-                fraction
+/// Whether `sum ±a b` over the four `(a, b, negative)` terms is exactly zero, each
+/// product negated when its flag is set. The sum is an error-free expansion
+/// ([`expansion`]); a product out of its exact range (a subnormal or non-finite factor,
+/// one that overflows or could underflow) is not shown zero: false.
+pub(crate) fn exact_four_products_zero(terms: [(f64, f64, bool); 4]) -> bool {
+    let sum = terms
+        .into_iter()
+        .try_fold(Vec::new(), |sum, (a, b, negative)| {
+            let p = expansion::product(a, b)?;
+            Some(if negative {
+                expansion::sub(&sum, &p)
             } else {
-                fraction | (1_u64 << 52)
-            },
-            if exponent == 0 {
-                -1074
-            } else {
-                exponent - 1075
-            },
-        ))
-    }
-    fn add_word(words: &mut [u64], word: u64, shift: usize) -> Option<()> {
-        let mut index = shift / 64;
-        let mut carry = u128::from(word) << (shift % 64);
-        while carry != 0 {
-            let slot = words.get_mut(index)?;
-            let sum = u128::from(*slot) + (carry & u128::from(u64::MAX));
-            *slot = sum as u64;
-            carry = (carry >> 64) + (sum >> 64);
-            index += 1;
-        }
-        Some(())
-    }
-    // Only these audited fixed sizes are supported; neither comes from input.
-    if !((FACTORS == 2 && WORDS == 66) || (FACTORS == 4 && WORDS == 132)) {
-        return None;
-    }
-    if terms.len() > 8 {
-        return None;
-    }
-    let mut positive = [0_u64; WORDS];
-    let mut negative = [0_u64; WORDS];
-    for (factors, negate) in terms {
-        let mut sign = *negate;
-        let mut exponent = 0;
-        let mut product = [1_u64, 0, 0, 0];
-        for factor in factors {
-            let (negative_factor, mantissa, power) = parts(*factor)?;
-            sign ^= negative_factor;
-            exponent += power;
-            let mut carry = 0_u128;
-            for word in &mut product {
-                // A 64-bit limb times a 53-bit significand plus its carry fits
-                // in 118 bits. Four significands need only 212 of 256 bits.
-                let value = u128::from(*word) * u128::from(mantissa) + carry;
-                *word = value as u64;
-                carry = value >> 64;
-            }
-            if carry != 0 {
-                return None;
-            }
-        }
-        // Two/four finite exponents plus2148/4296 are nonnegative and at most
-        // 4090/8180. The guarded constant conversion fits both i32 and wasm32.
-        let shift = (exponent + 1074 * FACTORS as i32) as usize;
-        let words = if sign { &mut negative } else { &mut positive };
-        for (index, word) in product.into_iter().enumerate() {
-            add_word(words, word, shift + 64 * index)?;
-        }
-    }
-    Some(positive.iter().rev().cmp(negative.iter().rev()))
+                expansion::add(&sum, &p)
+            })
+        });
+    sum.is_some_and(|sum| expansion::is_zero(&sum))
 }
 
 #[cfg(test)]
@@ -387,23 +315,58 @@ mod tests {
             }
         }
     }
-    /// Exact identities must survive overflow, underflow and unlike-term cancellation.
+    /// Exact identities must survive unlike-term cancellation at any in-range magnitude;
+    /// a product out of the exact range (one that overflows, a subnormal or non-finite
+    /// factor) is not shown zero, so the trim is not shown rectangular.
     #[test]
     fn exact_trim_products_keep_extreme_identity() {
-        for x in [f64::MAX, f64::from_bits(1), 1.0] {
-            assert!(dyadic_four_products_zero([
+        for x in [2.0_f64.powi(1000), 2.0_f64.powi(-480), 0.1, 1.0] {
+            assert!(exact_four_products_zero([
                 (x, 2.0, false),
                 (x, 3.0, false),
                 (x, 4.0, true),
                 (x, 1.0, true)
             ]));
-            assert!(!dyadic_four_products_zero([
+            assert!(!exact_four_products_zero([
                 (x, 2.0, false),
                 (x, 3.0, false),
                 (x, 4.0, true),
                 (x, 0.0, true)
             ]));
         }
-        assert!(!dyadic_four_products_zero([(f64::INFINITY, 0.0, false); 4]));
+        // 1e16 + 1 - 1e16 - 1 rounds to -1 left to right; exactly it is zero
+        assert!(exact_four_products_zero([
+            (1e16, 1.0, false),
+            (1.0, 1.0, false),
+            (1e16, 1.0, true),
+            (1.0, 1.0, true)
+        ]));
+        for x in [f64::MAX, f64::from_bits(1)] {
+            assert!(!exact_four_products_zero([
+                (x, 2.0, false),
+                (x, 3.0, false),
+                (x, 4.0, true),
+                (x, 1.0, true)
+            ]));
+        }
+        assert!(!exact_four_products_zero([(f64::INFINITY, 0.0, false); 4]));
+    }
+
+    /// A product that could underflow (`1e-160 * 1e-160`, below `2^-968`) is out of the
+    /// exact range: the sum is not shown zero, though it cancels.
+    #[test]
+    fn exact_trim_products_refuse_an_out_of_range_product() {
+        assert!(!exact_four_products_zero([
+            (1e-160, 1e-160, false),
+            (1e-160, 1e-160, true),
+            (0.0, 0.0, false),
+            (0.0, 0.0, false)
+        ]));
+        assert!(exact_four_products_zero([
+            (1e-140, 1e-140, false),
+            (1e-140, 1e-140, true),
+            (0.0, 0.0, false),
+            (0.0, 0.0, false)
+        ]));
     }
 }
