@@ -76,10 +76,12 @@
 //!   rejects a patch (WR-640); the port keeps that: it runs the
 //!   face intersections (their status and edits count) and the classifications, and
 //!   accepts.
-//! - **Open base (opt-in).** Upstream's `DoDefeature` returns success when a feature's
-//!   base patch could not be built, with the feature's faces cut out of the base and the
-//!   hole open (WR-656). With `Kernel::fixes.defeature_refuses_open_base` (own design)
-//!   [`FeatureExecutive::do_defeature`] refuses it with `SM_ERR` and puts the base back.
+//! - **Open base.** Upstream's `DoDefeature` returns success when a feature's base patch
+//!   could not be built, with the feature's faces cut out of the base and the hole open
+//!   (WR-656), for the caller to put back with `RestoreFeatures`.
+//!   [`FeatureExecutive::do_defeature`] puts such a feature back itself and returns it
+//!   ([`KeptFeature`]); when no feature comes off it refuses with `SM_ERR` and puts the
+//!   base back. No base is handed back open.
 //! - **Notifications.** B-rep edits run on arena-only notification records
 //!   ([`crate::topology::brep::p2::ArenaNotifyState`]; a copy's records cover both
 //!   B-reps), as upstream's objects notify their context. `PartitionFeature`'s and
@@ -596,44 +598,96 @@ impl<'a> FeatureExecutive<'a> {
     /// `DoDefeature`: partitions each feature, builds its patches and applies them
     /// (their statuses ignored); the base B-rep is edited in place.
     ///
-    /// Not upstream unless opted in (`fixes.defeature_refuses_open_base`, WR-656): a
-    /// feature whose base patch could not be built is refused before its patches are
-    /// applied, the base B-rep is put back as it was before the call (a
-    /// [`Brep::snapshot`] taken first) and the executive drops its features.
+    /// Not upstream (WR-656): a feature that was not partitioned, or whose base patch could
+    /// not be built, is not taken off. Upstream leaves its hole open, with success, for the
+    /// caller to put back with `RestoreFeatures`; here it is put back at once
+    /// (`RestoreFeature`), so no base is handed back open. The features kept are returned,
+    /// each naming the base loop edge of its open hole, and the executive drops them, as
+    /// `RestoreFeatures` does. When no feature comes off, the call is refused with `SM_ERR`
+    /// at the first kept feature's loop edge; a feature that cannot be put back (one whose
+    /// partition failed part way has nothing to restore) refuses the call too. Every exit
+    /// that is not a success, these refusals, an unported callee and a cancellation, puts the
+    /// base B-rep back as it was (a [`Brep::snapshot`] taken first, on every call: a copy of
+    /// the base is the price of that guarantee) and drops the executive's features, so a
+    /// failed call leaves the base untouched.
+    ///
+    /// After a partial success the kept features are gone from [`Self::features`], so the
+    /// indices [`KeptFeature::feature`] names (those when the call began) no longer index it.
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from a callee; dangling ids; with the fix, `SM_ERR` at a
-    /// loop edge of the base for a feature whose hole in the base stays open.
-    pub fn do_defeature(&mut self, k: &mut Kernel) -> Result<()> {
-        let mut saved = if k.fixes.defeature_refuses_open_base {
-            Some(self.base.snapshot()?)
-        } else {
-            None
-        };
+    /// [`SolidError::Unported`] from a callee and [`SolidError::Cancelled`]; dangling ids;
+    /// `SM_ERR` at a loop edge of the base when no feature comes off and one was kept, or
+    /// when a kept feature cannot be put back. The base is put back as it was in each case.
+    pub fn do_defeature(&mut self, k: &mut Kernel) -> Result<Vec<KeptFeature>> {
+        let saved = self.base.snapshot()?;
+        match self.take_off(k) {
+            Ok(kept) => Ok(kept),
+            Err(e) => {
+                self.put_back(saved);
+                Err(e)
+            }
+        }
+    }
+
+    /// The base put back as `saved` and the executive's features, patches and marks dropped
+    /// ([`Self::do_defeature`]'s failed exits).
+    fn put_back(&mut self, saved: crate::topology::Snapshot) {
+        self.base.restore(saved);
+        self.features.clear();
+        self.patches.clear();
+        self.marks = Marks::default();
+    }
+
+    /// [`Self::do_defeature`]'s work on the base, which the caller puts back on any error.
+    fn take_off(&mut self, k: &mut Kernel) -> Result<Vec<KeptFeature>> {
+        let mut kept: Vec<KeptFeature> = Vec::new();
+        let mut off = 0;
         for i in 0..self.features.len() {
             let Some(feature) = self.features.get_mut(i) else {
                 continue;
             };
             keep_unported(partition_feature(k, self.base, feature))?;
             keep_unported(build_patches(k, self.base, feature, &mut self.patches))?;
-            if !feature.base_rebuilt {
-                if let Some(saved) = saved.take() {
-                    let edge = open_loop_edge(feature);
-                    self.base.restore(saved);
-                    self.features.clear();
-                    self.patches.clear();
-                    self.marks = Marks::default();
-                    return Err(SolidError::Upstream {
-                        code: SM_ERR,
-                        operation: OP,
-                        entity: edge.map(EntityRef::Edge),
-                    });
-                }
+            // `build_patches` marks the feature rebuilt before it refuses an unpartitioned
+            // one, so both are read
+            if feature.is_partitioned && feature.base_rebuilt {
+                keep_unported(apply_patches(k, self.base, feature, &mut self.patches))?;
+                off += 1;
+            } else {
+                // its hole stays open until it is put back, after the others, as upstream's
+                // caller's RestoreFeatures would
+                kept.push(KeptFeature {
+                    feature: i,
+                    open_loop: open_loop_edge(feature),
+                });
             }
-            keep_unported(apply_patches(k, self.base, feature, &mut self.patches))?;
         }
-        Ok(())
+        if kept.is_empty() {
+            return Ok(kept);
+        }
+        let refusal = SolidError::Upstream {
+            code: SM_ERR,
+            operation: OP,
+            entity: kept.first().and_then(|f| f.open_loop).map(EntityRef::Edge),
+        };
+        if off == 0 {
+            return Err(refusal);
+        }
+        // in descending order, so each kept index is still its feature's when it is removed
+        for f in kept.iter().rev() {
+            let Some(feature) = self.features.get_mut(f.feature) else {
+                return Err(refusal);
+            };
+            match restore_feature(k, self.base, feature) {
+                Ok(()) => {
+                    self.features.remove(f.feature);
+                }
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => return Err(refusal),
+            }
+        }
+        Ok(kept)
     }
 
     /// `RestoreFeatures`: puts back the features that were partitioned but not
@@ -716,6 +770,16 @@ fn keep_unported(r: Result<()>) -> Result<()> {
     }
 }
 
+/// Not upstream (WR-656): a feature [`FeatureExecutive::do_defeature`] kept on the base
+/// because its base patch could not be built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeptFeature {
+    /// Its index in the executive's features when the call began.
+    pub feature: usize,
+    /// The base loop edge of the hole it would have left open.
+    pub open_loop: Option<EdgeId>,
+}
+
 /// Not upstream (WR-656): the first base loop edge of the first loop whose base patch is
 /// not used, the place of the hole a refused feature would leave open.
 fn open_loop_edge(feature: &Feature) -> Option<EdgeId> {
@@ -727,8 +791,8 @@ fn open_loop_edge(feature: &Feature) -> Option<EdgeId> {
     l.base_edges.first().copied()
 }
 
-/// Whether `error` is the refusal of `fixes.defeature_refuses_open_base` (not upstream,
-/// WR-656) from [`FeatureExecutive::do_defeature`].
+/// Whether `error` is the open-base refusal (not upstream, WR-656) of
+/// [`FeatureExecutive::do_defeature`].
 pub(crate) fn is_open_base_refusal(error: &SolidError) -> bool {
     matches!(
         error,
@@ -2207,12 +2271,27 @@ mod tests {
     #[test]
     fn defeature_carries_attributes_as_their_behaviours_say() {
         use crate::geom::attribute::{Attribute, Behavior};
+        // a plate's through hole, whose wall comes off with its patch built (a box face
+        // has none: WR-656 refuses it)
         let mut k = Kernel::default();
-        let mut b = create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0).unwrap();
+        let plate = create_box(&mut k, Point3::ZERO, 40.0, 30.0, 5.0).unwrap();
+        let drill = create_cylinder(&mut k, Point3::new(20.0, 15.0, -1.0), 5.0, 7.0).unwrap();
+        let mut b = crate::boolean::api_brep::boolean_difference(&mut k, plate, drill).unwrap();
         let faces = bp1::faces(&b, None).unwrap();
-        let f0 = faces[0];
-        let other = faces[1];
-        let e0 = face_edges(&b, f0, false).unwrap()[0];
+        let f0 = faces[6];
+        let wall = face_edges(&b, f0, false).unwrap();
+        let e0 = wall[0];
+        // a face away from the hole (a patch extends the faces round it, and copies them)
+        let other = *faces
+            .iter()
+            .find(|&&f| {
+                f != f0
+                    && face_edges(&b, f, false)
+                        .unwrap()
+                        .iter()
+                        .all(|e| !wall.contains(e))
+            })
+            .unwrap();
         b.add_attribute(EntityRef::Face(f0), Attribute::new(20001, Behavior::Copy))
             .unwrap();
         b.add_attribute(EntityRef::Edge(e0), Attribute::new(20002, Behavior::Copy))

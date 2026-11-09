@@ -1,6 +1,8 @@
-//! The SolidCraft fork's tangency-labs/smlib@2e1bb8c under
-//! `Kernel::fixes.offset_four_face_vertex_split` with `offset_closes_loop_gaps` (WR-666,
-//! #2052), on the commit message's two cases, rebuilt:
+//! The SolidCraft fork's tangency-labs/smlib@2e1bb8c (WR-666, its #2052, the default
+//! path since #2981): a vertex where four plane faces meet splits into the edge their
+//! two pairs' planes give, once; the loop gaps the split leaves close, and the
+//! shell/inset then reaches its closed form. On the commit message's two cases,
+//! rebuilt:
 //!
 //! - a trough 60 x 40 x 20 whose floor is four facets falling to a drain at its middle (the
 //!   long sides' facets fall 1 degree, the short sides' 2/3 degree, adjacent facets meet at
@@ -307,17 +309,9 @@ fn shell_pocket(fixes: &UpstreamFixes) -> Result<Shelled, String> {
     shell(fixes, pocket, SLAB[2], POCKET_T)
 }
 
-/// The opt-in with the loop-gap closing it builds on (`offset_closes_loop_gaps`, WR-578).
+/// The split pieces shell to their closed forms on the default path.
 fn split() -> UpstreamFixes {
-    let mut f = gaps_only();
-    f.offset_four_face_vertex_split = true;
-    f
-}
-
-fn gaps_only() -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.offset_closes_loop_gaps = true;
-    f
+    UpstreamFixes::default()
 }
 
 fn assert_closed_form(got: &Shelled, expected: f64, faces: usize, label: &str) {
@@ -343,58 +337,19 @@ fn the_parts_have_their_closed_form_volumes() {
     assert!((v - pocket_solid_volume()).abs() <= 1e-9 * v, "{v}");
 }
 
-/// Upstream (the default fixes) refuses the trough's shell: the merge fails (1001).
-#[test]
-fn default_fixes_refuse_the_trough_shell() {
-    let got = shell_trough(&UpstreamFixes::default());
-    assert_eq!(
-        got,
-        Err("boolean::merge::p2::make_faceuse: upstream status 1001".to_owned())
-    );
-}
-
-/// The loop-gap closing alone does not build it either: the corners and the drain are
-/// still one vertex each.
-#[test]
-fn loop_gap_closing_alone_refuses_the_trough_shell() {
-    let got = shell_trough(&gaps_only());
-    assert!(got.is_err(), "{got:?}");
-}
-
-/// The flag without `offset_closes_loop_gaps` has no effect.
-#[test]
-fn the_flag_alone_is_the_default() {
-    let mut f = UpstreamFixes::default();
-    f.offset_four_face_vertex_split = true;
-    assert_eq!(shell_trough(&f), shell_trough(&UpstreamFixes::default()));
-    assert_eq!(shell_pocket(&f), shell_pocket(&UpstreamFixes::default()));
-}
-
-/// With the opt-in the trough (every edge at its corners and drain convex) shells to the
-/// closed form: the 8 outer faces, their 8 offsets and the rim.
+/// The trough (every edge at its corners and drain convex) shells to the
+/// closed form on the default path: the 8 outer faces, their 8 offsets and the rim.
 #[test]
 fn trough_shells_to_its_closed_form() {
     let got = shell_trough(&split()).unwrap();
     assert_closed_form(&got, trough_shell_volume(), 17, "trough");
 }
 
-/// With the opt-in the pocket (every edge at its corners and drain concave) shells to the
-/// closed form: the slab's 13 faces below the top, their 13 offsets and the two rims (round the outside and round the pocket).
+/// The pocket (every edge at its corners and drain concave) shells to the
+/// closed form on the default path: the slab's 13 faces below the top, their 13 offsets
+/// and the two rims (round the outside and round the pocket).
 #[test]
 fn pocket_shells_to_its_closed_form() {
     let got = shell_pocket(&split()).unwrap();
     assert_closed_form(&got, pocket_shell_volume(), 28, "pocket");
-}
-
-/// Upstream (the default fixes) returns the pocket's shell, a manifold solid, at the wrong
-/// volume (43302.668, the closed form 43522.321); the loop-gap closing alone refuses it.
-#[test]
-fn without_the_flag_the_pocket_shell_is_wrong_or_refused() {
-    let got = shell_pocket(&UpstreamFixes::default()).unwrap();
-    assert!(
-        (got.volume - pocket_shell_volume()).abs() > 100.0,
-        "{got:?} vs {}",
-        pocket_shell_volume()
-    );
-    assert!(shell_pocket(&gaps_only()).is_err());
 }
