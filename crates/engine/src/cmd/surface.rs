@@ -19,6 +19,7 @@ use crate::schema::surface::{
     FairParams, OffsetParams, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceTrimParams, ThickenParams, UnstitchParams, UntrimParams,
 };
 use crate::schema::surface_blend::BlendParams;
+use crate::schema::surface_patch::{PatchResult, SurfacePatchParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -33,11 +34,14 @@ const SURFACE_EXTEND_CONTRACT: TypedContract<SurfaceExtendParams> = TypedContrac
 const SURFACE_TRIM_CONTRACT: TypedContract<SurfaceTrimParams> = TypedContract::new();
 const SURFACE_SWEEP_CONTRACT: TypedContract<SurfaceSweepParams> = TypedContract::new();
 const BLEND_CONTRACT: TypedContract<BlendParams> = TypedContract::new();
+const SURFACE_PATCH_CONTRACT: TypedContract<SurfacePatchParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("surface.patch", "Patch", patch)
+    CommandSpec::new("surface.patch", "Patch", crate::checked!("surface.patch", patch))
         .at("SURFACE", "CREATE")
         .icon("surface_patch")
+        .contract(&SURFACE_PATCH_CONTRACT)
+        .output(output_schema_for::<PatchResult>)
         .params("sketch?: id|name and profiles? (planar patches of sketch regions) | edges: [[x,y,z]] (points on a closed loop of a body's edges: one face on them, planar when the loop is, else a smooth B-spline surface) and body?; continuity?: g0|g1|g2|g3|g4 (edges only, default g0: how the patch meets the faces beside the loop — g1 their tangent planes, g2 also their curvature across the edges, g3 also its rate of change, g4 the change of that rate) or [{edge: [x,y,z], g: g0|g1|g2|g3|g4}] (those edges so, the rest g0) or {all, edges}; points?: [[x,y,z]] (edges only, up to 64: points the patch passes through); crown?: number −0.9…3 (default 0: only a fitted patch, whose middle becomes fuller by this many times the loop's size — the bump vanishes on the loop, so the face still meets the picked edges and the continuity across them; a loop that is planar and g0 is the exact plane whatever the crown; with points, crown needs a g1 or higher edge); name?, body_name?"),
     CommandSpec::new("surface.stitch", "Stitch", crate::checked!("surface.stitch", stitch))
         .at("SURFACE", "MODIFY")
