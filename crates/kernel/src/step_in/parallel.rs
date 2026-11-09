@@ -308,6 +308,18 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
             Err(e) => notes.push(Note::LeftOut(format!("left out: {}", e.to_string().trim_start_matches("the operation failed: ")))),
         }
     }
+    // A solid of one face that cannot be made has nothing else to give: the refusal says it is the
+    // only face, which face, and why (an edge's distance from the surface, a vertex's from its
+    // curve), never only that the import failed.
+    let distinct: std::collections::HashSet<u64> = faces.iter().map(|f| f.face).collect();
+    if pieces.is_empty()
+        && distinct.len() == 1
+        && let Some(f) = faces.first()
+    {
+        let why = left_out.iter().find(|(g, _)| *g == f.face).map_or(refused.msg.as_str(), |(_, m)| m.as_str());
+        let why = why.split_once("first: ").map_or(why, |(_, rest)| rest);
+        return Err(Failure { msg: format!("the solid's only face, #{}, cannot be made: {why}", f.face), ..refused });
+    }
     // Where SMLib cannot stitch them either, the solid is refused with the reason it was.
     let part = stitched_part(&pieces, faces.len(), &refused.msg).map_err(|e| {
         log::debug!(target: "step", "item #{item}: its faces not stitched ({e})");

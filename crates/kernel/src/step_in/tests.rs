@@ -2369,6 +2369,36 @@ fn can_with_its_lid_at(lid_z: f64) -> String {
     )
 }
 
+/// A file whose only face cannot be made (its circle 1.5 mm off its plane) gives nothing to
+/// open; the error names the face, why and how far, not only that the import failed.
+#[test]
+fn a_file_whose_only_face_cannot_be_made_names_it_and_how_far_off() {
+    let text = format!(
+        "{HEAD}
+#1=CARTESIAN_POINT('',(0.,0.,10.));
+#2=DIRECTION('',(0.,0.,1.));
+#3=DIRECTION('',(1.,0.,0.));
+#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+#5=CARTESIAN_POINT('',(5.,0.,10.));
+#6=VERTEX_POINT('',#5);
+#7=CIRCLE('',#4,5.);
+#8=EDGE_CURVE('',#6,#6,#7,.T.);
+#9=ORIENTED_EDGE('',*,*,#8,.T.);
+#10=EDGE_LOOP('',(#9));
+#11=FACE_OUTER_BOUND('',#10,.T.);
+#12=CARTESIAN_POINT('',(0.,0.,11.5));
+#13=AXIS2_PLACEMENT_3D('',#12,#2,#3);
+#14=PLANE('',#13);
+#15=ADVANCED_FACE('Lid',(#11),#14,.T.);
+#16=OPEN_SHELL('',(#15));
+#17=SHELL_BASED_SURFACE_MODEL('Sheet',(#16));
+#18=SHAPE_REPRESENTATION('',(#17),$);
+{TAIL}"
+    );
+    let err = step_import(&text).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(err.contains("only face, #15") && err.contains("1.5") && err.contains("off the face's surface"), "{err}");
+}
+
 /// SMLib's refusal of a face by its index in the record (NIST CTC 02's face whose NURBS form is
 /// not its analytic surface, which SMLib numbers 90) names the file's face, so the face is left
 /// out and the import's warning says which: "face #1202".
