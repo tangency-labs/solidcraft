@@ -3286,7 +3286,7 @@ impl SolveApp {
         prefs::apply(self, ctx);
         // The view's own dark or light only changes tokens, not egui's visuals: no restyle.
         solidcraft_theme::set_viewport_dark(self.preferences.viewport_theme.dark());
-        solidcraft_theme::set_viewport_background(self.preferences.viewport_background);
+        solidcraft_theme::set_viewport_background(self.preferences.viewport_background_colours());
         if !self.styled || solidcraft_theme::is_dark() != self.ui.dark || solidcraft_theme::vision() != self.preferences.color_vision {
             solidcraft_theme::set_dark(self.ui.dark);
             solidcraft_theme::set_vision(self.preferences.color_vision);
