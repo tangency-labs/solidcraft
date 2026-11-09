@@ -1,201 +1,285 @@
-# C:\solidcraft\update-solidcraft.ps1
-param(
-    [bool]$BuildGui = $true,
-    [bool]$BuildCli = $true,
-    [bool]$BuildWeb = $false
+<#
+.SYNOPSIS
+    SolidCraft Update & Build Script for Windows Environments
+.DESCRIPTION
+    Fetches, tests, builds, and deploys SolidCraft binaries. Native binaries
+    are deployed to the repository root; timestamped backups remain under
+    target\<profile>\backup\. The WebAssembly
+    target is deployed to the configured web root.
+#>
+[CmdletBinding()]
+param (
+    [Alias('g')][bool]$BuildGui = $true,
+    [Alias('c')][bool]$BuildCli = $true,
+    [Alias('w')][bool]$BuildWeb = $false,
+    [Alias('f', 'force')][switch]$ForceBuild = $false,
+    [Alias('s')][switch]$SkipTests = $false,
+    [string]$Branch,
+    [Alias('j')][int]$Jobs = 0,
+    [Alias('d')][switch]$DebugMode = $false,
+    [Alias('r')][switch]$ReleaseMode = $false,
+    [Alias('h', '?')][switch]$Help = $false
 )
 
-$RepoDir = "C:\solidcraft"
-Set-Location $RepoDir
-$TargetWebDir  = "$RepoDir\web-dist"
+$ErrorActionPreference = 'Stop'
+$BuildWorktree = $null
+$PreviousCargoTargetDir = $env:CARGO_TARGET_DIR
 
-# Ensure log directory exists
-$LogDir = "$RepoDir\build_logs"
-if (!(Test-Path $LogDir)) {
-    New-Item -ItemType Directory -Path $LogDir | Out-Null
-}
-$Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$LogFile = "$LogDir\build_$Timestamp.log"
+function Show-Usage {
+    @'
+SolidCraft Windows Build & Update Script
 
-# Start recording all console input/output to the log file
-Start-Transcript -Path $LogFile | Out-Null
+Usage: .\update-solidcraft.ps1 [options]
 
-Write-Host "====================================================" -ForegroundColor Cyan
-Write-Host " Starting SolidCraft Pipeline: $(Get-Date)" -ForegroundColor Cyan
-Write-Host " Log File: $LogFile" -ForegroundColor Cyan
-Write-Host "====================================================" -ForegroundColor Cyan
+Options:
+    -f, -ForceBuild          Force a clean rebuild even if Git commits match.
+    -s, -SkipTests           Skip running workspace tests before building.
+    -Branch <NAME>           Build a remote branch (default: current branch upstream).
+    -j, -Jobs <N>            Set number of parallel compilation jobs (default: all cores).
+    -d, -Debug               Build using debug profile.
+    -r, -Release             Build using release profile (default).
+    -w, -BuildWeb            Build and deploy WebAssembly target.
+    -g, -BuildGui <bool>     Enable/disable GUI build (default: true).
+    -c, -BuildCli <bool>     Enable/disable CLI build (default: true).
+    -h, -?, -Help            Display this help message.
 
-# Track status of individual targets
-$GlobalSuccess = $true
-$GuiSuccess    = $false
-$CliSuccess    = $false
-$WebSuccess    = $false
-
-function Write-StepHeader($StepNum, $StepName) {
-    Write-Host "`n----------------------------------------------------" -ForegroundColor Yellow
-    Write-Host " [STEP $StepNum] $StepName" -ForegroundColor Yellow
-    Write-Host "----------------------------------------------------" -ForegroundColor Yellow
+Native binaries are deployed to the repository root; timestamped backups are stored under target\<profile>\backup\.
+'@ | Write-Host
 }
 
-function Write-ProminentError($Message) {
-    Write-Host "`n####################################################" -ForegroundColor Red
-    Write-Host " [FATAL ERROR]: $Message" -ForegroundColor Red
-    Write-Host "####################################################`n" -ForegroundColor Red
+if ($Help) { Show-Usage; exit 0 }
+if ($Jobs -lt 0) { throw '-Jobs must be zero (all cores) or a positive integer.' }
+if ($DebugMode -and $ReleaseMode) { throw 'Choose either -DebugMode or -ReleaseMode, not both.' }
+
+$Profile = 'release'
+$CargoProfileFlag = @('--release')
+if ($DebugMode) { $Profile = 'debug'; $CargoProfileFlag = @() }
+
+# Scheduled tasks may start in an unrelated working directory.
+Set-Location -LiteralPath $PSScriptRoot
+$LogDir = Join-Path $PSScriptRoot 'build_logs'
+New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+$Timestamp = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
+$LogFile = Join-Path $LogDir "update_$Timestamp.log"
+Start-Transcript -Path $LogFile -Append | Out-Null
+
+function Invoke-Native {
+    param([Parameter(Mandatory)][string]$Command, [string[]]$Arguments = @())
+    & $Command @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command failed with exit code $LASTEXITCODE`: $Command $($Arguments -join ' ')"
+    }
+}
+
+function Get-NativeOutput {
+    param([Parameter(Mandatory)][string]$Command, [string[]]$Arguments = @())
+    $output = & $Command @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command failed with exit code $LASTEXITCODE`: $Command $($Arguments -join ' ')"
+    }
+    return (($output | Out-String).Trim())
+}
+
+# Cargo/Git paths are relative to the repository root, not the scripts folder.
+$RepoRoot = Get-NativeOutput -Command 'git' -Arguments @('-C', $PSScriptRoot, 'rev-parse', '--show-toplevel')
+Set-Location -LiteralPath $RepoRoot
+
+function Deploy-Binary {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination,
+        [Parameter(Mandatory)][string]$Label,
+        [Parameter(Mandatory)][string]$BackupDirectory
+    )
+    if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
+        throw "$Label build succeeded but expected artifact is missing: $Source"
+    }
+    New-Item -ItemType Directory -Path $BackupDirectory -Force | Out-Null
+    $staged = "$Destination.new.$PID"
+    $backup = Join-Path $BackupDirectory ((Split-Path -Leaf $Destination) + ".$((Get-Date).ToString('yyyyMMdd_HHmmss_fff')).$PID")
+    $movedOld = $false
+    try {
+        Copy-Item -LiteralPath $Source -Destination $staged -Force
+        if (Test-Path -LiteralPath $Destination -PathType Leaf) {
+            Move-Item -LiteralPath $Destination -Destination $backup
+            $movedOld = $true
+            Write-Host "$Label`: previous binary backed up to $backup"
+        }
+        Move-Item -LiteralPath $staged -Destination $Destination
+        Write-Host "$Label deployment successful: $Destination"
+    }
+    catch {
+        if ($movedOld -and (Test-Path -LiteralPath $backup -PathType Leaf)) {
+            if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
+            Move-Item -LiteralPath $backup -Destination $Destination -Force
+            Write-Warning "$Label deployment failed; previous binary restored."
+        }
+        throw
+    }
+    finally {
+        if (Test-Path -LiteralPath $staged) { Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Clear-ProfileBuildArtifactsPreservingBackups {
+    param([Parameter(Mandatory)][string]$TargetDirectory, [Parameter(Mandatory)][string]$BackupDirectory)
+
+    # Do not ask Cargo to remove target/<profile> itself. Keep target/, the
+    # selected profile directory, and backup/ in place; delete only generated
+    # children. This avoids the directory-rename/removal failure encountered
+    # when another process has target or target/<profile> open.
+    New-Item -ItemType Directory -Path $TargetDirectory -Force | Out-Null
+    New-Item -ItemType Directory -Path $BackupDirectory -Force | Out-Null
+    Get-ChildItem -LiteralPath $TargetDirectory -Force |
+        Where-Object { $_.Name -ne 'backup' } |
+        Remove-Item -Recurse -Force -ErrorAction Stop
+    Write-Host "Cleaned generated contents of $TargetDirectory; preserved $BackupDirectory."
 }
 
 try {
-    # ----------------------------------------------------------------
-    Write-StepHeader "1" "Pull Latest Changes from Git"
-    # ----------------------------------------------------------------
-    git pull
-    if ($LASTEXITCODE -ne 0) {
-        Write-ProminentError "Git pull failed. Aborting entire update chain."
-        $GlobalSuccess = $false
-        exit 1
-    }
-    Write-Host "Git pull completed successfully." -ForegroundColor Green
+    Write-Host '=================================================='
+    Write-Host "Starting SolidCraft update: $(Get-Date)"
+    Write-Host "Selected build profile: $Profile"
+    Write-Host "Log file: $LogFile"
 
-    # ----------------------------------------------------------------
-    Write-StepHeader "2" "Run Workspace Test Suite (Debug Mode)"
-    # ----------------------------------------------------------------
-    cargo test --workspace --jobs 2
-    if ($LASTEXITCODE -ne 0) {
-        Write-ProminentError "Tests failed! Aborting deployment. Existing build remains untouched."
-        $GlobalSuccess = $false
-        exit 1
-    }
-    Write-Host "All tests passed successfully!" -ForegroundColor Green
+    [void](Get-NativeOutput -Command 'git' -Arguments @('rev-parse', '--show-toplevel'))
 
-    # ----------------------------------------------------------------
-    Write-StepHeader "3" "Compile Target: GUI (solidcraft)"
-    # ----------------------------------------------------------------
-    if ($BuildGui) {
-        Write-Host "Building solidcraft (GUI)..."
-        cargo build --release -p solidcraft --jobs 2
-        if ($LASTEXITCODE -ne 0) {
-            Write-ProminentError "GUI compilation failed!"
-        } else {
-            $GuiSuccess = $true
-            Write-Host "GUI compilation succeeded." -ForegroundColor Green
+    # Default to the current branch upstream. -Branch overrides this with a
+    # remote-tracking branch such as main or origin/main. Never switch, reset,
+    # or stash the operator's original checkout.
+    if ($Branch) {
+        if ($Branch.StartsWith('refs/remotes/')) {
+            $SourceRef = $Branch
         }
-    } else {
-        Write-Host "GUI target skipped by parameter." -ForegroundColor DarkGray
-    }
-
-    # ----------------------------------------------------------------
-    Write-StepHeader "4" "Compile Target: CLI (solidcraft-cli)"
-    # ----------------------------------------------------------------
-    if ($BuildCli) {
-        Write-Host "Building solidcraft-cli (CLI)..."
-        cargo build --release -p solidcraft-cli --jobs 2
-        if ($LASTEXITCODE -ne 0) {
-            Write-ProminentError "CLI compilation failed!"
-        } else {
-            $CliSuccess = $true
-            Write-Host "CLI compilation succeeded." -ForegroundColor Green
-        }
-    } else {
-        Write-Host "CLI target skipped by parameter." -ForegroundColor DarkGray
-    }
-
-    # ----------------------------------------------------------------
-    Write-StepHeader "5" "Compile Target: Web (solidcraft-web)"
-    # ----------------------------------------------------------------
-    if ($BuildWeb) {
-        Write-Host "Building solidcraft-web (WASM)..."
-        cargo build --release -p solidcraft-web --target wasm32-unknown-unknown --jobs 2
-        if ($LASTEXITCODE -ne 0) {
-            Write-ProminentError "Web compilation failed!"
-        } else {
-            $WebSuccess = $true
-            Write-Host "Web compilation succeeded." -ForegroundColor Green
-        }
-    } else {
-        Write-Host "Web target skipped by parameter." -ForegroundColor DarkGray
-    }
-
-    # ----------------------------------------------------------------
-    Write-StepHeader "6" "Atomic Deployment for Successful Targets"
-    # ----------------------------------------------------------------
-    
-    # Deploy GUI if built successfully
-    if ($BuildGui -and $GuiSuccess) {
-        $SourceGui = "$RepoDir\target\release\solidcraft.exe"
-        $TargetGui = "$RepoDir\solidcraft.exe"
-        $TempGui   = "$RepoDir\solidcraft_new.exe"
-
-        if (Test-Path $SourceGui) {
-            Write-Host "Deploying GUI binary atomically..." -ForegroundColor Cyan
-            Copy-Item $SourceGui $TempGui -Force
-            if (Test-Path $TargetGui) {
-                Move-Item $TargetGui "$RepoDir\solidcraft_old.exe" -Force -ErrorAction SilentlyContinue
-                Move-Item $TempGui $TargetGui -Force
-                Remove-Item "$RepoDir\solidcraft_old.exe" -ErrorAction SilentlyContinue
-            } else {
-                Move-Item $TempGui $TargetGui -Force
+        elseif ($Branch.Contains('/')) {
+            $BranchRemote = $Branch.Split('/')[0]
+            $RemoteNamesText = Get-NativeOutput -Command 'git' -Arguments @('remote')
+            $RemoteNames = @($RemoteNamesText -split '\r?\n' | Where-Object { $_ })
+            if ($RemoteNames -contains $BranchRemote) {
+                $SourceRef = "refs/remotes/$Branch"
             }
-            Write-Host "Successfully deployed solidcraft.exe!" -ForegroundColor Green
-        } else {
-            Write-ProminentError "GUI binary missing at expected path despite successful build status."
-        }
-    }
-
-    # Deploy CLI if built successfully
-    if ($BuildCli -and $CliSuccess) {
-        $SourceCli = "$RepoDir\target\release\solidcraft-cli.exe"
-        $TargetCli = "$RepoDir\solidcraft-cli.exe"
-        $TempCli   = "$RepoDir\solidcraft-cli_new.exe"
-
-        if (Test-Path $SourceCli) {
-            Write-Host "Deploying CLI binary atomically..." -ForegroundColor Cyan
-            Copy-Item $SourceCli $TempCli -Force
-            if (Test-Path $TargetCli) {
-                Move-Item $TargetCli "$RepoDir\solidcraft-cli_old.exe" -Force -ErrorAction SilentlyContinue
-                Move-Item $TempCli $TargetCli -Force
-                Remove-Item "$RepoDir\solidcraft-cli_old.exe" -ErrorAction SilentlyContinue
-            } else {
-                Move-Item $TempCli $TargetCli -Force
+            else {
+                $SourceRef = "refs/remotes/origin/$Branch"
             }
-            Write-Host "Successfully deployed solidcraft-cli.exe!" -ForegroundColor Green
-        } else {
-            Write-ProminentError "CLI binary missing at expected path despite successful build status."
+        }
+        else {
+            $SourceRef = "refs/remotes/origin/$Branch"
         }
     }
-
-    # Deploy Web assets if built successfully
-    if ($BuildWeb -and $WebSuccess) {
-        $SourceWebWasm = "$RepoDir\target\wasm32-unknown-unknown\release\solidcraft_web.wasm"
-
-        if (Test-Path $SourceWebWasm) {
-            Write-Host "Deploying web assets..." -ForegroundColor Cyan
-            if (!(Test-Path $TargetWebDir)) {
-                New-Item -ItemType Directory -Path $TargetWebDir | Out-Null
-            }
-            Copy-Item $SourceWebWasm "$TargetWebDir\" -Force
-            Write-Host "Successfully deployed web assets!" -ForegroundColor Green
-        } else {
-            Write-ProminentError "Web WASM binary missing at expected path despite successful build status."
-        }
+    else {
+        $CurrentBranch = Get-NativeOutput -Command 'git' -Arguments @('symbolic-ref', '--quiet', '--short', 'HEAD')
+        $Upstream = Get-NativeOutput -Command 'git' -Arguments @('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
+        $SourceRef = "refs/remotes/$Upstream"
     }
 
-    # ----------------------------------------------------------------
-    Write-StepHeader "7" "Pipeline Summary Report"
-    # ----------------------------------------------------------------
-    Write-Host "Pipeline Execution Complete." -ForegroundColor Cyan
-    if ($BuildGui) { Write-Host " - GUI Target: $(if($GuiSuccess){'SUCCESS'}else{'FAILED'})" -ForegroundColor $(if($GuiSuccess){'Green'}else{'Red'}) }
-    if ($BuildCli) { Write-Host " - CLI Target: $(if($CliSuccess){'SUCCESS'}else{'FAILED'})" -ForegroundColor $(if($CliSuccess){'Green'}else{'Red'}) }
-    if ($BuildWeb) { Write-Host " - Web Target: $(if($WebSuccess){'SUCCESS'}else{'FAILED'})" -ForegroundColor $(if($WebSuccess){'Green'}else{'Red'}) }
-    Write-Host "Full log saved to: $LogFile" -ForegroundColor Cyan
-
-    if ((($BuildGui -and !$GuiSuccess)) -or (($BuildCli -and !$CliSuccess)) -or (($BuildWeb -and !$WebSuccess))) {
-        exit 2 # Non-zero exit to flag partial failures
+    Write-Host "[STEP 1] Fetching updates for $SourceRef..."
+    Invoke-Native -Command 'git' -Arguments @('-c', 'maintenance.auto=false', '-c', 'fetch.writeCommitGraph=false', 'fetch', '--all', '--prune')
+    $SourceCommit = Get-NativeOutput -Command 'git' -Arguments @('rev-parse', "$SourceRef^{commit}")
+    $SourceLabel = $SourceRef -replace '^refs/remotes/', ''
+    $Sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try { $HashBytes = $Sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes("$SourceRef|$Profile")) } finally { $Sha256.Dispose() }
+    $StateKey = [BitConverter]::ToString($HashBytes).Replace('-', '').ToLowerInvariant()
+    $TargetRoot = Join-Path $RepoRoot 'target'
+    $StateDir = Join-Path $TargetRoot '.solidcraft-build-state'
+    New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
+    $StateFile = Join-Path $StateDir $StateKey
+    $WebInstallState = if ($env:WEB_INSTALL_DIR) { $env:WEB_INSTALL_DIR } else { 'C:\inetpub\wwwroot\solidcraft' }
+    $BuildState = "$SourceRef|$SourceCommit|$Profile|$BuildGui|$BuildCli|$BuildWeb|$SkipTests|$WebInstallState"
+    $LastBuildState = ''
+    if (Test-Path -LiteralPath $StateFile -PathType Leaf) {
+        $LastBuildState = (Get-Content -LiteralPath $StateFile -Raw).Trim()
     }
 
+    if (($LastBuildState -eq $BuildState) -and -not $ForceBuild) {
+        Write-Host "$SourceLabel ($SourceCommit) is already built with this configuration. No build needed."
+        Write-Host 'Use -ForceBuild (-f) to force a clean rebuild.'
+        return
 }
+    if ($ForceBuild) {
+        Write-Host "Force build requested: a clean rebuild of $SourceLabel will be performed."
+    }
+    else {
+        Write-Host "New $SourceLabel revision/configuration detected: $SourceCommit"
+    }
+
+    $BuildWorktree = Join-Path ([System.IO.Path]::GetTempPath()) "solidcraft-build-$PID"
+    if (Test-Path -LiteralPath $BuildWorktree) { throw "Temporary build worktree path already exists: $BuildWorktree" }
+    Write-Host "[STEP 2] Preparing detached build worktree at $SourceLabel..."
+    Invoke-Native -Command 'git' -Arguments @('worktree', 'add', '--detach', $BuildWorktree, $SourceCommit)
+    $env:CARGO_TARGET_DIR = Join-Path $RepoRoot 'target'
+    Set-Location -LiteralPath $BuildWorktree
+
+    $TargetDir = Join-Path $RepoRoot (Join-Path 'target' $Profile)
+    $BackupDir = Join-Path $TargetDir 'backup'
+if ($ForceBuild) {
+        Write-Host '[STEP 2A] Cleaning Cargo artifacts while preserving deployed-binary backups...'
+        Clear-ProfileBuildArtifactsPreservingBackups -TargetDirectory $TargetDir -BackupDirectory $BackupDir
+}
+
+    $JobsArg = @()
+    if ($Jobs -gt 0) { $JobsArg = @('--jobs', "$Jobs") }
+if ($SkipTests) {
+        Write-Host '[STEP 3] Skipping workspace tests (-SkipTests active).'
+    }
+    else {
+    Write-Host "[STEP 3] Running workspace tests ($Profile mode)..."
+        Invoke-Native -Command 'cargo' -Arguments (@('test', '--workspace') + $CargoProfileFlag + $JobsArg)
+}
+
+    New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
+
+if ($BuildGui) {
+    Write-Host "[STEP 4] Building native GUI binary ($Profile)..."
+        Invoke-Native -Command 'cargo' -Arguments (@('build') + $CargoProfileFlag + @('--bin', 'solidcraft') + $JobsArg)
+        Deploy-Binary -Source (Join-Path $TargetDir 'solidcraft.exe') -Destination (Join-Path $RepoRoot 'solidcraft.exe') -Label 'GUI' -BackupDirectory $BackupDir
+}
+
+if ($BuildCli) {
+    Write-Host "[STEP 5] Building CLI binary ($Profile)..."
+        Invoke-Native -Command 'cargo' -Arguments (@('build') + $CargoProfileFlag + @('--bin', 'solidcraft-cli') + $JobsArg)
+        Deploy-Binary -Source (Join-Path $TargetDir 'solidcraft-cli.exe') -Destination (Join-Path $RepoRoot 'solidcraft-cli.exe') -Label 'CLI' -BackupDirectory $BackupDir
+}
+
+if ($BuildWeb) {
+    Write-Host "[STEP 6] Building WebAssembly target ($Profile)..."
+        Invoke-Native -Command 'cargo' -Arguments (@('build') + $CargoProfileFlag + @('--target', 'wasm32-unknown-unknown', '--bin', 'solidcraft-web') + $JobsArg)
+        $SourceWeb = Join-Path $RepoRoot (Join-Path 'target' (Join-Path 'wasm32-unknown-unknown' (Join-Path $Profile 'solidcraft-web.wasm')))
+        if (-not (Test-Path -LiteralPath $SourceWeb -PathType Leaf)) { throw "WebAssembly build succeeded but expected artifact is missing: $SourceWeb" }
+        $WebInstallDir = if ($env:WEB_INSTALL_DIR) { $env:WEB_INSTALL_DIR } else { 'C:\inetpub\wwwroot\solidcraft' }
+        New-Item -ItemType Directory -Path $WebInstallDir -Force | Out-Null
+        $WebStaged = Join-Path $WebInstallDir "solidcraft.wasm.new.$PID"
+    try {
+            Copy-Item -LiteralPath $SourceWeb -Destination $WebStaged -Force
+            Move-Item -LiteralPath $WebStaged -Destination (Join-Path $WebInstallDir 'solidcraft.wasm') -Force
+        }
+        finally {
+            if (Test-Path -LiteralPath $WebStaged) { Remove-Item -LiteralPath $WebStaged -Force -ErrorAction SilentlyContinue }
+            }
+        Write-Host "Web deployment successful to $WebInstallDir."
+        }
+
+    $StateTemp = "$StateFile.new.$PID"
+    Set-Content -LiteralPath $StateTemp -Value $BuildState -NoNewline
+    Move-Item -LiteralPath $StateTemp -Destination $StateFile -Force
+
+    Write-Host '=================================================='
+    Write-Host "Update sequence complete: $(Get-Date)"
+    Write-Host '=================================================='
+    }
 catch {
-    Write-ProminentError "Unexpected pipeline exception: $_"
-    exit 3
+    Write-Error "Update failed: $($_.Exception.Message)"
+    exit 1
 }
 finally {
+    Set-Location -LiteralPath $RepoRoot
+    if ($BuildWorktree -and (Test-Path -LiteralPath $BuildWorktree)) {
+        try {
+            Invoke-Native -Command 'git' -Arguments @('worktree', 'remove', '--force', $BuildWorktree)
+        }
+        catch {
+            Write-Warning "Could not remove temporary build worktree '$BuildWorktree': $($_.Exception.Message)"
+        }
+    }
+    $env:CARGO_TARGET_DIR = $PreviousCargoTargetDir
     Stop-Transcript | Out-Null
 }

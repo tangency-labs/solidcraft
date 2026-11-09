@@ -1,220 +1,239 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-# Configuration Toggles (Modify defaults as needed to true or false to build component)
-BUILD_GUI=true
-BUILD_CLI=true
-BUILD_WEB=true
+# WEB_INSTALL_DIR is used only as the WebAssembly deployment directory.
+WEB_INSTALL_DIR="${WEB_INSTALL_DIR:-/var/www/html/solidcraft/}"
+BUILD_GUI="${BUILD_GUI:-true}"
+BUILD_CLI="${BUILD_CLI:-true}"
+BUILD_WEB="${BUILD_WEB:-false}"
+FORCE_BUILD=false
+SKIP_TESTS=false
+BRANCH_OVERRIDE=""
+JOBS=0
+PROFILE="release"
+CARGO_PROFILE_FLAG=(--release)
 
-export HOME="$(getent passwd $USER | cut -d: -f6)"
-source "$HOME/.cargo/env"
-REPO_DIR="$HOME/solidcraft"
-WEB_DIR="/var/www/html/solidcraft"
-cd "$REPO_DIR" || { echo "Failed to cd into $REPO_DIR"; exit 1; }
+show_usage() {
+    cat << EOF
+SolidCraft Linux Build & Update Script
 
-# Setup Log Directory and File
-LOG_DIR="$REPO_DIR/build_logs"
+Usage: $0 [options]
+
+Options:
+    -f, --force, --force-build     Force a clean rebuild even if Git commits match.
+    -s, --skip-tests               Skip running workspace tests before building.
+    -b, --branch <NAME>            Build a remote branch (default: current branch upstream).
+    -j, --jobs <N>                 Set number of parallel compilation jobs (default: all cores).
+    -d, --debug                    Build using debug profile.
+    -r, --release                  Build using release profile (default).
+    -w, --web                      Build and deploy WebAssembly target.
+    --no-gui                       Disable native GUI build.
+    --no-cli                       Disable CLI build.
+    -h, --help                     Display this help message.
+
+Native binaries are deployed to the repository root; timestamped backups are stored under target/<profile>/backup/.
+The WebAssembly target is deployed to WEB_INSTALL_DIR (default: /var/www/html/solidcraft/).
+EOF
+}
+
+while (($#)); do
+    case "$1" in
+        -f|--force|--force-build) FORCE_BUILD=true; shift ;;
+        -s|--skip-tests) SKIP_TESTS=true; shift ;;
+        -b|--branch)
+            [[ $# -ge 2 ]] || { echo "Error: --branch requires a branch name." >&2; exit 2; }
+            BRANCH_OVERRIDE="$2"
+            [[ -n "$BRANCH_OVERRIDE" ]] || { echo "Error: --branch cannot be empty." >&2; exit 2; }
+            shift 2 ;;
+    -j|--jobs)
+            [[ $# -ge 2 ]] || { echo "Error: --jobs requires a value." >&2; exit 2; }
+      JOBS="$2"
+            [[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || { echo "Error: --jobs must be a positive integer." >&2; exit 2; }
+            shift 2 ;;
+        -d|--debug) PROFILE="debug"; CARGO_PROFILE_FLAG=(); shift ;;
+        -r|--release) PROFILE="release"; CARGO_PROFILE_FLAG=(--release); shift ;;
+        -w|--web) BUILD_WEB=true; shift ;;
+        --no-gui) BUILD_GUI=false; shift ;;
+        --no-cli) BUILD_CLI=false; shift ;;
+        -h|--help) show_usage; exit 0 ;;
+        *) echo "Error: Unknown option '$1'" >&2; echo "Run '$0 --help' for usage information." >&2; exit 2 ;;
+  esac
+done
+
+for flag in BUILD_GUI BUILD_CLI BUILD_WEB; do
+    value="${!flag}"
+    [[ "$value" == true || "$value" == false ]] || { echo "Error: $flag must be true or false (got '$value')." >&2; exit 2; }
+done
+
+# Scheduled tasks may start in an unrelated working directory.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+LOG_DIR="$SCRIPT_DIR/build_logs"
 mkdir -p "$LOG_DIR"
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="$LOG_DIR/build_$TIMESTAMP.log"
-
-# Redirect all stdout and stderr to both the console and the log file
+LOG_FILE="$LOG_DIR/update_$(date +%Y%m%d_%H%M%S)_$$.log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-echo "===================================================="
-echo " Starting SolidCraft Linux Pipeline: $(date)"
-echo " Log File: $LOG_FILE"
-echo "===================================================="
+fail() { echo "ERROR: $*" >&2; exit 1; }
 
-# Track individual target statuses
-GUI_SUCCESS=false
-CLI_SUCCESS=false
-WEB_SUCCESS=false
+# Run Cargo and Git from the repository root, not the scripts/ directory.
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" || fail "Unable to locate the Git repository containing this script."
+cd "$REPO_ROOT"
 
-write_step_header() {
-    echo ""
-    echo "----------------------------------------------------"
-    echo " [STEP $1] $2"
-    echo "----------------------------------------------------"
+deploy_binary() {
+    local source="$1" destination="$2" label="$3" backup_dir="$4"
+    local backup_file staged timestamp
+    mkdir -p "$backup_dir"
+    staged="${destination}.new.$$"
+    timestamp="$(date +%Y%m%d_%H%M%S)_$$"
+    backup_file="$backup_dir/$(basename -- "$destination").$timestamp"
+
+    cp -p -- "$source" "$staged" || { rm -f -- "$staged"; fail "$label: unable to stage new binary."; }
+    if [[ -f "$destination" ]]; then
+        cp -p -- "$destination" "$backup_file" || { rm -f -- "$staged"; fail "$label: unable to back up existing binary."; }
+        echo "$label: previous binary backed up to $backup_file"
+    fi
+    if ! mv -f -- "$staged" "$destination"; then
+        rm -f -- "$staged"
+        fail "$label: replacement failed; existing binary was left in place and backup retained if created."
+fi
+    echo "$label deployment successful: $destination"
 }
 
-write_prominent_error() {
-    echo ""
-    echo "####################################################"
-    echo " [FATAL ERROR]: $1"
-    echo "####################################################"
-    echo ""
+# Clear only target/<profile> generated contents, preserving target/ and backup/.
+clean_build_artifacts_preserving_backups() {
+    local target_dir="$REPO_ROOT/target/$PROFILE"
+    local backup_dir="$target_dir/backup"
+    mkdir -p "$backup_dir"
+    # Keep target/ and target/<profile>/ in place. Remove only the selected
+    # profile's generated contents, preserving backup/ and avoiding Cargo's
+    # broader target-directory cleanup (which can fail if another process has
+    # the target directory itself open).
+    find "$target_dir" -mindepth 1 -maxdepth 1 ! -name backup -exec rm -rf -- {} +
+    echo "Cleaned generated contents of $target_dir; preserved $backup_dir."
 }
 
-# ----------------------------------------------------------------
-write_step_header "1" "Fetch and Pull Latest Changes from Git"
-# ----------------------------------------------------------------
-git fetch origin
+echo "=================================================="
+echo "Starting SolidCraft update: $(date)"
+echo "Log file: $LOG_FILE"
+echo "Selected build profile: $PROFILE"
+if (( JOBS > 0 )); then JOBS_ARG=(--jobs "$JOBS"); else JOBS_ARG=(); fi
 
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-REMOTE_COMMIT=$(git rev-parse "origin/$CURRENT_BRANCH")
-LOCAL_COMMIT=$(git rev-parse HEAD)
+git rev-parse --show-toplevel >/dev/null 2>&1 || fail "Not running inside a Git repository."
 
-if [ "$LOCAL_COMMIT" != "$REMOTE_COMMIT" ]; then
-    echo "Changes detected on remote. Pulling latest code..."
-    git pull
-    if [ $? -ne 0 ]; then
-        write_prominent_error "Git pull failed. Aborting entire update chain."
-        exit 1
-    fi
-    echo "Git pull completed successfully."
-else
-    echo "Local repository is already up to date with origin/$CURRENT_BRANCH."
-fi
-
-# ----------------------------------------------------------------
-write_step_header "2" "Run Workspace Test Suite (Debug Mode)"
-# ----------------------------------------------------------------
-cargo test --workspace --jobs 2
-if [ $? -ne 0 ]; then
-    write_prominent_error "Tests failed! Aborting deployment. Existing build remains untouched."
-    exit 1
-fi
-echo "All tests passed successfully!"
-
-# ----------------------------------------------------------------
-write_step_header "3" "Compile Target: GUI (solidcraft)"
-# ----------------------------------------------------------------
-if [ "$BUILD_GUI" = true ]; then
-    echo "Building solidcraft (GUI)..."
-    cargo build --release -p solidcraft --jobs 2
-    if [ $? -ne 0 ]; then
-        write_prominent_error "GUI compilation failed!"
-    else
-        GUI_SUCCESS=true
-        echo "GUI compilation succeeded."
-    fi
-else
-    echo "GUI target skipped by parameter."
-fi
-
-# ----------------------------------------------------------------
-write_step_header "4" "Compile Target: CLI (solidcraft-cli)"
-# ----------------------------------------------------------------
-if [ "$BUILD_CLI" = true ]; then
-    echo "Building solidcraft-cli (CLI)..."
-    cargo build --release -p solidcraft-cli --jobs 2
-    if [ $? -ne 0 ]; then
-        write_prominent_error "CLI compilation failed!"
-    else
-        CLI_SUCCESS=true
-        echo "CLI compilation succeeded."
-    fi
-else
-    echo "CLI target skipped by parameter."
-fi
-
-# ----------------------------------------------------------------
-write_step_header "5" "Compile Target: Web (solidcraft-web)"
-# ----------------------------------------------------------------
-if [ "$BUILD_WEB" = true ]; then
-    echo "Building solidcraft-web (WASM)..."
-    cargo build --release -p solidcraft-web --target wasm32-unknown-unknown --jobs 2
-    if [ $? -ne 0 ]; then
-        write_prominent_error "Web compilation failed!"
-    else
-        WEB_SUCCESS=true
-        echo "Web compilation succeeded."
-    fi
-else
-    echo "Web target skipped by parameter."
-fi
-
-# ----------------------------------------------------------------
-write_step_header "6" "Atomic Deployment for Successful Targets"
-# ----------------------------------------------------------------
-
-# Deploy GUI if built successfully
-if [ "$BUILD_GUI" = true ] && [ "$GUI_SUCCESS" = true ]; then
-    SOURCE_GUI="$REPO_DIR/target/release/solidcraft"
-    TARGET_GUI="$REPO_DIR/solidcraft"
-    TEMP_GUI="$REPO_DIR/solidcraft_new"
-
-    if [ -f "$SOURCE_GUI" ]; then
-        echo "Deploying GUI binary atomically..."
-        cp -f "$SOURCE_GUI" "$TEMP_GUI"
-        if [ -f "$TARGET_GUI" ]; then
-            mv -f "$TARGET_GUI" "$REPO_DIR/solidcraft_old"
-            mv -f "$TEMP_GUI" "$TARGET_GUI"
-            rm -f "$REPO_DIR/solidcraft_old"
+# Build from a detached worktree so local changes in the operator's checkout
+# are never stashed, reset, overwritten, or included accidentally.
+# By default, build the upstream configured for the currently checked-out
+# branch. --branch overrides this with a remote-tracking branch (e.g. main or
+# origin/main). The original checkout is never switched, reset, or stashed.
+CURRENT_BRANCH="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+if [[ -n "$BRANCH_OVERRIDE" ]]; then
+    if [[ "$BRANCH_OVERRIDE" == refs/remotes/* ]]; then
+        SOURCE_REF="$BRANCH_OVERRIDE"
+    elif [[ "$BRANCH_OVERRIDE" == */* ]]; then
+        BRANCH_REMOTE="${BRANCH_OVERRIDE%%/*}"
+        if git remote get-url "$BRANCH_REMOTE" >/dev/null 2>&1; then
+            SOURCE_REF="refs/remotes/$BRANCH_OVERRIDE"
         else
-            mv -f "$TEMP_GUI" "$TARGET_GUI"
+            SOURCE_REF="refs/remotes/origin/$BRANCH_OVERRIDE"
         fi
-        chmod +x "$TARGET_GUI"
-        echo "Successfully deployed solidcraft!"
     else
-        write_prominent_error "GUI binary missing at expected path despite successful build status."
+        SOURCE_REF="refs/remotes/origin/$BRANCH_OVERRIDE"
     fi
+else
+    [[ -n "$CURRENT_BRANCH" ]] || fail "Detached HEAD; specify --branch <name> to select a remote branch."
+    SOURCE_REF="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" || fail "Branch '$CURRENT_BRANCH' has no configured upstream; specify --branch <name>."
+    SOURCE_REF="refs/remotes/$SOURCE_REF"
 fi
 
-# Deploy CLI if built successfully
-if [ "$BUILD_CLI" = true ] && [ "$CLI_SUCCESS" = true ]; then
-    SOURCE_CLI="$REPO_DIR/target/release/solidcraft-cli"
-    TARGET_CLI="$REPO_DIR/solidcraft-cli"
-    TEMP_CLI="$REPO_DIR/solidcraft-cli_new"
+echo "[STEP 1] Fetching updates for $SOURCE_REF..."
+git -c maintenance.auto=false -c fetch.writeCommitGraph=false fetch --all --prune
+SOURCE_COMMIT="$(git rev-parse "$SOURCE_REF^{commit}")" || fail "Unable to resolve selected remote branch '$SOURCE_REF'."
+SOURCE_LABEL="${SOURCE_REF#refs/remotes/}"
+STATE_KEY="$(printf '%s' "$SOURCE_REF|$PROFILE" | sha256sum | awk '{print $1}')"
+STATE_DIR="$REPO_ROOT/target/.solidcraft-build-state"
+STATE_FILE="$STATE_DIR/$STATE_KEY"
+mkdir -p "$STATE_DIR"
+BUILD_STATE="$SOURCE_REF|$SOURCE_COMMIT|$PROFILE|$BUILD_GUI|$BUILD_CLI|$BUILD_WEB|$SKIP_TESTS|$WEB_INSTALL_DIR"
+LAST_BUILD_STATE=""
+[[ -f "$STATE_FILE" ]] && LAST_BUILD_STATE="$(cat "$STATE_FILE")"
 
-    if [ -f "$SOURCE_CLI" ]; then
-        echo "Deploying CLI binary atomically..."
-        cp -f "$SOURCE_CLI" "$TEMP_CLI"
-        if [ -f "$TARGET_CLI" ]; then
-            mv -f "$TARGET_CLI" "$REPO_DIR/solidcraft-cli_old"
-            mv -f "$TEMP_CLI" "$TARGET_CLI"
-            rm -f "$REPO_DIR/solidcraft-cli_old"
-        else
-            mv -f "$TEMP_CLI" "$TARGET_CLI"
-        fi
-        chmod +x "$TARGET_CLI"
-        echo "Successfully deployed solidcraft-cli!"
-    else
-        write_prominent_error "CLI binary missing at expected path despite successful build status."
+if [[ "$LAST_BUILD_STATE" == "$BUILD_STATE" && "$FORCE_BUILD" == false ]]; then
+    echo "$SOURCE_LABEL ($SOURCE_COMMIT) is already built with this configuration. No build needed."
+    echo "Use --force-build (-f) to force a clean rebuild."
+    exit 0
+fi
+if [[ "$FORCE_BUILD" == true ]]; then
+    echo "Force build requested: a clean rebuild of $SOURCE_LABEL will be performed."
+else
+    echo "New $SOURCE_LABEL revision/configuration detected: $SOURCE_COMMIT"
+fi
+
+BUILD_WORKTREE_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/solidcraft-build.XXXXXX")"
+BUILD_WORKTREE="$BUILD_WORKTREE_PARENT/checkout"
+cleanup_build_worktree() {
+    cd "$REPO_ROOT" 2>/dev/null || true
+    if [[ -n "${BUILD_WORKTREE:-}" && -d "$BUILD_WORKTREE" ]]; then
+        git -C "$REPO_ROOT" worktree remove --force "$BUILD_WORKTREE" >/dev/null 2>&1 || echo "WARNING: Could not remove temporary build worktree: $BUILD_WORKTREE" >&2
     fi
+    if [[ -n "${BUILD_WORKTREE_PARENT:-}" && -d "$BUILD_WORKTREE_PARENT" ]]; then
+        rmdir "$BUILD_WORKTREE_PARENT" 2>/dev/null || true
+fi
+}
+trap cleanup_build_worktree EXIT
+
+echo "[STEP 2] Preparing detached build worktree at $SOURCE_LABEL..."
+git worktree add --detach "$BUILD_WORKTREE" "$SOURCE_COMMIT"
+cd "$BUILD_WORKTREE"
+export CARGO_TARGET_DIR="$REPO_ROOT/target"
+
+TARGET_DIR="$REPO_ROOT/target/$PROFILE"
+mkdir -p "$TARGET_DIR/backup"
+
+if [[ "$FORCE_BUILD" == true ]]; then
+    echo "[STEP 2A] Cleaning Cargo artifacts while preserving deployed-binary backups..."
+    clean_build_artifacts_preserving_backups
 fi
 
-# Deploy Web assets to web directory if built successfully
-if [ "$BUILD_WEB" = true ] && [ "$WEB_SUCCESS" = true ]; then
-    SOURCE_WEB="$REPO_DIR/target/wasm32-unknown-unknown/release/solidcraft_web.wasm"
-
-    if [ -f "$SOURCE_WEB" ]; then
-        echo "Deploying web assets to web root ($WEB_DIR)..."
-
-        # Note: Deploying to /var/www/html/ typically requires elevated privileges.
-        # Ensure the cron user has passwordless sudo rights for cp/mkdir/chown, 
-        # or grant the build user ownership of $WEB_DIR.
-
-        # Ensure web directory exists (using sudo if permissions require it)
-        sudo mkdir -p "$WEB_DIR"
-
-        # Copy compiled WASM binary and any associated web artifacts
-        sudo cp -f "$SOURCE_WEB" "$WEB_DIR/"
-
-        # Optional: Set appropriate web server permissions (e.g., www-data)
-        sudo chown -R www-data:www-data "$WEB_DIR" 2>/dev/null || true
-
-        echo "Successfully deployed web assets to $WEB_DIR!"
-    else
-        write_prominent_error "Web WASM binary missing at expected path despite successful build status."
-    fi
+if [[ "$SKIP_TESTS" == true ]]; then
+    echo "[STEP 3] Skipping workspace tests (--skip-tests active)."
+else
+    echo "[STEP 3] Running workspace tests ($PROFILE mode)..."
+    cargo test --workspace "${CARGO_PROFILE_FLAG[@]}" "${JOBS_ARG[@]}"
 fi
 
-# ----------------------------------------------------------------
-write_step_header "7" "Pipeline Summary Report"
-# ----------------------------------------------------------------
-echo "Pipeline Execution Complete."
-[ "$BUILD_GUI" = true ] && echo " - GUI Target: $( [ "$GUI_SUCCESS" = true ] && echo "SUCCESS" || echo "FAILED" )"
-[ "$BUILD_CLI" = true ] && echo " - CLI Target: $( [ "$CLI_SUCCESS" = true ] && echo "SUCCESS" || echo "FAILED" )"
-[ "$BUILD_WEB" = true ] && echo " - Web Target: $( [ "$WEB_SUCCESS" = true ] && echo "SUCCESS" || echo "FAILED" )"
-echo "Full log saved to: $LOG_FILE"
+TARGET_DIR="$REPO_ROOT/target/$PROFILE"
+mkdir -p "$TARGET_DIR/backup"
 
-# Exit with error if any enabled target failed
-if { [ "$BUILD_GUI" = true ] && [ "$GUI_SUCCESS" = false ]; } || \
-   { [ "$BUILD_CLI" = true ] && [ "$CLI_SUCCESS" = false ]; } || \
-   { [ "$BUILD_WEB" = true ] && [ "$WEB_SUCCESS" = false ]; }
-then
-    exit 2
+if [[ "$BUILD_GUI" == true ]]; then
+    echo "[STEP 4] Building native GUI binary ($PROFILE)..."
+    cargo build "${CARGO_PROFILE_FLAG[@]}" --bin solidcraft "${JOBS_ARG[@]}"
+    SOURCE_GUI="$TARGET_DIR/solidcraft"
+    [[ -f "$SOURCE_GUI" ]] || fail "GUI build succeeded but expected artifact is missing: $SOURCE_GUI"
+    deploy_binary "$SOURCE_GUI" "$REPO_ROOT/solidcraft" "GUI" "$TARGET_DIR/backup"
 fi
 
-exit 0
+if [[ "$BUILD_CLI" == true ]]; then
+    echo "[STEP 5] Building CLI binary ($PROFILE)..."
+    cargo build "${CARGO_PROFILE_FLAG[@]}" --bin solidcraft-cli "${JOBS_ARG[@]}"
+    SOURCE_CLI="$TARGET_DIR/solidcraft-cli"
+    [[ -f "$SOURCE_CLI" ]] || fail "CLI build succeeded but expected artifact is missing: $SOURCE_CLI"
+    deploy_binary "$SOURCE_CLI" "$REPO_ROOT/solidcraft-cli" "CLI" "$TARGET_DIR/backup"
+fi
+
+if [[ "$BUILD_WEB" == true ]]; then
+    echo "[STEP 6] Building WebAssembly target ($PROFILE)..."
+    cargo build "${CARGO_PROFILE_FLAG[@]}" --target wasm32-unknown-unknown --bin solidcraft-web "${JOBS_ARG[@]}"
+    SOURCE_WEB="$REPO_ROOT/target/wasm32-unknown-unknown/$PROFILE/solidcraft-web.wasm"
+    [[ -f "$SOURCE_WEB" ]] || fail "WebAssembly build succeeded but expected artifact is missing: $SOURCE_WEB"
+    mkdir -p "$WEB_INSTALL_DIR"
+    WEB_STAGED="$WEB_INSTALL_DIR/solidcraft.wasm.new.$$"
+    cp -- "$SOURCE_WEB" "$WEB_STAGED"
+    mv -f -- "$WEB_STAGED" "$WEB_INSTALL_DIR/solidcraft.wasm"
+    echo "Web deployment successful to $WEB_INSTALL_DIR."
+fi
+
+printf '%s' "$BUILD_STATE" > "$STATE_FILE.new.$$"
+mv -f -- "$STATE_FILE.new.$$" "$STATE_FILE"
+
+echo "=================================================="
+echo "Update sequence completed: $(date)"
+echo "=================================================="
