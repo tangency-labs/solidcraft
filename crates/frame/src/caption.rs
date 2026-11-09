@@ -106,7 +106,10 @@ impl CaptionMap {
     /// them (an interactive rectangle that is dropped would turn into a drag area, so callers
     /// merge small controls into larger rectangles instead of overflowing).
     pub fn publish(&self, layout: &CaptionLayout) {
-        let before = self.seq.fetch_add(1, Ordering::AcqRel);
+        // The fence keeps every store below after the odd number: a reader that sees any of them
+        // sees the number change too.
+        let before = self.seq.fetch_add(1, Ordering::Relaxed);
+        std::sync::atomic::fence(Ordering::Release);
         debug_assert!(before.is_multiple_of(2), "CaptionMap has a single publisher");
         let put = |i: usize, r: PxRect| {
             let c = &self.coords[i];
@@ -134,7 +137,8 @@ impl CaptionMap {
     /// Forget the layout (the custom title bar is gone, e.g. fullscreen): every point is
     /// [`CaptionHit::Outside`] until the next publish.
     pub fn clear(&self) {
-        self.seq.fetch_add(1, Ordering::AcqRel);
+        self.seq.fetch_add(1, Ordering::Relaxed);
+        std::sync::atomic::fence(Ordering::Release);
         self.published.store(0, Ordering::Relaxed);
         self.seq.fetch_add(1, Ordering::Release);
     }
@@ -172,6 +176,12 @@ impl CaptionMap {
     /// is in flight and, after a bounded number of tries, answers [`CaptionHit::Client`] (the
     /// conservative answer: the UI sees the press).
     pub fn hit(&self, x: i32, y: i32) -> CaptionHit {
+        self.read_hit(x, y).unwrap_or(CaptionHit::Client)
+    }
+
+    /// One consistent read of what is at (`x`, `y`), or `None` when publishes kept every try
+    /// from getting one.
+    fn read_hit(&self, x: i32, y: i32) -> Option<CaptionHit> {
         for _ in 0..64 {
             let a = self.seq.load(Ordering::Acquire);
             if !a.is_multiple_of(2) {
@@ -181,15 +191,16 @@ impl CaptionMap {
             let hit = self.hit_once(x, y);
             std::sync::atomic::fence(Ordering::Acquire);
             if self.seq.load(Ordering::Relaxed) == a {
-                return hit;
+                return Some(hit);
             }
         }
-        CaptionHit::Client
+        None
     }
 
-    /// The published bar and maximize button (`None` while nothing is published), read as one
-    /// consistent snapshot. The window procedure reports them to the system as the title bar's
-    /// geometry (`WM_GETTITLEBARINFOEX` on Windows), which decides where the system's own
+    /// The published bar and maximize button, read as one consistent snapshot: `None` while
+    /// nothing is published, or when publishes kept every try from getting a consistent read.
+    /// The window procedure reports them to the system as the title bar's geometry
+    /// (`WM_GETTITLEBARINFOEX` on Windows), which decides where the system's own
     /// maximize-button behaviour (snap layouts) applies.
     pub fn bar_and_maximize(&self) -> Option<(PxRect, Option<PxRect>)> {
         for _ in 0..64 {
@@ -287,9 +298,10 @@ mod tests {
 
     #[test]
     fn concurrent_readers_never_see_torn_layouts() {
-        // Two layouts that disagree everywhere: a reader must see one or the other.
+        // At (50, 5) `a` is Drag and `b` is Outside, and a mix of the two (`a`'s bar with `b`'s
+        // empty drag list) would be Client: a reader that accepts a torn read fails.
         let a = CaptionLayout { bar: PxRect::new(0, 0, 100, 10), drag: vec![PxRect::new(0, 0, 100, 10)], ..Default::default() };
-        let b = CaptionLayout { bar: PxRect::new(0, 0, 100, 10), interactive: vec![PxRect::new(0, 0, 100, 10)], ..Default::default() };
+        let b = CaptionLayout { bar: PxRect::new(0, 0, 10, 10), ..Default::default() };
         let m = std::sync::Arc::new(CaptionMap::new());
         m.publish(&a);
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -298,14 +310,21 @@ mod tests {
                 let (m, stop) = (m.clone(), stop.clone());
                 std::thread::spawn(move || {
                     while !stop.load(Ordering::Relaxed) {
-                        let h = m.hit(50, 5);
-                        assert!(matches!(h, CaptionHit::Drag | CaptionHit::Client), "{h:?}");
+                        // Only consistent reads are judged: when publishes keep a read from getting
+                        // one, `hit` answers Client by design.
+                        if let Some(h) = m.read_hit(50, 5) {
+                            assert!(matches!(h, CaptionHit::Drag | CaptionHit::Outside), "{h:?}");
+                        }
                     }
                 })
             })
             .collect();
         for i in 0..20_000 {
             m.publish(if i % 2 == 0 { &b } else { &a });
+            // Room for readers to start between publishes, so their reads overlap the next one.
+            for _ in 0..64 {
+                std::hint::spin_loop();
+            }
         }
         stop.store(true, Ordering::Relaxed);
         for r in readers {
