@@ -31,9 +31,9 @@
 //!   does the same for NLib errors (keeping the surface upstream leaves behind) but
 //!   returns non-NLib errors, which mark inputs where upstream indexes outside its
 //!   arrays.
-//! - `N_SrfJoin` of a rational and a non-rational surface loads both nets as they
-//!   are, so its knot removal runs on a net that mixes weights with the non-rational
-//!   marker `NL_NOW`, and only then sets the marker to `1.0`. [`join`] gives the
+//! - `N_SrfJoin` of a rational and a non-rational surface loads both nets as they are,
+//!   so its knot removal runs on a net that mixes weights with the non-rational marker
+//!   `NL_NOW`, and only then sets the marker to `1.0` (`WR-773`). [`join`] gives the
 //!   non-rational piece weights `1.0` first ([`make_rat_compatible`]): the net before
 //!   the removal is upstream's, and the removal sees real weights.
 //! - `N_MakeSrfsCompatible` ignores the status of `N_SrfReparam` /
