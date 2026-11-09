@@ -269,11 +269,8 @@ fn a_view_that_cant_be_numbered_still_places_its_list() {
 /// sheet exports the same SVG after save and reopen. Every model edit is made with the drawing closed.
 #[test]
 fn the_assembly_sheet_keeps_its_parts_list_revisions_and_tag_through_the_model() {
-    let script: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/w23-assembly-sheet/assembly.json")).unwrap();
-    let mut s = Session::default();
-    let made = s.run_script(&script).unwrap();
-    let step = script["commands"].as_array().unwrap().iter().position(|c| c["as"] == "second_holder").unwrap();
-    let second = made[step]["occurrence"].as_u64().unwrap();
+    let (mut s, named) = crate::tests::w23_assembly_sheet();
+    let second = named["second_holder"];
     let exec = |s: &mut Session, id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
 
     exec(&mut s, "assembly.bom.renumber", json!({"levels": "top"}));
