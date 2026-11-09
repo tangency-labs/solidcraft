@@ -2257,6 +2257,14 @@ fn a_trace_follows_the_instance_its_path_names() {
     let pivot = Vec3::new(0.0, 50.0, 1.0);
     assert!(turned.iter().all(|p| (p.dist(pivot) - 122f64.sqrt()).abs() < 1e-6), "{turned:?}");
     assert!(turned.first().zip(turned.last()).is_some_and(|(a, b)| (a.dist(*b) - 244f64.sqrt()).abs() < 1e-6), "a quarter turn: {turned:?}");
+    // Kept with a point_ref as the Motion Trace dialog sends a pick on the second Arm: with the
+    // pick's placement path. The trace's own occurrence names that placement already.
+    let reference = json!({"occurrence": tip, "path": [second, tip], "point": [11, 51, 1]});
+    let p = json!({"occurrence": [second, tip], "point": [11, 51, 1], "joint": "Pivot", "from": 0, "to": 90, "samples": 3, "point_ref": reference});
+    let kept = run(&mut s, "motion.trace.keep", p);
+    let trace_point = s.doc.assembly.traces.last().map(|t| t.point.clone());
+    assert_eq!(trace_point.map(|o| (o.occurrence, o.inside)), Some((tip, Vec::new())), "{kept}");
+    assert!(traced(&kept).iter().all(|p| (p.dist(pivot) - 122f64.sqrt()).abs() < 1e-6), "{kept}");
     let first = trace(&mut s, json!(tip));
     assert!(first.iter().all(|p| p.dist(Vec3::new(11.0, 51.0, 1.0)) < 1e-9), "{first:?}");
     assert!(s.execute("motion.trace", &json!({"occurrence": [tip, second], "point": [0, 0, 0], "joint": "Pivot", "from": 0, "to": 90})).is_err());

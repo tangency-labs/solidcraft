@@ -55,7 +55,12 @@ pub(super) fn source(s: &Session, p: &Value, cmd: &str) -> Result<MotionTrace> {
             // The origin parser uses an occurrence's first placement. A trace can name a
             // different nested instance; convert its world pick to that canonical frame.
             placed_world(s, &occurrence)?;
-            let reference = super::super::joints::in_first_placement(s, v, &occurrence, cmd)?;
+            let mut reference = super::super::joints::in_first_placement(s, v, &occurrence, cmd)?;
+            // The trace's `occurrence` names the placement, and the reference now sits in its
+            // part's first placement: a pick's `path` would anchor it on the copy a second time.
+            if let Some(m) = reference.as_object_mut() {
+                m.remove("path");
+            }
             let o = super::super::joints::origin_param(s, Some(&reference), cmd)?;
             if o.occurrence != occurrence.last().copied().unwrap_or(0) {
                 return Err(bad(cmd, "point_ref must belong to the traced occurrence"));

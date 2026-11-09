@@ -1744,6 +1744,14 @@ fn joint_origin_picked_on_a_repeated_sub_assembly_is_on_that_copy() {
         let o = &app.session.doc.assembly.origins.last().unwrap().origin;
         assert_eq!((o.occurrence, o.inside.clone()), stored, "{body}: {o:?}");
     }
+    // The same part in two copies is two sides of a joint, not "one component".
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for x in [-5.0, 95.0] {
+        d.pick(&app.session, face_sel(&app.session, Vec3::new(x, 25.0, 10.0)).unwrap());
+    }
+    let Kind::Assembly(k) = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!(joint_problem(&app, k, &d.inputs), None);
     // Edit Joint shows a side on the second copy on that copy's part.
     app.run("component.create", json!({"name": "Probe", "parent": "root", "grounded": false})).unwrap();
     app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [50, -30, 0]})).unwrap();

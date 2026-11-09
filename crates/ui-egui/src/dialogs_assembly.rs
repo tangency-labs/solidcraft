@@ -1490,7 +1490,11 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
             bodies.push(b.to_string());
         }
     }
-    let occs: Vec<Option<u64>> = bodies.iter().map(|b| occurrence_of_body(&app.session, b)).collect();
+    // The occurrence a joint at each body would hold: a part in a later copy of a sub-assembly is
+    // held through that copy, so picks on the same part in two copies are two sides (#11426).
+    let doc = &app.session.doc;
+    let occs: Vec<Option<u64>> =
+        bodies.iter().map(|b| placement_of_body(&app.session, b).map(|path| solidcraft_engine::doc::joints::origin_anchor(doc, &path).0)).collect();
     if occs.first().is_some_and(|first| first.is_some() && occs.iter().all(|o| o == first)) {
         return Some(match bodies.as_slice() {
             [body] => (solidcraft_ui_text::format("joint.one_body", &[("body", body.as_str())]), Vec::new()),
