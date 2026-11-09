@@ -18,6 +18,7 @@ The authority is `solidcore/docs/layers.md`; this is its short form. Every job l
 
 ## Lists that only shrink
 - `xtask/mesh-decisions.txt`: model decisions made from a mesh (`cargo xtask mesh-decisions`).
+- `xtask/app-geometry.txt`: functions in the app crates that compute geometry (`cargo xtask app-geometry`). A new one fails CI; when you move one into `solidcore/`, delete its line.
 - `solidcore/plan/panic-sites.tsv`: panic-prone calls in solidcore (SolidCore checks in CI).
 
 ## Working in solidcore/

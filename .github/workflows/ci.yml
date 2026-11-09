@@ -436,6 +436,10 @@ jobs:
         run: |
           cargo xtask mesh-decisions
           cargo test -p xtask mesh_decisions --locked
+      - name: Apps compute no geometry
+        run: |
+          cargo xtask app-geometry
+          cargo test -p xtask app_geometry --locked
       - name: Agent router and skills cite real files
         run: |
           cargo xtask skills
