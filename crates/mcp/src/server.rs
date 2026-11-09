@@ -1,7 +1,7 @@
 //! SolidCraft's MCP server: its tools, instructions and resources over the shared server
 //! (`solidcraft-mcp-server`), with the agent's folders and the output options around each call.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, mpsc};
 
 use serde_json::{Value, json};
@@ -219,17 +219,23 @@ impl Server {
     /// each carries its request's id.
     pub fn serve(&mut self, input: impl std::io::BufRead + Send, output: impl std::io::Write + Send) -> std::io::Result<()> {
         let output = Mutex::new(output);
-        let busy = AtomicBool::new(false);
-        // How to reach the app apart from the call in progress, and the options its tools run with.
-        let side: Mutex<Option<(Remote, Options)>> = Mutex::new(None);
+        // Messages read and not yet answered by the main loop: counted when the reader queues one,
+        // not when the loop takes it, so a `running` read right behind a `batch` the loop has not
+        // picked up yet is not queued behind it. A `running` answered apart is never queued, so it
+        // never counts.
+        let in_flight = AtomicUsize::new(0);
+        // How to reach the app apart from the call in progress, and the options its tools run with:
+        // known before the first message, and refreshed as each one is taken (the backend may
+        // bridge to an app that started since).
+        let side: Mutex<Option<(Remote, Options)>> = Mutex::new(self.side());
         let (tx, rx) = mpsc::channel::<Incoming>();
         std::thread::scope(|scope| {
-            let (output, busy, side) = (&output, &busy, &side);
+            let (output, in_flight, side) = (&output, &in_flight, &side);
             let reader = scope.spawn(move || -> std::io::Result<()> {
                 let mut input = input;
                 while let Some(incoming) = read_message(&mut input, solidcraft_engine::MAX_LINE)? {
                     if let Incoming::Line(line) = &incoming
-                        && busy.load(Ordering::SeqCst)
+                        && in_flight.load(Ordering::SeqCst) > 0
                         && let Some(id) = running_call(line)
                         && let Some((mut remote, options)) = side_probe(side)
                     {
@@ -240,6 +246,7 @@ impl Server {
                         });
                         continue;
                     }
+                    in_flight.fetch_add(1, Ordering::SeqCst);
                     if tx.send(incoming).is_err() {
                         break;
                     }
@@ -249,17 +256,15 @@ impl Server {
             let mut written = Ok(());
             for incoming in rx {
                 if let Ok(mut s) = side.lock() {
-                    *s = self.inner.tools().backend.side_channel().map(|r| (r, self.inner.tools().listed));
+                    *s = self.side();
                 }
-                busy.store(true, Ordering::SeqCst);
                 let reply = match incoming {
                     Incoming::Line(line) => self.inner.handle_line(&line),
                     Incoming::Refused(reply) => Some(reply),
                 };
-                busy.store(false, Ordering::SeqCst);
-                if let Some(reply) = reply
-                    && let Err(e) = write_line(output, &reply)
-                {
+                let sent = reply.map_or(Ok(()), |reply| write_line(output, &reply));
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                if let Err(e) = sent {
                     written = Err(e);
                     break;
                 }
@@ -267,6 +272,12 @@ impl Server {
             let read = reader.join().unwrap_or_else(|_| Err(std::io::Error::other("the stdin reader stopped")));
             written.and(read)
         })
+    }
+    /// A fresh bridge to the app for answering `running` apart from the call in progress, with
+    /// the options tools run with now; `None` when the backend is not bridged to an app.
+    fn side(&mut self) -> Option<(Remote, Options)> {
+        let options = self.inner.tools().listed;
+        self.inner.tools().backend.side_channel().map(|r| (r, options))
     }
     /// One line in, at most one line out (notifications get no reply).
     pub fn handle_line(&mut self, line: &str) -> Option<String> {

@@ -3273,25 +3273,27 @@ fn running_is_asked_at_once_behind_a_request_still_running() {
     assert!(e.starts_with(STILL_RUNNING) && e.contains("earlier request"), "still outstanding: {e}");
 }
 
-/// #14007: over stdio, a `running` call sent while a long `batch` is still in the app is
-/// answered at once, on a connection of its own, not after the batch. The fake app holds the
-/// batch until it has been asked `control.running` (or 10 s pass), so before the fix, when stdin
-/// was read only between calls, the batch ran out its wait and `running` came after it.
-#[test]
-fn running_answers_at_once_while_a_long_batch_runs() {
-    use std::io::Write;
+/// #14007 over stdio: a `batch` the fake app holds, then a `running` call, sent once the app has
+/// the batch or (`back_to_back`) in the same write, before the server has taken the batch.
+/// Returns the reply ids in the order they came, and whether the app was asked `control.running`
+/// while it held the batch, which it can only be on a connection of its own: the fake app reads a
+/// connection's next request only after answering the last. The batch is held until the test has
+/// read the first reply (at most 10 s), so the order of the replies is not a race.
+fn running_during_a_held_batch(back_to_back: bool) -> (Vec<Value>, bool) {
+    use std::io::{BufRead, Write};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
     let asked = std::sync::Arc::new(AtomicBool::new(false));
-    let seen_running = asked.clone();
+    let release = std::sync::Arc::new(AtomicBool::new(false));
+    let (seen_running, released) = (asked.clone(), release.clone());
     let (addr, seen) = scripted_app(move |req| match req["method"].as_str() {
         Some("engine.batch") => {
             let start = Instant::now();
-            while !seen_running.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(10) {
+            while !released.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(10) {
                 std::thread::sleep(Duration::from_millis(5));
             }
             let held = seen_running.load(Ordering::SeqCst);
-            json!({"ok": true, "result": {"ok": true, "results": [{"ok": true, "result": {"running_seen": held}}]}})
+            json!({"ok": true, "result": {"ok": true, "results": [{"ok": true, "result": {"running_seen_while_held": held}}]}})
         }
         Some("control.running") => {
             seen_running.store(true, Ordering::SeqCst);
@@ -3299,37 +3301,60 @@ fn running_answers_at_once_while_a_long_batch_runs() {
         }
         _ => json!({"ok": true, "result": null}),
     });
-    let (reader, mut writer) = std::io::pipe().unwrap();
+    let (stdin, mut to_server) = std::io::pipe().unwrap();
+    let (from_server, stdout) = std::io::pipe().unwrap();
     let server = std::thread::spawn(move || {
         let mut s = Server::new(Box::new(crate::Remote::new(&addr, None)));
-        let mut out = Vec::new();
-        s.serve(std::io::BufReader::new(reader), &mut out).unwrap();
-        out
+        s.serve(std::io::BufReader::new(stdin), stdout).unwrap();
     });
     let call =
         |id: u64, name: &str, args: Value| json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}});
     let steps = json!({"commands": [{"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}], "verbose": false});
-    writeln!(writer, "{}", call(1, "batch", steps)).unwrap();
-    // Send `running` once the batch is in the app.
-    let start = Instant::now();
-    while !seen.lock().unwrap().1.iter().any(|m| m == "engine.batch") && start.elapsed() < Duration::from_secs(10) {
-        std::thread::sleep(Duration::from_millis(5));
+    if back_to_back {
+        write!(to_server, "{}\n{}\n", call(1, "batch", steps), call(2, "running", json!({}))).unwrap();
+    } else {
+        writeln!(to_server, "{}", call(1, "batch", steps)).unwrap();
+        let start = Instant::now();
+        while !seen.lock().unwrap().1.iter().any(|m| m == "engine.batch") && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        writeln!(to_server, "{}", call(2, "running", json!({}))).unwrap();
     }
-    writeln!(writer, "{}", call(2, "running", json!({}))).unwrap();
-    // Wait for both replies before closing stdin.
-    while !asked.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(15) {
-        std::thread::sleep(Duration::from_millis(5));
+    let mut replies = std::io::BufReader::new(from_server);
+    let mut read = || {
+        let mut line = String::new();
+        replies.read_line(&mut line).unwrap();
+        serde_json::from_str::<Value>(&line).unwrap()
+    };
+    let first = read();
+    release.store(true, Ordering::SeqCst);
+    let second = read();
+    drop(to_server);
+    server.join().unwrap();
+    for r in [&first, &second] {
+        assert_ne!(r["result"]["isError"], true, "{r}");
     }
-    drop(writer);
-    let text = String::from_utf8(server.join().unwrap()).unwrap();
-    let replies: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
-    assert_eq!(replies.iter().map(|r| r["id"].clone()).collect::<Vec<_>>(), [json!(2), json!(1)], "`running` first: {text}");
-    assert_ne!(replies[0]["result"]["isError"], true, "{text}");
-    assert!(replies[0]["result"]["content"][0]["text"].as_str().unwrap_or_default().contains("engine.batch"), "{text}");
-    assert_ne!(replies[1]["result"]["isError"], true, "{text}");
-    assert!(text.contains("running_seen"), "{text}");
-    let seen = seen.lock().unwrap();
-    assert!(seen.0 >= 2, "`running` went on a connection of its own: {} connections", seen.0);
+    let batch = if first["id"] == 1 { &first } else { &second };
+    let held = batch["result"]["content"][0]["text"].as_str().unwrap_or_default().contains("\"running_seen_while_held\": true");
+    (vec![first["id"].clone(), second["id"].clone()], held)
+}
+
+/// #14007: a `running` call sent while a long `batch` is in the app is answered at once, on a
+/// connection of its own, not after the batch.
+#[test]
+fn running_answers_at_once_while_a_long_batch_runs() {
+    let (order, held) = running_during_a_held_batch(false);
+    assert_eq!(order, [json!(2), json!(1)], "`running` first");
+    assert!(held, "the app was asked `control.running` while it held the batch");
+}
+
+/// #14007: also when `running` comes in right behind the `batch`, before the server has taken
+/// the batch off its queue.
+#[test]
+fn running_sent_right_behind_a_batch_is_not_queued_behind_it() {
+    let (order, held) = running_during_a_held_batch(true);
+    assert_eq!(order, [json!(2), json!(1)], "`running` first");
+    assert!(held, "the app was asked `control.running` while it held the batch");
 }
 
 /// A request still running after the wait is left to the `pending` tool: the error says so
