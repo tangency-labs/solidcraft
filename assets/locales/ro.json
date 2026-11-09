@@ -1889,6 +1889,7 @@
   "material.editor.preserved_appearance": "Aspect păstrat",
   "material.editor.public_reference": "Referință publică",
   "material.editor.reference": "Referință",
+  "material.editor.remove": "Elimină",
   "material.editor.save_or_discard": "Salvați sau renunțați la ciorna materialului înainte de a atribui un material.",
   "material.editor.saved": "Material salvat. Atribuirile pe corpuri rămân neschimbate.",
   "material.editor.scope": "Salvarea stochează acest material fără a-l atribui corpurilor. Proprietățile și condițiile lăsate necompletate rămân necunoscute. Densitatea din fișă nu modifică densitatea atribuită și nici masa.",

@@ -1,0 +1,226 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b93": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b94": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b94"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b95"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b95"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b96"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b93"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b97"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b97"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b98"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b96"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b99"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b98"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b100"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b99",
+        "b100"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b101"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "3456-deep-cut-through-drilled-taper-leaves-base",
+  "expected": {
+    "body_count": 1,
+    "faces": 12,
+    "method": "cone frustum r=30 at z=0 to r=20 at z=100 (a tapered extrude, narrowing by atan(0.1)=5.7106 deg) (r(z)=30-0.1z) with nine r=1.5 bores (centre + eight on r=10). Removing z>2 leaves the slab z 0..2: frustum slice pi*2/3*(30^2+30*29.8+29.8^2) minus 9*pi*1.5^2*2. Faces: base, top, cone side, nine bore walls = 12",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3456",
+      "tangency-labs/solidcraft#3497"
+    ],
+    "volume_mm3": 5490.0169,
+    "what": "a deep cut that removes everything above z=2 of a tapered body with nine through-bores, leaving the 2 mm drilled base"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 30,
+      "faces": 12,
+      "vertices": 20
+    }
+  },
+  "records": "3456-deep-cut-through-drilled-taper-leaves-base.bodies.json.gz",
+  "result": [
+    {
+      "body": "Taper",
+      "made": "b101"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6037.313309506173,
+      "body_count": 1,
+      "edges": 30,
+      "faces": 12,
+      "vertices": 20,
+      "volume_mm3": 5490.016937876277
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3456",
+    "tangency-labs/solidcraft#3497"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a deep cut that removes everything above z=2 of a tapered body with nine through-bores, leaving the 2 mm drilled base",
+  "why_not": []
+}

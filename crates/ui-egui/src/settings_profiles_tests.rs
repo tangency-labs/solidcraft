@@ -265,7 +265,7 @@ fn theme_options_profiles_restore_replace_and_preserve_stale_values() {
     assert_eq!(out["skipped"], json!([]));
     assert_eq!(serde_json::to_value(&h.app.preferences.theme_options).unwrap(), options);
     h.frames(2);
-    assert_eq!(crate::theme::Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
+    assert_eq!(solidcraft_theme::Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
     run(&mut h, "settings.profile.apply", json!({"name":"Empty"}));
     assert!(h.app.preferences.theme_options.is_empty());
     run(&mut h, "settings.profile.apply", json!({"name":"Options"}));
@@ -406,10 +406,10 @@ fn cancel_in_preferences_takes_a_switch_back() {
 fn starting_a_profile_command_opens_preferences_instead_of_failing() {
     let mut h = Harness::new();
     h.app.start("settings.profile.save");
-    assert!(h.app.prefs_window.open);
-    assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GENERAL);
+    assert!(h.app.prefs_window.shell.open);
+    assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GENERAL);
     h.frames(2);
-    assert!(h.app.prefs_window.open);
+    assert!(h.app.prefs_window.shell.open);
 }
 
 #[test]
@@ -426,7 +426,7 @@ fn typing_a_profile_name_keeps_focus_out_of_preferences_search() {
     for text in ["Lap", "top"] {
         h.step(&json!({"text": text})).expect("type a profile name");
         h.frames(2);
-        assert_eq!(h.app.prefs_window.filter, "profiles", "profile-name text went to Preferences search");
+        assert_eq!(h.app.prefs_window.shell.filter, "profiles", "profile-name text went to Preferences search");
         assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(name_focus), "the name field keeps focus");
     }
     assert!(h.widget("Laptop").is_some(), "the name field contains the typed name");
@@ -434,7 +434,7 @@ fn typing_a_profile_name_keeps_focus_out_of_preferences_search() {
     h.frames(2);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
     assert_eq!(h.app.settings_profiles.names(), ["Laptop"]);
-    assert_eq!(h.app.prefs_window.filter, "profiles");
+    assert_eq!(h.app.prefs_window.shell.filter, "profiles");
 }
 
 #[test]
@@ -482,7 +482,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
                 .unwrap();
             let count = crate::scenario::rect_of("dialog:section:Profiles:count").unwrap();
             assert!((count.left() - title.right() - 12.0).abs() < 1.1, "{theme}: count follows the painted title");
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let rule = h
                 .shapes
                 .iter()
@@ -600,11 +600,11 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
         let active = crate::scenario::rect_of("prefs:profile:Desk:active").unwrap();
         assert!(desk.contains_rect(active));
         assert!((active.height() - 18.0).abs() < 0.5);
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == desk && rect.fill == t.selected_bg && rect.stroke.color == t.form_primary)));
-        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if desk.contains(text.pos) && text.galley.job.text == "Desk" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::fonts::semibold(t.font_label)))));
+        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if desk.contains(text.pos) && text.galley.job.text == "Desk" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::ui_kit::type_face::semibold(t.font_label)))));
         let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if body.contains(text.pos) && text.galley.job.text == "Appearance" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::fonts::semibold(t.font_caption)))));
+        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if body.contains(text.pos) && text.galley.job.text == "Appearance" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::ui_kit::type_face::semibold(t.font_caption)))));
         assert!(laptop.contains_rect(crate::scenario::rect_of("prefs:profile:Laptop:apply").unwrap()));
         h.step(&json!({"click":{"handle":"prefs:profile:Laptop:apply"}})).unwrap();
         h.frames(3);
@@ -642,8 +642,8 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
             Some("Laptop"),
             "replacement keeps the typed name too"
         );
-        assert!(h.app.prefs_window.filter.is_empty(), "name entry must not type into search");
-        assert!(h.app.prefs_window.open);
+        assert!(h.app.prefs_window.shell.filter.is_empty(), "name entry must not type into search");
+        assert!(h.app.prefs_window.shell.open);
     }
 }
 
@@ -687,7 +687,7 @@ fn general_inactive_profile_rows_export_rename_import_and_delete_without_applyin
     assert_eq!(h.app.settings_profiles.names(), ["Travel", "Desk"]);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
     assert!(!h.app.preferences.zoom_reverse);
-    assert!(h.app.prefs_window.open && h.app.prefs_window.filter.is_empty());
+    assert!(h.app.prefs_window.shell.open && h.app.prefs_window.shell.filter.is_empty());
     assert_eq!(
         h.output
             .accesskit_update
@@ -759,7 +759,7 @@ fn general_profile_row_rename_commits_or_cancels_without_closing_preferences() {
         let committed = matches!(action, "Enter" | "Tab" | "ok");
         assert_eq!(h.app.settings_profiles.names(), [if committed { "Travel" } else { "Laptop" }, "Desk"], "{action}");
         assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
-        assert!(h.app.prefs_window.open && h.app.prefs_window.filter.is_empty(), "{action}");
+        assert!(h.app.prefs_window.shell.open && h.app.prefs_window.shell.filter.is_empty(), "{action}");
         assert!(crate::scenario::rect_of("prefs:profile:rename_popup").is_none());
     }
 }
@@ -781,7 +781,7 @@ fn general_profile_row_rename_keeps_validation_and_unchanged_name_noop() {
         h.frames(3);
         assert_eq!(h.app.settings_profiles.names(), ["Laptop", "Desk"]);
         assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
-        assert!(h.app.prefs_window.open);
+        assert!(h.app.prefs_window.shell.open);
         if to == "Desk" {
             assert!(h.widget("another settings profile is called `Desk`").is_some(), "the existing act outcome surfaces duplicates");
         }
@@ -1013,7 +1013,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     h.frames(2);
     assert!(crate::scenario::rect_of("dialog:list:Laptop").is_some(), "the card's padding opens its real menu");
     h.step(&json!({"key":"Escape"})).unwrap();
-    assert!(h.app.prefs_window.open);
+    assert!(h.app.prefs_window.shell.open);
     assert!(crate::scenario::rect_of("dialog:list:Laptop").is_none(), "Escape dismisses the sidebar menu itself");
     h.step(&json!({"key":"Enter"})).unwrap();
     h.frames(2);
@@ -1044,7 +1044,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     h.step(&json!({"widget":"Save"})).unwrap();
     h.frames(3);
     assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
-    assert!(h.app.prefs_window.open, "saving a profile keeps Preferences open");
+    assert!(h.app.prefs_window.shell.open, "saving a profile keeps Preferences open");
     let saved = run(&mut h, "settings.profile.export", json!({"name":"Laptop"}));
     assert_eq!(saved["profile"]["preferences"]["direct_interaction"], true);
     h.step(&json!({"click":{"handle":"prefs:profile"}})).unwrap();
@@ -1052,7 +1052,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     let profiles_label = h.app.tr("prefs.profiles").to_string();
     h.step(&json!({"widget":profiles_label})).unwrap();
     h.frames(3);
-    assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GENERAL);
+    assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GENERAL);
     assert_eq!(
         h.output
             .accesskit_update

@@ -197,7 +197,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Resize) -> bool {
             ui.label(configuration_name(&k.family.id, size, k.length));
         });
     }
-    crate::ui_kit::text(ui, crate::i18n::tr("ui.part_size_shared"), crate::ui_kit::Text::Hint("part_size_shared"));
+    crate::ui_kit::text(ui, solidcraft_ui_text::tr("ui.part_size_shared"), crate::ui_kit::Text::Hint("part_size_shared"));
     false
 }
 
@@ -478,6 +478,7 @@ mod tests {
         for (family, size, length) in [
             ("socket_head_cap_screw", "M5", Some(20.0)),
             ("button_head_cap_screw", "M5", Some(20.0)),
+            ("countersunk_socket_screw", "M5", Some(20.0)),
             ("hex_bolt", "M5", Some(20.0)),
             ("hex_nut", "M5", None),
             ("washer", "M5", None),

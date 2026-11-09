@@ -38,7 +38,12 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) -> Result<(), String> {
     for e in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
         let e = e.map_err(|e| e.to_string())?;
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') || name.starts_with("target") || matches!(name.as_str(), "plan" | "dist" | "node_modules" | "corpus") {
+        // vendored code keeps its own licences: the patched crates (vendor/README.md) and the
+        // kernel (solidcore/); their images, STEP files and fonts are not SolidCraft's assets.
+        if name.starts_with('.')
+            || name.starts_with("target")
+            || matches!(name.as_str(), "plan" | "dist" | "node_modules" | "corpus" | "solidcore" | "vendor")
+        {
             continue;
         }
         let p = e.path();
@@ -107,6 +112,22 @@ mod tests {
         assert!(needs_attribution("design/project.vectorcraft"));
         assert!(!needs_attribution("assets/README.md"));
         assert!(!needs_attribution("crates/ui/src/widget.rs"));
+    }
+
+    #[test]
+    fn vendored_code_is_not_an_asset() {
+        let root = std::env::temp_dir().join(format!("solidcraft-xtask-assets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("solidcore/assets")).unwrap();
+        std::fs::create_dir_all(root.join("vendor/patched")).unwrap();
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(root.join("solidcore/assets/logo.svg"), "x").unwrap();
+        std::fs::write(root.join("vendor/patched/upstream.svg"), "x").unwrap();
+        std::fs::write(root.join("assets/ours.svg"), "x").unwrap();
+        let mut files = Vec::new();
+        walk(&root, &root, &mut files).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(files, ["assets/ours.svg"]);
     }
 
     #[test]

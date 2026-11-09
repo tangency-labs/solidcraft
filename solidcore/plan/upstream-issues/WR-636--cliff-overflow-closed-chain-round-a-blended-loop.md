@@ -1,0 +1,11 @@
+#### WR-636. A cliff overflow whose boundary closes round a blended loop is refused
+- **Severity:** Wrong result (refusal)
+- **Area:** Blend (fillet executive)
+- **Location:** the fork's `source/SMLib/src/SmFilletCliffOverflow.cpp`, `SmFilletExecutive::CloseRemovalRegion` (tangency-labs/smlib@8ba4667).
+- **What happens:** when every edge of a face's loop round a pocket is blended and the blend runs past a cliff (the chamfer's legs on the pocket's walls running past its floor), the sheet's boundary on that face is a closed chain round the loop, with no side edge where it passes onto another face. `CloseRemovalRegion` built a closing face only for a chain between two side edges and refused a closed one: `SM_FILERR_NO_ROOM`, "a cliff overflow's fillet boundary closes on one face".
+- **Trigger:** a 60 x 40 x 10 plate's 30 x 20 pocket 5 deep, its rim loop chamfered 5.5.
+- **How found:** SolidCraft (#1080, #960). Fixed in the fork by tangency-labs/smlib@bba9914 (branch `replay/1.0.1`): a closed chain on a planar host closes with the face between it and the host's loop whose every edge is blended and whose edges the chain's fillet faces blend (`sm_CloseRoundLoop`): two loops on the host's plane, the larger anticlockwise and the other inside it clockwise. No such loop, two, or a non-planar host stay refused (`SM_FILERR_NO_ROOM`, their own comments).
+- **Confirmed:** no C++ run of the fork was made; not reachable in the pinned C++ (`3fd5b95`), which has no cliff overflow. The port refused the same case with the same comment before the change.
+- **Rust port:** follows bba9914 under `Kernel::fixes.fillet_cliff_overflow` (a refinement of that construction): `close_round_loop`, the closed branch of `lamina_chains` and `Blended::edge_of_fillet`, `crates/solidcore/src/blend/fillet_cliff_overflow.rs`; the session fills the fillet faces' edges after the open-end cuts.
+
+  Tests: `crates/solidcore/tests/wr635_636_cliff_overflow_closing.rs` (`a_pocket_rim_chamfer_past_the_floor_is_subtracted`: chamfers 5.5 and 6 remove what the same chamfer removes from the pocket 15 deep, to 1e-6; refused without the flag). The fork's closed form for the pocket, `50 d^2 + (4/3) d^3`, is for chamfers mitred at the corners (tangency-labs/smlib@4f06e72, not ported); the port's corners are upstream's corner patches, so the test compares against the deep pocket instead.

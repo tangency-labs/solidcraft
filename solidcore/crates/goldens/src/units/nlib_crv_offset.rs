@@ -1,0 +1,531 @@
+//! Runner for unit `nlib.crv_offset`: the planar curve offset by point sampling
+//! (`N_CrvOffsetPtSampling`).
+//!
+//! Ported from upstream
+//! `source/SMLib/src/NL_CrvOffset.cpp`; checked against its golden. Rust: `solidcore::nurbs::crv_offset`
+//! ([`Curve::offset_pt_sampling`]).
+//!
+//! Inputs: a curve (inline `cpts` `[x, y, z, w]`, degree `p`, knots `u`, or an upstream
+//! `.smc` file `{"smc": {"$upstream_file": "crvToOffset.smc"}}`), the plane normal `b`,
+//! the distance `d`, the approximation degree `deg`, `tangents` (`tan = NL_YES`), `par`
+//! (`uniform`, `chord_length`, `centripetal`, `inherited`) and `tol`.
+//!
+//! Output keys: `status` (`0` ok, else the `NL_*_ERR` number, `1000` for upstream's
+//! bare error flags, `-1` for any other error, such as the sample bound's refusal),
+//! then on success `dims` (`n p m`), `cpts` (homogeneous `x y z w`) and `knots` of the
+//! offset curve.
+//!
+//! Every run has at least [`MIN_GENERATED`] generated cases.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use solidcore::nurbs::crv_adv::p1::BARE_FLAG_REASON;
+use solidcore::nurbs::crv_basic::{ConicType, Curve};
+use solidcore::nurbs::crv_common::{circ_arc, Arc};
+use solidcore::nurbs::crv_fit::p1::ParamMethod;
+use solidcore::nurbs::crv_offset::OffsetParam;
+use solidcore::nurbs::math::{CPoint, NOW, NOZ};
+use solidcore::{SolidError, Vec3};
+
+use crate::case::CaseContext;
+use crate::runner::default_cases;
+use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+
+/// Generated cases per run, whatever `--seeds` says (it can only raise this).
+pub const MIN_GENERATED: usize = 1500;
+
+/// `nlib.crv_offset` runner.
+pub struct Runner;
+
+/// An inline curve.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct InlineCrv {
+    cpts: Vec<[f64; 4]>,
+    p: usize,
+    u: Vec<f64>,
+}
+
+/// A curve input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum CrvIn {
+    /// An upstream `.smc` file (absolute path after fixture expansion).
+    File { smc: String },
+    /// Inline data.
+    Inline(InlineCrv),
+}
+
+/// Upstream `par` flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ParIn {
+    Uniform,
+    ChordLength,
+    Centripetal,
+    Inherited,
+}
+
+impl ParIn {
+    fn par(self) -> OffsetParam {
+        match self {
+            ParIn::Uniform => OffsetParam::Fit(ParamMethod::Uniform),
+            ParIn::ChordLength => OffsetParam::Fit(ParamMethod::ChordLength),
+            ParIn::Centripetal => OffsetParam::Fit(ParamMethod::Centripetal),
+            ParIn::Inherited => OffsetParam::Inherited,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Inputs {
+    crv: CrvIn,
+    b: [f64; 3],
+    d: f64,
+    deg: usize,
+    #[serde(default)]
+    tangents: bool,
+    par: ParIn,
+    tol: f64,
+}
+
+fn harness(msg: impl Into<String>) -> HarnessError {
+    HarnessError::new(msg)
+}
+
+// ---- inputs -----------------------------------------------------------------------
+
+fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
+    let c = crate::fixtures::text_curve::read(path)?;
+    Ok(InlineCrv {
+        cpts: c.cpts,
+        p: c.p,
+        u: c.u,
+    })
+}
+
+fn resolve(c: &CrvIn) -> Result<InlineCrv, HarnessError> {
+    match c {
+        CrvIn::File { smc } => read_smc(smc),
+        CrvIn::Inline(c) => Ok(c.clone()),
+    }
+}
+
+fn to_curve(c: &InlineCrv) -> Result<Curve, HarnessError> {
+    let pw = c
+        .cpts
+        .iter()
+        .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+        .collect();
+    Curve::new(pw, c.p, c.u.clone()).map_err(|e| harness(format!("curve: {e}")))
+}
+
+// ---- records ----------------------------------------------------------------------
+
+fn take<'a>(flat: &'a [f64], at: &mut usize, k: usize) -> Result<&'a [f64], HarnessError> {
+    let part = at
+        .checked_add(k)
+        .and_then(|end| flat.get(*at..end))
+        .ok_or_else(|| harness(format!("record too short ({} values)", flat.len())))?;
+    *at += k;
+    Ok(part)
+}
+
+fn count(x: f64) -> Result<usize, HarnessError> {
+    if x.fract() != 0.0 || !(0.0..=1e8).contains(&x) {
+        return Err(harness(format!("bad count {x} in record")));
+    }
+    Ok(x as usize)
+}
+
+/// Splits a record (status, then on success `n p m`, control points, knots).
+fn to_output(flat: &[f64]) -> Result<Output, HarnessError> {
+    let mut at = 0usize;
+    let status = take(flat, &mut at, 1)?.to_vec();
+    let ok = status == [0.0];
+    let mut out = Output::new().values("status", status);
+    if ok {
+        let dims = take(flat, &mut at, 3)?.to_vec();
+        let n = count(dims.first().copied().unwrap_or(f64::NAN))?;
+        let m = count(dims.last().copied().unwrap_or(f64::NAN))?;
+        out = out.values("dims", dims);
+        out = out.values("cpts", take(flat, &mut at, 4 * (n + 1))?.to_vec());
+        out = out.values("knots", take(flat, &mut at, m + 1)?.to_vec());
+    }
+    if at != flat.len() {
+        return Err(harness(format!(
+            "record has {} values, layout used {at}",
+            flat.len()
+        )));
+    }
+    Ok(out)
+}
+
+// ---- Rust side --------------------------------------------------------------------
+
+/// Status of a Rust error: the NLib number, `1000` for upstream's bare error flags,
+/// `-1` for anything else.
+fn status(e: &SolidError) -> f64 {
+    match e {
+        SolidError::Nlib { code, .. } => f64::from(code.code()),
+        SolidError::NotConverged { operation, .. } if operation.starts_with("nurbs::bezier") => {
+            1000.0
+        }
+        SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. } if *reason == BARE_FLAG_REASON => 1000.0,
+        _ => -1.0,
+    }
+}
+
+fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+    to_output(&rust_record(i)?)
+}
+
+/// The Rust offset of the case's curve; the outer error is the harness's.
+fn rust_offset(i: &Inputs) -> Result<solidcore::Result<Curve>, HarnessError> {
+    let cur = to_curve(&resolve(&i.crv)?)?;
+    let [bx, by, bz] = i.b;
+    Ok(cur.offset_pt_sampling(
+        Vec3::new(bx, by, bz),
+        i.d,
+        i.deg,
+        i.tangents,
+        i.par.par(),
+        i.tol,
+    ))
+}
+
+/// The Rust record (status, then the curve on success).
+fn rust_record(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
+    let rec = match rust_offset(i)? {
+        Ok(q) => {
+            let mut o = vec![0.0, q.n() as f64, q.degree() as f64, q.m() as f64];
+            for &pw in q.cpts() {
+                o.extend(pw.to_array());
+            }
+            o.extend_from_slice(q.knots());
+            o
+        }
+        Err(e) => vec![status(&e)],
+    };
+    Ok(rec)
+}
+
+// ---- generated cases --------------------------------------------------------------
+
+/// A random rotation (orthonormal columns) from three uniform angles.
+fn gen_frame(rng: &mut Rng) -> [[f64; 3]; 3] {
+    let (a, b, c) = (
+        rng.uniform(0.0, std::f64::consts::TAU),
+        rng.uniform(0.0, std::f64::consts::TAU),
+        rng.uniform(0.0, std::f64::consts::TAU),
+    );
+    let (sa, ca) = a.sin_cos();
+    let (sb, cb) = b.sin_cos();
+    let (sc, cc) = c.sin_cos();
+    [
+        [ca * cb, ca * sb * sc - sa * cc, ca * sb * cc + sa * sc],
+        [sa * cb, sa * sb * sc + ca * cc, sa * sb * cc - ca * sc],
+        [-sb, cb * sc, cb * cc],
+    ]
+}
+
+/// A plane: origin, frame (columns 0 and 1 span it, column 2 is the normal), and
+/// whether the curve is the 2D / 3D `z = 0` plane.
+struct Plane {
+    o: [f64; 3],
+    f: [[f64; 3]; 3],
+    xy: bool,
+    two_d: bool,
+}
+
+impl Plane {
+    fn gen(rng: &mut Rng) -> Plane {
+        let xy = rng.chance(0.6);
+        if xy {
+            let o = rng.point3(-10.0, 10.0);
+            Plane {
+                o: [o[0], o[1], 0.0],
+                f: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                xy,
+                two_d: rng.chance(0.5),
+            }
+        } else {
+            Plane {
+                o: rng.point3(-10.0, 10.0),
+                f: gen_frame(rng),
+                xy,
+                two_d: false,
+            }
+        }
+    }
+
+    fn point(&self, x: f64, y: f64) -> [f64; 3] {
+        let (o, f) = (self.o, self.f);
+        [
+            o[0] + f[0][0] * x + f[0][1] * y,
+            o[1] + f[1][0] * x + f[1][1] * y,
+            o[2] + f[2][0] * x + f[2][1] * y,
+        ]
+    }
+
+    fn normal(&self) -> [f64; 3] {
+        [self.f[0][2], self.f[1][2], self.f[2][2]]
+    }
+
+    /// Homogeneous control point of the plane point `(x, y)` with weight `w`
+    /// (`None` = non-rational).
+    fn cpt(&self, x: f64, y: f64, w: Option<f64>) -> [f64; 4] {
+        let [px, py, pz] = self.point(x, y);
+        let pz = if self.xy { 0.0 } else { pz };
+        let ww = w.unwrap_or(1.0);
+        let z = if self.two_d { NOZ } else { pz * ww };
+        [px * ww, py * ww, z, w.unwrap_or(NOW)]
+    }
+}
+
+/// Clamped knots of degree `p` with `n - p` interior knots (some with
+/// multiplicity up to `p - 1`, keeping the curve G1 for smooth polygons).
+fn gen_knots(rng: &mut Rng, n: usize, p: usize) -> Vec<f64> {
+    let (a, len) = if rng.chance(0.4) {
+        (0.0, 1.0)
+    } else {
+        (rng.uniform(-5.0, 5.0), rng.uniform(0.25, 10.0))
+    };
+    let b = a + len;
+    let mut inner: Vec<f64> = Vec::new();
+    let mut remaining = n - p;
+    while remaining > 0 {
+        let v = a + len * rng.uniform(0.05, 0.95);
+        if inner.contains(&v) {
+            continue;
+        }
+        let mult = if p > 2 && rng.chance(0.15) {
+            1 + rng.below((p - 1).min(remaining) as u64) as usize
+        } else {
+            1
+        };
+        inner.extend(std::iter::repeat_n(v, mult));
+        remaining -= mult;
+    }
+    inner.sort_by(f64::total_cmp);
+    let mut u = vec![a; p + 1];
+    u.extend(inner);
+    u.extend(std::iter::repeat_n(b, p + 1));
+    u
+}
+
+/// A smooth planar free-form curve: control polygon from a turning walk.
+fn gen_freeform(rng: &mut Rng, pl: &Plane) -> InlineCrv {
+    let p = 1 + rng.below(5) as usize;
+    let p = if p == 1 && rng.chance(0.7) { 3 } else { p };
+    let n = p + rng.below(7) as usize;
+    let rational = rng.chance(0.25);
+    let scale = if rng.chance(0.2) {
+        rng.uniform(0.01, 0.5)
+    } else {
+        rng.uniform(1.0, 20.0)
+    };
+    let (mut x, mut y) = (0.0, 0.0);
+    let mut ang = rng.uniform(0.0, std::f64::consts::TAU);
+    let turn = rng.uniform(0.1, 1.2);
+    let cpts = (0..=n)
+        .map(|_| {
+            let w = rational.then(|| rng.uniform(0.5, 2.0));
+            let c = pl.cpt(x, y, w);
+            let step = scale * rng.uniform(0.5, 1.5);
+            x += step * ang.cos();
+            y += step * ang.sin();
+            ang += rng.uniform(-turn, turn);
+            c
+        })
+        .collect();
+    InlineCrv {
+        cpts,
+        p,
+        u: gen_knots(rng, n, p),
+    }
+}
+
+/// A straight curve (collinear control points, monotone along the line).
+fn gen_line(rng: &mut Rng, pl: &Plane) -> InlineCrv {
+    let p = 1 + rng.below(3) as usize;
+    let n = p + rng.below(3) as usize;
+    let ang = rng.uniform(0.0, std::f64::consts::TAU);
+    let len = rng.uniform(0.5, 30.0);
+    let mut ts: Vec<f64> = (0..=n).map(|_| rng.unit()).collect();
+    ts.sort_by(f64::total_cmp);
+    if let Some(f) = ts.first_mut() {
+        *f = 0.0;
+    }
+    if let Some(l) = ts.last_mut() {
+        *l = 1.0;
+    }
+    let cpts = ts
+        .iter()
+        .map(|&t| pl.cpt(t * len * ang.cos(), t * len * ang.sin(), None))
+        .collect();
+    InlineCrv {
+        cpts,
+        p,
+        u: gen_knots(rng, n, p),
+    }
+}
+
+/// A circular arc or circle built by the port's `N_CreateCircArc`.
+fn gen_circle(rng: &mut Rng, pl: &Plane) -> Option<InlineCrv> {
+    let full = rng.chance(0.3);
+    let end = if full {
+        360.0
+    } else {
+        rng.uniform(10.0, 350.0)
+    };
+    let ctp = *rng.choose(&[ConicType::Quadratic, ConicType::Quartic, ConicType::Quintic])?;
+    let [cx, cy, cz] = pl.point(0.0, 0.0);
+    let cz = if pl.xy { 0.0 } else { cz };
+    let x = Vec3::new(pl.f[0][0], pl.f[1][0], pl.f[2][0]);
+    let y = Vec3::new(pl.f[0][1], pl.f[1][1], pl.f[2][1]);
+    let arc = Arc {
+        center: Vec3::new(cx, cy, cz),
+        x,
+        y,
+        r: rng.uniform(0.2, 20.0),
+        start: 0.0,
+        end,
+    };
+    let mut c = circ_arc(&arc, ctp).ok()?;
+    if pl.two_d {
+        c.to_2d();
+    }
+    Some(InlineCrv {
+        cpts: c.cpts().iter().map(|q| q.to_array()).collect(),
+        p: c.degree(),
+        u: c.knots().to_vec(),
+    })
+}
+
+fn gen_inputs(rng: &mut Rng) -> Option<Inputs> {
+    let pl = Plane::gen(rng);
+    let kind = rng.below(10);
+    let c = match kind {
+        0 => gen_line(rng, &pl),
+        1 => gen_circle(rng, &pl)?,
+        _ => gen_freeform(rng, &pl),
+    };
+    let size = c
+        .cpts
+        .iter()
+        .map(|q| {
+            let w = if q[3] == NOW { 1.0 } else { q[3] };
+            (q[0] / w).abs().max((q[1] / w).abs())
+        })
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let mut b = pl.normal();
+    match rng.below(20) {
+        0 => b = [0.0, 0.0, 0.0],
+        1 | 2 => b = b.map(|v| -v),
+        3 => b = b.map(|v| v * rng.uniform(0.1, 10.0)),
+        4 => {
+            // Not the plane normal: tilted.
+            let t = rng.point3(-0.3, 0.3);
+            b = [b[0] + t[0], b[1] + t[1], b[2] + t[2]];
+        }
+        _ => {}
+    }
+    let d = match rng.below(10) {
+        0 => 0.0,
+        1 => rng.uniform(-0.5, 0.5) * size,
+        _ => rng.uniform(-0.1, 0.1) * size,
+    };
+    let deg = match rng.below(12) {
+        0 => 1,
+        1..=3 => 2,
+        4..=8 => 3,
+        9 => 4,
+        10 => 5,
+        _ => 6 + rng.below(3) as usize,
+    };
+    let par = *rng.choose(&[
+        ParIn::Inherited,
+        ParIn::Inherited,
+        ParIn::Uniform,
+        ParIn::ChordLength,
+        ParIn::Centripetal,
+    ])?;
+    let tol = match rng.below(30) {
+        0 => 0.0,
+        1 => 1.0,
+        _ => *rng.choose(&[1e-1, 1e-2, 1e-3, 1e-4, 1e-5])? * size,
+    };
+    let tol = tol.min(1.0);
+    Some(Inputs {
+        crv: CrvIn::Inline(c),
+        b,
+        d,
+        deg,
+        tangents: rng.chance(0.4),
+        par,
+        tol,
+    })
+}
+
+/// A generated case (redrawn up to 64 times while the curve cannot be built).
+fn gen_case(rng: &mut Rng) -> Option<Inputs> {
+    (0..64).find_map(|_| gen_inputs(rng))
+}
+
+impl UnitDiff for Runner {
+    fn id(&self) -> &'static str {
+        "nlib.crv_offset"
+    }
+
+    fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        serde_json::to_value(gen_case(rng)?).ok()
+    }
+
+    fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
+        let ctx = CaseContext {
+            seeds: ctx.seeds.max(MIN_GENERATED),
+            ..ctx.clone()
+        };
+        default_cases(self, &ctx)
+    }
+
+    fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        rust(&case.parse()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::nurbs::crv_offset::TOO_MANY_SAMPLES_REASON;
+    use std::collections::BTreeMap;
+
+    /// The generator reaches success and the main error statuses. The only error
+    /// without an `NL_*_ERR` number it reaches is the sample bound's refusal of an
+    /// offset with a cusp: seed 216 offsets a cubic by 0.87 across a span whose
+    /// radius of curvature falls to 1.9e-4, which needs 17 743 samples where the
+    /// bound is 16 384.
+    #[test]
+    fn generated_cases_cover_statuses() {
+        let mut tally: BTreeMap<i64, usize> = BTreeMap::new();
+        for s in 0..400 {
+            let mut rng = Rng::new(1000 + s);
+            let Some(i) = gen_case(&mut rng) else {
+                continue;
+            };
+            let st = rust_record(&i).unwrap()[0];
+            if st == -1.0 {
+                let e = rust_offset(&i).unwrap().unwrap_err();
+                let bound = matches!(&e, SolidError::InvalidInput { reason, .. }
+                    if *reason == TOO_MANY_SAMPLES_REASON);
+                assert!(bound, "seed {s}: {e:?}");
+            }
+            *tally.entry(st as i64).or_default() += 1;
+        }
+        eprintln!("{tally:?}");
+        assert!(tally.get(&0).copied().unwrap_or(0) > 200, "{tally:?}");
+        assert!(tally.get(&-1).copied().unwrap_or(0) <= 1, "{tally:?}");
+    }
+}

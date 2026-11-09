@@ -1,0 +1,136 @@
+{
+  "area": "ladder/09-shells-and-offsets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "shell",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              15.999999999999996,
+              8.88888888888889,
+              20.0
+            ]
+          ],
+          "tolerance": 0.07483414773547883
+        },
+        "thickness": -2.0
+      }
+    }
+  ],
+  "case": "001-box-open-top-t2",
+  "expected": {
+    "body_count": 1,
+    "faces": 11,
+    "method": "cavity 56x36x18; faces 5 outer + rim + 5 inner",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 11712,
+    "what": "the stock shelled 2 mm, open at the top"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 12112.0,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 11,
+      "vertices": 16,
+      "volume_mm3": 11711.999999999998
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 11,
+      "vertices": 16
+    }
+  },
+  "records": "001-box-open-top-t2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 12112.0,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 11,
+      "vertices": 16,
+      "volume_mm3": 11711.999999999998
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [],
+  "what": "the stock shelled 2 mm, open at the top",
+  "why_not": []
+}

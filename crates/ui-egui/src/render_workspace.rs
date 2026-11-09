@@ -16,8 +16,9 @@ use solidcraft_engine::render::{
     ScratchLayout,
 };
 
+use crate::SolveApp;
 use crate::gpu::{Frame, GpuScene, SceneSlot, ViewportCallback};
-use crate::{SolveApp, theme::Tokens};
+use solidcraft_theme::Tokens;
 
 // Vertex payload only, not an OS/GPU peak-memory promise. Native viewport
 // uploads are already chunked by the installed device's buffer limit.
@@ -61,6 +62,9 @@ pub(crate) mod prepare;
 
 #[path = "render_workspace_materials.rs"]
 mod materials;
+
+#[path = "render_workspace_quality.rs"]
+mod quality;
 
 #[path = "render_workspace_setups.rs"]
 mod setups;
@@ -174,6 +178,8 @@ pub struct State {
     preview_upload_bytes: Option<usize>,
     image: Option<(solidcraft_engine::render::job::JobId, Result<egui::TextureHandle, String>)>,
     image_info: Option<solidcraft_engine::render::job::FrameInfo>,
+    denoise_mask_image: Option<(solidcraft_engine::render::job::JobId, Result<egui::TextureHandle, String>)>,
+    denoise_mask_info: Option<solidcraft_engine::render::job::FrameInfo>,
     preview_image: Option<PreviewImage>,
     clipboard_image: Option<egui::ColorImage>,
     clipboard_text: Option<String>,
@@ -235,11 +241,11 @@ impl PathHost {
         // that may spend minutes compiling or warming up its pipelines.
         *self = match std::thread::Builder::new().name("gpu-path-setup".into()).spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(create))
-                .unwrap_or_else(|_| Err(crate::i18n::tr("render.error_setup_panicked").into()));
+                .unwrap_or_else(|_| Err(solidcraft_ui_text::tr("render.error_setup_panicked").into()));
             let _ = tx.send(result);
         }) {
             Ok(_) => Self::Preparing(rx, std::time::Instant::now()),
-            Err(e) => Self::failed(crate::i18n::format("render.error_setup_worker", &[("error", &e.to_string())])),
+            Err(e) => Self::failed(solidcraft_ui_text::format("render.error_setup_worker", &[("error", &e.to_string())])),
         };
     }
 
@@ -258,15 +264,15 @@ impl PathHost {
             Ok(Ok(host)) => Self::Ready(host),
             Ok(Err(error)) => Self::failed(error),
             Err(std::sync::mpsc::TryRecvError::Empty) => return None,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Self::failed(crate::i18n::tr("render.error_setup_stopped").into()),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Self::failed(solidcraft_ui_text::tr("render.error_setup_stopped").into()),
         };
         matches!(self, Self::Ready(_)).then_some(took)
     }
 }
 
-/// The samples slider's top end: 2^12 = 4096 samples per pixel.
+/// The samples slider's top end: 2^7 = 128 samples per pixel.
 #[cfg(test)]
-const MAX_SAMPLES_EXPONENT: u32 = 12;
+const MAX_SAMPLES_EXPONENT: u32 = 7;
 
 /// Setup times kept per adapter, at most.
 const MAX_SETUP_TIMES: usize = 16;
@@ -439,6 +445,8 @@ pub struct ViewState {
     cpu: cpu::View,
     overwrite: bool,
     result: bool,
+    /// Diagnostic viewing is bound to one completed result and never saved with a shot.
+    denoise_mask_job: Option<solidcraft_engine::render::job::JobId>,
     result_camera: Camera,
     result_scale: ResultScale,
     /// Full image domain and explicit scale policy last applied by the host.
@@ -529,6 +537,7 @@ impl Default for ViewState {
             cpu: cpu::View::default(),
             overwrite: false,
             result: false,
+            denoise_mask_job: None,
             result_camera: Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() },
             result_scale: ResultScale::Fit,
             result_domain: None,
@@ -569,6 +578,8 @@ impl Default for State {
             preview_upload_bytes: None,
             image: None,
             image_info: None,
+            denoise_mask_image: None,
+            denoise_mask_info: None,
             preview_image: None,
             clipboard_image: None,
             clipboard_text: None,
@@ -618,7 +629,7 @@ impl State {
         // A driver that takes the process down while it compiles (#9236) is beyond any error
         // scope or unwind guard; the marker is how the next launch learns of it.
         if self.setup_crashed() {
-            self.path_host = PathHost::failed(crate::i18n::tr("render.gpu_path_crashed").into());
+            self.path_host = PathHost::failed(solidcraft_ui_text::tr("render.gpu_path_crashed").into());
             return;
         }
         let Some(create) = self.pending_setup.take() else {
@@ -759,20 +770,20 @@ pub(crate) fn inspect_state(app: &SolveApp) -> serde_json::Value {
         "comparison": view.compare,
         "live": live::inspect(app), "preparation": prepare::inspect(app), "batch_preparation": prepare::inspect_batches(app),
         "queue": app.session.render_queue_state(),
-        "showing_result": view.result, "export_format": if view.studio.export_exr {"exr"} else {"png"},
+        "showing_result": view.result, "showing_denoise_mask": quality::mask_active(app), "export_format": studio::export_format(app),
     })
 }
 
 pub fn host_executor(max_dimension: u32, depth: bool, samples: u32) -> Result<ExecutorDescriptor, String> {
     if !matches!(samples, 1 | 2 | 4 | 8 | 16) {
-        return Err(crate::i18n::tr("render.error_gpu_samples").into());
+        return Err(solidcraft_ui_text::tr("render.error_gpu_samples").into());
     }
     Ok(ExecutorDescriptor {
         id: ExecutorId::new("gpu-viewport").map_err(|e| e.to_string())?,
         availability: if depth && max_dimension > 0 {
             Availability::Available
         } else {
-            Availability::Unavailable { reason: crate::i18n::tr("render.error_preview_device").into() }
+            Availability::Unavailable { reason: solidcraft_ui_text::tr("render.error_preview_device").into() }
         },
         profiles: vec![RenderProfile {
             mode: RenderMode::Preview,
@@ -798,6 +809,22 @@ fn wants_path_host(app: &SolveApp) -> bool {
     active(app) && app.render_workspace.view.method == ImageMethod::GpuRaytrace
 }
 
+/// Apply this computer's admission preference without replacing hosts or leases.
+/// A newly completed GPU setup uses the same preference before registration.
+pub(crate) fn apply_memory_policy(app: &SolveApp) {
+    use solidcraft_engine::render::job::NativeMemoryPolicy;
+    let policy = if app.preferences.render_legacy_memory_admission { NativeMemoryPolicy::SoftwarePoolOnly } else { NativeMemoryPolicy::AvailableRam };
+    if let Some(host) = &app.render_workspace.image_host {
+        host.set_native_memory_policy(policy);
+    }
+    if let Some(host) = app.session.render_job_host() {
+        host.set_native_memory_policy(policy);
+    }
+    if let PathHost::Ready(host) = &app.render_workspace.path_host {
+        host.set_native_memory_policy(policy);
+    }
+}
+
 pub fn sync_backend(app: &mut SolveApp) {
     #[cfg(not(target_arch = "wasm32"))]
     if wants_path_host(app) {
@@ -806,6 +833,7 @@ pub fn sync_backend(app: &mut SolveApp) {
     if let Some(took) = app.render_workspace.poll_setup() {
         record_setup(&mut app.render_workspace, took);
     }
+    apply_memory_policy(app);
     if let PathHost::Ready(host) = &app.render_workspace.path_host
         && let Err(e) = app.session.register_render_job_host(host.clone())
     {
@@ -904,6 +932,8 @@ pub(crate) fn invalidate_images(app: &mut SolveApp) {
     app.render_workspace.displayed.clear();
     app.render_workspace.image = None;
     app.render_workspace.image_info = None;
+    app.render_workspace.denoise_mask_image = None;
+    app.render_workspace.denoise_mask_info = None;
     app.render_workspace.preview_image = None;
     app.render_workspace.comparison_images.clear();
 }
@@ -925,7 +955,7 @@ pub fn invalidate_scene(app: &mut SolveApp) {
 pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
     if render {
         if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load.busy() {
-            return Err(crate::i18n::tr("render.error_finish_operation").into());
+            return Err(solidcraft_ui_text::tr("render.error_finish_operation").into());
         }
         app.run("render.scene", json!({}))?;
         let entering = !active(app);
@@ -1107,9 +1137,9 @@ pub(crate) fn stage_projection(app: &mut SolveApp, perspective: bool) -> Result<
     inspector::apply_camera_draft(app, camera)
 }
 
-pub(crate) fn output_summary(app: &SolveApp) -> (String, &'static str) {
+pub(crate) fn output_summary(app: &SolveApp) -> (String, &str) {
     let view = &app.render_workspace.view;
-    (format!("{} × {}", view.draft.width, view.draft.height), if view.studio.export_exr { "EXR" } else { "PNG" })
+    (format!("{} × {}", view.draft.width, view.draft.height), studio::export_format_label(app))
 }
 
 pub(crate) fn output_child_summary(app: &SolveApp, kind: &str) -> String {
@@ -1124,7 +1154,7 @@ pub(crate) fn output_child_summary(app: &SolveApp, kind: &str) -> String {
                 view.raytrace.progressive.map_or(u32::from(view.raytrace.primary_samples), |p| p.samples_per_pixel)
             }
         ),
-        "effects" => crate::i18n::format(
+        "effects" => solidcraft_ui_text::format(
             "render.children.look_summary",
             &[
                 ("tone", if view.studio.tone_map == solidcraft_engine::render::job::ToneMap::AcesFitted { "ACES" } else { "Reinhard" }),
@@ -1188,7 +1218,9 @@ pub(crate) fn browser_mode(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     if app.render_workspace.view.search_objects {
         let mut query = app.render_workspace.view.object_query.clone();
         crate::ui_kit::scope(ui, |ui| {
-            if crate::ui_kit::search_field(ui, ui.scope_id().with("render:tree:query"), &mut query, crate::i18n::tr("render.tree_search")).changed() {
+            if crate::ui_kit::search_field(ui, ui.scope_id().with("render:tree:query"), &mut query, solidcraft_ui_text::tr("render.tree_search"))
+                .changed()
+            {
                 let _ = app.run("view.render_browser", json!({"query":query}));
             }
         });
@@ -1202,6 +1234,7 @@ pub(crate) fn appearances_card(app: &mut SolveApp, ui: &mut egui::Ui, bounds: eg
 }
 
 fn image_host(app: &SolveApp, method: ImageMethod) -> Result<&ImageHost, String> {
+    apply_memory_policy(app);
     if method == ImageMethod::GpuRaytrace {
         let host = match &app.render_workspace.path_host {
             PathHost::NotStarted => return Err(app.tr("render.gpu_path_not_started").to_string()),
@@ -1433,7 +1466,7 @@ fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
     let label = app.tr(current.label()).to_string();
     let bounded =
         celestial_switch_active(app) || app.render_workspace.view.studio.volume.is_some() || app.render_workspace.view.studio.caustics.is_some();
-    let width = ui.available_width().min(crate::theme::Tokens::get().form_card_width);
+    let width = ui.available_width().min(solidcraft_theme::Tokens::get().form_card_width);
     let choices = |ui: &mut egui::Ui| {
         for (method, handle) in [
             (ImageMethod::Raster, "render:method-raster"),
@@ -1458,7 +1491,7 @@ fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
             && app.render_workspace.view.raytrace.path.is_none()
         {
             let sampling = app.render_workspace.view.raytrace.progressive.unwrap_or_default();
-            let detail = crate::i18n::format(
+            let detail = solidcraft_ui_text::format(
                 if volume_path { "render.cpu_volume_enable_path_plan" } else { "render.cpu_celestial_adopt" },
                 &[
                     ("depth", &app.render_workspace.view.max_depth.to_string()),
@@ -1491,9 +1524,6 @@ fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
 
 fn cpu_sampling_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let progressive = cpu::progressive_controls(app, ui);
-    if progressive {
-        crate::ui_kit::text(ui, app.tr("render.cpu_progressive_help"), crate::ui_kit::Text::Note("render.cpu_progressive_help"));
-    }
     if progressive && !app.preferences.render_legacy_image_defaults {
         return;
     }
@@ -1573,7 +1603,7 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             if crate::ui_kit::button(ui, app.tr("render.result_fit"), crate::ui_kit::Button::Normal).clicked() {
                 let _ = app.run("render.result.view", json!({"view":"fit"}));
             }
-            if crate::ui_kit::button(ui, crate::i18n::tr("render.result_actual_size"), crate::ui_kit::Button::Enabled(!reduced_display(app)))
+            if crate::ui_kit::button(ui, solidcraft_ui_text::tr("render.result_actual_size"), crate::ui_kit::Button::Enabled(!reduced_display(app)))
                 .backing_on_hover_text(app.tr("render.result_actual_help"))
                 .clicked()
             {
@@ -1631,7 +1661,7 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if app.render_workspace.view.method == ImageMethod::GpuRaytrace {
         ui.label(app.tr("render.image_samples"));
-        // Powers of two from 1 to 4096; requests from elsewhere keep any count.
+        // New selections stop at 128; requests from elsewhere keep any count.
         let samples = &mut app.render_workspace.view.samples;
         let mut exponent = (*samples).max(1).ilog2().min(MAX_SAMPLES_EXPONENT);
         let slider = crate::ui_kit::Slider { integer: true, format: |e| format!("{}", 1u32 << (e as u32).min(31)), ..Default::default() };
@@ -1641,7 +1671,13 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         let title = app.tr("render.image_advanced").to_string();
         crate::ui_kit::section(ui, "render_gpu_advanced", &title, false, |ui| {
             ui.label(app.tr("render.gpu_depth"));
-            crate::ui_kit::number_field(ui, &mut app.render_workspace.view.max_depth, 1..=16, 1.0, "");
+            crate::ui_kit::number_field(
+                ui,
+                &mut app.render_workspace.view.max_depth,
+                1..=u32::from(solidcraft_engine::render::job::MAX_PATH_DEPTH),
+                1.0,
+                "",
+            );
             ui.label(app.tr("render.gpu_seed"));
             crate::ui_kit::number_field(ui, &mut app.render_workspace.view.seed, 0..=u32::MAX, 1.0, "");
             ui.label(app.tr("render.image_exposure"));
@@ -1679,7 +1715,7 @@ fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
     if let Some(job) = app.render_workspace.view.job {
         match app.session.execute("render.status", &json!({"job":job})) {
             Ok(status) => {
-                let phase = status["progress"]["phase"].as_str().unwrap_or(crate::i18n::tr("render.property_unknown"));
+                let phase = status["progress"]["phase"].as_str().unwrap_or(solidcraft_ui_text::tr("render.property_unknown"));
                 busy = matches!(phase, "queued" | "preparing" | "running" | "encoding" | "cancelling");
                 state = Some(status);
             }
@@ -1819,7 +1855,7 @@ fn cache_completed_image(app: &mut SolveApp, ctx: &egui::Context) {
         app.render_workspace.image_info = None;
         let result = (|| -> Result<egui::TextureHandle, String> {
             let handle = app.session.render_job_handle(job).map_err(|e| e.to_string())?;
-            let frame = handle.frame().map_err(|e| e.to_string())?.ok_or(crate::i18n::tr("render.error_no_completed_image"))?;
+            let frame = handle.frame().map_err(|e| e.to_string())?.ok_or(solidcraft_ui_text::tr("render.error_no_completed_image"))?;
             if let Some((_, cached)) = app.render_workspace.comparison_images.iter().find(|(id, _)| *id == job) {
                 let texture = cached.clone()?;
                 app.render_workspace.image_info = Some(frame.info.clone());
@@ -1840,8 +1876,54 @@ fn cache_completed_image(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// Diagnostic masks have their own cache and categorical reconstruction. They never
+/// replace the colour image or its display receipt identity.
+fn cache_denoise_mask(app: &mut SolveApp, ctx: &egui::Context) {
+    if !quality::mask_active(app) {
+        app.render_workspace.denoise_mask_image = None;
+        app.render_workspace.denoise_mask_info = None;
+        return;
+    }
+    let Some(job) = app.render_workspace.view.denoise_mask_job else { return };
+    if app.render_workspace.denoise_mask_image.as_ref().is_some_and(|(cached, _)| *cached == job) {
+        return;
+    }
+    app.render_workspace.denoise_mask_info = None;
+    let result = (|| -> Result<egui::TextureHandle, String> {
+        let handle = app.session.render_job_handle(job).map_err(|error| error.to_string())?;
+        let frame = handle.frame().map_err(|error| error.to_string())?.ok_or(solidcraft_ui_text::tr("render.error_no_completed_image"))?;
+        let png = frame.denoise_mask_png().ok_or(solidcraft_ui_text::tr("render.denoise_mask_unavailable"))?;
+        let mask = frame.denoise_mask_info().ok_or(solidcraft_ui_text::tr("render.denoise_mask_unavailable"))?;
+        let captured = handle.status().map_err(|error| error.to_string())?;
+        let budget = if frame.info.executor.as_str() == "gpu-path" {
+            solidcraft_engine::render::job::GPU_PATH_LIMITS
+        } else {
+            captured_image_limits(&captured.request)
+        };
+        let image = decode_render_image_filtered(
+            png,
+            mask.width,
+            mask.height,
+            budget,
+            ctx.input(|input| input.max_texture_side),
+            image::imageops::FilterType::Nearest,
+        )?;
+        let mut info = frame.info.clone();
+        info.width = mask.width;
+        info.height = mask.height;
+        info.png_bytes = mask.bytes;
+        info.png_sha256 = mask.sha256.clone();
+        app.render_workspace.denoise_mask_info = Some(info);
+        Ok(ctx.load_texture("sc_render_denoise_mask", image, egui::TextureOptions::NEAREST))
+    })();
+    app.render_workspace.denoise_mask_image = Some((job, result));
+}
+
 fn displayed_image(app: &SolveApp) -> Option<DisplayImage<'_>> {
     let state = &app.render_workspace;
+    if quality::mask_active(app) {
+        return Some(DisplayImage { info: state.denoise_mask_info.as_ref()?, image: &state.denoise_mask_image.as_ref()?.1, preview: None });
+    }
     if let Some(preview) = &state.preview_image
         && state.view.job == Some(preview.info.frame.job)
     {
@@ -1863,7 +1945,8 @@ fn captured_adaptive_preview(
             .adaptive
             .as_deref()
             .map(|adaptive| {
-                let maximum = options.progressive.ok_or_else(|| crate::i18n::tr("render.error_provisional_identity").to_string())?.samples_per_pixel;
+                let maximum =
+                    options.progressive.ok_or_else(|| solidcraft_ui_text::tr("render.error_provisional_identity").to_string())?.samples_per_pixel;
                 AdaptivePreview::captured(*adaptive, maximum, completed).map_err(|error| error.to_string())
             })
             .transpose()
@@ -1886,22 +1969,22 @@ fn cache_preview_frame(app: &mut SolveApp, ctx: &egui::Context, info: &PreviewIn
     }
     let result = (|| -> Result<egui::TextureHandle, String> {
         if info.frame_sequence == 0 || info.samples_per_pixel == 0 {
-            return Err(crate::i18n::tr("render.error_provisional_identity").into());
+            return Err(solidcraft_ui_text::tr("render.error_provisional_identity").into());
         }
         let handle = app.session.render_job_handle(info.frame.job).map_err(|e| e.to_string())?;
         let captured = handle.status().map_err(|e| e.to_string())?;
         if (info.frame.width, info.frame.height) != (captured.request.width, captured.request.height) {
-            return Err(crate::i18n::tr("render.error_checkpoint_dimensions").into());
+            return Err(solidcraft_ui_text::tr("render.error_checkpoint_dimensions").into());
         }
         if info.frame.executor != captured.resolved.executor || info.frame.scene_generation != captured.scene_generation {
-            return Err(crate::i18n::tr("render.error_provisional_identity").into());
+            return Err(solidcraft_ui_text::tr("render.error_provisional_identity").into());
         }
         let limits = if info.frame.executor.as_str() == "gpu-path" {
             let target = captured.options.preview_target().map_err(|e| e.to_string())?;
             let adaptive =
                 solidcraft_engine::render::job::adaptive::AdaptivePreview::at(captured.options, info.samples_per_pixel).map_err(|e| e.to_string())?;
             if info.samples_per_pixel >= target || info.adaptive != adaptive {
-                return Err(crate::i18n::tr("render.error_provisional_identity").into());
+                return Err(solidcraft_ui_text::tr("render.error_provisional_identity").into());
             }
             solidcraft_engine::render::job::GPU_PATH_LIMITS
         } else {
@@ -1910,12 +1993,17 @@ fn cache_preview_frame(app: &mut SolveApp, ctx: &egui::Context, info: &PreviewIn
                 && info.samples_per_pixel
                     >= captured.request.raytrace.as_ref().map_or(Ok(0), RaytraceOptions::preview_target).map_err(|e| e.to_string())?;
             if exceeds_target || info.adaptive != adaptive {
-                return Err(crate::i18n::tr("render.error_provisional_identity").into());
+                return Err(solidcraft_ui_text::tr("render.error_provisional_identity").into());
             }
             let options = solidcraft_engine::render::job::CpuProgressiveOptions { samples_per_pixel: info.samples_per_pixel, seed: 0 };
-            options
-                .validate_image_with_budget(info.frame.width, info.frame.height, captured.request.cpu_budget())
-                .map_err(|error| error.to_string())?;
+            let scale = captured.request.raytrace.as_ref().map_or(1, |options| options.supersampling);
+            let (width, height) = if scale == 1 {
+                (info.frame.width, info.frame.height)
+            } else {
+                solidcraft_engine::render::job::supersampled_dimensions(info.frame.width, info.frame.height, scale)
+                    .map_err(|error| error.to_string())?
+            };
+            options.validate_image_with_budget(width, height, captured.request.cpu_budget()).map_err(|error| error.to_string())?;
             captured_image_limits(&captured.request)
         };
         let image = decode_render_image(png, info.frame.width, info.frame.height, limits, ctx.input(|i| i.max_texture_side))?;
@@ -1964,6 +2052,7 @@ fn cache_render_images(app: &mut SolveApp, ctx: &egui::Context) {
     cache_preview_image(app, ctx);
     sync_results(app);
     cache_completed_image(app, ctx);
+    cache_denoise_mask(app, ctx);
     // Checkpoint updates and preview→final/cancel transitions preserve shared pan/zoom.
     remember_displayed_job(app, preserve_view);
     finish_auto_result(app);
@@ -2016,7 +2105,13 @@ fn sync_results(app: &mut SolveApp) {
         }
     }
     view.retained = results;
-    view.completed = app.session.render_selected_result();
+    let completed = app.session.render_selected_result();
+    if view.completed != completed {
+        view.denoise_mask_job = None;
+        app.render_workspace.denoise_mask_image = None;
+        app.render_workspace.denoise_mask_info = None;
+    }
+    view.completed = completed;
     if view.compare.as_ref().is_some_and(|comparison| {
         [comparison.left, comparison.right].into_iter().flatten().any(|job| !view.retained.iter().any(|result| result.frame.job == job))
     }) {
@@ -2033,6 +2128,7 @@ fn follow_batch_view(view: &mut ViewState, queue: solidcraft_engine::render_jobs
     if let Some(job) = queue.job {
         if view.job != Some(job) {
             view.follow_job = view.compare.is_none();
+            view.denoise_mask_job = None;
         }
         view.job = Some(job);
         view.job_shot = queue.shot;
@@ -2051,14 +2147,14 @@ fn captured_image_limits(request: &solidcraft_engine::render::job::ImageRequest)
 /// full resolution. Avoid asking a viewport device for an unsupported texture.
 fn display_dimensions(width: u32, height: u32, max_texture_side: usize) -> Result<(u32, u32), String> {
     if width == 0 || height == 0 || max_texture_side == 0 {
-        return Err(crate::i18n::tr("render.error_display_dimensions").into());
+        return Err(solidcraft_ui_text::tr("render.error_display_dimensions").into());
     }
     let max_side = max_texture_side.min(8192) as u64;
     let display = RenderLimits { max_dimension: max_side, max_pixels: 16_777_216, max_scratch_bytes: 512 * 1024 * 1024 };
-    let (w, h) = display.fit(u64::from(width), u64::from(height), None).ok_or(crate::i18n::tr("render.error_display_fit"))?;
+    let (w, h) = display.fit(u64::from(width), u64::from(height), None).ok_or(solidcraft_ui_text::tr("render.error_display_fit"))?;
     Ok((
-        u32::try_from(w).map_err(|_| crate::i18n::tr("render.error_display_width"))?,
-        u32::try_from(h).map_err(|_| crate::i18n::tr("render.error_display_height"))?,
+        u32::try_from(w).map_err(|_| solidcraft_ui_text::tr("render.error_display_width"))?,
+        u32::try_from(h).map_err(|_| solidcraft_ui_text::tr("render.error_display_height"))?,
     ))
 }
 
@@ -2068,26 +2164,33 @@ fn decode_image(png: &[u8], width: u32, height: u32) -> Result<egui::ColorImage,
 }
 
 fn decode_render_image(png: &[u8], width: u32, height: u32, budget: RenderLimits, max_texture_side: usize) -> Result<egui::ColorImage, String> {
+    decode_render_image_filtered(png, width, height, budget, max_texture_side, image::imageops::FilterType::Triangle)
+}
+
+fn decode_render_image_filtered(
+    png: &[u8],
+    width: u32,
+    height: u32,
+    budget: RenderLimits,
+    max_texture_side: usize,
+    filter: image::imageops::FilterType,
+) -> Result<egui::ColorImage, String> {
     let size = (u64::from(width), u64::from(height));
     if budget.fit(size.0, size.1, None) != Some(size) {
-        return Err(crate::i18n::tr("render.error_image_profile").into());
+        return Err(solidcraft_ui_text::tr("render.error_image_profile").into());
     }
     let display_size = display_dimensions(width, height, max_texture_side)?;
     let mut reader = image::ImageReader::with_format(std::io::Cursor::new(png), image::ImageFormat::Png);
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(width);
     limits.max_image_height = Some(height);
-    limits.max_alloc = Some(size.0.checked_mul(size.1).and_then(|n| n.checked_mul(16)).ok_or(crate::i18n::tr("render.error_decode_budget"))?);
+    limits.max_alloc = Some(size.0.checked_mul(size.1).and_then(|n| n.checked_mul(16)).ok_or(solidcraft_ui_text::tr("render.error_decode_budget"))?);
     reader.limits(limits);
     let image = reader.decode().map_err(|e| e.to_string())?.to_rgba8();
     if image.dimensions() != (width, height) {
-        return Err(crate::i18n::tr("render.error_image_dimensions").into());
+        return Err(solidcraft_ui_text::tr("render.error_image_dimensions").into());
     }
-    let image = if display_size != (width, height) {
-        image::imageops::resize(&image, display_size.0, display_size.1, image::imageops::FilterType::Triangle)
-    } else {
-        image
-    };
+    let image = if display_size != (width, height) { image::imageops::resize(&image, display_size.0, display_size.1, filter) } else { image };
     Ok(egui::ColorImage::from_rgba_unmultiplied([display_size.0 as usize, display_size.1 as usize], image.as_raw()))
 }
 
@@ -2231,6 +2334,7 @@ fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             let _ = app.run("render.result.view", json!({"view":view}));
         }
     }
+    quality::mask_view_controls(app, ui);
     let copy = result_action_button(ui, app.tr("render.output_copy"), ribbon::action_ready(app, "render.result.copy").is_ok(), host);
     crate::scenario::publish_target("render:result-copy", copy.rect);
     if copy.clicked() {
@@ -2300,6 +2404,7 @@ fn classic_result_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let _ = app.run("render.result.view", json!({"view":view}));
             }
         }
+        quality::mask_view_controls(app, ui);
         let copy = crate::ui_kit::button(
             ui,
             app.tr("render.output_copy"),
@@ -2324,18 +2429,19 @@ fn classic_result_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn result_label(result: &solidcraft_engine::render_jobs::RetainedResult) -> String {
-    let name = result.shot.as_deref().unwrap_or_else(|| crate::i18n::tr("render.results_unnamed"));
-    let label = crate::i18n::format(
+    let name = result.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr("render.results_unnamed"));
+    let label = solidcraft_ui_text::format(
         "render.results_label",
         &[("number", &result.frame.job.serial.to_string()), ("shot", name), ("seconds", &format!("{:.0}", result.seconds))],
     );
-    if result.stale { crate::i18n::format("render.results_stale_label", &[("result", &label)]) } else { label }
+    if result.stale { solidcraft_ui_text::format("render.results_stale_label", &[("result", &label)]) } else { label }
 }
 
 fn result_header(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let display = displayed_image(app).map(|display| (display.info.clone(), display.preview.cloned()));
     let state = match &display {
+        Some(_) if quality::mask_active(app) => "render.denoise_view_mask",
         Some((_, Some(_))) => "render.state_in_progress",
         Some(_) => "render.state_completed",
         None if ribbon::busy(app) => "render.state_in_progress",
@@ -2568,7 +2674,8 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
     content.set_clip_rect(free.intersect(ui.clip_rect()));
     let ui = &mut content;
     let Some(info) = displayed_image(app).map(|display| display.info.clone()) else {
-        let message = match &app.render_workspace.image {
+        let cached = if quality::mask_active(app) { &app.render_workspace.denoise_mask_image } else { &app.render_workspace.image };
+        let message = match cached {
             Some((_, Err(error))) => error.clone(),
             _ if ribbon::busy(app) => app.tr("render.state_in_progress").to_string(),
             _ => app.tr("render.result_empty").to_string(),
@@ -2648,7 +2755,10 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
         if let Some(display) = displayed_image(app)
             && let Ok(texture) = display.image
         {
-            let source = displayed::Source::image(display.info, display.preview);
+            let mut source = displayed::Source::image(display.info, display.preview);
+            if quality::mask_active(app) {
+                source.kind = displayed::Kind::DenoiseMask;
+            }
             painter.image(texture.id(), image_rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), Tokens::get().file_image_tint);
             app.render_workspace.displayed.record(&painter, image_rect, source);
         }
@@ -2685,7 +2795,7 @@ fn preview_signature(app: &mut SolveApp) -> (u64, usize, u64) {
 
 pub(super) fn adaptive_preview_label(_app: &SolveApp, progress: solidcraft_engine::render::job::adaptive::AdaptivePreview) -> String {
     use solidcraft_engine::render::job::adaptive::PreviewStage;
-    crate::i18n::format(
+    solidcraft_ui_text::format(
         match progress.stage {
             PreviewStage::Pilot => "render.adaptive.pilot_progress",
             PreviewStage::Production => "render.adaptive.production_progress",
@@ -2711,7 +2821,7 @@ impl State {
                             Err(_) => false,
                         };
                         if !uploaded {
-                            let error = crate::i18n::tr("render.error_upload_slot").to_string();
+                            let error = solidcraft_ui_text::tr("render.error_upload_slot").to_string();
                             self.scene = None;
                             self.key = None;
                             self.preview_upload_bytes = None;
@@ -2757,7 +2867,7 @@ fn preview_error(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, error:
     ui.scope_builder(egui::UiBuilder::new().max_rect(bounded), |ui| {
         ui.set_clip_rect(ui.clip_rect().intersect(bounded));
         ui.set_max_width(bounded.width().min(t.form_card_width * 2.0));
-        crate::ui_kit::Panel::feature_frame(ui.ctx(), crate::shell::LayoutMode::Floating, crate::frame::Side::Left).inner_margin(t.space_8).show(
+        crate::ui_kit::Panel::feature_frame(ui.ctx(), crate::ui_kit::LayoutMode::Floating, crate::frame::Side::Left).inner_margin(t.space_8).show(
             ui,
             |ui| {
                 crate::ui_kit::text(ui, error, crate::ui_kit::Text::Error("render.preview_failure"));
@@ -2779,7 +2889,7 @@ fn export_image(app: &mut SolveApp, job: solidcraft_engine::render::job::JobId, 
     app.pick_save("render.png", &["png"], move |app, path| {
         let Some(path) = path else { return };
         if !Arc::ptr_eq(&origin, &app.session.doc) {
-            app.set_status(crate::i18n::tr("render.error_export_document"), true);
+            app.set_status(solidcraft_ui_text::tr("render.error_export_document"), true);
             return;
         }
         let _ = app.run("render.export", json!({"job":job,"path":path,"overwrite":overwrite}));
@@ -2794,10 +2904,23 @@ fn export_linear_image(app: &mut SolveApp, job: solidcraft_engine::render::job::
             return;
         };
         if !Arc::ptr_eq(&origin, &app.session.doc) {
-            app.set_status(crate::i18n::tr("render.error_export_document"), true);
+            app.set_status(solidcraft_ui_text::tr("render.error_export_document"), true);
             return;
         }
         let _ = app.run("render.export", json!({"job":job,"path":path,"overwrite":overwrite,"format":"exr"}));
+    });
+}
+
+/// The mask format and completed result stay fixed while the picker is open.
+fn export_denoise_mask(app: &mut SolveApp, job: solidcraft_engine::render::job::JobId, overwrite: bool) {
+    let origin = app.session.doc.clone();
+    app.pick_save("render-denoise-mask.png", &["png"], move |app, path| {
+        let Some(path) = path else { return };
+        if !Arc::ptr_eq(&origin, &app.session.doc) {
+            app.set_status(solidcraft_ui_text::tr("render.error_export_document"), true);
+            return;
+        }
+        let _ = app.run("render.export", json!({"job":job,"path":path,"overwrite":overwrite,"format":"denoise_mask"}));
     });
 }
 
@@ -2811,11 +2934,14 @@ struct PreviewUploadPlan {
 }
 impl PreviewUploadPlan {
     fn bytes(self) -> Result<usize, String> {
-        self.pbr.checked_add(self.tris).and_then(|n| n.checked_add(self.glass)).ok_or_else(|| crate::i18n::tr("render.error_geometry_size").into())
+        self.pbr
+            .checked_add(self.tris)
+            .and_then(|n| n.checked_add(self.glass))
+            .ok_or_else(|| solidcraft_ui_text::tr("render.error_geometry_size").into())
     }
     fn add(&mut self, pbr: bool, glass: bool, triangles: usize, limit: usize) -> Result<(), String> {
         let stride = if pbr { crate::gpu::PBR_SIZE } else { crate::gpu::TRI_SIZE };
-        let bytes = triangles.checked_mul(3).and_then(|n| n.checked_mul(stride)).ok_or(crate::i18n::tr("render.error_geometry_size"))?;
+        let bytes = triangles.checked_mul(3).and_then(|n| n.checked_mul(stride)).ok_or(solidcraft_ui_text::tr("render.error_geometry_size"))?;
         let count = if pbr {
             &mut self.pbr
         } else if glass {
@@ -2823,33 +2949,34 @@ impl PreviewUploadPlan {
         } else {
             &mut self.tris
         };
-        *count = count.checked_add(bytes).ok_or(crate::i18n::tr("render.error_geometry_size"))?;
+        *count = count.checked_add(bytes).ok_or(solidcraft_ui_text::tr("render.error_geometry_size"))?;
         admit_geometry(self.bytes()? as u64, limit as u64)
     }
 }
 
 fn preview_upload_plan(scene: &ProductScene, limit: usize) -> Result<PreviewUploadPlan, String> {
     if scene.meshes.len() > solidcraft_engine::render::job::MAX_CPU_BODIES {
-        return Err(crate::i18n::tr("render.error_body_bound").into());
+        return Err(solidcraft_ui_text::tr("render.error_body_bound").into());
     }
     let mut plan = PreviewUploadPlan::default();
     for body in &scene.meshes {
-        plan.source_triangles = plan.source_triangles.checked_add(body.mesh.triangles.len()).ok_or(crate::i18n::tr("render.error_triangle_count"))?;
+        plan.source_triangles =
+            plan.source_triangles.checked_add(body.mesh.triangles.len()).ok_or(solidcraft_ui_text::tr("render.error_triangle_count"))?;
         if plan.source_triangles > solidcraft_engine::render::job::MAX_CPU_TRIANGLES {
-            return Err(crate::i18n::tr("render.error_triangle_bound").into());
+            return Err(solidcraft_ui_text::tr("render.error_triangle_bound").into());
         }
         if body.faces.len() > 262_144 {
-            return Err(crate::i18n::tr("render.error_face_cap").into());
+            return Err(solidcraft_ui_text::tr("render.error_face_cap").into());
         }
         if !body.opacity.is_finite()
             || !(0.0..=1.0).contains(&body.opacity)
             || body.faces.iter().any(|face| !face.opacity.is_finite() || !(0.0..=1.0).contains(&face.opacity))
         {
-            return Err(crate::i18n::tr("render.error_opacity").into());
+            return Err(solidcraft_ui_text::tr("render.error_opacity").into());
         }
         let looks: std::collections::BTreeMap<_, _> = body.faces.iter().map(|face| (face.face, face)).collect();
         if looks.len() != body.faces.len() {
-            return Err(crate::i18n::tr("render.error_duplicate_face").into());
+            return Err(solidcraft_ui_text::tr("render.error_duplicate_face").into());
         }
         for index in 0..body.mesh.triangles.len() {
             let face = body.mesh.tri_face.get(index).and_then(|id| looks.get(id));
@@ -2857,7 +2984,7 @@ fn preview_upload_plan(scene: &ProductScene, limit: usize) -> Result<PreviewUplo
                 (face.opacity, face.surface.is_some() && face.transmission.is_none())
             });
             if pbr && opacity != 1.0 {
-                return Err(crate::i18n::tr("render.error_pbr_opacity").into());
+                return Err(solidcraft_ui_text::tr("render.error_pbr_opacity").into());
             }
             if opacity > 0.0 {
                 plan.add(pbr, opacity < 0.999, 1, usize::MAX)?;
@@ -2882,17 +3009,17 @@ fn gpu_scene_with_budget(scene: &ProductScene, budget: u64) -> Result<(u64, GpuS
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     let mut gpu = GpuScene::default();
     for (buffer, bytes) in [(&mut gpu.pbr, plan.pbr), (&mut gpu.tris, plan.tris), (&mut gpu.glass, plan.glass)] {
-        buffer.try_reserve_exact(bytes).map_err(|_| crate::i18n::tr("render.error_vertex_allocation").to_string())?;
+        buffer.try_reserve_exact(bytes).map_err(|_| solidcraft_ui_text::tr("render.error_vertex_allocation").to_string())?;
     }
     for body in &scene.meshes {
         if body.faces.len() > 262_144 {
-            return Err(crate::i18n::tr("render.error_face_cap").into());
+            return Err(solidcraft_ui_text::tr("render.error_face_cap").into());
         }
         if !body.opacity.is_finite()
             || !(0.0..=1.0).contains(&body.opacity)
             || body.faces.iter().any(|f| !f.opacity.is_finite() || !(0.0..=1.0).contains(&f.opacity))
         {
-            return Err(crate::i18n::tr("render.error_opacity").into());
+            return Err(solidcraft_ui_text::tr("render.error_opacity").into());
         }
         (Arc::as_ptr(&body.mesh) as usize).hash(&mut hash);
         body.name.hash(&mut hash);
@@ -2914,7 +3041,7 @@ fn gpu_scene_with_budget(scene: &ProductScene, budget: u64) -> Result<(u64, GpuS
                 (l.color, l.opacity, l.surface.filter(|_| l.transmission.is_none()))
             });
             if surface.is_some() && opacity != 1.0 {
-                return Err(crate::i18n::tr("render.error_pbr_opacity").into());
+                return Err(solidcraft_ui_text::tr("render.error_pbr_opacity").into());
             }
             if opacity <= 0.0 {
                 continue;
@@ -2926,14 +3053,14 @@ fn gpu_scene_with_budget(scene: &ProductScene, budget: u64) -> Result<(u64, GpuS
                 p.into_iter().chain(n).all(f32::is_finite).then_some((p, n))
             });
             let [Some(a), Some(b), Some(c)] = vertices else {
-                return Err(crate::i18n::tr("render.error_product_triangle").into());
+                return Err(solidcraft_ui_text::tr("render.error_product_triangle").into());
             };
             let rgba = [color[0], color[1], color[2], (opacity * 255.0).round() as u8];
             let index = gpu.color(rgba);
             for (p, n) in [a, b, c] {
                 if let Some(surface) = surface {
                     if n.iter().all(|v| *v == 0.0) {
-                        return Err(crate::i18n::tr("render.error_surface_normals").into());
+                        return Err(solidcraft_ui_text::tr("render.error_surface_normals").into());
                     }
                     gpu.pbr_tri(p, n, surface);
                 } else if opacity < 0.999 {
@@ -2945,7 +3072,7 @@ fn gpu_scene_with_budget(scene: &ProductScene, budget: u64) -> Result<(u64, GpuS
         }
     }
     if (gpu.pbr.len(), gpu.tris.len(), gpu.glass.len()) != (plan.pbr, plan.tris, plan.glass) {
-        return Err(crate::i18n::tr("render.error_vertex_packing").into());
+        return Err(solidcraft_ui_text::tr("render.error_vertex_packing").into());
     }
     Ok((hash.finish(), gpu))
 }
@@ -3054,7 +3181,7 @@ pub fn preview_size(executor: Option<&ExecutorDescriptor>, full: (u64, u64)) -> 
 fn preview_background(app: &SolveApp) -> Tokens {
     let view = &app.render_workspace.view;
     let tokens = Tokens::get();
-    if crate::theme::tab_surfaces_enabled()
+    if solidcraft_theme::tab_surfaces_enabled()
         && !app.session.doc.render.setups.contains_key(&view.name)
         && view.clean_setup.as_ref().is_some_and(|clean| clean.background == view.draft.background)
         && !view.transparent
@@ -3176,7 +3303,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
     }
     let result = (|| -> Result<(), String> {
         if app.viewport.gpu.is_none() {
-            return Err(crate::i18n::tr("render.error_gpu_preview").into());
+            return Err(solidcraft_ui_text::tr("render.error_gpu_preview").into());
         }
         let ppp = ui.ctx().pixels_per_point();
         let setup = &app.render_workspace.view.draft;
@@ -3185,7 +3312,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
                 || setup.environment_rotation != 0.0
                 || setup.environment_intensity != 1.0)
         {
-            return Err(crate::i18n::tr("render.error_fixed_preview").into());
+            return Err(solidcraft_ui_text::tr("render.error_fixed_preview").into());
         }
         // A 4K or 5K viewport is past the preview's pixel budget: draw it smaller and filter it
         // up into the viewport rather than refusing the frame.
@@ -3203,7 +3330,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
         };
         solidcraft_engine::render::resolve_request(&[app.session.render_backend()], &request).map_err(|e| e.to_string())?;
         if app.session.model.is_stale() {
-            return Err(crate::i18n::tr("render.error_finish_gesture").into());
+            return Err(solidcraft_ui_text::tr("render.error_finish_gesture").into());
         }
         let (doc, world, visibility) = preview_signature(app);
         let budget = preferred_geometry_budget(app.render_workspace.geometry_budget, app.preferences.render_previous_geometry_budget);
@@ -3218,15 +3345,15 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
         if app.render_workspace.key != previous_key {
             ui.ctx().request_repaint();
         }
-        let scene = app.render_workspace.scene.as_ref().ok_or(crate::i18n::tr("render.error_no_scene"))?;
+        let scene = app.render_workspace.scene.as_ref().ok_or(solidcraft_ui_text::tr("render.error_no_scene"))?;
         if let Some(error) = app.render_workspace.upload_error.lock().ok().and_then(|e| e.clone()) {
             return Err(upload_refusal(app.render_workspace.preview_upload_bytes.unwrap_or(0) as u64, &error));
         }
         request.features = scene.required_features();
         solidcraft_engine::render::resolve_request(&[app.session.render_backend()], &request).map_err(|e| e.to_string())?;
-        let key = app.render_workspace.key.ok_or(crate::i18n::tr("render.error_no_geometry"))?;
+        let key = app.render_workspace.key.ok_or(solidcraft_ui_text::tr("render.error_no_geometry"))?;
         if scene.bounds.is_empty() {
-            return Err(crate::i18n::tr("render.error_visible_solid").into());
+            return Err(solidcraft_ui_text::tr("render.error_visible_solid").into());
         }
         let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(camera.target);
         let eye = camera.eye();
@@ -3313,7 +3440,10 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
         "render.preflight.copy" => {
             app.render_workspace.clipboard_text = Some(reply["text"].as_str().ok_or("invalid check report")?.to_string());
         }
-        "render.compare" => compare::apply(app, reply)?,
+        "render.compare" => {
+            app.render_workspace.view.denoise_mask_job = None;
+            compare::apply(app, reply)?;
+        }
         "render.compare.divider" => {
             let position = reply["position"].as_f64().ok_or("invalid comparison divider position")?;
             if let Some(view) = &mut app.render_workspace.view.compare {
@@ -3337,10 +3467,12 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
                 let _ = app.session.label_render_job(job, shot);
             }
             app.render_workspace.view.job = Some(job);
+            app.render_workspace.view.denoise_mask_job = None;
             app.render_workspace.view.job_shot = shot;
             app.render_workspace.view.follow_job = app.render_workspace.view.compare.is_none();
         }
         "render.result.select" | "render.result.discard" | "render.result.pin" => {
+            app.render_workspace.view.denoise_mask_job = None;
             sync_results(app);
             app.render_workspace.preview_image = None;
             app.render_workspace.view.follow_job = false;
@@ -3355,7 +3487,7 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
         "render.output.size" => {
             let width = reply["width"].as_u64().and_then(|v| u32::try_from(v).ok()).ok_or("invalid output width")?;
             let height = reply["height"].as_u64().and_then(|v| u32::try_from(v).ok()).ok_or("invalid output height")?;
-            if cpu::image_limits(app).fit(u64::from(width), u64::from(height), None) != Some((u64::from(width), u64::from(height))) {
+            if cpu::size_selection_limits(app).fit(u64::from(width), u64::from(height), None) != Some((u64::from(width), u64::from(height))) {
                 return Err(app.tr("render.output_over_budget").into());
             }
             app.render_workspace.view.inspector.resolution.custom = reply["custom"].as_bool().unwrap_or(false);
@@ -3368,7 +3500,25 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
             if view == "actual" && reduced_display(app) {
                 return Err(app.tr("render.result_reduced_display").into());
             }
+            let mask_job = if view == "denoise_mask" {
+                let job = serde_json::from_value(reply["job"].clone()).map_err(|error| format!("invalid guide mask job identity: {error}"))?;
+                sync_results(app);
+                if app.render_workspace.view.completed != Some(job) {
+                    return Err(app.tr("render.error_provisional_identity").to_string());
+                }
+                Some(job)
+            } else {
+                None
+            };
             app.render_workspace.view.result = view != "model";
+            if !matches!(view, "fit" | "actual") {
+                app.render_workspace.view.denoise_mask_job = mask_job;
+            }
+            if view == "denoise_mask" {
+                app.render_workspace.view.compare = None;
+                app.render_workspace.comparison_images.clear();
+                fit_result(app);
+            }
             if matches!(view, "model") || id == "render.result.close" {
                 app.render_workspace.view.compare = None;
                 app.render_workspace.comparison_images.clear();
@@ -3387,6 +3537,9 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
             app.viewport.orbit_free = None;
         }
         "render.result.copy" => {
+            if quality::mask_active(app) {
+                return Err(app.tr("render.denoise_mask_copy_help").to_string());
+            }
             let job = serde_json::from_value(reply["frame"]["job"].clone()).map_err(|e| e.to_string())?;
             let frame = app
                 .session

@@ -1,0 +1,174 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  40.0,
+                  5.0,
+                  15.0
+                ],
+                [
+                  10.908712114635712,
+                  5.0,
+                  15.0
+                ]
+              ],
+              "index": 14
+            },
+            {
+              "at": [
+                [
+                  10.908712114635712,
+                  5.0,
+                  15.0
+                ],
+                [
+                  8.660254037844378,
+                  5.0,
+                  17.0
+                ]
+              ],
+              "index": 8
+            }
+          ],
+          "points": [
+            [
+              25.454356057317856,
+              5.0,
+              15.0
+            ],
+            [
+              9.37310427729263,
+              4.999999999999998,
+              15.549828769195267
+            ]
+          ],
+          "tolerance": 3.0686049981184227
+        },
+        "kind": "round",
+        "sizes": [
+          1.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "every-block-cylinder-crease-top-edge-after-arc-round-r1",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "block 40x10x15 (x 0..40, y -5..5) joined to the cylinder R10 x 30 on the z axis, the block's end on the cylinder's diameter x = 0 so its sides y = +-5 meet the wall at vertical creases: V0 = 6000 + 3000 pi - 15 * (the disc's part with x > 0, |y| <= 5: 2 (y/2 sqrt(100-y^2) + 50 asin(y/10)) at y=5 = 95.661148) = 13989.8607 and the arc rounded r2 (every-block-cylinder-crease-concave-arc-r2). The top edge y = 5, z = 15 now ends where the top face meets the arc round (x = sqrt(144-25)); its tangent chain goes on up the edge between the side face and the arc round (the round's end, a curve on the plane y = 5 tangent to the top edge there) to the cylinder's crease. The r1 round along that curve has no closed-form volume (the curve is a torus cut by a plane): one valid body, blend seams G1.",
+    "source": "invariants",
+    "sources": [],
+    "what": "a block's concave arc at the cylinder it is joined to rounded r2, then the block's long top edge rounded r1, which ends on the arc's round"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 23,
+      "faces": 10,
+      "vertices": 15
+    }
+  },
+  "records": "every-block-cylinder-crease-top-edge-after-arc-round-r1.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4034.7654998706016,
+      "body_count": 1,
+      "edges": 23,
+      "faces": 10,
+      "vertices": 15,
+      "volume_mm3": 13992.239532899048
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a block's concave arc at the cylinder it is joined to rounded r2, then the block's long top edge rounded r1, which ends on the arc's round",
+  "why_not": []
+}
