@@ -18,6 +18,20 @@ pub(crate) mod navigation;
 #[path = "../../../assets/icons/ui/source/pointer.rs"]
 pub(crate) mod pointer;
 
+/// SolidCraft's code-drawn glyphs, as the kit draws them ([`crate::ui_kit::icons::glyphs`]).
+pub static GLYPHS: crate::ui_kit::icons::glyphs::Glyphs = crate::ui_kit::icons::glyphs::Glyphs {
+    transport: glyphs::transport_glyph,
+    caption: glyphs::paint_glyph,
+    badge: glyphs::badge,
+    pin: glyphs::pin_icon,
+    cross: glyphs::cross,
+    breadcrumb: glyphs::breadcrumb,
+    axis_tip: navigation::axis_tip_scaled,
+    axis_radius: navigation::AXIS_RADIUS,
+    pointer: pointer::paint,
+    brand_mark: glyphs::brand_mark_silhouette,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

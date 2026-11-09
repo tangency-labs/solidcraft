@@ -355,7 +355,7 @@ impl super::MenuItem<'_> {
             let tab = painter.layout_no_wrap(tab.trim().to_owned(), FontId::proportional(t.font_small), t.form_dim);
             let x = (left + tab.size().x + t.space_6).min(path_rect.right());
             painter.with_clip_rect(path_rect).galley(pos2(left, path_rect.center().y - tab.size().y / 2.0), tab, t.form_dim);
-            crate::icons::glyphs::breadcrumb(&painter.with_clip_rect(path_rect), pos2(x, path_rect.center().y), t.form_dim);
+            crate::ui_kit::icons::glyphs::breadcrumb(&painter.with_clip_rect(path_rect), pos2(x, path_rect.center().y), t.form_dim);
             super::text::paint_text(
                 ui,
                 Rect::from_min_max(pos2((x + t.space_6).min(path_rect.right()), path_rect.top()), path_rect.max),

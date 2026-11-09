@@ -251,7 +251,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     let viewport_left = bx + bw + gap;
     let viewport_bottom = if state.history == 0 { bottom - 10.0 - gap } else { bottom };
     let object_centre = c.at((viewport_left + 120.0 - inset) * 0.5, (top + viewport_bottom) * 0.5);
-    crate::icons::glyphs::brand_mark_silhouette(&p, object_centre, c.width(22.0), quiet);
+    crate::ui_kit::icons::glyphs::brand_mark_silhouette(&p, object_centre, c.width(22.0), quiet);
     p.circle_filled(c.at(110.0 - inset, top + 7.0), c.width(3.5), quiet);
     let history = match state.history {
         1 => Some(panel(inset, top, 10.0, bottom - top, "", t.selected_bg)),

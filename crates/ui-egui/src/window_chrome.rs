@@ -20,8 +20,8 @@
 //!
 //! Adapted from VectorCraft's `crates/ui-egui/src/titlebar.rs` (MIT OR Apache-2.0).
 
-use crate::icons::glyphs::paint_glyph;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::icons::glyphs::paint_glyph;
 use egui::{
     Color32, CursorIcon, Id, LayerId, Order, PointerButton, Pos2, Rect, ResizeDirection, Sense, Stroke, Ui, ViewportBuilder, ViewportCommand, pos2,
     vec2,

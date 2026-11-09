@@ -181,7 +181,7 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
     if let Some(icon) = chip.icon {
         let at = Rect::from_center_size(pos2(rect.left() + t.space_8 + icon_side / 2.0, rect.center().y), vec2(icon_side, icon_side));
         if icon == "lock" {
-            crate::icons::glyphs::badge(ui.painter(), at, "lock", ink);
+            crate::ui_kit::icons::glyphs::badge(ui.painter(), at, "lock", ink);
         } else {
             crate::ui_kit::icons::paint_ink(ui.painter(), at, icon, ink);
         }

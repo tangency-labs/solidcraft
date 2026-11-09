@@ -1376,7 +1376,7 @@ pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Opti
         if pin.hovered() {
             p.rect_filled(pr, t.radius_sm.saturating_sub(1), t.border.gamma_multiply(0.6));
         }
-        crate::icons::glyphs::pin_icon(p, pr, entry.pinned, if entry.pinned { t.accent } else { t.text_dim });
+        crate::ui_kit::icons::glyphs::pin_icon(p, pr, entry.pinned, if entry.pinned { t.accent } else { t.text_dim });
         solidcraft_ui_registry::publish_handle(&handle(style.pin, entry.id), pr.center());
     }
     let tip = if entry.pinned { style.unpin_tip } else { style.pin_tip };
@@ -1764,7 +1764,7 @@ pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuS
         if pin_hovered {
             painter.rect_filled(pr, 3.0, t.border.gamma_multiply(0.6));
         }
-        crate::icons::glyphs::pin_icon(&painter, pr.shrink(2.5), entry.pinned, if entry.pinned { t.accent } else { t.text_dim });
+        crate::ui_kit::icons::glyphs::pin_icon(&painter, pr.shrink(2.5), entry.pinned, if entry.pinned { t.accent } else { t.text_dim });
     }
     if let Some(pin) = pin {
         solidcraft_ui_registry::publish_handle(&handle(style.pin, entry.id), pr.center());
@@ -1849,7 +1849,7 @@ fn drag_ghost(ui: &egui::Ui, icon: &str, at: Pos2, removing: bool, handles: &Han
         let s = Stroke::new(2.0, t.error);
         let x = Rect::from_center_size(r.right_top(), vec2(9.0, 9.0));
         p.circle_filled(x.center(), 7.0, t.toolbar);
-        crate::icons::glyphs::cross(&p, x, s);
+        crate::ui_kit::icons::glyphs::cross(&p, x, s);
     }
     solidcraft_ui_registry::publish_handle(if removing { handles.drag_remove } else { handles.drag }, at);
 }

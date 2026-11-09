@@ -96,8 +96,9 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
         let c = Pos2::new(100.0, 100.0);
         for (name, d, want) in [("x", Vec3::X, t.axis_x), ("y", Vec3::Y, t.axis_y), ("z", Vec3::Z, t.axis_z)] {
             let at = c + vec2(32.0, 0.0);
-            let mut out =
-                ctx.run_ui(egui::RawInput::default(), |ui| crate::icons::navigation::axis_tip(ui.painter(), c, name, d.into(), at, 0.5, false, t));
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                crate::icons::navigation::axis_tip_scaled(ui.painter(), c, name, d.into(), at, 0.5, false, t, 1.0)
+            });
             out.textures_delta.clear();
             let end = out.shapes.iter().find_map(|s| match &s.shape {
                 egui::Shape::Circle(e) if e.center == at => Some(e.fill),

@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use egui::{Color32, Painter, Rect, TextureHandle, TextureOptions, pos2};
 
+pub mod glyphs;
 mod svg;
 
 pub use svg::{

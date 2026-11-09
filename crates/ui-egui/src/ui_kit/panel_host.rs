@@ -161,7 +161,7 @@ pub(crate) fn panel_host_control_label_opacity(
         if chrome.icon_only {
             if let Some(transport) = icon.strip_prefix("timeline_").filter(|name| matches!(*name, "first" | "back" | "play" | "forward" | "last")) {
                 let glyph = if transport == "play" && chrome.selected { "pause" } else { transport };
-                crate::icons::glyphs::transport_glyph(&painter, icon_rect.center(), glyph, ink);
+                crate::ui_kit::icons::glyphs::transport_glyph(&painter, icon_rect.center(), glyph, ink);
             } else {
                 crate::ui_kit::icons::paint_ink(&painter, icon_rect, icon, ink);
             }

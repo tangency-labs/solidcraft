@@ -3,7 +3,6 @@
 //! ([`Compass`], [`ViewAxes`]) and returns the [`ViewAction`] chosen, and [`orbit`] returns a drag's
 //! [`OrbitStep`]; the app turns the camera.
 //! Every tip publishes its handle (`axis_view:<axis>`) to the widget registry while it is drawn.
-use crate::icons::navigation::AXIS_RADIUS;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Pos2, Rect, Sense, Stroke, pos2, vec2};
 use solidcraft_theme::Tokens;
@@ -107,7 +106,7 @@ pub fn tips(axes: &ViewAxes, c: Pos2) -> Vec<Tip> {
 
 /// The front-most tip within reach of `p`.
 pub fn hit(tips: &[Tip], p: Pos2) -> Option<usize> {
-    tips.iter().enumerate().rev().find(|(_, (_, _, at, _))| at.distance(p) <= AXIS_RADIUS).map(|(i, _)| i)
+    tips.iter().enumerate().rev().find(|(_, (_, _, at, _))| at.distance(p) <= crate::ui_kit::icons::glyphs::axis_radius()).map(|(i, _)| i)
 }
 
 /// Draw the compass; a tip or Home clicked this frame (a drag on it is [`orbit`]'s).
@@ -128,7 +127,7 @@ pub fn show(ui: &mut egui::Ui, compass: &Compass) -> Option<ViewAction> {
             // The origin dot sits behind the three front axes and over the three back ones.
             painter.circle(c, 3.6, t.text.gamma_multiply(0.9), Stroke::new(1.4, t.panel));
         }
-        crate::icons::navigation::axis_tip(&painter, c, name, *d, *at, *depth, hovered == Some(i), t);
+        crate::ui_kit::icons::glyphs::axis_tip(&painter, c, name, *d, *at, *depth, hovered == Some(i), t);
         solidcraft_ui_registry::publish_handle(&format!("axis_view:{name}"), *at);
     }
     solidcraft_ui_registry::publish_count("axis_view_highlights", f64::from(u8::from(hovered.is_some())));

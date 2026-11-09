@@ -36,10 +36,11 @@ pub static SET: IconSet = IconSet::new(IconData {
     danger_accent: "constraint",
 });
 
-/// Make SolidCraft's icons the ones the kit draws: at startup, before the first frame, and in every
-/// test context. Calling it again does nothing.
+/// Make SolidCraft's icons and code-drawn glyphs ([`crate::icons::GLYPHS`]) the ones the kit draws:
+/// at startup, before the first frame, and in every test context. Calling it again does nothing.
 pub fn install() {
     icons::install(&SET);
+    icons::glyphs::install(&crate::icons::GLYPHS);
 }
 
 /// The master and accent for an app icon id: an alias (with its accent), a master of that name,
