@@ -227,7 +227,7 @@ pub fn save_to_disk(file_path: &PathBuf, kv: &HashMap<String, String>) {
             if let Err(err) = written {
                 log::warn!("Failed to serialize app state: {err}");
                 std::fs::remove_file(&tmp_path).ok();
-            } else if let Err(err) = std::fs::rename(&tmp_path, file_path) {
+            } else if let Err(err) = rename_with_retries(&tmp_path, file_path) {
                 log::warn!("Failed to replace {}: {err}", file_path.display());
                 std::fs::remove_file(&tmp_path).ok();
             } else {
@@ -238,6 +238,21 @@ pub fn save_to_disk(file_path: &PathBuf, kv: &HashMap<String, String>) {
             log::warn!("Failed to create file {}: {err}", tmp_path.display());
         }
     }
+}
+
+// SolidCraft: Windows refuses to replace a file another process has open, as a second window does
+// while it reads or saves the settings. That passes in moments, so try again before giving up. This
+// runs on the save thread, and the longest wait is 150 ms.
+fn rename_with_retries(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut result = std::fs::rename(from, to);
+    for wait_ms in [10, 20, 40, 80] {
+        if result.is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+        result = std::fs::rename(from, to);
+    }
+    result
 }
 
 // ----------------------------------------------------------------------------

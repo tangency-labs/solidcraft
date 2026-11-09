@@ -595,6 +595,19 @@ mod tests {
     }
 
     #[test]
+    fn a_settings_save_the_system_refuses_leaves_no_temporary_file() {
+        let d = scratch("refused-save");
+        let path = d.join("app.ron");
+        // A folder with something in it can't be replaced by a file, so every rename fails.
+        std::fs::create_dir_all(path.join("inside")).unwrap();
+        eframe::save_to_disk(&path, &std::collections::HashMap::from([("k".to_string(), "v".to_string())]));
+        assert!(path.join("inside").is_dir(), "what was there stays");
+        let names: Vec<_> = std::fs::read_dir(&d).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names, ["app.ron"], "no temporary files are left");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
     fn launches_that_never_got_a_window_are_counted_until_one_does() {
         let d = scratch("marker");
         assert_eq!(begin(&d), 0);

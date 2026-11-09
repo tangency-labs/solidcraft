@@ -118,6 +118,8 @@ are not copied.
 SolidCraft changes:
 - `src/native/file_storage.rs`: `save_to_disk` writes the settings (`app.ron`) to a temporary
   file beside them, syncs it and renames it over them, so the file always holds one whole save.
+  A rename the system refuses is tried again for up to 150 ms (Windows refuses while another
+  process has the file open).
   Two windows saving at once each truncated and wrote the same file, and a shorter save left the
   tail of a longer one behind it (#4164). `src/lib.rs` re-exports it, hidden, for SolidCraft's tests.
 - `src/native/epi_integration.rs`: with no window icon given, the default is an empty one instead
