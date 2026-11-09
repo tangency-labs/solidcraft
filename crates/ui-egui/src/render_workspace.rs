@@ -63,6 +63,9 @@ pub(crate) mod prepare;
 #[path = "render_workspace_materials.rs"]
 mod materials;
 
+#[path = "render_workspace_quality.rs"]
+mod quality;
+
 #[path = "render_workspace_setups.rs"]
 mod setups;
 
@@ -175,6 +178,8 @@ pub struct State {
     preview_upload_bytes: Option<usize>,
     image: Option<(solidcraft_engine::render::job::JobId, Result<egui::TextureHandle, String>)>,
     image_info: Option<solidcraft_engine::render::job::FrameInfo>,
+    denoise_mask_image: Option<(solidcraft_engine::render::job::JobId, Result<egui::TextureHandle, String>)>,
+    denoise_mask_info: Option<solidcraft_engine::render::job::FrameInfo>,
     preview_image: Option<PreviewImage>,
     clipboard_image: Option<egui::ColorImage>,
     clipboard_text: Option<String>,
@@ -265,9 +270,9 @@ impl PathHost {
     }
 }
 
-/// The samples slider's top end: 2^12 = 4096 samples per pixel.
+/// The samples slider's top end: 2^7 = 128 samples per pixel.
 #[cfg(test)]
-const MAX_SAMPLES_EXPONENT: u32 = 12;
+const MAX_SAMPLES_EXPONENT: u32 = 7;
 
 /// Setup times kept per adapter, at most.
 const MAX_SETUP_TIMES: usize = 16;
@@ -440,6 +445,8 @@ pub struct ViewState {
     cpu: cpu::View,
     overwrite: bool,
     result: bool,
+    /// Diagnostic viewing is bound to one completed result and never saved with a shot.
+    denoise_mask_job: Option<solidcraft_engine::render::job::JobId>,
     result_camera: Camera,
     result_scale: ResultScale,
     /// Full image domain and explicit scale policy last applied by the host.
@@ -530,6 +537,7 @@ impl Default for ViewState {
             cpu: cpu::View::default(),
             overwrite: false,
             result: false,
+            denoise_mask_job: None,
             result_camera: Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() },
             result_scale: ResultScale::Fit,
             result_domain: None,
@@ -570,6 +578,8 @@ impl Default for State {
             preview_upload_bytes: None,
             image: None,
             image_info: None,
+            denoise_mask_image: None,
+            denoise_mask_info: None,
             preview_image: None,
             clipboard_image: None,
             clipboard_text: None,
@@ -760,7 +770,7 @@ pub(crate) fn inspect_state(app: &SolveApp) -> serde_json::Value {
         "comparison": view.compare,
         "live": live::inspect(app), "preparation": prepare::inspect(app), "batch_preparation": prepare::inspect_batches(app),
         "queue": app.session.render_queue_state(),
-        "showing_result": view.result, "export_format": if view.studio.export_exr {"exr"} else {"png"},
+        "showing_result": view.result, "showing_denoise_mask": quality::mask_active(app), "export_format": studio::export_format(app),
     })
 }
 
@@ -799,6 +809,22 @@ fn wants_path_host(app: &SolveApp) -> bool {
     active(app) && app.render_workspace.view.method == ImageMethod::GpuRaytrace
 }
 
+/// Apply this computer's admission preference without replacing hosts or leases.
+/// A newly completed GPU setup uses the same preference before registration.
+pub(crate) fn apply_memory_policy(app: &SolveApp) {
+    use solidcraft_engine::render::job::NativeMemoryPolicy;
+    let policy = if app.preferences.render_legacy_memory_admission { NativeMemoryPolicy::SoftwarePoolOnly } else { NativeMemoryPolicy::AvailableRam };
+    if let Some(host) = &app.render_workspace.image_host {
+        host.set_native_memory_policy(policy);
+    }
+    if let Some(host) = app.session.render_job_host() {
+        host.set_native_memory_policy(policy);
+    }
+    if let PathHost::Ready(host) = &app.render_workspace.path_host {
+        host.set_native_memory_policy(policy);
+    }
+}
+
 pub fn sync_backend(app: &mut SolveApp) {
     #[cfg(not(target_arch = "wasm32"))]
     if wants_path_host(app) {
@@ -807,6 +833,7 @@ pub fn sync_backend(app: &mut SolveApp) {
     if let Some(took) = app.render_workspace.poll_setup() {
         record_setup(&mut app.render_workspace, took);
     }
+    apply_memory_policy(app);
     if let PathHost::Ready(host) = &app.render_workspace.path_host
         && let Err(e) = app.session.register_render_job_host(host.clone())
     {
@@ -905,6 +932,8 @@ pub(crate) fn invalidate_images(app: &mut SolveApp) {
     app.render_workspace.displayed.clear();
     app.render_workspace.image = None;
     app.render_workspace.image_info = None;
+    app.render_workspace.denoise_mask_image = None;
+    app.render_workspace.denoise_mask_info = None;
     app.render_workspace.preview_image = None;
     app.render_workspace.comparison_images.clear();
 }
@@ -1108,9 +1137,9 @@ pub(crate) fn stage_projection(app: &mut SolveApp, perspective: bool) -> Result<
     inspector::apply_camera_draft(app, camera)
 }
 
-pub(crate) fn output_summary(app: &SolveApp) -> (String, &'static str) {
+pub(crate) fn output_summary(app: &SolveApp) -> (String, &str) {
     let view = &app.render_workspace.view;
-    (format!("{} × {}", view.draft.width, view.draft.height), if view.studio.export_exr { "EXR" } else { "PNG" })
+    (format!("{} × {}", view.draft.width, view.draft.height), studio::export_format_label(app))
 }
 
 pub(crate) fn output_child_summary(app: &SolveApp, kind: &str) -> String {
@@ -1205,6 +1234,7 @@ pub(crate) fn appearances_card(app: &mut SolveApp, ui: &mut egui::Ui, bounds: eg
 }
 
 fn image_host(app: &SolveApp, method: ImageMethod) -> Result<&ImageHost, String> {
+    apply_memory_policy(app);
     if method == ImageMethod::GpuRaytrace {
         let host = match &app.render_workspace.path_host {
             PathHost::NotStarted => return Err(app.tr("render.gpu_path_not_started").to_string()),
@@ -1494,9 +1524,6 @@ fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
 
 fn cpu_sampling_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let progressive = cpu::progressive_controls(app, ui);
-    if progressive {
-        crate::ui_kit::text(ui, app.tr("render.cpu_progressive_help"), crate::ui_kit::Text::Note("render.cpu_progressive_help"));
-    }
     if progressive && !app.preferences.render_legacy_image_defaults {
         return;
     }
@@ -1634,7 +1661,7 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if app.render_workspace.view.method == ImageMethod::GpuRaytrace {
         ui.label(app.tr("render.image_samples"));
-        // Powers of two from 1 to 4096; requests from elsewhere keep any count.
+        // New selections stop at 128; requests from elsewhere keep any count.
         let samples = &mut app.render_workspace.view.samples;
         let mut exponent = (*samples).max(1).ilog2().min(MAX_SAMPLES_EXPONENT);
         let slider = crate::ui_kit::Slider { integer: true, format: |e| format!("{}", 1u32 << (e as u32).min(31)), ..Default::default() };
@@ -1644,7 +1671,13 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         let title = app.tr("render.image_advanced").to_string();
         crate::ui_kit::section(ui, "render_gpu_advanced", &title, false, |ui| {
             ui.label(app.tr("render.gpu_depth"));
-            crate::ui_kit::number_field(ui, &mut app.render_workspace.view.max_depth, 1..=16, 1.0, "");
+            crate::ui_kit::number_field(
+                ui,
+                &mut app.render_workspace.view.max_depth,
+                1..=u32::from(solidcraft_engine::render::job::MAX_PATH_DEPTH),
+                1.0,
+                "",
+            );
             ui.label(app.tr("render.gpu_seed"));
             crate::ui_kit::number_field(ui, &mut app.render_workspace.view.seed, 0..=u32::MAX, 1.0, "");
             ui.label(app.tr("render.image_exposure"));
@@ -1843,8 +1876,54 @@ fn cache_completed_image(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// Diagnostic masks have their own cache and categorical reconstruction. They never
+/// replace the colour image or its display receipt identity.
+fn cache_denoise_mask(app: &mut SolveApp, ctx: &egui::Context) {
+    if !quality::mask_active(app) {
+        app.render_workspace.denoise_mask_image = None;
+        app.render_workspace.denoise_mask_info = None;
+        return;
+    }
+    let Some(job) = app.render_workspace.view.denoise_mask_job else { return };
+    if app.render_workspace.denoise_mask_image.as_ref().is_some_and(|(cached, _)| *cached == job) {
+        return;
+    }
+    app.render_workspace.denoise_mask_info = None;
+    let result = (|| -> Result<egui::TextureHandle, String> {
+        let handle = app.session.render_job_handle(job).map_err(|error| error.to_string())?;
+        let frame = handle.frame().map_err(|error| error.to_string())?.ok_or(solidcraft_ui_text::tr("render.error_no_completed_image"))?;
+        let png = frame.denoise_mask_png().ok_or(solidcraft_ui_text::tr("render.denoise_mask_unavailable"))?;
+        let mask = frame.denoise_mask_info().ok_or(solidcraft_ui_text::tr("render.denoise_mask_unavailable"))?;
+        let captured = handle.status().map_err(|error| error.to_string())?;
+        let budget = if frame.info.executor.as_str() == "gpu-path" {
+            solidcraft_engine::render::job::GPU_PATH_LIMITS
+        } else {
+            captured_image_limits(&captured.request)
+        };
+        let image = decode_render_image_filtered(
+            png,
+            mask.width,
+            mask.height,
+            budget,
+            ctx.input(|input| input.max_texture_side),
+            image::imageops::FilterType::Nearest,
+        )?;
+        let mut info = frame.info.clone();
+        info.width = mask.width;
+        info.height = mask.height;
+        info.png_bytes = mask.bytes;
+        info.png_sha256 = mask.sha256.clone();
+        app.render_workspace.denoise_mask_info = Some(info);
+        Ok(ctx.load_texture("sc_render_denoise_mask", image, egui::TextureOptions::NEAREST))
+    })();
+    app.render_workspace.denoise_mask_image = Some((job, result));
+}
+
 fn displayed_image(app: &SolveApp) -> Option<DisplayImage<'_>> {
     let state = &app.render_workspace;
+    if quality::mask_active(app) {
+        return Some(DisplayImage { info: state.denoise_mask_info.as_ref()?, image: &state.denoise_mask_image.as_ref()?.1, preview: None });
+    }
     if let Some(preview) = &state.preview_image
         && state.view.job == Some(preview.info.frame.job)
     {
@@ -1917,9 +1996,14 @@ fn cache_preview_frame(app: &mut SolveApp, ctx: &egui::Context, info: &PreviewIn
                 return Err(solidcraft_ui_text::tr("render.error_provisional_identity").into());
             }
             let options = solidcraft_engine::render::job::CpuProgressiveOptions { samples_per_pixel: info.samples_per_pixel, seed: 0 };
-            options
-                .validate_image_with_budget(info.frame.width, info.frame.height, captured.request.cpu_budget())
-                .map_err(|error| error.to_string())?;
+            let scale = captured.request.raytrace.as_ref().map_or(1, |options| options.supersampling);
+            let (width, height) = if scale == 1 {
+                (info.frame.width, info.frame.height)
+            } else {
+                solidcraft_engine::render::job::supersampled_dimensions(info.frame.width, info.frame.height, scale)
+                    .map_err(|error| error.to_string())?
+            };
+            options.validate_image_with_budget(width, height, captured.request.cpu_budget()).map_err(|error| error.to_string())?;
             captured_image_limits(&captured.request)
         };
         let image = decode_render_image(png, info.frame.width, info.frame.height, limits, ctx.input(|i| i.max_texture_side))?;
@@ -1968,6 +2052,7 @@ fn cache_render_images(app: &mut SolveApp, ctx: &egui::Context) {
     cache_preview_image(app, ctx);
     sync_results(app);
     cache_completed_image(app, ctx);
+    cache_denoise_mask(app, ctx);
     // Checkpoint updates and preview→final/cancel transitions preserve shared pan/zoom.
     remember_displayed_job(app, preserve_view);
     finish_auto_result(app);
@@ -2020,7 +2105,13 @@ fn sync_results(app: &mut SolveApp) {
         }
     }
     view.retained = results;
-    view.completed = app.session.render_selected_result();
+    let completed = app.session.render_selected_result();
+    if view.completed != completed {
+        view.denoise_mask_job = None;
+        app.render_workspace.denoise_mask_image = None;
+        app.render_workspace.denoise_mask_info = None;
+    }
+    view.completed = completed;
     if view.compare.as_ref().is_some_and(|comparison| {
         [comparison.left, comparison.right].into_iter().flatten().any(|job| !view.retained.iter().any(|result| result.frame.job == job))
     }) {
@@ -2037,6 +2128,7 @@ fn follow_batch_view(view: &mut ViewState, queue: solidcraft_engine::render_jobs
     if let Some(job) = queue.job {
         if view.job != Some(job) {
             view.follow_job = view.compare.is_none();
+            view.denoise_mask_job = None;
         }
         view.job = Some(job);
         view.job_shot = queue.shot;
@@ -2072,6 +2164,17 @@ fn decode_image(png: &[u8], width: u32, height: u32) -> Result<egui::ColorImage,
 }
 
 fn decode_render_image(png: &[u8], width: u32, height: u32, budget: RenderLimits, max_texture_side: usize) -> Result<egui::ColorImage, String> {
+    decode_render_image_filtered(png, width, height, budget, max_texture_side, image::imageops::FilterType::Triangle)
+}
+
+fn decode_render_image_filtered(
+    png: &[u8],
+    width: u32,
+    height: u32,
+    budget: RenderLimits,
+    max_texture_side: usize,
+    filter: image::imageops::FilterType,
+) -> Result<egui::ColorImage, String> {
     let size = (u64::from(width), u64::from(height));
     if budget.fit(size.0, size.1, None) != Some(size) {
         return Err(solidcraft_ui_text::tr("render.error_image_profile").into());
@@ -2087,11 +2190,7 @@ fn decode_render_image(png: &[u8], width: u32, height: u32, budget: RenderLimits
     if image.dimensions() != (width, height) {
         return Err(solidcraft_ui_text::tr("render.error_image_dimensions").into());
     }
-    let image = if display_size != (width, height) {
-        image::imageops::resize(&image, display_size.0, display_size.1, image::imageops::FilterType::Triangle)
-    } else {
-        image
-    };
+    let image = if display_size != (width, height) { image::imageops::resize(&image, display_size.0, display_size.1, filter) } else { image };
     Ok(egui::ColorImage::from_rgba_unmultiplied([display_size.0 as usize, display_size.1 as usize], image.as_raw()))
 }
 
@@ -2235,6 +2334,7 @@ fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             let _ = app.run("render.result.view", json!({"view":view}));
         }
     }
+    quality::mask_view_controls(app, ui);
     let copy = result_action_button(ui, app.tr("render.output_copy"), ribbon::action_ready(app, "render.result.copy").is_ok(), host);
     crate::scenario::publish_target("render:result-copy", copy.rect);
     if copy.clicked() {
@@ -2304,6 +2404,7 @@ fn classic_result_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let _ = app.run("render.result.view", json!({"view":view}));
             }
         }
+        quality::mask_view_controls(app, ui);
         let copy = crate::ui_kit::button(
             ui,
             app.tr("render.output_copy"),
@@ -2340,6 +2441,7 @@ fn result_header(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let display = displayed_image(app).map(|display| (display.info.clone(), display.preview.cloned()));
     let state = match &display {
+        Some(_) if quality::mask_active(app) => "render.denoise_view_mask",
         Some((_, Some(_))) => "render.state_in_progress",
         Some(_) => "render.state_completed",
         None if ribbon::busy(app) => "render.state_in_progress",
@@ -2572,7 +2674,8 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
     content.set_clip_rect(free.intersect(ui.clip_rect()));
     let ui = &mut content;
     let Some(info) = displayed_image(app).map(|display| display.info.clone()) else {
-        let message = match &app.render_workspace.image {
+        let cached = if quality::mask_active(app) { &app.render_workspace.denoise_mask_image } else { &app.render_workspace.image };
+        let message = match cached {
             Some((_, Err(error))) => error.clone(),
             _ if ribbon::busy(app) => app.tr("render.state_in_progress").to_string(),
             _ => app.tr("render.result_empty").to_string(),
@@ -2652,7 +2755,10 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
         if let Some(display) = displayed_image(app)
             && let Ok(texture) = display.image
         {
-            let source = displayed::Source::image(display.info, display.preview);
+            let mut source = displayed::Source::image(display.info, display.preview);
+            if quality::mask_active(app) {
+                source.kind = displayed::Kind::DenoiseMask;
+            }
             painter.image(texture.id(), image_rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), Tokens::get().file_image_tint);
             app.render_workspace.displayed.record(&painter, image_rect, source);
         }
@@ -2802,6 +2908,19 @@ fn export_linear_image(app: &mut SolveApp, job: solidcraft_engine::render::job::
             return;
         }
         let _ = app.run("render.export", json!({"job":job,"path":path,"overwrite":overwrite,"format":"exr"}));
+    });
+}
+
+/// The mask format and completed result stay fixed while the picker is open.
+fn export_denoise_mask(app: &mut SolveApp, job: solidcraft_engine::render::job::JobId, overwrite: bool) {
+    let origin = app.session.doc.clone();
+    app.pick_save("render-denoise-mask.png", &["png"], move |app, path| {
+        let Some(path) = path else { return };
+        if !Arc::ptr_eq(&origin, &app.session.doc) {
+            app.set_status(solidcraft_ui_text::tr("render.error_export_document"), true);
+            return;
+        }
+        let _ = app.run("render.export", json!({"job":job,"path":path,"overwrite":overwrite,"format":"denoise_mask"}));
     });
 }
 
@@ -3321,7 +3440,10 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
         "render.preflight.copy" => {
             app.render_workspace.clipboard_text = Some(reply["text"].as_str().ok_or("invalid check report")?.to_string());
         }
-        "render.compare" => compare::apply(app, reply)?,
+        "render.compare" => {
+            app.render_workspace.view.denoise_mask_job = None;
+            compare::apply(app, reply)?;
+        }
         "render.compare.divider" => {
             let position = reply["position"].as_f64().ok_or("invalid comparison divider position")?;
             if let Some(view) = &mut app.render_workspace.view.compare {
@@ -3345,10 +3467,12 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
                 let _ = app.session.label_render_job(job, shot);
             }
             app.render_workspace.view.job = Some(job);
+            app.render_workspace.view.denoise_mask_job = None;
             app.render_workspace.view.job_shot = shot;
             app.render_workspace.view.follow_job = app.render_workspace.view.compare.is_none();
         }
         "render.result.select" | "render.result.discard" | "render.result.pin" => {
+            app.render_workspace.view.denoise_mask_job = None;
             sync_results(app);
             app.render_workspace.preview_image = None;
             app.render_workspace.view.follow_job = false;
@@ -3363,7 +3487,7 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
         "render.output.size" => {
             let width = reply["width"].as_u64().and_then(|v| u32::try_from(v).ok()).ok_or("invalid output width")?;
             let height = reply["height"].as_u64().and_then(|v| u32::try_from(v).ok()).ok_or("invalid output height")?;
-            if cpu::image_limits(app).fit(u64::from(width), u64::from(height), None) != Some((u64::from(width), u64::from(height))) {
+            if cpu::size_selection_limits(app).fit(u64::from(width), u64::from(height), None) != Some((u64::from(width), u64::from(height))) {
                 return Err(app.tr("render.output_over_budget").into());
             }
             app.render_workspace.view.inspector.resolution.custom = reply["custom"].as_bool().unwrap_or(false);
@@ -3376,7 +3500,25 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
             if view == "actual" && reduced_display(app) {
                 return Err(app.tr("render.result_reduced_display").into());
             }
+            let mask_job = if view == "denoise_mask" {
+                let job = serde_json::from_value(reply["job"].clone()).map_err(|error| format!("invalid guide mask job identity: {error}"))?;
+                sync_results(app);
+                if app.render_workspace.view.completed != Some(job) {
+                    return Err(app.tr("render.error_provisional_identity").to_string());
+                }
+                Some(job)
+            } else {
+                None
+            };
             app.render_workspace.view.result = view != "model";
+            if !matches!(view, "fit" | "actual") {
+                app.render_workspace.view.denoise_mask_job = mask_job;
+            }
+            if view == "denoise_mask" {
+                app.render_workspace.view.compare = None;
+                app.render_workspace.comparison_images.clear();
+                fit_result(app);
+            }
             if matches!(view, "model") || id == "render.result.close" {
                 app.render_workspace.view.compare = None;
                 app.render_workspace.comparison_images.clear();
@@ -3395,6 +3537,9 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
             app.viewport.orbit_free = None;
         }
         "render.result.copy" => {
+            if quality::mask_active(app) {
+                return Err(app.tr("render.denoise_mask_copy_help").to_string());
+            }
             let job = serde_json::from_value(reply["frame"]["job"].clone()).map_err(|e| e.to_string())?;
             let frame = app
                 .session

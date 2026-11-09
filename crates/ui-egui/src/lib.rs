@@ -1270,6 +1270,7 @@ impl SolveApp {
         prefs::apply_network(&self.preferences);
         // Before a file given at start opens: the largest file it may be (#4086).
         prefs::apply_file_limits(&self.preferences);
+        render_workspace::apply_memory_policy(self);
         // Saved before the theme was a preference: the Dark/Light flag says which.
         if v.get("preferences").and_then(|p| p.get("theme")).is_none() {
             self.preferences.theme = if self.ui.dark { "dark" } else { "light" }.into();
