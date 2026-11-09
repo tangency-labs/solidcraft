@@ -1202,6 +1202,41 @@ mod tests {
     }
 
     #[test]
+    fn mixed_rationality_is_refused_where_built() {
+        let refused = |r: Result<Surface>| matches!(r, Err(SolidError::InvalidInput { .. }));
+        let knots = || vec![0.0, 0.0, 1.0, 1.0];
+        let idx = SurfaceIndices {
+            n: 1,
+            m: 1,
+            p: 1,
+            q: 1,
+            r: 3,
+            s: 3,
+        };
+        // One weighted point among non-rational ones, then one non-rational point
+        // among weighted ones, at a corner and inside the net.
+        for (i, j, w) in [(0, 0, 1.0), (1, 1, 2.0), (0, 1, NOW), (1, 0, NOW)] {
+            let mut net = bilinear().net.as_ref().clone();
+            if w == NOW {
+                for pw in net.iter_mut().flatten() {
+                    pw.w = 1.0;
+                }
+            }
+            net[i][j].w = w;
+            assert!(refused(Surface::new(net.clone(), 1, 1, knots(), knots())));
+            assert!(refused(Surface::with_indices(net, knots(), knots(), idx)));
+        }
+        // Storage past the indices in use is not part of the surface.
+        let mut net = bilinear().net.as_ref().clone();
+        for row in &mut net {
+            row.push(CPoint::new(0.0, 2.0, 0.0, 1.0));
+        }
+        net.push(vec![CPoint::new(2.0, 0.0, 0.0, 1.0); 3]);
+        let s = Surface::with_indices(net, knots(), knots(), idx).unwrap();
+        assert!(s.counts_are_valid().is_ok());
+    }
+
+    #[test]
     fn counts_and_weights() {
         let mut s = bilinear();
         s.set_size_indices(SurfaceIndices {
