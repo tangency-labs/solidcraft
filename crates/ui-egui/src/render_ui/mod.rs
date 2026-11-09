@@ -2,10 +2,10 @@
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::{
     SolveApp,
-    theme::Tokens,
     ui_kit::{self, Container, Edge},
 };
 use egui::{Rect, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) fn reset_shell(app: &mut SolveApp) {
     app.shell.workspace_panels.retain(|id, _| !id.starts_with("render:"));

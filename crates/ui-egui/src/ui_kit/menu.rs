@@ -1,9 +1,10 @@
 //! Menus share one popup surface and one row painter. Command dispatch stays with callers.
 use crate::ui_kit::{Container, Surface};
-use crate::{fonts::RichTextExt as _, icons, theme::Tokens};
+use crate::{icons, ui_kit::type_face::RichTextExt as _};
 use egui::{Color32, FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 use serde::Serialize;
 use serde_json::Value;
+use solidcraft_theme::Tokens;
 
 /// One menu entry: a command id (run with `params` when given, else started like a toolbar
 /// click) or a `ui.*` action. `-` is a separator, `#…` a section heading.
@@ -306,7 +307,7 @@ impl Menu {
         let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_24), Sense::hover());
         let mut job = egui::text::LayoutJob::simple_singleline(
             solidcraft_ui_text::tr_label(label).to_uppercase(),
-            crate::fonts::semibold(t.font_small),
+            crate::ui_kit::type_face::semibold(t.font_small),
             t.form_dim,
         );
         for section in &mut job.sections {
@@ -480,7 +481,7 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
         ui.add_space(t.space_4);
         ui.label(
             egui::RichText::new(solidcraft_ui_text::tr("ui.ribbon_workspace").to_uppercase())
-                .size(crate::theme::Tokens::get().font_small)
+                .size(solidcraft_theme::Tokens::get().font_small)
                 .semibold()
                 .color(t.text_dim),
         );
@@ -531,8 +532,9 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
                 let name = solidcraft_ui_text::tr_label(&item.label);
                 let x = r.left() + 74.0;
                 let y = r.top() + 17.0;
-                let galley = egui::WidgetText::from(egui::RichText::new(name).semibold().size(crate::theme::Tokens::get().font_heading).color(text))
-                    .into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button);
+                let galley =
+                    egui::WidgetText::from(egui::RichText::new(name).semibold().size(solidcraft_theme::Tokens::get().font_heading).color(text))
+                        .into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button);
                 let badge_x = x + galley.size().x + 9.0;
                 let origin = pos2(x, y - galley.size().y / 2.0);
                 let ppp = ui.ctx().pixels_per_point().max(0.5);
@@ -547,7 +549,7 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
                 });
                 let badge = ui.painter().layout_no_wrap(
                     badge.to_string(),
-                    FontId::proportional(crate::theme::Tokens::get().font_small),
+                    FontId::proportional(solidcraft_theme::Tokens::get().font_small),
                     if current { t.on_accent } else { accent },
                 );
                 let badge_rect = Rect::from_min_size(pos2(badge_x, y - 8.0), badge.size() + vec2(t.space_12, t.space_3));
@@ -555,7 +557,7 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
                 ui.painter().galley(badge_rect.min + vec2(t.space_6, t.space_3 / 2.0), badge, accent);
                 let line = |content: String, y: f32| {
                     let mut job =
-                        egui::text::LayoutJob::simple_singleline(content, FontId::proportional(crate::theme::Tokens::get().font_body), text);
+                        egui::text::LayoutJob::simple_singleline(content, FontId::proportional(solidcraft_theme::Tokens::get().font_body), text);
                     job.wrap.max_width = r.right() - x - 6.0;
                     job.wrap.max_rows = 1;
                     job.wrap.break_anywhere = false;
@@ -583,7 +585,7 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
         ui.add_space(t.space_6);
         ui.add(
             egui::Label::new(
-                egui::RichText::new(solidcraft_ui_text::tr("ui.workspace_footer")).size(crate::theme::Tokens::get().font_small).color(t.text_dim),
+                egui::RichText::new(solidcraft_ui_text::tr("ui.workspace_footer")).size(solidcraft_theme::Tokens::get().font_small).color(t.text_dim),
             )
             .wrap(),
         );

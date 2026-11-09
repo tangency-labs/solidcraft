@@ -395,7 +395,7 @@ fn marker_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) -> egui::Response
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_12), Sense::drag());
     crate::semantic_content::record_capture(ui, &response);
     let line = Rect::from_min_max(pos2(rect.left() + 2.0 + depth as f32 * INDENT, rect.top()), rect.max);
-    crate::ui_kit::history_marker(ui.painter(), line, true, crate::theme::TabAccent::for_tab(&t, &app.ui.tab));
+    crate::ui_kit::history_marker(ui.painter(), line, true, solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab));
     crate::scenario::publish_handle("browser:rollback", rect.center());
     if response.hovered() || response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -412,7 +412,7 @@ fn drag_marker(app: &mut SolveApp, ui: &egui::Ui, resp: &egui::Response, slots: 
     let Some(y) = ui.ctx().pointer_latest_pos().map(|p| p.y) else { return };
     let Some(&(slot_y, position)) = slots.iter().min_by(|a, b| (a.0 - y).abs().total_cmp(&(b.0 - y).abs())) else { return };
     if resp.dragged() && position != marker {
-        let accent = crate::theme::TabAccent::current(ui.ctx()).color;
+        let accent = solidcraft_theme::TabAccent::current(ui.ctx()).color;
         ui.painter().hline(resp.rect.left() + 4.0..=resp.rect.right() - 4.0, slot_y, Stroke::new(2.0, accent));
     }
     if resp.drag_stopped()

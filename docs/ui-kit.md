@@ -529,7 +529,7 @@ Colours shared with the boards use `dialog_body` (window/popup), `dialog_footer`
 (inspector), `dialog_border`, `dialog_rule`, `control_border`, `form_ink`, `form_dim`
 and `selected_bg`. Additional `nav_*` roles above, plus `nav_field`,
 `nav_viewport` and `nav_dim`, have light/dark defaults in
-`assets/styles/ui/palettes.rs`. They are ordinary `solidcraft-theme/1` colour keys:
+`crates/theme/src/palettes.rs`. They are ordinary `solidcraft-theme/1` colour keys:
 import, export and palette cache identity all include them through `theme_files.rs`.
 Files omitting them retain their base palette, including older exported themes.
 Semantic selection/action ink reuses measured `form_primary`, and the slot-cap notice
@@ -560,6 +560,18 @@ Board regression checks live in the existing test modules:
   `tool_cursor.rs::navigation_preference_restores_tool_badge_on_cancel_and_defaults` covers
   the relocated setting's snapshot and page defaults.
   Runtime icon discovery visits More at narrow width, retaining Preferences page coverage.
+
+## Type
+
+The kit sets type through `ui_kit::type_face`: the weights (`medium`, `semibold`, `bold`,
+`RichTextExt`), the family and fallback names a host installs its faces under, the script checks
+and the on-demand CJK font state. It holds no font data. Host contract: before the kit draws, the
+context's fonts bind the weight families. A host with faces of its own binds them in its
+definitions (SolidCraft's `fonts.rs` installs IBM Plex at four weights; `with_weight_families`
+binds any it leaves out); a host with none calls `type_face::install_weight_families(ctx)` once,
+which replaces the definitions with egui's defaults, and the kit draws every weight with those
+faces. Without either, egui finds no face for the weight families and draws no glyphs for
+weighted text.
 
 ## Extending and checking the kit
 
@@ -1064,7 +1076,7 @@ of each element is a role read from `Tokens`: `figure_ground`, `figure_line`, `f
 `figure_face_left`, `figure_face_right`, `figure_card`, `figure_accent`, `figure_reference`,
 `figure_axis_x/y/z`, `figure_ok`, `figure_warn`, plus `form_ink`, `form_dim`, `dialog_border`,
 `control_border` and `control_fill` (`docs/design/preferences/tokens.md`). The new tokens, with light
-and dark values, are in `assets/styles/ui/palettes.rs`; theme files cannot override them yet and keep
+and dark values, are in `crates/theme/src/palettes.rs`; theme files cannot override them yet and keep
 the built-in values. The colour vision samples read `axis_z`, `sketch_projected`, `axis_x`, `bend_up`
 and `bend_down`, so they follow the colour vision mode.
 

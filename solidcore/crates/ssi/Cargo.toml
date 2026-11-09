@@ -1,0 +1,12 @@
+[package]
+name = "ssi"
+description = "Surface/surface intersection of rational B-spline patches, tangencies included, aimed at every case of jyviko's SSI corpus"
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -1,8 +1,9 @@
 //! Preference compositions for the approved Navigation bar board.
 use super::{Container, Surface, navigation::*};
+use crate::icons;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{icons, theme::Tokens};
 use egui::{FontId, Rect, Response, Sense, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) const NAV_STAGE_HEIGHT: f32 = 96.0;
 pub(crate) const NAV_STAGE_GRID: f32 = 16.0;

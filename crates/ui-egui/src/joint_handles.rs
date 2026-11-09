@@ -16,10 +16,10 @@ use solidcraft_engine::{
 
 use crate::{
     SolveApp,
-    theme::Tokens,
     ui_kit::{Container, Surface},
     viewport::Proj,
 };
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Mode {

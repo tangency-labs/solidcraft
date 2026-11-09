@@ -53,14 +53,14 @@ pub(super) fn configurations_rows(
         .enumerate()
         .map(|(index, label)| {
             let min_width = if index == 0 {
-                name_width + gap + status_width + crate::theme::Tokens::get().space_24
+                name_width + gap + status_width + solidcraft_theme::Tokens::get().space_24
             } else {
-                ui_kit::row_height() * 2.0 + crate::theme::Tokens::get().space_24
+                ui_kit::row_height() * 2.0 + solidcraft_theme::Tokens::get().space_24
             };
             if index == labels.len() - 1 {
                 ui_kit::Column::new(label, 0.0)
                     .icon_only()
-                    .min_content_width(crate::theme::Tokens::get().control_height + crate::theme::Tokens::get().space_12)
+                    .min_content_width(solidcraft_theme::Tokens::get().control_height + solidcraft_theme::Tokens::get().space_12)
             } else {
                 let weight = if index == 0 {
                     1.6
@@ -365,7 +365,7 @@ fn column_menu(
         }
         // The popup remembers its size: once the filter has emptied the list, a list that fills
         // again would be clipped to that small height, so a list that scrolls takes the full one.
-        let list_height = crate::theme::Tokens::get().space_24 * 12.0;
+        let list_height = solidcraft_theme::Tokens::get().space_24 * 12.0;
         egui::ScrollArea::vertical().max_height(list_height).min_scrolled_height(list_height).show(ui, |ui| {
             for (label, p) in &matching {
                 if ui_kit::button(ui, label.as_str(), ui_kit::Button::Normal).clicked() {

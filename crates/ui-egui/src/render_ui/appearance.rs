@@ -347,7 +347,7 @@ pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::U
         view.pick_mode = view.mode;
     }
     let selected_targets = targets(app, mode_step(view.mode));
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let result = ui_kit::settings_form(ui, t.form_label_width + t.space_8, |ui| draw(app, ui, &mut view, &selected_targets));
     if let Err(error) = result {
         ui_kit::text(ui, &error, ui_kit::Text::Error("render:appearance:error"));
@@ -380,7 +380,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
         ui_kit::text(ui, app.tr("render.inspector_pick_target"), ui_kit::Text::Note("render.inspector_pick_target"));
         return Ok(());
     };
-    let default_color = crate::theme::Tokens::get().body;
+    let default_color = solidcraft_theme::Tokens::get().body;
     let default = Look::custom([default_color.r(), default_color.g(), default_color.b()], 1.0);
     let looks: Vec<_> = chains
         .iter()
@@ -447,7 +447,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
         &used,
         |ui| {
             let response = ui_kit::compact_dropdown_menu(ui, "render_appearance_chain", &source, |ui| {
-                ui.set_min_width(crate::theme::Tokens::get().form_label_width * 3.0);
+                ui.set_min_width(solidcraft_theme::Tokens::get().form_label_width * 3.0);
                 if let Some(step) =
                     ui_kit::look_chain(ui, "render:appearance:chain", chain_labels, chain.each_ref().map(|l| l.as_ref().map(sphere)), selected_step)
                 {

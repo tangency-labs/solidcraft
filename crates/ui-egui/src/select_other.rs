@@ -31,9 +31,9 @@ use solidcraft_engine::sketch::CurveKind;
 use std::hash::{Hash, Hasher};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::tool_modifiers::Held;
 use crate::viewport::{Hit, Proj};
+use solidcraft_theme::Tokens;
 
 /// How long the left button stays down, without moving, before the list opens.
 pub const HOLD_SECS: f64 = 0.5;
@@ -655,7 +655,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     pos2(r.left() + 8.0, r.center().y),
                     Align2::LEFT_CENTER,
                     title,
-                    FontId::proportional(crate::theme::Tokens::get().font_panel),
+                    FontId::proportional(solidcraft_theme::Tokens::get().font_panel),
                     t.text_dim,
                 );
                 egui::ScrollArea::vertical().min_scrolled_height(0.0).max_height(scroll_height).show(ui, |ui| {

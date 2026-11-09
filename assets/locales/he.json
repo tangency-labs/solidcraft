@@ -1509,6 +1509,7 @@
   "cmd.timeline_stop": "עצירת ציר הזמן",
   "cmd.timeline_suppress": "השבתת פיצ'ר",
   "cmd.ui.assistant": "הצגה או הסתרה של העוזר",
+  "cmd.ui.palette": "חיפוש פקודות",
   "cmd.view.navigator": "ניווט תצוגה מותאם אישית",
   "cmd.view.render_browser": "דפדפן רינדור",
   "cmd.view.render_dock": "הזז את עגינת הרינדור",

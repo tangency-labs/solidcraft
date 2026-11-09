@@ -1,8 +1,8 @@
 //! Layout elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
 use super::{metrics::*, text::paint_text};
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Response, RichText, Ui, vec2};
+use solidcraft_theme::Tokens;
 
 pub(super) const FORM: &str = "sc_dense_form";
 
@@ -90,7 +90,7 @@ pub(crate) fn catalog_footer(ui: &mut Ui, text: &str) -> Response {
     let icon =
         egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_6, rect.top() + t.space_8 + t.font_small * 0.5), vec2(t.space_12, t.space_12));
     ui.painter().circle_stroke(icon.center(), t.space_4, t.control_border_stroke(t.form_dim));
-    ui.painter().text(icon.center(), egui::Align2::CENTER_CENTER, "i", crate::fonts::semibold(t.font_badge), t.form_dim);
+    ui.painter().text(icon.center(), egui::Align2::CENTER_CENTER, "i", crate::ui_kit::type_face::semibold(t.font_badge), t.form_dim);
     let mut job =
         egui::text::LayoutJob::simple(text.to_owned(), egui::FontId::proportional(t.font_small), t.form_dim, (rect.width() - t.space_24).max(1.0));
     job.wrap.max_rows = 1;
@@ -471,7 +471,7 @@ pub(crate) fn figure_rows(
 pub(crate) fn section_heading(ui: &mut Ui, title: &str) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_16), egui::Sense::hover());
-    paint_text(ui, rect, &solidcraft_ui_text::tr_label(title).to_uppercase(), crate::fonts::semibold(t.font_caption), t.form_dim, true);
+    paint_text(ui, rect, &solidcraft_ui_text::tr_label(title).to_uppercase(), crate::ui_kit::type_face::semibold(t.font_caption), t.form_dim, true);
     solidcraft_ui_registry::publish_rect(&format!("dialog:heading:{title}"), rect);
 }
 
@@ -579,7 +579,7 @@ fn section_with_badge<R>(
     let badge_value = count;
     let badge_width = badge_value.as_ref().map_or(0.0, |value| label_width(ui, value) + t.space_12);
     let reserved = if badge_value.is_some() { badge_width + t.space_12 } else { 0.0 };
-    let mut format = egui::TextFormat::simple(crate::fonts::semibold(t.font_caption), t.form_dim);
+    let mut format = egui::TextFormat::simple(crate::ui_kit::type_face::semibold(t.font_caption), t.form_dim);
     format.extra_letter_spacing = t.font_caption * t.font_section_tracking;
     let title_width = ui
         .fonts_mut(|fonts| fonts.layout_job(egui::text::LayoutJob::single_section(caption.clone(), format)))
@@ -588,7 +588,7 @@ fn section_with_badge<R>(
         .ceil()
         .min((text_rect.width() - reserved).max(0.0));
     let title_rect = egui::Rect::from_min_max(text_rect.min, egui::pos2(text_rect.left() + title_width, text_rect.bottom()));
-    paint_text(ui, title_rect, &caption, crate::fonts::semibold(t.font_caption), t.form_dim, true);
+    paint_text(ui, title_rect, &caption, crate::ui_kit::type_face::semibold(t.font_caption), t.form_dim, true);
     let mut rule_left = title_rect.right() + t.space_12;
     let mut rule_right = rect.right();
     if let Some(value) = badge_value {
@@ -662,7 +662,7 @@ pub(crate) fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl F
     let badge_value = count.to_string();
     let badge_width = label_width(ui, &badge_value) + t.space_12;
     let reserved = badge_width + t.space_12;
-    let mut format = egui::TextFormat::simple(crate::fonts::semibold(t.font_caption), t.form_dim);
+    let mut format = egui::TextFormat::simple(crate::ui_kit::type_face::semibold(t.font_caption), t.form_dim);
     format.extra_letter_spacing = t.font_caption * t.font_section_tracking;
     let title_width = ui
         .fonts_mut(|fonts| fonts.layout_job(egui::text::LayoutJob::single_section(caption.clone(), format)))
@@ -671,7 +671,7 @@ pub(crate) fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl F
         .ceil()
         .min((text_rect.width() - reserved).max(0.0));
     let title_rect = egui::Rect::from_min_max(text_rect.min, egui::pos2(text_rect.left() + title_width, text_rect.bottom()));
-    paint_text(ui, title_rect, &caption, crate::fonts::semibold(t.font_caption), t.form_dim, true);
+    paint_text(ui, title_rect, &caption, crate::ui_kit::type_face::semibold(t.font_caption), t.form_dim, true);
     let mut rule_left = title_rect.right() + t.space_12;
     let width = badge_width.min((rect.right() - rule_left).max(0.0));
     let badge = egui::Rect::from_min_size(egui::pos2(rule_left.min(rect.right()), rect.center().y - t.space_10), vec2(width, t.space_10 * 2.0));
@@ -837,10 +837,10 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
         _ => t.form_ink,
     };
     let font = match style {
-        Text::Inline if in_catalog(ui) => crate::fonts::semibold(t.font_small),
-        Text::NameCell(true) | Text::SelectedNameCell => crate::fonts::semibold(t.font_label),
-        Text::NameCell(false) => crate::fonts::medium(t.font_label),
-        Text::Heading(_) => crate::fonts::semibold(t.font_button),
+        Text::Inline if in_catalog(ui) => crate::ui_kit::type_face::semibold(t.font_small),
+        Text::NameCell(true) | Text::SelectedNameCell => crate::ui_kit::type_face::semibold(t.font_label),
+        Text::NameCell(false) => crate::ui_kit::type_face::medium(t.font_label),
+        Text::Heading(_) => crate::ui_kit::type_face::semibold(t.font_button),
         Text::MonoCell | Text::Value(_, _) => egui::FontId::monospace(t.font_body),
         Text::MonoNote(_) => egui::FontId::monospace(t.font_small),
         Text::Hint(_) | Text::Error(_) => egui::FontId::proportional(t.font_body),
@@ -926,7 +926,7 @@ pub(crate) fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut 
     );
     let title = egui::Rect::from_min_max(text.min, egui::pos2(text.right(), text.center().y));
     let detail = egui::Rect::from_min_max(egui::pos2(text.left(), text.center().y), text.max);
-    paint_text(ui, title, name, crate::fonts::semibold(t.font_label), t.form_ink, false);
+    paint_text(ui, title, name, crate::ui_kit::type_face::semibold(t.font_label), t.form_ink, false);
     paint_text(ui, detail, summary, egui::FontId::proportional(t.font_small), t.form_dim, false);
     let response = ui.interact(text, ui.scope_id().with("summary"), egui::Sense::hover()).backing_on_hover_text(summary);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), format!("{name}: {summary}")));

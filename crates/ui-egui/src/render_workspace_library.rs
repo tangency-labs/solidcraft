@@ -7,10 +7,11 @@ mod surface_import;
 
 use super::{ImageMethod, materials, setups};
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{SolveApp, theme::Tokens, ui_kit};
+use crate::{SolveApp, ui_kit};
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_engine::doc::Document;
+use solidcraft_theme::Tokens;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Weak},

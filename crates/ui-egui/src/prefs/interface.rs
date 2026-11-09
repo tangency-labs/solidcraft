@@ -181,7 +181,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             let mode = app.preferences.color_vision;
             ui_kit::settings_form(ui, t.form_label_width, |ui| {
                 ui_kit::settings_row_help(ui, app.tr("ui.colour_vision_mode"), app.tr("prefs.appearance.colour_vision_help"), |ui| {
-                    let modes = crate::theme::ColorVision::ALL;
+                    let modes = solidcraft_theme::ColorVision::ALL;
                     let labels: Vec<_> = modes.iter().map(|m| solidcraft_ui_text::tr(m.label_id())).collect();
                     let mut selected = modes.iter().position(|m| *m == mode).unwrap_or(0);
                     if ui_kit::settings_segments(ui, app.tr("ui.colour_vision_mode"), &mut selected, &labels)
@@ -192,7 +192,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     if let Some(rect) = crate::scenario::rect_of(&format!("dialog:segments:{}", app.tr("ui.colour_vision_mode"))) {
                         crate::scenario::publish_target("prefs:color_vision", rect);
                     }
-                    for mode in crate::theme::ColorVision::ALL {
+                    for mode in solidcraft_theme::ColorVision::ALL {
                         if let Some(at) =
                             crate::scenario::handle_at(&format!("dialog:{}:{}", app.tr("ui.colour_vision_mode"), app.tr(mode.label_id())))
                         {
@@ -204,7 +204,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             ui_kit::status_palette_sample(ui, app.preferences.color_vision);
             // What the modes recolour, in the mode being chosen (#7152): the status chips above keep
             // their colours in every mode.
-            ui_kit::colour_vision_sample(ui, &crate::theme::Tokens::get_in(app.preferences.color_vision));
+            ui_kit::colour_vision_sample(ui, &solidcraft_theme::Tokens::get_in(app.preferences.color_vision));
             if app.preferences.color_vision != mode {
                 ui.ctx().request_repaint();
             }

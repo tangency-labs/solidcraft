@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 thread_local! {
     /// The drawing line type (0 normal, 1 construction, 2 centerline) and the sketch it is for.
@@ -462,7 +462,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.ctx().data_mut(|d| d.insert_temp(header_height, header.rect.height()));
             }
             crate::ui_kit::Part::Body => {
-                let t = crate::theme::Tokens::get();
+                let t = solidcraft_theme::Tokens::get();
                 if open_ends > 0 {
                     let text = solidcraft_ui_text::format("sketch.open_ends", &[("count", &open_ends.to_string())]);
                     ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.open_ends_tip"));

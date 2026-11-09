@@ -1,7 +1,7 @@
 //! Shared theme browser vocabulary: toggle segments, slots, marked cards and scroll viewport.
 use super::*;
-use crate::theme::Tokens;
 use egui::{Align2, Color32, FontId, Painter, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum ThemeGlyph {
@@ -305,7 +305,13 @@ pub(crate) fn theme_slot(ui: &mut Ui, slot: &ThemeSlot<'_>) -> Response {
     glyph(ui.painter(), icon, if slot.night { ThemeGlyph::Moon } else { ThemeGlyph::Sun }, t.form_dim);
     let p = ui.painter().with_clip_rect(r.shrink(t.space_8).intersect(ui.clip_rect()));
     p.text(pos2(icon.right() + t.space_4, icon.center().y), Align2::LEFT_CENTER, slot.title, FontId::proportional(t.font_small), t.form_dim);
-    p.text(pos2(x, r.bottom() - t.space_16 - t.space_4), Align2::LEFT_CENTER, slot.name, crate::fonts::semibold(t.font_label), t.form_ink);
+    p.text(
+        pos2(x, r.bottom() - t.space_16 - t.space_4),
+        Align2::LEFT_CENTER,
+        slot.name,
+        crate::ui_kit::type_face::semibold(t.font_label),
+        t.form_ink,
+    );
     p.text(pos2(r.right() - t.space_10, r.center().y), Align2::RIGHT_CENTER, slot.hint, FontId::proportional(t.font_small), t.form_dim);
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), slot.aimed, slot.title));
     super::settings_search::remember(ui, slot.title, r);

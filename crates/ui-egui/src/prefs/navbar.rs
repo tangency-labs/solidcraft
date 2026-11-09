@@ -4,9 +4,10 @@ use crate::navigation_bar::{self, Labels, MenuDisplay, NavigationBar, Position, 
 use crate::navigation_bar_view;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{NavigationEdge, NavigationIdle, NavigationKind, NavigationSize};
-use crate::{SolveApp, scenario, theme::Tokens, ui_kit};
+use crate::{SolveApp, scenario, ui_kit};
 use egui::{Rect, Sense, vec2};
 use serde_json::json;
+use solidcraft_theme::Tokens;
 
 #[derive(Default)]
 pub(super) struct State {
@@ -181,7 +182,10 @@ fn preview(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, width: f32)
     scenario::publish_target("prefs:navbar:stage", stage);
     scenario::publish_target("prefs:navbar:preview", stage);
     let bar = navigation_bar_view::editor_layout(stage, &app.preferences.navigation_bar, |slot| {
-        ui.painter().layout_no_wrap(navigation_bar_view::slot_text(app, slot).to_owned(), crate::fonts::medium(ui_kit::NAV_TEXT), t.form_ink).size().x
+        ui.painter()
+            .layout_no_wrap(navigation_bar_view::slot_text(app, slot).to_owned(), crate::ui_kit::type_face::medium(ui_kit::NAV_TEXT), t.form_ink)
+            .size()
+            .x
     });
     scenario::publish_rect("prefs:navbar:bar", bar.rect);
     let mut cells = Vec::new();

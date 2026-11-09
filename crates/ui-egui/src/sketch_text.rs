@@ -583,7 +583,7 @@ fn path_row(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut
             *active = 0;
         }
         if on {
-            let size = crate::theme::Tokens::get().space_24;
+            let size = solidcraft_theme::Tokens::get().space_24;
             let rect = egui::Rect::from_center_size(egui::pos2(chip_rect.right() - size / 2.0, chip_rect.center().y), egui::vec2(size, size));
             let clear = ui_kit::icon_button_at(ui, rect, "close", "sketch_text.path_clear");
             crate::scenario::publish_handle("dialog:Path clear", clear.rect.center());
@@ -1092,7 +1092,7 @@ mod tests {
         h.frames(2);
         h.step(&json!({"click":{"handle":"menu:report"}})).unwrap();
         h.frames(3);
-        let token = h.app.shot_token;
+        let token = h.app.shots.token;
         crate::issue_report::receive(&mut h.app, token, std::sync::Arc::new(egui::ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
         let focus = egui::Id::unique("issue_report_title");

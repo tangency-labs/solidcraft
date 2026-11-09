@@ -1,9 +1,10 @@
 //! Standalone Environment inspector body. Drawing and source browsing never save a setup.
 use super::{ImageMethod, Stage, cpu, hdr, setups, studio};
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{SolveApp, theme::Tokens, ui_kit};
+use crate::{SolveApp, ui_kit};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::render_settings::{RenderJob, RenderSetup};
+use solidcraft_theme::Tokens;
 use std::sync::{Arc, Weak};
 
 #[derive(Clone, Debug, Default)]

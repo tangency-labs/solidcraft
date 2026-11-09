@@ -2,14 +2,15 @@
 //! or in Preferences), resizable, folded to a thin strip with Minimise, closed with ×. Its side,
 //! width and fold are preferences, so they come back next time.
 
-use crate::fonts::RichTextExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::type_face::RichTextExt as _;
 use crate::ui_kit::{Container, Edge, Surface};
 use egui::{Align, Align2, Color32, Id, Layout, Rect, RichText, Sense, Stroke, pos2, vec2};
+use solidcraft_engine::panels::Flow;
 
 use super::*;
-use crate::theme::Tokens;
 use crate::ui_kit;
+use solidcraft_theme::Tokens;
 
 pub const MIN_WIDTH: f32 = 280.0;
 pub const MAX_WIDTH: f32 = 760.0;
@@ -240,7 +241,7 @@ pub(crate) fn finish_shared(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// Existing Assistant controls and conversation, inside the shared host's body.
-pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
+pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow) {
     let rect = ui.max_rect().intersect(ui.clip_rect());
     if !shown(app) || !app.agent_chat.open || !rect.is_finite() || !rect.is_positive() {
         return;
@@ -248,7 +249,7 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.agent_chat.panel_rect = Some(rect);
     app.agent_chat.drop_rect = Some(rect);
     crate::scenario::publish_rect("agent_chat:panel", rect);
-    ui_kit::scope(ui, |ui| content(app, ui));
+    ui_kit::scope(ui, |ui| content(app, ui, flow));
 }
 
 /// Horizontal room reserved before the history and browser when Assistant is on the left.
@@ -890,7 +891,7 @@ fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response, left: boo
             zone.center(),
             Align2::CENTER_CENTER,
             tr(if to_left { "ui.agent_chat_dock_left" } else { "ui.agent_chat_dock_right" }),
-            egui::FontId::proportional(crate::theme::Tokens::get().font_heading),
+            egui::FontId::proportional(solidcraft_theme::Tokens::get().font_heading),
             t.text,
         );
     }
@@ -904,10 +905,12 @@ fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response, left: boo
 
 fn body(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
     header(app, ui, left);
-    content(app, ui);
+    content(app, ui, Flow::Tall);
 }
 
-fn content(app: &mut SolveApp, ui: &mut egui::Ui) {
+fn content(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow) {
+    #[cfg(target_arch = "wasm32")]
+    let _ = flow;
     #[cfg(not(target_arch = "wasm32"))]
     if !crate::panel_runtime::shared_content_measurement(ui.ctx()) {
         ui_kit::assistant_controls(ui, |ui| switcher(app, ui));
@@ -917,17 +920,61 @@ fn content(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui.label(tr("ui.agent_chat_desktop_only"));
     }
     #[cfg(not(target_arch = "wasm32"))]
-    desktop_body(app, ui);
+    desktop_body(app, ui, flow);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
+fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow) {
     let top = ui.cursor().top();
     let shared = crate::panel_runtime::shared_content_measurement(ui.ctx());
     if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
         refresh(app, ui.ctx());
     }
     let state = app.agent_chat.state();
+    let bounds = ui.available_rect_before_wrap();
+    let gap = Tokens::get().space_8;
+    // Compact wide cards keep the existing stack until both regions fit.
+    let wide = shared && flow == Flow::Wide && bounds.width() >= MIN_WIDTH * 2.0 + gap;
+    let (interaction_bounds, transcript_bounds) = if wide {
+        let width = (bounds.width() - gap) / 2.0;
+        let left = Rect::from_min_size(bounds.min, vec2(width, bounds.height()));
+        let right = Rect::from_min_max(pos2(bounds.right() - width, bounds.top()), bounds.max);
+        if crate::i18n::panel_direction(&app.preferences.language) == solidcraft_engine::panels::Direction::Rtl {
+            (left, Some(right))
+        } else {
+            (right, Some(left))
+        }
+    } else {
+        (bounds, None)
+    };
+    let root = ui.scope_id();
+    // Orientation changes rectangles, never the retained region identities.
+    let mut interaction = shared.then(|| {
+        let mut child = ui.new_child(egui::UiBuilder::new().scope_id(root.with("assistant-interaction")).max_rect(interaction_bounds));
+        child.set_clip_rect(ui.clip_rect().intersect(interaction_bounds));
+        child
+    });
+    let (top_height, outcome, remaining) = {
+        let column = interaction.as_mut().unwrap_or(&mut *ui);
+        let top_height = top_controls(app, column, state, shared);
+        let outcome = composer(app, column, state);
+        (top_height, outcome, column.available_rect_before_wrap())
+    };
+    let mut transcript = shared.then(|| {
+        let bounds = transcript_bounds.unwrap_or(remaining);
+        let mut child = ui.new_child(egui::UiBuilder::new().scope_id(root.with("assistant-transcript")).max_rect(bounds));
+        child.set_clip_rect(ui.clip_rect().intersect(bounds));
+        child
+    });
+    let transcript_height = transcript_body(app, transcript.as_mut().unwrap_or(&mut *ui));
+    let interaction_height = top_height + outcome.height;
+    let height = if wide { interaction_height.max(transcript_height) } else { interaction_height + transcript_height };
+    crate::panel_runtime::report_content_extent(ui, top, height, false);
+    finish_composer(app, ui.ctx(), outcome);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn new_chat_confirmation(app: &mut SolveApp, ui: &mut egui::Ui) {
     if app.agent_chat.confirm_new {
         ui_kit::scope(ui, |ui| {
             inset(ui, |ui| {
@@ -935,7 +982,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::text(ui, tr("ui.agent_chat_new_confirm"), ui_kit::Text::Report("new_chat", false));
                 ui.horizontal(|ui| {
                     let yes = ui_kit::button(ui, tr("ui.agent_chat_new"), ui_kit::Button::Normal);
-                    crate::scenario::publish_handle("agent_chat:new_confirm", yes.rect.center());
+                    crate::scenario::publish_target("agent_chat:new_confirm", yes.rect);
                     if yes.clicked() {
                         new_chat(app);
                     }
@@ -945,6 +992,23 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn top_controls(app: &mut SolveApp, ui: &mut egui::Ui, state: State, shared: bool) -> f32 {
+    let top = ui.cursor().top();
+    let reveal_confirmation = shared && {
+        let id = ui.scope_id().with("assistant-confirm-visible");
+        let visible = app.agent_chat.confirm_new;
+        ui.data_mut(|data| {
+            let previous = data.get_temp::<bool>(id).unwrap_or(false);
+            data.insert_temp(id, visible);
+            visible && !previous
+        })
+    };
+    if !shared {
+        new_chat_confirmation(app, ui);
     }
     // Shared top controls must yield scroll space to the pinned composer, including
     // when discovery lists several agents or a long message grows the editor.
@@ -956,24 +1020,41 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         ui.available_height() / 3.0
     };
-    let picker = egui::ScrollArea::vertical()
+    let provider_scroll = egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_picker_scroll")
         .min_scrolled_height(0.0)
         .max_height(picker_max)
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            if shared {
-                ui_kit::assistant_controls(ui, |ui| switcher(app, ui));
-            }
-            picker(app, ui);
-            if shared && state == State::NeedsAuth {
-                inset(ui, |ui| auth_box(app, ui));
-            }
-        });
+        .auto_shrink([false, true]);
+    let provider_scroll = if reveal_confirmation { provider_scroll.vertical_scroll_offset(0.0) } else { provider_scroll };
+    let picker = provider_scroll.show(ui, |ui| {
+        crate::scenario::publish_rect("agent_chat:providers", ui.clip_rect());
+        if shared {
+            new_chat_confirmation(app, ui);
+            ui_kit::assistant_controls(ui, |ui| switcher(app, ui));
+        }
+        picker(app, ui);
+        if shared && state == State::NeedsAuth {
+            inset(ui, |ui| auth_box(app, ui));
+        }
+    });
     if !shared && state == State::NeedsAuth {
         inset(ui, |ui| auth_box(app, ui));
     }
-    let top_height = ui.cursor().top() - top - picker.inner_rect.height().min(picker.content_size.y) + picker.content_size.y;
+    ui.cursor().top() - top - picker.inner_rect.height().min(picker.content_size.y) + picker.content_size.y
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ComposerOutcome {
+    height: f32,
+    send_clicked: bool,
+    stop_clicked: bool,
+    enter: bool,
+    steer: bool,
+    esc: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State) -> ComposerOutcome {
     // The input sits at the bottom of the panel and grows upwards: a long message makes its box
     // taller up to `edit_max`, then it scrolls, and the conversation takes what is left above. It
     // is a panel of its own at the bottom, as high as its content this frame, so the buttons under
@@ -1148,6 +1229,11 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     if pick_clicked {
         start_pick(app);
     }
+    ComposerOutcome { height: composer.inner, send_clicked, stop_clicked, enter, steer, esc }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn transcript_body(app: &mut SolveApp, ui: &mut egui::Ui) -> f32 {
     let conversation = egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_scroll")
         .min_scrolled_height(0.0)
@@ -1163,7 +1249,12 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             scroll_while_selecting(ui);
         });
     crate::scenario::publish_rect("agent_chat:conversation", conversation.inner_rect);
-    crate::panel_runtime::report_content_extent(ui, top, top_height + composer.inner + conversation.content_size.y, false);
+    conversation.content_size.y
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn finish_composer(app: &mut SolveApp, ctx: &egui::Context, outcome: ComposerOutcome) {
+    let ComposerOutcome { send_clicked, stop_clicked, enter, steer, esc, .. } = outcome;
     if esc || stop_clicked {
         cancel(app);
     }
@@ -1174,13 +1265,13 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Enter waits with the button.
     } else if (send_clicked || enter || steer) && something {
         let text = std::mem::take(&mut app.agent_chat.input).trim_end_matches('\n').to_string();
-        send(app, ui.ctx(), text);
+        send(app, ctx, text);
         if steer {
-            send_now(app, ui.ctx());
+            send_now(app, ctx);
         }
     } else if steer {
         // Nothing typed: Ctrl+Enter sends what is already queued.
-        send_now(app, ui.ctx());
+        send_now(app, ctx);
     }
 }
 
@@ -1329,7 +1420,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     });
     if let Some(a) = &app.agent_chat.auth_status {
-        ui.label(RichText::new(a).color(t.text_dim).size(crate::theme::Tokens::get().font_small));
+        ui.label(RichText::new(a).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_small));
     }
 }
 
@@ -1707,7 +1798,7 @@ fn auth_box(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::text(ui, tr("ui.agent_chat_auth_none"), ui_kit::Text::Note("auth_none"));
         }
         for m in methods {
-            ui.add_space(crate::theme::Tokens::get().space_4);
+            ui.add_space(solidcraft_theme::Tokens::get().space_4);
             let desc = m.description.trim();
             ui_kit::text(
                 ui,
@@ -1737,7 +1828,7 @@ fn auth_box(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         }
-        ui.add_space(crate::theme::Tokens::get().space_4);
+        ui.add_space(solidcraft_theme::Tokens::get().space_4);
         if ui_kit::button(ui, tr("ui.agent_chat_auth_retry"), ui_kit::Button::Normal).clicked() {
             connect(app, ui.ctx());
         }
@@ -1985,9 +2076,9 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             Item::Changes { steps, doc, undone } => {
                 ui.horizontal(|ui| {
                     let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
-                    ui.label(RichText::new(text).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
+                    ui.label(RichText::new(text).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
                     if *undone {
-                        ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
+                        ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
                     } else if Arc::ptr_eq(doc, &current_doc) {
                         let b =
                             ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.ai_undo_tip"));
@@ -2024,7 +2115,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 let tag = if stopped && !busy { "ui.agent_chat_queued_stopped" } else { "ui.agent_chat_queued" };
-                ui.label(RichText::new(tr(tag)).color(t.accent).semibold().size(crate::theme::Tokens::get().font_small));
+                ui.label(RichText::new(tr(tag)).color(t.accent).semibold().size(solidcraft_theme::Tokens::get().font_small));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let x = ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr("ui.agent_chat_remove"));
                     crate::scenario::publish_handle(&format!("agent_chat:pending_remove:{n}"), x.rect.center());
@@ -2059,7 +2150,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                         super::markdown_view::selectable(ui, egui::Label::new(RichText::new(&p.text).color(t.text)).wrap());
                     }
                     if p.image {
-                        ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(crate::theme::Tokens::get().font_small));
+                        ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_small));
                     }
                     context_chips(ui, &p.context, false);
                     files_line(ui, p.files.iter().map(|f| f.name.as_str()));
@@ -2274,7 +2365,7 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
                             r.center(),
                             Align2::CENTER_CENTER,
                             f.mark(),
-                            egui::FontId::proportional(crate::theme::Tokens::get().font_micro),
+                            egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro),
                             color,
                         );
                         r.width()
@@ -2533,10 +2624,10 @@ mod tests {
     #[test]
     fn assistant_header_and_composer_keep_actions_inside_each_panel_width() {
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             for width in [280.0, 440.0, 760.0] {
                 let ctx = crate::fonts::test_context();
-                crate::theme::apply(&ctx);
+                solidcraft_theme::apply(&ctx);
                 let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
                 app.agent_chat.detection = Some(discover::Detection::default());
                 app.agent_chat.picking = Some(false);
@@ -2550,7 +2641,7 @@ mod tests {
                         ui.set_width(width);
                         ui_kit::scope(ui, |ui| {
                             header(&mut app, ui, false);
-                            desktop_body(&mut app, ui);
+                            desktop_body(&mut app, ui, Flow::Tall);
                         });
                     });
                     output.textures_delta.clear();

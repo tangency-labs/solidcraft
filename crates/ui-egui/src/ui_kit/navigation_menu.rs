@@ -1,8 +1,9 @@
 //! Popup and tooltip skin from the approved navigation boards.
 use super::{Container, Surface, navigation::*};
+use crate::icons;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{icons, theme::Tokens};
 use egui::{Align2, FontId, Rect, Response, Sense, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) fn navigation_popup_frame() -> egui::Frame {
     Container::menu_frame().inner_margin(egui::Margin::same(NAV_POPUP_PADDING))
@@ -59,7 +60,7 @@ impl<'a> NavigationMenuRow<'a> {
                 Rect::from_center_size(pos2(rect.left() + NAV_MENU_INSET + NAV_MENU_ICON / 2.0, rect.center().y), vec2(NAV_MENU_ICON, NAV_MENU_ICON));
             icons::paint_ink(ui.painter(), icon, self.icon, if self.selected { ink } else { t.form_dim });
         }
-        let font = if self.selected { crate::fonts::semibold(NAV_TEXT) } else { FontId::proportional(NAV_TEXT) };
+        let font = if self.selected { crate::ui_kit::type_face::semibold(NAV_TEXT) } else { FontId::proportional(NAV_TEXT) };
         // The label ends before the detail and the check or chevron: one that doesn't fit is cut
         // with an ellipsis and shown whole on hover, as a long name in a list is (#8700).
         let mut end = rect.right() - NAV_MENU_INSET - if self.selected || self.submenu { t.space_14 + t.space_4 } else { 0.0 };
@@ -96,7 +97,7 @@ impl<'a> NavigationMenuRow<'a> {
 pub(crate) fn navigation_menu_heading(ui: &mut Ui, title: &str) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), NAV_MENU_HEADING), Sense::hover());
-    let mut format = egui::TextFormat::simple(crate::fonts::semibold(NAV_HEADING_TEXT), t.form_dim);
+    let mut format = egui::TextFormat::simple(crate::ui_kit::type_face::semibold(NAV_HEADING_TEXT), t.form_dim);
     format.extra_letter_spacing = NAV_HEADING_TEXT * NAV_HEADING_TRACKING;
     let galley = ui.painter().layout_job(egui::text::LayoutJob::single_section(title.to_uppercase(), format));
     ui.painter().galley(rect.min + vec2(t.space_8, t.space_6), galley, t.form_dim);
@@ -140,7 +141,7 @@ pub(crate) fn navigation_tooltip(response: &Response, along: Rect, edge: Navigat
                 ui.spacing_mut().item_spacing.x = t.space_8;
                 ui.spacing_mut().interact_size.y = 0.0;
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(label).font(crate::fonts::medium(t.font_body)).color(t.nav_tip_ink));
+                    ui.label(egui::RichText::new(label).font(crate::ui_kit::type_face::medium(t.font_body)).color(t.nav_tip_ink));
                     if let Some(key) = shortcut {
                         egui::Frame::NONE
                             .stroke(egui::Stroke::new(NAV_BORDER, t.nav_tip_key_border))

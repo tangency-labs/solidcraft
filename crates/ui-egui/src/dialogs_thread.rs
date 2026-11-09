@@ -767,7 +767,7 @@ mod contribution_tests {
         for label in ["Profile", "Size", "Nominal diameter", "Pitch", "Designation", "Tap drill diameter"] {
             let row = crate::scenario::rect_of(&format!("dialog:row:{label}")).unwrap();
             let control = crate::scenario::rect_of(&format!("dialog:control:{label}")).unwrap();
-            assert_eq!(row.height(), crate::theme::Tokens::get().control_height, "{label}");
+            assert_eq!(row.height(), solidcraft_theme::Tokens::get().control_height, "{label}");
             assert!(card.contains_rect(row) && row.contains_rect(control), "{label}: {row:?} {control:?} outside {card:?}");
         }
     }

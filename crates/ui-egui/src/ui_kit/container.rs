@@ -2,9 +2,9 @@
 //! A surface declares its purpose; the shell supplies the layout once per frame. Never infer
 //! floating/docked presentation from a panel name or keep a second layout preference here.
 use crate::frame::Side;
-use crate::theme::Tokens;
 use egui::{Color32, Context, Frame, Id, Stroke, WidgetText};
 use serde::{Deserialize, Serialize};
+use solidcraft_theme::Tokens;
 
 pub(super) type Background = fn(&egui::Painter, Frame, egui::Rect, egui::Shape) -> egui::Shape;
 
@@ -1075,7 +1075,7 @@ impl Container {
     /// popup in both layouts; only the universal module constructs the egui popup frame.
     pub fn popup_frame(style: &egui::Style) -> Frame {
         let mut frame = Frame::popup(style);
-        frame.stroke = Tokens::get().borders.stroke(crate::theme::BorderRole::Primary, frame.stroke);
+        frame.stroke = Tokens::get().borders.stroke(solidcraft_theme::BorderRole::Primary, frame.stroke);
         frame
     }
 

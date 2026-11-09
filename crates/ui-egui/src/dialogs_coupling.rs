@@ -16,7 +16,7 @@ use crate::SolveApp;
 use crate::dialogs::{field, form_row};
 use crate::dialogs_assembly::Asm;
 use crate::selection::{EDGES, FACES, SelInput};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// What a round-face input takes: a face, or an edge of one.
 const ROUND: u16 = FACES | EDGES;

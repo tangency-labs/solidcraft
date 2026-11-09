@@ -404,7 +404,7 @@ fn finish_editing_is_a_model_tab_button_only_while_a_part_is_edited_in_place() {
     // Under a press Finish Edit stays plain, as Finish Sketch does; the release finishes.
     let button = crate::scenario::rect_of("button:component.finish_edit").unwrap();
     h.frame_with(crate::test_support::pointer(button.center(), true));
-    let soft = crate::theme::Tokens::get().accent_soft;
+    let soft = solidcraft_theme::Tokens::get().accent_soft;
     let lit = h.shapes.iter().any(|s| match &s.shape {
         egui::Shape::Rect(r) => r.rect == button && r.fill == soft,
         egui::Shape::Vec(v) => v.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.rect == button && r.fill == soft)),

@@ -1,10 +1,10 @@
 //! Document RGB and optional separate opacity editing. Interface paint uses tokens; gradients are colour data.
 use super::recent_colors::{MAX_RECENT_COLORS, recent_colors, remember_color};
 use super::{layout::label, metrics::dimension};
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use egui::{Color32, Response, Sense, Ui, ecolor::HsvaGamma, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 fn publish(key: &str, response: &Response) {
     solidcraft_ui_registry::publish_rect(key, response.rect);
@@ -22,7 +22,7 @@ pub(crate) fn linear_color_field(ui: &mut Ui, rgb: &mut [f64; 3], maximum: f64) 
         let color = Color32::from(egui::Rgba::from_rgb(preview[0], preview[1], preview[2]));
         let mut bytes = [color.r(), color.g(), color.b()];
         if color_field(ui, &mut bytes).changed() {
-            let linear = egui::Rgba::from(crate::theme::srgb(bytes.map(|c| f32::from(c) / 255.0))).to_array();
+            let linear = egui::Rgba::from(solidcraft_theme::srgb(bytes.map(|c| f32::from(c) / 255.0))).to_array();
             for (channel, value) in rgb.iter_mut().zip(linear) {
                 *channel = f64::from(value);
             }
@@ -70,7 +70,7 @@ fn color_field_inner(ui: &mut Ui, rgb: &mut [u8; 3], opacity: Option<&mut f64>, 
     ui.painter().rect(
         rect,
         t.control_radius,
-        crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0)),
+        solidcraft_theme::srgb(rgb.map(|c| f32::from(c) / 255.0)),
         t.control_border_stroke(t.control_border),
         egui::StrokeKind::Inside,
     );
@@ -113,7 +113,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
     let t = Tokens::get();
     ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
     let id = ui.scope_id().with("color_hsv");
-    let color = crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0));
+    let color = solidcraft_theme::srgb(rgb.map(|c| f32::from(c) / 255.0));
     // Retain hue for black/grey, and sub-byte precision while dragging.
     let (saved, hsv) = ui.ctx().data(|d| d.get_temp::<([u8; 3], HsvaGamma)>(id)).unwrap_or((*rgb, color.into()));
     let mut hsv = if saved == *rgb { hsv } else { color.into() };
@@ -198,7 +198,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                     hex.alpha = alpha.is_some();
                     hex.set(*rgb, opacity.as_deref().copied());
                     if *rgb != before_rgb {
-                        hsv = crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0)).into();
+                        hsv = solidcraft_theme::srgb(rgb.map(|c| f32::from(c) / 255.0)).into();
                     }
                 }
             });
@@ -225,7 +225,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
             } else {
                 channels.map(|v| v.round() as u8)
             };
-            hsv = crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0)).into();
+            hsv = solidcraft_theme::srgb(rgb.map(|c| f32::from(c) / 255.0)).into();
         }
         // Only graphical edits convert HSV back to RGB. Typed byte values stay exact.
         let mut graphical_edit = false;
@@ -281,7 +281,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         ui.painter().rect(
             strip,
             t.control_radius,
-            crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0)),
+            solidcraft_theme::srgb(rgb.map(|c| f32::from(c) / 255.0)),
             t.control_border_stroke(t.control_border),
             egui::StrokeKind::Inside,
         );
@@ -291,7 +291,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
             *rgb = picked;
             picked_recent = true;
             accepted_mixed = mixed;
-            hsv = crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0)).into();
+            hsv = solidcraft_theme::srgb(rgb.map(|c| f32::from(c) / 255.0)).into();
             hex.set(*rgb, opacity.as_deref().copied());
         }
     });
@@ -519,7 +519,13 @@ fn recent_row(ui: &mut Ui, width: f32) -> Option<[u8; 3]> {
             };
             let response = ui.interact(rect, ui.scope_id().with(("color_recent", slot)), Sense::click());
             let stroke = if response.hovered() { t.control_border_stroke(t.form_ink) } else { t.control_border_stroke(t.control_border) };
-            ui.painter().rect(rect, t.control_radius, crate::theme::srgb([r, g, b].map(|c| f32::from(c) / 255.0)), stroke, egui::StrokeKind::Inside);
+            ui.painter().rect(
+                rect,
+                t.control_radius,
+                solidcraft_theme::srgb([r, g, b].map(|c| f32::from(c) / 255.0)),
+                stroke,
+                egui::StrokeKind::Inside,
+            );
             let hex = format!("#{r:02x}{g:02x}{b:02x}");
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &hex));
             publish(&format!("color:recent:{slot}"), &response);

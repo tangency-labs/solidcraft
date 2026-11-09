@@ -109,7 +109,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
     f.shell_inner_shell_of_statuses = true;
-    f.local_operation_offset_status = true;
     f.local_operation_refuses_loose_tangent_edges = true;
     f.torus_major_radius_from_origin = true;
     f.fillet_corner_sphere_from_four_arcs = true;
@@ -161,7 +160,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.shell_empty_cavity_fails = true;
     f.fillet_refuse_ball_not_fitting = true;
     f.boolean_lists_virtual_surface_copies = true;
-    f.sphere_small_circle_not_touching = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
     f.ssi_singular_start_inside_direction = true;
@@ -353,9 +351,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.fillet_surface_plane_curve_on_plane_equation = true;
     f.fillet_gn_section_generator = true;
-    f.face_trim_curves_kept_where_exact = true;
-    f.swap_uv_keeps_analytic_definition = true;
-    f.face_shrink_bound_on_knot = true;
     f.offset_updates_result_tolerances = true;
     f.cone_iso_circle_at_axial_height = true;
     f.boolean_coincident_strip_drops_crossing = true;

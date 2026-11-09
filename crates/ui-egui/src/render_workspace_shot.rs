@@ -1,9 +1,10 @@
 //! Standalone Shot editor and transient frame composition. Commands own every edit.
 use super::{RenderSelection, Stage, inspector};
-use crate::{SolveApp, theme::Tokens, ui_kit};
+use crate::{SolveApp, ui_kit};
 use egui::{Rect, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::render_settings::{RenderSettings, RenderSetup};
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Frame {

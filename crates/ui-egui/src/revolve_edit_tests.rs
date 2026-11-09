@@ -254,7 +254,7 @@ fn sketch_axis_cancel_restores_original_document_and_history() {
 fn only_the_active_selection_field_looks_active() {
     let mut h = make(Harness::new(), json!("Y"));
     open(&mut h);
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let border = |h: &Harness, label: &str| {
         let field = crate::scenario::rect_of(&format!("dialog:field:{label}")).unwrap();
         h.shapes
