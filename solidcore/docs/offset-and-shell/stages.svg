@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="440" viewBox="0 0 1000 440">
+  <title>stages</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L1000 0 L1000 440 L0 440 Z" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 40 45)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Shell, offset and thicken: the stages</tspan></text>
+    <text transform="matrix(1 0 0 1 40 90)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">The one construction (offset/construction.rs)</tspan></text>
+    <path d="M40 105 L210 105 L210 190 L40 190 Z" fill="#dce9f5" stroke="#555555" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 50 130)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">S1 face offsets</tspan></text>
+    <text transform="matrix(1 0 0 1 50 153)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">exact or certified</tspan></text>
+    <text transform="matrix(1 0 0 1 50 173)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">built, opt-in</tspan></text>
+    <g>
+      <g>
+        <path d="M213 146.25 L226.5 146.25 C226.914 146.25 227.25 146.586 227.25 147 C227.25 147.414 226.914 147.75 226.5 147.75 L213 147.75 C212.586 147.75 212.25 147.414 212.25 147 C212.25 146.586 212.586 146.25 213 146.25" fill="#000000"/>
+        <path d="M229.5 147 L223.5 150 L223.5 144 Z" fill="#000000"/>
+      </g>
+    </g>
+    <path d="M232.5 105 L402.5 105 L402.5 190 L232.5 190 Z" fill="#f0f0f0" stroke="#555555" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 242.5 130)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">S2 mitres</tspan></text>
+    <text transform="matrix(1 0 0 1 242.5 153)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">with the reach</tspan></text>
+    <text transform="matrix(1 0 0 1 242.5 173)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">open</tspan></text>
+    <g>
+      <g>
+        <path d="M405.5 146.25 L419 146.25 C419.414 146.25 419.75 146.586 419.75 147 C419.75 147.414 419.414 147.75 419 147.75 L405.5 147.75 C405.086 147.75 404.75 147.414 404.75 147 C404.75 146.586 405.086 146.25 405.5 146.25" fill="#000000"/>
+        <path d="M422 147 L416 150 L416 144 Z" fill="#000000"/>
+      </g>
+    </g>
+    <path d="M425 105 L595 105 L595 190 L425 190 Z" fill="#f0f0f0" stroke="#555555" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 435 130)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">S3 arrangement</tspan></text>
+    <text transform="matrix(1 0 0 1 435 153)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">of all the sheets</tspan></text>
+    <text transform="matrix(1 0 0 1 435 173)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">open</tspan></text>
+    <g>
+      <g>
+        <path d="M598 146.25 L611.5 146.25 C611.914 146.25 612.25 146.586 612.25 147 C612.25 147.414 611.914 147.75 611.5 147.75 L598 147.75 C597.586 147.75 597.25 147.414 597.25 147 C597.25 146.586 597.586 146.25 598 146.25" fill="#000000"/>
+        <path d="M614.5 147 L608.5 150 L608.5 144 Z" fill="#000000"/>
+      </g>
+    </g>
+    <path d="M617.5 105 L787.5 105 L787.5 190 L617.5 190 Z" fill="#f0f0f0" stroke="#555555" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 627.5 130)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">S4 cavity rule</tspan></text>
+    <text transform="matrix(1 0 0 1 627.5 153)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">winding numbers</tspan></text>
+    <text transform="matrix(1 0 0 1 627.5 173)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">open</tspan></text>
+    <g>
+      <g>
+        <path d="M790.5 146.25 L804 146.25 C804.414 146.25 804.75 146.586 804.75 147 C804.75 147.414 804.414 147.75 804 147.75 L790.5 147.75 C790.086 147.75 789.75 147.414 789.75 147 C789.75 146.586 790.086 146.25 790.5 146.25" fill="#000000"/>
+        <path d="M807 147 L801 150 L801 144 Z" fill="#000000"/>
+      </g>
+    </g>
+    <path d="M810 105 L980 105 L980 190 L810 190 Z" fill="#f0f0f0" stroke="#555555" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 820 130)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">S5 extraction</tspan></text>
+    <text transform="matrix(1 0 0 1 820 153)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">the result&apos;s faces</tspan></text>
+    <text transform="matrix(1 0 0 1 820 173)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">open</tspan></text>
+    <text transform="matrix(1 0 0 1 40 255)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">Today&apos;s executive (offset_executive), which runs S1 under shell_one_construction</tspan></text>
+    <path d="M40 270 L210 270 L210 355 L40 355 Z" fill="#f0f0f0" stroke="#555555" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 50 295)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">face offsets</tspan></text>
+    <text transform="matrix(1 0 0 1 50 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">analytic kinds exact,</tspan></text>
+    <text transform="matrix(1 0 0 1 50 338)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">else S + d n</tspan></text>
+    <g>
+      <g>
+        <path d="M213 311.25 L226.5 311.25 C226.914 311.25 227.25 311.586 227.25 312 C227.25 312.414 226.914 312.75 226.5 312.75 L213 312.75 C212.586 312.75 212.25 312.414 212.25 312 C212.25 311.586 212.586 311.25 213 311.25" fill="#000000"/>
+        <path d="M229.5 312 L223.5 315 L223.5 309 Z" fill="#000000"/>
+      </g>
+    </g>
+    <path d="M232.5 270 L402.5 270 L402.5 355 L232.5 355 Z" fill="#f0f0f0" stroke="#555555" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 242.5 295)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">mitres</tspan></text>
+    <text transform="matrix(1 0 0 1 242.5 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">extended by the reach,</tspan></text>
+    <text transform="matrix(1 0 0 1 242.5 338)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">neighbours intersected</tspan></text>
+    <g>
+      <g>
+        <path d="M405.5 311.25 L419 311.25 C419.414 311.25 419.75 311.586 419.75 312 C419.75 312.414 419.414 312.75 419 312.75 L405.5 312.75 C405.086 312.75 404.75 312.414 404.75 312 C404.75 311.586 405.086 311.25 405.5 311.25" fill="#000000"/>
+        <path d="M422 312 L416 315 L416 309 Z" fill="#000000"/>
+      </g>
+    </g>
+    <path d="M425 270 L595 270 L595 355 L425 355 Z" fill="#f0f0f0" stroke="#555555" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 435 295)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">merge</tspan></text>
+    <text transform="matrix(1 0 0 1 435 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">one body; regions</tspan></text>
+    <text transform="matrix(1 0 0 1 435 338)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">kept or dropped</tspan></text>
+    <g>
+      <g>
+        <path d="M598 311.25 L611.5 311.25 C611.914 311.25 612.25 311.586 612.25 312 C612.25 312.414 611.914 312.75 611.5 312.75 L598 312.75 C597.586 312.75 597.25 312.414 597.25 312 C597.25 311.586 597.586 311.25 598 311.25" fill="#000000"/>
+        <path d="M614.5 312 L608.5 315 L608.5 309 Z" fill="#000000"/>
+      </g>
+    </g>
+    <path d="M617.5 270 L787.5 270 L787.5 355 L617.5 355 Z" fill="#f0f0f0" stroke="#555555" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 627.5 295)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">implicit offsets</tspan></text>
+    <text transform="matrix(1 0 0 1 627.5 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">S1: certified bicubic;</tspan></text>
+    <text transform="matrix(1 0 0 1 627.5 338)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">else a sampled fit</tspan></text>
+    <g>
+      <g>
+        <path d="M790.5 311.25 L804 311.25 C804.414 311.25 804.75 311.586 804.75 312 C804.75 312.414 804.414 312.75 804 312.75 L790.5 312.75 C790.086 312.75 789.75 312.414 789.75 312 C789.75 311.586 790.086 311.25 790.5 311.25" fill="#000000"/>
+        <path d="M807 312 L801 315 L801 309 Z" fill="#000000"/>
+      </g>
+    </g>
+    <path d="M810 270 L980 270 L980 355 L810 355 Z" fill="#f0f0f0" stroke="#555555" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 820 295)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">shell</tspan></text>
+    <text transform="matrix(1 0 0 1 820 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">difference with input;</tspan></text>
+    <text transform="matrix(1 0 0 1 820 338)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">thicken: merge, stitch</tspan></text>
+    <text transform="matrix(1 0 0 1 40 395)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Row 2 is what runs. A shell of a solid ends in a boolean difference with the input at the input&apos;s tolerance;</tspan></text>
+    <text transform="matrix(1 0 0 1 40 413)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Row 1 is the design that replaces it; S2 to S5 are not built.</tspan></text>
+  </g>
+</svg>

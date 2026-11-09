@@ -9,6 +9,8 @@ pub struct PreparedPrimitive {
     pub body_index: usize,
     /// Authoritative captured mesh face tag; never inferred from a plane.
     pub face: Option<u32>,
+    /// Explicit scalar face appearance suppresses inherited body maps.
+    pub has_face_override: bool,
     pub vertices: [Vec3; 3],
     pub normals: [Vec3; 3],
     pub surface: OpaqueSurface,

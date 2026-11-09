@@ -1,0 +1,268 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/8472",
+ "pr": "https://github.com/tangency-labs/solidcore/pull/1854",
+ "test": "none: the issue is open and has no fixing PR (SolidCraft's kernel work is paused, #3992), so `pr` points at the PR that adds this fixture, as the loader requires a /pull/ URL; the issue reproduces it (a Combine, Operation = Join) and its triage comment; the numbers here are analytic",
+ "summary": "Joining two crossing cylinders fails on SolidCraft's kernel with 'boolean Union: kernel internal error: boolean: tolerance must be no less than 1e-6' (reproduced on 0.25.1 at main 18fe82ab and on 0.26.0): cylinder A (base (27.5, 5, 17.5), axis +X, radius 3.75, height 5) and cylinder B (base (27.5, 2.5, 2.5), axis +Z, radius 6.25, height 17.5). Join in both orders and Cut A - B fail; Cut B - A and Intersect work. It fails only at A's radius 3.75: there A's side reaches y = 8.75, the largest y of B's side, and the two touch where A's start cap (x = 27.5) crosses B's axis. The volumes are exact for true cylinders (the issue's 2185.83 comes from the kernel's faceted result): A and B are closed form, the intersection is an integral evaluated by Gauss-Legendre quadrature and cross-checked on a grid. The tolerance is 0.01 mm^3, as in the other boolean cases.",
+ "cases": [
+  {
+   "name": "join_a_b",
+   "note": "#8472: the join as the issue made it (A united with B).",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "a",
+     "origin": [
+      27.5,
+      5,
+      17.5
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 3.75,
+     "height": 5.0
+    },
+    {
+     "op": "cylinder",
+     "id": "b",
+     "origin": [
+      27.5,
+      2.5,
+      2.5
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 6.25,
+     "height": 17.5
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2186.078922533,
+     "tol": 0.01,
+     "formula": "V = V(A) + V(B) - I; A = pi*3.75^2*5, B = pi*6.25^2*17.5; I = int_{27.5}^{32.5} [ int over y in A's chord and B's strip |y-2.5| <= sqrt(6.25^2-(x-27.5)^2) of (min(17.5+h,20) - (17.5-h)) dy ] dx, h = sqrt(3.75^2-(y-5)^2); Gauss-Legendre (400 nodes in x, 200 per smooth piece in y), cross-checked on a 1400 x 1400 grid (within 2e-4 mm^3)"
+    }
+   }
+  },
+  {
+   "name": "join_b_a",
+   "note": "#8472: the join in the other order, which failed too.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "a",
+     "origin": [
+      27.5,
+      5,
+      17.5
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 3.75,
+     "height": 5.0
+    },
+    {
+     "op": "cylinder",
+     "id": "b",
+     "origin": [
+      27.5,
+      2.5,
+      2.5
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 6.25,
+     "height": 17.5
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "b",
+     "b": "a"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2186.078922533,
+     "tol": 0.01,
+     "formula": "V = V(A) + V(B) - I; A = pi*3.75^2*5, B = pi*6.25^2*17.5; I = int_{27.5}^{32.5} [ int over y in A's chord and B's strip |y-2.5| <= sqrt(6.25^2-(x-27.5)^2) of (min(17.5+h,20) - (17.5-h)) dy ] dx, h = sqrt(3.75^2-(y-5)^2); Gauss-Legendre (400 nodes in x, 200 per smooth piece in y), cross-checked on a 1400 x 1400 grid (within 2e-4 mm^3)"
+    }
+   }
+  },
+  {
+   "name": "cut_a_minus_b",
+   "note": "#8472: A with B cut away, which failed with the same error.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "a",
+     "origin": [
+      27.5,
+      5,
+      17.5
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 3.75,
+     "height": 5.0
+    },
+    {
+     "op": "cylinder",
+     "id": "b",
+     "origin": [
+      27.5,
+      2.5,
+      2.5
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 6.25,
+     "height": 17.5
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 38.505819493,
+     "tol": 0.01,
+     "formula": "V = V(A) - I; A = pi*3.75^2*5, B = pi*6.25^2*17.5; I = int_{27.5}^{32.5} [ int over y in A's chord and B's strip |y-2.5| <= sqrt(6.25^2-(x-27.5)^2) of (min(17.5+h,20) - (17.5-h)) dy ] dx, h = sqrt(3.75^2-(y-5)^2); Gauss-Legendre (400 nodes in x, 200 per smooth piece in y), cross-checked on a 1400 x 1400 grid (within 2e-4 mm^3)"
+    }
+   }
+  },
+  {
+   "name": "cut_b_minus_a",
+   "note": "#8472: B with A cut away, which worked on SolidCraft's kernel.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "a",
+     "origin": [
+      27.5,
+      5,
+      17.5
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 3.75,
+     "height": 5.0
+    },
+    {
+     "op": "cylinder",
+     "id": "b",
+     "origin": [
+      27.5,
+      2.5,
+      2.5
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 6.25,
+     "height": 17.5
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "b",
+     "b": "a"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 1965.185689078,
+     "tol": 0.01,
+     "formula": "V = V(B) - I; A = pi*3.75^2*5, B = pi*6.25^2*17.5; I = int_{27.5}^{32.5} [ int over y in A's chord and B's strip |y-2.5| <= sqrt(6.25^2-(x-27.5)^2) of (min(17.5+h,20) - (17.5-h)) dy ] dx, h = sqrt(3.75^2-(y-5)^2); Gauss-Legendre (400 nodes in x, 200 per smooth piece in y), cross-checked on a 1400 x 1400 grid (within 2e-4 mm^3)"
+    }
+   }
+  },
+  {
+   "name": "intersection_a_b",
+   "note": "#8472: the common part, which worked on SolidCraft's kernel.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "a",
+     "origin": [
+      27.5,
+      5,
+      17.5
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 3.75,
+     "height": 5.0
+    },
+    {
+     "op": "cylinder",
+     "id": "b",
+     "origin": [
+      27.5,
+      2.5,
+      2.5
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 6.25,
+     "height": 17.5
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 182.387413962,
+     "tol": 0.01,
+     "formula": "V = I; A = pi*3.75^2*5, B = pi*6.25^2*17.5; I = int_{27.5}^{32.5} [ int over y in A's chord and B's strip |y-2.5| <= sqrt(6.25^2-(x-27.5)^2) of (min(17.5+h,20) - (17.5-h)) dy ] dx, h = sqrt(3.75^2-(y-5)^2); Gauss-Legendre (400 nodes in x, 200 per smooth piece in y), cross-checked on a 1400 x 1400 grid (within 2e-4 mm^3)"
+    }
+   }
+  }
+ ]
+}

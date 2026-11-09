@@ -1,0 +1,227 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                10.0,
+                -10.0,
+                -10.0
+              ],
+              "start": [
+                -10.0,
+                -10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                10.0,
+                -10.0
+              ],
+              "start": [
+                10.0,
+                -10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                10.0,
+                -10.0
+              ],
+              "start": [
+                10.0,
+                10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                -10.0,
+                -10.0
+              ],
+              "start": [
+                -10.0,
+                10.0,
+                -10.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                30.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                20.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                30.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                30.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                30.0,
+                10.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                20.0,
+                10.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-inspect-clearance-turned-occurrence",
+  "expected": {
+    "body_count": 3,
+    "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); a block 10x10x10 from (20,0,0); hinge at 90 puts Arm at x -5..5, y 0..40: the gap to the block's face x = 20 is 15",
+    "results": [
+      {
+        "json": {
+          "near": [
+            {
+              "distance_mm": 15.0
+            }
+          ],
+          "overlaps": []
+        },
+        "step": 14
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 9000.0,
+    "what": "inspect.clearance between the arm turned 90 degrees and a grounded block"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 18,
+      "vertices": 24
+    }
+  },
+  "result": [
+    {
+      "body": "BaseBox",
+      "made": "b1"
+    },
+    {
+      "body": "PostBox",
+      "made": "b3"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4000.0,
+      "body_count": 3,
+      "edges": 36,
+      "faces": 18,
+      "vertices": 24,
+      "volume_mm3": 9000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "inspect.clearance between the arm turned 90 degrees and a grounded block",
+  "why_not": [
+    "body \"ArmBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

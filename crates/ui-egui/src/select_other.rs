@@ -31,9 +31,9 @@ use solidcraft_engine::sketch::CurveKind;
 use std::hash::{Hash, Hasher};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::tool_modifiers::Held;
 use crate::viewport::{Hit, Proj};
+use solidcraft_theme::Tokens;
 
 /// How long the left button stays down, without moving, before the list opens.
 pub const HOLD_SECS: f64 = 0.5;
@@ -293,7 +293,7 @@ pub(crate) fn curve_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> S
 }
 
 /// "Point (arc 2 centre)": the role it plays in the first curve that uses it.
-fn point_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> String {
+pub(crate) fn point_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> String {
     let Some(pi) = sk.points.iter().position(|p| p.id == id) else { return id.to_string() };
     let role = sk.curves.iter().find_map(|c| {
         let name = format!("{} {}", curve_kind_name(&c.kind).to_lowercase(), id_number(&c.id).unwrap_or(0));
@@ -417,7 +417,7 @@ pub fn close(app: &mut SolveApp) {
     if let Some(p) = app.viewport.select_other.popup.take()
         && p.lit_body
     {
-        app.viewport.hover_bodies.clear();
+        crate::semantic_content::set_external_body_hover(app, Vec::new());
     }
 }
 
@@ -557,12 +557,12 @@ pub fn hover_override(app: &mut SolveApp) {
     app.viewport.hover = if body.is_some() { None } else { row.map(|r| r.hit.clone()) };
     match body {
         Some(b) => {
-            app.viewport.hover_bodies = vec![b];
             p.lit_body = true;
+            crate::semantic_content::set_external_body_hover(app, vec![b]);
         }
         None if p.lit_body => {
-            app.viewport.hover_bodies.clear();
             p.lit_body = false;
+            crate::semantic_content::set_external_body_hover(app, Vec::new());
         }
         None => {}
     }
@@ -630,7 +630,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut picked = None;
     let screen = ctx.content_rect();
     let margins = crate::ui_kit::Menu::frame().total_margin().sum();
-    let width = crate::context_menu::LIST_W.min(screen.width());
+    let width = crate::ui_kit::LIST_W.min(screen.width());
     let w = (width - margins.x).max(0.0);
     let header = 20.0;
     let gap = vec2(12.0, 12.0);
@@ -640,7 +640,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let scroll_height = (screen.height() - overhead).max(0.0);
     let size = vec2(width, overhead + rows_height.min(scroll_height));
     let resp = Container::new(ctx, Surface::Popup)
-        .area(egui::Id::new("sc_select_other"))
+        .area(egui::Id::unique("sc_select_other"))
         .fixed_pos(crate::context_menu::place(at, gap, size, screen))
         .constrain(true)
         .order(egui::Order::Foreground)
@@ -649,13 +649,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ui.set_max_height(size.y);
             crate::ui_kit::Menu::show(ui, width, |ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(w, header), Sense::hover());
-                let title = crate::i18n::tr_label("Select Other").to_uppercase();
+                let title = solidcraft_ui_text::tr_label("Select Other").to_uppercase();
                 let title = if p.total > p.rows.len() { format!("{title} · {} / {}", p.rows.len(), p.total) } else { title };
                 ui.painter().text(
                     pos2(r.left() + 8.0, r.center().y),
                     Align2::LEFT_CENTER,
                     title,
-                    FontId::proportional(crate::theme::Tokens::get().font_panel),
+                    FontId::proportional(solidcraft_theme::Tokens::get().font_panel),
                     t.text_dim,
                 );
                 egui::ScrollArea::vertical().min_scrolled_height(0.0).max_height(scroll_height).show(ui, |ui| {

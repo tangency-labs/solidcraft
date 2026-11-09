@@ -1,0 +1,158 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  6.5429455452638186,
+                  4.60324489808139,
+                  19.46304540426003
+                ],
+                [
+                  6.5429455452638186,
+                  4.60324489808139,
+                  19.46304540426003
+                ]
+              ],
+              "index": 3
+            }
+          ],
+          "points": [
+            [
+              -6.542944606820235,
+              -4.603244429050468,
+              19.463045149388545
+            ]
+          ],
+          "tolerance": 5.968915438369532
+        },
+        "kind": "round",
+        "sizes": [
+          3.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-tee-pipe-r8-into-pipe-r20-r3",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "the ball's centre runs where the cylinders R23 and R11 meet, a quartic with no node: not rational, so the round is fitted (a B-spline within the fillet's tolerance). V0 = the pipes less the branch inside the pipe, integral over the branch's disc of sqrt(400 - y^2): 129767.064584659383; the round adds 62.888321009560, (1/3) of the flux of the position through the boundary of the material the round adds: the round's surface as the ball's circles about the spine from contact to contact, the strips of the faces between the edge and the contact lines, each written out exactly and integrated by Gauss-Legendre quadrature (24 points a panel), the spine written out by the branch's angle, (11 cos f, 11 sin f, sqrt(529 - 121 sin^2 f)).",
+    "source": "analytic",
+    "sources": [],
+    "surface_types": [
+      "bspline",
+      "cylinder",
+      "plane"
+    ],
+    "tolerance": {
+      "rel": 1e-6
+    },
+    "volume_mm3": 129829.95290566895,
+    "what": "the saddle edge of a tee: a branch R8 standing on a pipe R20, rounded r3"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 8,
+      "faces": 6,
+      "vertices": 5
+    }
+  },
+  "records": "cov-fillet-tee-pipe-r8-into-pipe-r20-r3.bodies.json.gz",
+  "result": [
+    {
+      "body": "Tee",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 16086.20830421664,
+      "body_count": 1,
+      "edges": 8,
+      "faces": 6,
+      "vertices": 5,
+      "volume_mm3": 129829.95304169628
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the saddle edge of a tee: a branch R8 standing on a pipe R20, rounded r3",
+  "why_not": []
+}

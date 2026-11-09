@@ -1,7 +1,8 @@
 //! Status heading and constraint meter; Tokens: font_label, text, text_dim, accent, dialog_rule, sketch_accent, spacing.
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{fonts::RichTextExt as _, theme::Tokens};
+use crate::ui_kit::type_face::RichTextExt as _;
 use egui::{RichText, vec2};
+use solidcraft_theme::Tokens;
 
 /// Status content for a named card. `key` is the scenario namespace, `fraction` is clamped.
 pub(crate) struct StatusHeader<'a> {
@@ -37,12 +38,12 @@ pub(crate) fn status_header(ui: &mut egui::Ui, key: &str, name: &str, status: St
             if fraction > 0.0 {
                 ui.painter().rect_filled(egui::Rect::from_min_size(meter.min, vec2(meter.width() * fraction, meter.height())), t.space_3, t.form_ink);
             }
-            crate::scenario::publish_rect(&format!("{key}:meter"), meter);
-            crate::scenario::publish_count(&format!("{key}:constrained_fraction"), f64::from(fraction));
+            solidcraft_ui_registry::publish_rect(&format!("{key}:meter"), meter);
+            solidcraft_ui_registry::publish_count(&format!("{key}:constrained_fraction"), f64::from(fraction));
         })
         .response;
     t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top(), t.dialog_rule);
-    crate::scenario::publish_target(&format!("{key}:status_header"), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("{key}:status_header"), response.rect);
     response
 }
 
@@ -57,8 +58,8 @@ pub(crate) fn progress(ui: &mut egui::Ui, key: &str, fraction: f32) -> egui::Res
     if fraction > 0.0 {
         ui.painter().rect_filled(egui::Rect::from_min_size(bar.min, vec2(bar.width() * fraction, bar.height())), t.space_3, t.form_primary);
     }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ProgressIndicator, ui.is_enabled(), format!("{:.0}%", fraction * 100.0)));
-    crate::scenario::publish_rect(&format!("dialog:progress:{key}"), bar);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ProgressIndicator, ui.is_enabled(), format!("{:.0}%", fraction * 100.0)));
+    solidcraft_ui_registry::publish_rect(&format!("dialog:progress:{key}"), bar);
     response
 }
 
@@ -77,7 +78,7 @@ pub(crate) fn steps(ui: &mut egui::Ui, key: &str, labels: &[&str], current: usiz
             ui.allocate_exact_size(vec2(super::metrics::dimension(ui.available_width()), super::row_height()), egui::Sense::hover());
         let order = i.cmp(&current);
         let (font, ink) = match order {
-            std::cmp::Ordering::Equal => (crate::fonts::semibold(t.font_label), t.form_ink),
+            std::cmp::Ordering::Equal => (crate::ui_kit::type_face::semibold(t.font_label), t.form_ink),
             std::cmp::Ordering::Less => (egui::FontId::proportional(t.font_label), t.form_ink),
             std::cmp::Ordering::Greater => (egui::FontId::proportional(t.font_label), t.form_dim),
         };
@@ -131,9 +132,9 @@ pub(crate) fn steps(ui: &mut egui::Ui, key: &str, labels: &[&str], current: usiz
             std::cmp::Ordering::Equal => "current",
             std::cmp::Ordering::Greater => "next",
         };
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), *label));
-        crate::scenario::publish_rect(&format!("dialog:step:{key}:{i}:{state}"), row);
-        crate::scenario::publish_rect(&format!("dialog:step_mark:{key}:{i}"), slot);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), *label));
+        solidcraft_ui_registry::publish_rect(&format!("dialog:step:{key}:{i}:{state}"), row);
+        solidcraft_ui_registry::publish_rect(&format!("dialog:step_mark:{key}:{i}"), slot);
     }
 }
 
@@ -161,7 +162,7 @@ pub(crate) fn completion_text(ui: &mut egui::Ui, label: &str, complete: bool) ->
         if complete { t.form_ink } else { t.form_dim },
         false,
     );
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
     response
 }
 
@@ -210,19 +211,45 @@ pub(crate) fn check_status_line(ui: &mut egui::Ui, key: &str, label: &str, statu
             super::text(ui, label, super::Text::Report(key, false));
         })
         .response;
-    crate::scenario::publish_rect(key, response.rect);
+    solidcraft_ui_registry::publish_rect(key, response.rect);
     response
 }
 
-/// Single-row render status for a shared Navigation card. The caller dispatches Cancel.
-pub(crate) fn progress_action(ui: &mut egui::Ui, caption: &str, fraction: f32, cancel: &str) -> egui::Response {
+/// Single-row render status for a shared Navigation card: name, status, meter and Cancel, within
+/// the width the caller's `ui` offers. Cancel and the status always show in full; a long name
+/// gives way first (cut with an ellipsis, its full text on hover), then the meter narrows
+/// (#11222). Publishes `dialog:progress:KEY`, `KEY:name` with `KEY:name:cut`, and `KEY:cancel`.
+/// The caller dispatches Cancel. Tokens: `font_label, form_ink, space_24, control_height`.
+pub(crate) fn progress_action(ui: &mut egui::Ui, key: &str, name: &str, status: &str, fraction: f32, cancel: &str) -> egui::Response {
     let t = Tokens::get();
     ui.horizontal(|ui| {
-        super::text(ui, caption, super::Text::Inline);
-        ui.allocate_ui_with_layout(vec2(t.space_24 * 6.0, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            progress(ui, "render-pill", fraction);
-        });
-        super::button(ui, cancel, super::Button::Normal)
+        let font = egui::FontId::proportional(t.font_label);
+        let measure = |ui: &egui::Ui, text: &str| ui.painter().layout_no_wrap(text.to_owned(), font.clone(), t.form_ink).size().x.ceil();
+        let gap = ui.spacing().item_spacing.x;
+        let status_width = measure(ui, status);
+        let cancel_width = measure(ui, cancel) + 2.0 * ui.spacing().button_padding.x;
+        let (meter_full, meter_min, name_min) = (t.space_24 * 6.0, t.space_24 * 2.0, t.space_24);
+        // What the name and the meter share once the status, Cancel and the gaps have their room.
+        let shared = (ui.available_width() - status_width - cancel_width - 3.0 * gap).max(0.0);
+        let name_natural = measure(ui, name);
+        // The name keeps its length while the full meter still fits beside it; past that it is
+        // cut, down to `name_min`, and only then does the meter narrow, down to `meter_min`.
+        let name_width = name_natural.min((shared - meter_full).max(name_min));
+        let meter = (shared - name_width).min(meter_full).max(meter_min);
+        let fixed = |ui: &mut egui::Ui, width: f32, add: &dyn Fn(&mut egui::Ui) -> egui::Response| {
+            ui.allocate_ui_with_layout(vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), add).inner
+        };
+        let shown = fixed(ui, name_width, &|ui| super::text(ui, name, super::Text::Inline));
+        let cut = name_natural > name_width + 0.5;
+        solidcraft_ui_registry::publish_rect(&format!("{key}:name"), shown.rect);
+        solidcraft_ui_registry::publish_count(&format!("{key}:name:cut"), f64::from(u8::from(cut)));
+        fixed(ui, status_width, &|ui| super::text(ui, status, super::Text::Inline));
+        fixed(ui, meter, &|ui| progress(ui, key, fraction));
+        // Cancel keeps its whole label whatever room the row has left.
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+        let response = super::button(ui, cancel, super::Button::Normal);
+        solidcraft_ui_registry::publish_rect(&format!("{key}:cancel"), response.rect);
+        response
     })
     .inner
 }

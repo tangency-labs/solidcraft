@@ -280,3 +280,41 @@ fn cancelling_an_editor_with_visibility_changes_restores_an_existing_history_mar
     assert_eq!(session.doc.marker, Some(1));
     assert!(session.visibility.hidden_origin.is_empty());
 }
+
+/// Rolling the marker back before a move of the body a joint seats on solves the joints again,
+/// which puts the seated occurrence back where the body was: the editor's pinned model differs
+/// from its source there, and only there, and the edit still goes through.
+#[test]
+fn an_editor_accepts_the_placements_rolling_the_marker_solves() {
+    let mut session = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        session.execute("component.activate", &json!({"component": "root"})).unwrap();
+        session.execute("component.create", &json!({"name": name})).unwrap();
+        session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    let component = |s: &Session, name: &str| s.doc.components.iter().find(|c| c.name == name).map(|c| c.id).unwrap();
+    let occurrence = |s: &Session, name: &str| {
+        let component = component(s, name);
+        s.doc.occurrences.iter().find(|o| o.component == component).cloned().unwrap()
+    };
+    session.execute("occurrence.ground", &json!({"occurrence": occurrence(&session, "A").id, "grounded": true})).unwrap();
+    session
+        .execute("joint.create", &json!({"type": "rigid", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "offset": 5, "name": "Seat"}))
+        .unwrap();
+    let seated = occurrence(&session, "B").transform;
+    // A's box moves along, and B, seated on it, with it.
+    session.execute("component.activate", &json!({"component": "A"})).unwrap();
+    let a = component(&session, "A");
+    let body = session.model.state().bodies.iter().find(|b| b.component == a).map(|b| b.name.clone()).unwrap();
+    session.execute("solid.move", &json!({"bodies": [body], "translate": [30, 0, 0]})).unwrap();
+    let moved = occurrence(&session, "B").transform;
+    assert_ne!(moved, seated, "B follows the box it is seated on");
+    let original = session.scratch();
+    session.execute("timeline.roll_to", &json!({"position": 2})).unwrap();
+    let source = session.scratch();
+    assert_eq!(occurrence(&session, "B").transform, seated, "before the move, B sits where the box was");
+    let prepared = session.scratch().compute_editor_commands(&[], &source, original).unwrap();
+    session.accept_commands(prepared).unwrap();
+    assert_eq!(session.doc.marker, None);
+    assert_eq!(occurrence(&session, "B").transform, moved);
+}

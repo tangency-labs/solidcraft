@@ -8,8 +8,8 @@ use egui::{Color32, Pos2, Rect, Shape, Stroke, pos2, vec2};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 
 use crate::dialogs::{HoleOpts, Kind};
-use crate::theme::Tokens;
 use crate::ui_kit::FigureSlot;
+use solidcraft_theme::Tokens;
 
 /// A size the section shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -466,7 +466,8 @@ mod tests {
                         (Dim::ThreadDepth, 145.0),
                     ]
                     .map(|(dim, y)| (dim, Rect::from_min_size(pos2(150.0, y), vec2(100.0, 20.0)), false));
-                    let output = ctx.run_ui(egui::RawInput::default(), |ui| paint(ui.painter(), pic, &section, &slots));
+                    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| paint(ui.painter(), pic, &section, &slots));
+                    output.textures_delta.clear();
                     let mut dimensions: Vec<_> = output
                         .shapes
                         .iter()
@@ -533,11 +534,12 @@ mod tests {
         let ctx = crate::fonts::test_context();
         let drawn = |choice: Choice| {
             let mut size = egui::Vec2::ZERO;
-            let output = ctx.run_ui(Default::default(), |ui| {
+            let mut output = ctx.run_ui(Default::default(), |ui| {
                 let before = ui.min_rect();
                 preview(ui, &form, false, choice, &|_, _| Some(10.0));
                 size = ui.min_rect().size() - before.size();
             });
+            output.textures_delta.clear();
             assert!(size.x > 0.0 && size.y > 0.0, "{choice:?} drew nothing");
             output.shapes.into_iter().map(|c| c.shape).collect::<Vec<_>>()
         };

@@ -363,6 +363,38 @@ fn offset_curve_reads_and_round_trips() {
     round_trip_curve(&c, &[]);
 }
 
+/// A CURVE_REPLICA's operator: x' = +Y, z' = +Z (so y' = z' x x' = -X), origin (5, 0, 0), scale 2.
+const TURNED: &str = "#20=CARTESIAN_POINT('',(5.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',#5,$,#20,2.,#2);";
+
+#[test]
+fn curve_replica_is_its_parent_moved_and_scaled() {
+    let c = curve(&format!("{TURNED}#10=CIRCLE('',#4,10.);#11=CURVE_REPLICA('',#10,#21);"), 11, MM);
+    // The parent's point at t is origin + 2 (cos t · 10 · x' + sin t · 10 · y').
+    at_curve(&c, 0.0, [5.0, 20.0, 0.0]);
+    at_curve(&c, FRAC_PI_2, [-15.0, 0.0, 0.0]);
+    at_curve(&c, PI, [5.0, -20.0, 0.0]);
+    // A line keeps its parameter: its point at t is the parent's, moved.
+    let l = curve(&format!("{TURNED}#10=LINE('',#1,#12);#12=VECTOR('',#3,3.);#11=CURVE_REPLICA('',#10,#21);"), 11, MM);
+    at_curve(&l, 1.0, [5.0, 6.0, 0.0]);
+}
+
+#[test]
+fn curve_replica_scales_its_placement_with_the_file_units() {
+    let inches = Units { len: 25.4, ang: 1.0 };
+    let c = curve(
+        "#20=CARTESIAN_POINT('',(1.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',$,$,#20,$,$);#10=LINE('',#1,#12);#12=VECTOR('',#3,1.);#11=CURVE_REPLICA('',#10,#21);",
+        11,
+        inches,
+    );
+    at_curve(&c, 1.0, [50.8, 0.0, 0.0]);
+}
+
+#[test]
+fn curve_replica_round_trips() {
+    let c = curve(&format!("{TURNED}#10=CIRCLE('',#4,10.);#11=CURVE_REPLICA('',#10,#21);"), 11, MM);
+    round_trip_curve(&c, &[0.0, 1.0, FRAC_PI_2, PI]);
+}
+
 #[test]
 fn shared_entities_are_written_once() {
     let c = Arc::new(Curve::Circle {
@@ -413,6 +445,35 @@ fn hostile_geometry_is_an_error_never_a_panic() {
         let ex = file(&format!("{BASE}{s}"));
         assert!(Reader::new(&ex, MM).surface(10).is_err(), "{s}");
     }
+}
+
+/// A curve whose definition leads back to itself, directly or through another curve, is refused
+/// with an error that names a curve of the loop. A 2D trimmed curve in a pcurve used to follow
+/// its basis without the depth check of the other readers, until the stack overflowed and the
+/// app closed; here it is reached both as a surface curve and as the profile of a face's surface.
+#[test]
+fn a_curve_that_refers_to_itself_is_an_error_never_a_crash() {
+    let trimmed = |id: u64, basis: u64| format!("#{id}=TRIMMED_CURVE('',#{basis},(PARAMETER_VALUE(0.)),(PARAMETER_VALUE(1.)),.T.,.PARAMETER.);");
+    for curves in [trimmed(20, 20), trimmed(20, 21) + &trimmed(21, 20)] {
+        let ex = file(&format!(
+            "{BASE}#10=PLANE('',#4);#11=VECTOR('',#3,1.);#12=LINE('',#1,#11);\
+             #13=(GEOMETRIC_REPRESENTATION_CONTEXT(2)PARAMETRIC_REPRESENTATION_CONTEXT()REPRESENTATION_CONTEXT('2D SPACE',''));\
+             {curves}#14=DEFINITIONAL_REPRESENTATION('',(#20),#13);#15=PCURVE('',#10,#14);#16=SURFACE_CURVE('',#12,(#15),.CURVE_3D.);\
+             #17=SURFACE_OF_LINEAR_EXTRUSION('',#16,#11);"
+        ));
+        let read = [Reader::new(&ex, MM).curve(16).map(|_| ()), Reader::new(&ex, MM).surface(17).map(|_| ())];
+        for got in read {
+            let Err(e) = got else { panic!("read although it refers to itself: {curves}") };
+            assert!(e.contains("curve #20") || e.contains("curve #21"), "{e}");
+        }
+    }
+    // A 3D curve and a surface that refer to themselves name themselves too.
+    let ex = file(&format!("{BASE}{}", trimmed(10, 10)));
+    let e = Reader::new(&ex, MM).curve(10).err().unwrap_or_default();
+    assert!(e.contains("curve #10"), "{e}");
+    let ex = file(&format!("{BASE}#10=OFFSET_SURFACE('',#10,1.,.F.);"));
+    let e = Reader::new(&ex, MM).surface(10).err().unwrap_or_default();
+    assert!(e.contains("surface #10"), "{e}");
 }
 
 /// Every edge curve and face surface of every STEP file in `SOLIDCRAFT_STEP_CORPUS` (the

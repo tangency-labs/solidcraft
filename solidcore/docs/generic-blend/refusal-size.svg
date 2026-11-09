@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="560" height="340" viewBox="0 0 560 340">
+  <title>Refusals that name the size</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L560 0 L560 340 L0 340 Z" fill="#ffffff"/>
+    <path d="M55 150 C55 199.706 95.294 240 145 240 C194.706 240 235 199.706 235 150 L235 270 L55 270 Z" fill="#f0f0f0"/>
+    <path d="M290 70 L330 70 L330 260 L430 260 L430 70 L470 70 L470 290 L290 290 Z" fill="#f0f0f0"/>
+    <path d="M280 20 L280 290" fill="none" stroke="#cccccc" stroke-width="0.8" stroke-miterlimit="10"/>
+    <path d="M85 150 C85 183.137 111.863 210 145 210 C178.137 210 205 183.137 205 150 M115 150 C115 166.569 128.431 180 145 180 C161.569 180 175 166.569 175 150" fill="none" stroke="#888888" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <path d="M330 220 C330 242.091 347.909 260 370 260 C392.091 260 410 242.091 410 220 C410 197.909 392.091 180 370 180 C347.909 180 330 197.909 330 220 Z" fill="none" stroke="#aaaaaa" stroke-width="0.8" stroke-miterlimit="10" stroke-dasharray="2 3"/>
+    <path d="M330 210 C330 237.614 352.386 260 380 260 C407.614 260 430 237.614 430 210 C430 182.386 407.614 160 380 160 C352.386 160 330 182.386 330 210 Z" fill="none" stroke="#000000" stroke-width="1.2" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <path d="M55 150 C55 199.706 95.294 240 145 240 C194.706 240 235 199.706 235 150" fill="none" stroke="#000000" stroke-width="1.6" stroke-miterlimit="10"/>
+    <path d="M290 70 L330 70 L330 260 L430 260 L430 70 L470 70" fill="none" stroke="#000000" stroke-width="1.6" stroke-miterlimit="10"/>
+    <path d="M330 54 L330 66 M430 54 L430 66 M330 60 L430 60" fill="none" stroke="#000000" stroke-width="0.8" stroke-miterlimit="10"/>
+    <path d="M330 220 C330 242.091 347.909 260 370 260" fill="none" stroke="#1f6fb2" stroke-width="2.4" stroke-miterlimit="10"/>
+    <path d="M149 150 C149 147.791 147.209 146 145 146 C142.791 146 141 147.791 141 150 C141 152.209 142.791 154 145 154 C147.209 154 149 152.209 149 150 Z" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 20 30)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Fold: the offset of a concave face</tspan></text>
+    <text transform="matrix(1 0 0 1 20 46)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">dashed: offsets at growing r</tspan></text>
+    <text transform="matrix(1 0 0 1 153 140)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#1f6fb2"><tspan x="0" y="0">r = ρ: a focal point</tspan></text>
+    <text transform="matrix(1 0 0 1 64 262)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">face, curvature radius ρ</tspan></text>
+    <text transform="matrix(1 0 0 1 290 30)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Room: the ball must fit</tspan></text>
+    <text transform="matrix(1 0 0 1 376 52)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">w</tspan></text>
+    <text transform="matrix(1 0 0 1 476 150)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#000000"><tspan x="0" y="0">dashed:</tspan></text>
+    <text transform="matrix(1 0 0 1 476 164)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#000000"><tspan x="0" y="0">r = w/2,</tspan></text>
+    <text transform="matrix(1 0 0 1 476 178)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#000000"><tspan x="0" y="0">the largest</tspan></text>
+    <text transform="matrix(1 0 0 1 476 192)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#000000"><tspan x="0" y="0">that fits</tspan></text>
+    <text transform="matrix(1 0 0 1 300 284)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#1f6fb2"><tspan x="0" y="0">round r &lt; w/2 builds</tspan></text>
+    <text transform="matrix(1 0 0 1 20 310)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#000000"><tspan x="0" y="0">past ρ: refused, naming the r that builds</tspan></text>
+    <text transform="matrix(1 0 0 1 290 310)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#000000"><tspan x="0" y="0">past w/2: refused, naming the r that fits</tspan></text>
+    <text transform="matrix(1 0 0 1 20 330)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">Every refusal returns that size through smlib_blend_fit_size and names it in smlib_blend_reason.</tspan></text>
+  </g>
+</svg>

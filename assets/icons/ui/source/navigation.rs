@@ -1,8 +1,8 @@
 //! Navigation drawing definitions. Camera projection and picking remain in the UI widgets.
-use crate::theme::Tokens;
 use egui::{Color32, FontId, Pos2, Rect, Shape, Stroke, pos2, vec2};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::Ring;
+use solidcraft_theme::Tokens;
 pub(crate) struct Facet {
     pub(crate) direction: Vec3,
     pub(crate) points: Ring<Pos2>,
@@ -55,8 +55,7 @@ pub(crate) fn face_text(painter: &egui::Painter, face: &Facet, ink: Color32, fon
     painter.ctx().add_plugin(LabelAtlas);
     let text = Shape::Text(egui::epaint::TextShape::new(Pos2::ZERO, galley, ink));
     let atlas = painter.ctx().fonts(|f| f.font_image_size());
-    let primitives =
-        painter.ctx().tessellate(vec![egui::epaint::ClippedShape { clip_rect: Rect::EVERYTHING, shape: text }], painter.ctx().pixels_per_point());
+    let primitives = painter.ctx().tessellate(vec![egui::epaint::ClippedShape::new(Rect::EVERYTHING, text)], painter.ctx().pixels_per_point());
     for primitive in primitives {
         if let egui::epaint::Primitive::Mesh(mut mesh) = primitive.primitive {
             mesh.texture_id = LABEL_PIXELS;
@@ -151,16 +150,16 @@ pub(crate) fn curved_arrow(painter: &egui::Painter, at: Pos2, clockwise: bool, h
 }
 /// The pointer target around a compass end: larger than the drawn disc, so it is easy to hit.
 pub(crate) const AXIS_RADIUS: f32 = 15.0;
-pub(crate) fn axis_tip(painter: &egui::Painter, c: Pos2, name: &str, d: &Vec3, at: Pos2, depth: f64, hovered: bool, t: Tokens) {
+pub(crate) fn axis_tip(painter: &egui::Painter, c: Pos2, name: &str, d: [f64; 3], at: Pos2, depth: f64, hovered: bool, t: Tokens) {
     axis_tip_scaled(painter, c, name, d, at, depth, hovered, t, 1.0);
 }
 
 /// The same compass artwork at a uniform scale, including its lettering and strokes.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn axis_tip_scaled(painter: &egui::Painter, c: Pos2, name: &str, d: &Vec3, at: Pos2, depth: f64, hovered: bool, t: Tokens, scale: f32) {
-    let col = if d.x != 0.0 {
+pub(crate) fn axis_tip_scaled(painter: &egui::Painter, c: Pos2, name: &str, d: [f64; 3], at: Pos2, depth: f64, hovered: bool, t: Tokens, scale: f32) {
+    let col = if d[0] != 0.0 {
         t.axis_x
-    } else if d.y != 0.0 {
+    } else if d[1] != 0.0 {
         t.axis_y
     } else {
         t.axis_z
@@ -197,7 +196,7 @@ pub(crate) fn axis_tip_scaled(painter: &egui::Painter, c: Pos2, name: &str, d: &
         // On a hovered (white) disc the letter takes the axis colour.
         let letter = if hovered { col } else { t.on_accent };
         let label = name.to_uppercase();
-        let galley = painter.layout_no_wrap(label, crate::fonts::bold(crate::theme::Tokens::get().font_compass * scale), letter);
+        let galley = painter.layout_no_wrap(label, crate::ui_kit::type_face::bold(solidcraft_theme::Tokens::get().font_compass * scale), letter);
         let origin = at - galley.size() / 2.0;
         let ppp = painter.ctx().pixels_per_point().max(0.5);
         let origin = pos2((origin.x * ppp).round() / ppp, (origin.y * ppp).round() / ppp);

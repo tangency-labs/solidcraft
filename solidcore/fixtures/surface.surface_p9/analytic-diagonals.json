@@ -1,0 +1,48 @@
+{
+  "cases": [
+    {
+      "name": "analytic_diagonal_cylinder_u_disabled",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644; new deterministic analytic-diagonal regression (not an upstream test input)",
+      "inputs": {
+        "op": 0, "analytic_plane": false, "analytic_revolution": false, "analytic_cone": 1,
+        "domain": [0.125, 0.2, 0.375, 0.8], "direction": 0,
+        "controls": [0.05, 15.0, 0.0], "diagonals": false,
+        "net": [[0,0,0],[0,0.5,0],[0,1,0],[0.5,0,0],[0.5,0.5,0],[0.5,1,0],[1,0,0],[1,0.5,0],[1,1,0]],
+        "line": [[0.5,0.5,-5],[0.5,0.5,5]]
+      }
+    },
+    {
+      "name": "analytic_diagonal_cylinder_u_enabled",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644; new deterministic analytic-diagonal regression (not an upstream test input)",
+      "inputs": {
+        "op": 0, "analytic_plane": false, "analytic_revolution": false, "analytic_cone": 1,
+        "domain": [0.125, 0.2, 0.375, 0.8], "direction": 0,
+        "controls": [0.05, 15.0, 0.0], "diagonals": true,
+        "net": [[0,0,0],[0,0.5,0],[0,1,0],[0.5,0,0],[0.5,0.5,0],[0.5,1,0],[1,0,0],[1,0.5,0],[1,1,0]],
+        "line": [[0.5,0.5,-5],[0.5,0.5,5]]
+      }
+    },
+    {
+      "name": "analytic_diagonal_cone_u_disabled",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644; new deterministic analytic-diagonal regression (not an upstream test input)",
+      "inputs": {
+        "op": 0, "analytic_plane": false, "analytic_revolution": false, "analytic_cone": 2,
+        "domain": [0.125, 0.2, 0.375, 0.8], "direction": 0,
+        "controls": [0.05, 15.0, 0.0], "diagonals": false,
+        "net": [[0,0,0],[0,0.5,0],[0,1,0],[0.5,0,0],[0.5,0.5,0],[0.5,1,0],[1,0,0],[1,0.5,0],[1,1,0]],
+        "line": [[0.5,0.5,-5],[0.5,0.5,5]]
+      }
+    },
+    {
+      "name": "analytic_diagonal_cone_u_enabled",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644; new deterministic analytic-diagonal regression (not an upstream test input)",
+      "inputs": {
+        "op": 0, "analytic_plane": false, "analytic_revolution": false, "analytic_cone": 2,
+        "domain": [0.125, 0.2, 0.375, 0.8], "direction": 0,
+        "controls": [0.05, 15.0, 0.0], "diagonals": true,
+        "net": [[0,0,0],[0,0.5,0],[0,1,0],[0.5,0,0],[0.5,0.5,0],[0.5,1,0],[1,0,0],[1,0.5,0],[1,1,0]],
+        "line": [[0.5,0.5,-5],[0.5,0.5,5]]
+      }
+    }
+  ]
+}

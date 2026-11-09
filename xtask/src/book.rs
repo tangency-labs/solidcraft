@@ -141,6 +141,7 @@ fn reference(cmds: &[Value], guides: &BTreeMap<String, String>) -> String {
             } else if let Some((label, path)) = guide(c) {
                 md.push_str(&format!("Read the [{label}]({path}).\n\n"));
             }
+            md.push_str(&parameter_table(command_text(c, "params")));
             md.push_str("<details>\n<summary>Automation details</summary>\n\n");
             md.push_str(&format!("<p><strong>Command ID:</strong> <code>{}</code></p>\n\n", html(command_text(c, "id"))));
             let p = command_text(c, "params");
@@ -158,6 +159,49 @@ fn reference(cmds: &[Value], guides: &BTreeMap<String, String>) -> String {
         }
     }
     md
+}
+
+/// The parameters of a command as a table a reader can scan: name, type and whether the
+/// command needs them. The complete parameter text stays in the automation details.
+fn parameter_table(params: &str) -> String {
+    let rows = crate::params::parse(params);
+    if rows.is_empty() {
+        return String::new();
+    }
+    let mut md = String::from("| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n");
+    for row in rows {
+        let cells =
+            [table_cell(&row.name), table_cell(&row.kind), if row.required { "Yes".to_string() } else { "No".to_string() }, prose(&row.description)];
+        md.push('|');
+        for cell in cells {
+            // An empty cell keeps the column, with a single space between the bars.
+            if cell.is_empty() {
+                md.push(' ');
+            } else {
+                md.push(' ');
+                md.push_str(&cell);
+                md.push(' ');
+            }
+            md.push('|');
+        }
+        md.push('\n');
+    }
+    md.push('\n');
+    md
+}
+
+/// One cell of a parameter table: literal text that cannot break the table or the page.
+fn table_cell(text: &str) -> String {
+    let mut escaped = String::new();
+    for ch in text.chars() {
+        match ch {
+            '\r' | '\n' => escaped.push(' '),
+            '\\' => escaped.push_str("\\\\"),
+            '|' => escaped.push_str("\\|"),
+            _ => escaped.push(ch),
+        }
+    }
+    html(escaped.trim())
 }
 
 /// Hand-authored Markdown is reviewed documentation, separate from registry metadata.
@@ -336,6 +380,62 @@ mod tests {
             md.split("<pre><code style=\"white-space: pre-wrap; overflow-wrap: anywhere;\">").nth(1).unwrap().split("</code></pre>").next().unwrap();
         assert_eq!(decoded_code(stored), params, "every parameter byte, including newlines and backticks, stays readable");
         assert!(md.contains("<code>odd.&lt;tag&gt;&amp;id</code>"));
+    }
+
+    #[test]
+    fn command_parameters_are_listed_as_a_table_with_their_type_and_whether_they_are_required() {
+        // The registry's own notation, as crates/engine/src/cmd/features.rs writes it.
+        let params = "length, width, height: expr; corner?: [x,y,z] | center?: [x,y,z] (numbers in mm or length expressions; default: the origin); operation?, targets?: [body], name?, body_name?";
+        let md = reference(&[json!({"id":"solid.box","label":"Box","tab":"SOLID","params":params})]);
+        assert!(md.contains("| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n"));
+        for row in [
+            "| length | expr | Yes | |",
+            "| width | expr | Yes | |",
+            "| height | expr | Yes | |",
+            "| corner | [x,y,z] | No | |",
+            "| center | [x,y,z] | No | numbers in mm or length expressions; default: the origin |",
+            "| operation | | No | |",
+            "| targets | [body] | No | |",
+            "| name | | No | |",
+            "| body_name | | No | |",
+        ] {
+            assert!(md.contains(row), "missing row {row}");
+        }
+    }
+
+    #[test]
+    fn a_description_with_inline_markdown_stays_literal_in_the_table() {
+        // crates/engine/src/cmd/sketch.rs: a description may carry backticks and emphasis.
+        let md = reference(&[json!({"id":"solid.box","label":"Box","params":"size: expr (a parameter with `backticks` and *bold* text)"})]);
+        let row = md.lines().find(|line| line.starts_with("| size |")).expect("a row for the size parameter");
+        assert!(
+            row.contains(r"| size | expr | Yes | a parameter with \`backticks\` and \*bold\* text |"),
+            "the description shows its Markdown literally: {row}"
+        );
+        assert!(!row.contains("`backticks`"), "the backticks must not open a code span: {row}");
+        assert!(!row.contains("*bold*"), "the emphasis markers must not start emphasis: {row}");
+    }
+
+    #[test]
+    fn a_pipe_in_the_name_position_lists_alternative_names_and_one_after_the_colon_is_a_type() {
+        // crates/engine/src/cmd/features.rs: `radius | diameter: expr` and `direction?: positive|negative|symmetric`.
+        let md = reference(&[
+            json!({"id":"solid.sphere","label":"Sphere","params":"radius | diameter: expr; center?: [x,y,z] (numbers in mm or length expressions; default: the origin)"}),
+            json!({"id":"solid.extrude","label":"Extrude","params":"direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane)"}),
+        ]);
+        assert!(md.contains("| radius | expr | Yes | |\n"));
+        assert!(md.contains("| diameter | expr | Yes | |\n"));
+        assert!(
+            md.contains("| direction | positive\\|negative\\|symmetric | No | distance is total thickness, split evenly around the start plane |\n")
+        );
+    }
+
+    #[test]
+    fn a_reply_after_an_arrow_is_not_a_parameter() {
+        // crates/engine/src/cmd/parts.rs: `cloud: id or name → deleted`.
+        let md = reference(&[json!({"id":"pointcloud.delete","label":"Delete","params":"cloud: id or name → deleted"})]);
+        assert!(md.contains("| cloud | id or name | Yes | |\n"));
+        assert!(!md.contains("| deleted |"));
     }
 
     #[test]

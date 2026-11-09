@@ -1,7 +1,8 @@
 //! Explicit saved render-only ground. Does not add engineering bodies or material cards.
+use crate::schema::TypedContract;
+use crate::schema::render_stage::{BackdropKind, BackdropParams, ClearParams, GroundParams, StageSaved};
 use crate::{Result, Session, params::bad};
-use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_doc::render_settings::{RenderJob, RenderSetup};
 use solidcraft_render::{
     ProductScene,
@@ -9,49 +10,41 @@ use solidcraft_render::{
     stage::{Stage, StagePanel},
 };
 use std::sync::Arc;
-fn patch() -> Value {
-    json!({})
-}
-fn margin() -> f64 {
-    0.25
-}
-fn gap() -> f64 {
-    0.1
-}
-fn reflectance() -> [f64; 3] {
-    [0.18; 3]
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Ground {
-    name: String,
-    #[serde(default = "patch")]
-    set: Value,
-    #[serde(default = "margin")]
-    margin_fraction: f64,
-    #[serde(default = "gap")]
-    gap_mm: f64,
-    #[serde(default = "reflectance")]
-    reflectance_linear: [f64; 3],
-    #[serde(default)]
-    replace_stage: bool,
-}
+
+pub(super) const GROUND_CONTRACT: TypedContract<GroundParams> = TypedContract::new();
+pub(super) const BACKDROP_CONTRACT: TypedContract<BackdropParams> = TypedContract::new();
+pub(super) const CLEAR_CONTRACT: TypedContract<ClearParams> = TypedContract::new();
+
 pub(super) fn apply(scene: &mut ProductScene, setup: &RenderSetup, command: &str) -> Result<()> {
     setup.stage.append_to(scene, &CancelToken::default()).map_err(|e| bad(command, e.to_string()))
 }
-fn save(s: &mut Session, name: String, setup: RenderSetup, command: &str) -> Result<Value> {
+fn save(s: &mut Session, name: String, setup: RenderSetup, command: &str) -> Result<StageSaved> {
     let mut settings = (*s.doc.render).clone();
     settings.setups.insert(name.clone(), setup.clone());
     settings.validate().map_err(|e| bad(command, e.to_string()))?;
+    let setup = serde_json::to_value(&setup).map_err(|e| bad(command, e.to_string()))?;
     if settings != *s.doc.render {
         s.doc_mut().render = Arc::new(settings);
     }
-    Ok(json!({"name":name,"setup":setup,"engineering_geometry_unchanged":true,"stage_only":true,
-        "clearance":"conservative product AABB separation; not a B-rep collision proof"}))
+    Ok(StageSaved {
+        name,
+        setup,
+        engineering_geometry_unchanged: true,
+        stage_only: true,
+        clearance: "conservative product AABB separation; not a B-rep collision proof".into(),
+        geometry_kind: None,
+        light_transport: None,
+        camera_preserved: None,
+        limitations: None,
+        param_warnings: Vec::new(),
+    })
+}
+fn reply(command: &str, saved: StageSaved) -> Result<Value> {
+    serde_json::to_value(saved).map_err(|e| bad(command, e.to_string()))
 }
 pub(super) fn ground(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.stage.ground";
-    let input: Ground = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: GroundParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     if !input.margin_fraction.is_finite()
         || !(0.0..=10.0).contains(&input.margin_fraction)
         || !input.gap_mm.is_finite()
@@ -88,48 +81,22 @@ pub(super) fn ground(s: &mut Session, params: &Value) -> Result<Value> {
     }])
     .map_err(|e| bad(command, e.to_string()))?;
     apply(&mut scene, &setup, command)?;
-    save(s, input.name, setup, command)
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Clear {
-    name: String,
-    #[serde(default = "patch")]
-    set: Value,
+    reply(command, save(s, input.name, setup, command)?)
 }
 pub(super) fn clear(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.stage.clear";
-    let input: Clear = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: ClearParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     let mut setup = super::patched_settings(s, &input.name, &input.set, command)?;
     setup.stage = Stage::default();
-    save(s, input.name, setup, command)
+    reply(command, save(s, input.name, setup, command)?)
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum BackdropKind {
-    FloorWall,
-    Cyclorama,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BackdropInput {
-    name: String,
-    #[serde(default = "patch")]
-    set: Value,
-    kind: BackdropKind,
-    #[serde(default = "reflectance")]
-    reflectance_linear: [f64; 3],
-    #[serde(default)]
-    replace_stage: bool,
-    expected_revision: u64,
-}
 /// Original world-space stage derived from captured subject bounds and the chosen
 /// camera azimuth. Twenty-four explicit planar strips approximate the round cove;
 /// it is not an analytic smooth surface, terrain or engineering model operation.
 pub(super) fn backdrop(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.stage.backdrop";
-    let input: BackdropInput = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: BackdropParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     if input.expected_revision != s.revision {
         return Err(bad(command, "the design changed; review the stage again"));
     }
@@ -204,17 +171,20 @@ pub(super) fn backdrop(s: &mut Session, params: &Value) -> Result<Value> {
     setup.stage = Stage::new(panels).map_err(|e| bad(command, e.to_string()))?;
     apply(&mut scene, &setup, command)?;
     let mut result = save(s, input.name, setup, command)?;
-    result["geometry_kind"] = json!(match input.kind {
-        BackdropKind::FloorWall => "finite_floor_and_wall",
-        BackdropKind::Cyclorama => "24_segment_polygonal_cyclorama",
-    });
-    result["light_transport"] =
-        json!("nonemissive world-space stage; receives native lighting and casts reflections/shadows supported by the selected executor");
-    result["camera_preserved"] = json!(true);
-    result["limitations"] = json!([
-        "Finite background, not an infinite floor or a terrain mesh.",
-        "Cyclorama is an explicit 24-strip polygonal approximation, not a smooth CAD face.",
-        "No change to HDR, light energy, subject optics, pose or engineering properties."
+    result.geometry_kind = Some(
+        match input.kind {
+            BackdropKind::FloorWall => "finite_floor_and_wall",
+            BackdropKind::Cyclorama => "24_segment_polygonal_cyclorama",
+        }
+        .into(),
+    );
+    result.light_transport =
+        Some("nonemissive world-space stage; receives native lighting and casts reflections/shadows supported by the selected executor".into());
+    result.camera_preserved = Some(true);
+    result.limitations = Some(vec![
+        "Finite background, not an infinite floor or a terrain mesh.".into(),
+        "Cyclorama is an explicit 24-strip polygonal approximation, not a smooth CAD face.".into(),
+        "No change to HDR, light energy, subject optics, pose or engineering properties.".into(),
     ]);
-    Ok(result)
+    reply(command, result)
 }
