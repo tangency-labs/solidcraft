@@ -213,6 +213,44 @@ fn plane_through_axis_and_point_accepts_straight_model_and_sketch_lines() {
     assert!(parallel(plane(&s, "Side").normal(), Vec3::Y));
 }
 
+/// Issue #12851: construct.plane.axis_point with an edge pick whose circle centre lies on the
+/// axis (e.g. rim of a cylinder or revolved torus). The centre is on the axis, so resolving the
+/// edge pick to the centre would refuse with "the point is on the axis". Instead, resolve to the
+/// picked point on the edge, supporting picks at any angle around the rim.
+#[test]
+fn plane_through_axis_and_circular_edge_centered_on_axis_succeeds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 1, 0], "radius": 15, "height": 30, "body_name": "Cyl"}));
+    // Edge at 0 degrees round the rim (x = 15, y = 30, z = 0).
+    run(
+        &mut s,
+        "construct.plane.axis_point",
+        json!({
+            "axis": {"axis": "Y"},
+            "point": {"edge": [15, 30, 0]},
+            "name": "PlaneAt0Deg"
+        }),
+    );
+    let pl0 = plane(&s, "PlaneAt0Deg");
+    assert!(parallel(pl0.normal(), Vec3::Z), "normal is {:?}", pl0.normal());
+    assert!(on_plane(&pl0, Vec3::new(15.0, 30.0, 0.0)));
+    assert!(on_plane(&pl0, Vec3::new(0.0, 0.0, 0.0)));
+
+    // Edge pick at 90 degrees round the rim (x = 0, y = 30, z = 15).
+    run(
+        &mut s,
+        "construct.plane.axis_point",
+        json!({
+            "axis": {"axis": "Y"},
+            "point": {"edge": [0, 30, 15]},
+            "name": "PlaneAt90Deg"
+        }),
+    );
+    let pl90 = plane(&s, "PlaneAt90Deg");
+    assert!(parallel(pl90.normal(), Vec3::X), "normal is {:?}", pl90.normal());
+    assert!(on_plane(&pl90, Vec3::new(0.0, 30.0, 15.0)));
+}
+
 #[test]
 fn plane_through_axis_and_point_in_a_moved_component_keeps_its_world_picks() {
     let mut s = Session::default();
@@ -619,6 +657,27 @@ fn construction_lives_in_the_component_frame() {
     assert!(near(point(&s, "PinTop"), Vec3::new(50.0, 0.0, 10.0)), "{:?}", point(&s, "PinTop"));
     run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 20, 0]}));
     assert!(near(point(&s, "PinTop"), Vec3::new(50.0, 20.0, 10.0)), "{:?}", point(&s, "PinTop"));
+}
+
+/// A construction plane in a moved (and turned) component sections where the viewport draws it,
+/// not where the component was modelled: the plane halves the box's height, which the turn
+/// about X laid along Y.
+#[test]
+fn a_section_on_a_construction_plane_cuts_where_the_component_stands() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Mid"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 0, 30], "axis": [1, 0, 0], "angle": "90 deg"}));
+    // The box as `inspect.measure` answers it, placed in the world.
+    let bbox = run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"].clone();
+    let mid_y = (bbox["min"][1].as_f64().unwrap() + bbox["max"][1].as_f64().unwrap()) / 2.0;
+    assert!(mid_y.abs() > 1.0, "the turn moved the box's middle off y = 0: {bbox}");
+    let r = run(&mut s, "inspect.section", json!({"plane": "Mid"}));
+    let y = r["section"]["origin"][1].as_f64().unwrap();
+    assert!((y - mid_y).abs() < 1e-9, "the cut halves the placed box: {r}");
+    let n = &r["section"]["normal"];
+    assert!((n[1].as_f64().unwrap().abs() - 1.0).abs() < 1e-9 && n[2].as_f64().unwrap().abs() < 1e-9, "the normal turned with the box: {r}");
 }
 
 #[test]

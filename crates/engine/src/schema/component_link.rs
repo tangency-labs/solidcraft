@@ -52,7 +52,7 @@ impl JsonSchema for ComponentRef {
 
 /// `key`, a component's id or name, with the handler's message for anything else, `null`
 /// included.
-fn component_key<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<ComponentRef>, D::Error> {
+pub(super) fn component_key<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<ComponentRef>, D::Error> {
     match Value::deserialize(d)? {
         Value::Number(n) => Ok(Some(ComponentRef(n.to_string()))),
         Value::String(s) => Ok(Some(ComponentRef(s))),
@@ -95,7 +95,7 @@ fn path_schema(_: &mut SchemaGenerator) -> Schema {
 
 /// Adds `key` to the schema's `required` list: for a key the type has optional so that the
 /// handler, not the check, refuses it when it's left out.
-fn require(schema: &mut Schema, key: &str) {
+pub(super) fn require(schema: &mut Schema, key: &str) {
     match schema.get_mut("required") {
         Some(Value::Array(required)) => {
             if !required.iter().any(|k| k == key) {

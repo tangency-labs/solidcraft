@@ -1,0 +1,11 @@
+#### UB-5. `ReadType` overflows its 256-byte buffer unless libstdc++ bounds the read [PSIRT]
+- **Severity:** Crash / undefined behaviour
+- **Area:** File reading
+- **Location:** `SmDatabaseIO.cpp:400`, `SmDatabaseIO::ReadType` (`istream >> char*` into `sBuff[256]`).
+- **What happens:** An ASCII word longer than 255 bytes overflows `sBuff`. GCC 11+ libstdc++ only caps the extraction under `__OPTIMIZE__`, so `-O0` builds and other standard libraries overflow.
+- **Trigger:** An ASCII record whose type word is 300 non-space bytes, read by a `-O0` build.
+- **How found:** read during porting.
+- **Confirmed:** no. The `-O2` reference build caps the read.
+- **Severity:** crash/UB.
+- **Rust port:** Caps the word at 255 bytes, as the optimised build does.
+- **Platform dependence:** confirmed 2026-10-21 on macOS arm64 (Apple clang 21, libc++, C++17): libc++ does not bound `>> char*`, so the `-O2` build overflows too. `topology.database_io` gen0185 (and gen0576, gen0883, gen1324, gen1363, gen1519, gen1590, gen1652, gen1783) abort in `__stack_chk_fail` <- `SmDatabaseIO::ReadType`. Only libstdc++ under `__OPTIMIZE__` makes the reference build safe. GitHub issue #450.

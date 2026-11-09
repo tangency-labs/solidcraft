@@ -432,11 +432,12 @@ mod tests {
         assert!(classify(&body, &mesh, 0).0.iter().all(|f| !*f));
     }
 
-    /// A G2 corner patch's sides are G2 to their rounds except near the faces they end on, and
-    /// SMLib holds each side as two edges: the side is one join, drawn whole, not up to the
-    /// vertex in its middle where the G2 half begins (the 20 mm box's r3 corner).
+    /// A G2 corner patch's sides are G2 to their rounds except near the faces they end on: each
+    /// side is one join, drawn whole (the 20 mm box's r3 corner). Since tangency-labs/solidcore#2988 the
+    /// corner SMLib leaves open is the blend corner's Setback, whose sections are not split, so
+    /// each side is one edge (the N x N patch before it held each side as two).
     #[test]
-    fn a_seam_split_in_two_edges_is_drawn_whole() {
+    fn a_g2_corner_s_side_to_its_round_is_drawn_whole() {
         let body = crate::box_solid(Vec3::ZERO, Vec3::new(20., 20., 20.)).unwrap();
         let picks = [Vec3::new(20., 20., 10.), Vec3::new(20., 10., 20.), Vec3::new(10., 20., 20.)];
         let g2 = crate::fillet_g2_corners(&body, &picks, 3., &[]).unwrap();
@@ -452,7 +453,7 @@ mod tests {
         for round in rounds {
             let side: Vec<usize> =
                 (0..mesh.edges.len()).filter(|e| mesh.edge_faces[*e].contains(&patch) && mesh.edge_faces[*e].contains(&round)).collect();
-            assert_eq!(side.len(), 2, "SMLib splits the side in two: {side:?}");
+            assert_eq!(side.len(), 1, "the Setback's section is one edge (tangency-labs/solidcore#2988): {side:?}");
             assert!(side.iter().all(|e| mesh.shaded_edge_visible(*e)), "the side to round {round} is drawn whole: {side:?}");
         }
     }

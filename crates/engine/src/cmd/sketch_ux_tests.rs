@@ -340,6 +340,125 @@ fn tangent_moves_only_the_second_pick() {
     check_order(line_and_circle(), "sketch.constraint.tangent", "c1", "l1");
 }
 
+/// #12092: Tangent with a line's end point and a circle puts that end on the circle and makes the
+/// line tangent there, in one step. In either pick order only the picked end moves: the line turns
+/// about its other end and gets longer or shorter, and the circle stays.
+#[test]
+fn tangent_at_a_lines_end_puts_the_end_on_the_circle() {
+    // Where the line ends up: its end's distance from the centre, and the line's.
+    let touch = |s: &Session| {
+        let sk = sketch(s);
+        let (a, b) = (pt(s, "l1.start"), pt(s, "l1.end"));
+        let c = sk.point(sk.resolve_point("c1.center").unwrap()).unwrap();
+        let line = (b - a).cross(c - a).abs() / a.dist(b);
+        (b.dist(c), line, sk.radius(sk.curve_index("c1").unwrap()).unwrap())
+    };
+    for (a, b) in [("c1", "l1.end"), ("l1.end", "c1")] {
+        let mut s = line_and_circle();
+        let circle = snap(&s, "c1");
+        let undo = s.undo.len();
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert_eq!(r["constraints"].as_array().map(Vec::len), Some(2), "{a}, {b}: {r}");
+        let (end, line, radius) = touch(&s);
+        assert!((radius - 5.0).abs() < 1e-9, "{a}, {b}: the circle keeps its size: {radius}");
+        assert!((end - 5.0).abs() < 1e-6 && (line - 5.0).abs() < 1e-6, "{a}, {b}: end {end}, line {line} from the centre");
+        assert!(same(&snap(&s, "c1"), &circle), "{a}, {b}: the circle moved");
+        let start = pt(&s, "l1.start");
+        assert!(start.dist(solidcore_record::Vec2::new(5.0, 3.0)) < 1e-9, "{a}, {b}: the line's other end moved to {start:?}");
+        assert_eq!(s.undo.len(), undo + 1, "{a}, {b}: one undo step");
+    }
+    // A point that ends no curve names no curve to be tangent: the refusal says what to pick.
+    let mut s = line_and_circle();
+    let e = s.execute("sketch.constraint.tangent", &json!({"a": "l1", "b": "c1.center"})).unwrap_err().to_string();
+    assert!(e.contains("end"), "{e}");
+}
+
+/// A line whose end is already joined to an arc's end (the coincident a click there adds): Tangent
+/// on that end and the arc, or on the two ends in either order, adds only the tangent, since the
+/// end already lies on the arc. The joint holds. With the end and the arc the line stays and the
+/// arc moves; with two ends the first pick stays.
+#[test]
+fn tangent_at_a_joint_adds_only_the_tangent() {
+    for (a, b, stays) in [("l1.end", "a1", "l1"), ("a1", "l1.end", "l1"), ("l1.end", "a1.start", "l1"), ("a1.start", "l1.end", "a1")] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[2, 3], [12, 3]]}));
+        run(&mut s, "sketch.arc.center_point", json!({"center": [16, 9], "start": [12, 3], "sweep": 90}));
+        let joints = sketch(&s).constraints.len();
+        let kept = snap(&s, stays);
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert!(same(&snap(&s, stays), &kept), "{a}, {b}: {stays} moved");
+        assert_eq!(r["constraints"].as_array().map(Vec::len), Some(1), "{a}, {b}: {r}");
+        assert_eq!(sketch(&s).constraints.len(), joints + 1, "{a}, {b}: only the tangent is new");
+        let sk = sketch(&s);
+        let arc = sk.curve_index("a1").unwrap();
+        let (p, q, c) = (pt(&s, "l1.start"), pt(&s, "l1.end"), sk.center(arc).unwrap());
+        assert!(q.dist(pt(&s, "a1.start")) < 1e-6, "{a}, {b}: the joint came apart");
+        assert!(((q - p).cross(c - p).abs() / p.dist(q) - sk.radius(arc).unwrap()).abs() < 1e-6, "{a}, {b}: not tangent");
+    }
+}
+
+/// Tangent on a line's end and a circle the end already touches tangentially, as for two curves
+/// (`constrain`): what already holds moves nothing. With both fixed the tangent removes no degree
+/// of freedom, so it is kept and reported as redundant, or refused with `if_redundant: "refuse"`,
+/// leaving the sketch as it was.
+#[test]
+fn tangent_at_an_end_that_already_holds_is_redundant() {
+    let touching = |fixed: bool| {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[5, 3], [20, 3]]}));
+        run(&mut s, "sketch.circle.center", json!({"center": [20, 8], "radius": 5}));
+        if fixed {
+            run(&mut s, "sketch.constraint.fix", json!({"entities": ["l1", "c1"], "fixed": true}));
+        }
+        s
+    };
+    for (a, b) in [("l1.end", "c1"), ("c1", "l1.end")] {
+        let mut s = touching(false);
+        let (line, circle) = (snap(&s, "l1"), snap(&s, "c1"));
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert!(same(&snap(&s, "l1"), &line) && same(&snap(&s, "c1"), &circle), "{a}, {b}: something moved");
+        assert!(r.get("redundant").is_none(), "{a}, {b}: free, so not redundant: {r}");
+
+        let mut s = touching(true);
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert_eq!(r["redundant"], true, "{a}, {b}: {r}");
+        // Fixed entities are held, not constrained, so no constraint is listed.
+        assert!(r["determined_by"].is_array(), "{a}, {b}: {r}");
+        assert_eq!(r["constraints"].as_array().map(Vec::len), Some(2), "{a}, {b}: {r}");
+
+        let mut s = touching(true);
+        let count = sketch(&s).constraints.len();
+        let e = s.execute("sketch.constraint.tangent", &json!({"a": a, "b": b, "if_redundant": "refuse"})).unwrap_err().to_string();
+        assert!(e.contains("already determined by"), "{a}, {b}: {e}");
+        assert_eq!(sketch(&s).constraints.len(), count, "{a}, {b}: nothing added");
+    }
+}
+
+/// The same with free curves whose own constraints already decide it: circle c2 is concentric
+/// with c1 and equal to it, the line is tangent to c2 and its end lies on c2. Tangent on that end
+/// and c1 adds the end on c1 and the tangent, and names what determines the tangent: at the end
+/// it says the line is square to the radius there, so the shared centre and the tangent on c2
+/// decide it, and the equal radius does not.
+#[test]
+fn tangent_at_an_end_names_the_constraints_that_determine_it() {
+    for (a, b) in [("l1.end", "c1"), ("c1", "l1.end")] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[5, 3], [20, 3]]}));
+        run(&mut s, "sketch.circle.center", json!({"center": [20, 8], "radius": 5}));
+        run(&mut s, "sketch.circle.center", json!({"center": [40, 30], "radius": 2}));
+        let mut id = |cmd: &str, p: Value| run(&mut s, cmd, p)["constraint"].as_str().unwrap_or_default().to_string();
+        let concentric = id("sketch.constraint.concentric", json!({"a": "c1", "b": "c2"}));
+        id("sketch.constraint.equal", json!({"a": "c1", "b": "c2"}));
+        let tangent = id("sketch.constraint.tangent", json!({"a": "l1", "b": "c2"}));
+        id("sketch.constraint.coincident", json!({"a": "l1.end", "b": "c2"}));
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert_eq!(r["redundant"], true, "{a}, {b}: {r}");
+        assert_eq!(r["constraints"].as_array().map(Vec::len), Some(2), "{a}, {b}: {r}");
+        let by = json!([format!("{concentric} (Concentric)"), format!("{tangent} (Tangent)")]);
+        assert_eq!(r["determined_by"], by, "{a}, {b}: {r}");
+    }
+}
+
 #[test]
 fn a_fixed_second_pick_makes_the_first_move() {
     let mut s = line_and_circle();
