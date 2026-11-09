@@ -2057,6 +2057,14 @@ impl EvalKey {
                     source_feature(doc, *id).ok().map(|src| fingerprint(doc, 0, src, vals, false, steps)).hash(&mut h);
                 }
             }
+            // A sketch's stored solve exactly: its fingerprint rounds it to a grid, and a sketch
+            // that rounds alike gives back the solve it was taken from, which an edit compares
+            // exactly (deleting a dimension that changed its points by less than the grid).
+            if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+                for p in &sketch.points {
+                    (p.pos.x.to_bits(), p.pos.y.to_bits()).hash(&mut h);
+                }
+            }
             // Every body's name and component: new names avoid the names, a cut's pieces are
             // numbered past them, a tool's default targets are its component's bodies.
             for b in &st.bodies {
