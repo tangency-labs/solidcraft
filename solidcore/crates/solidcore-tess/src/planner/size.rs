@@ -1,7 +1,9 @@
 //! Target triangle size: one side length per face, so triangles come out about equilateral
 //! (well-shaped triangles shade evenly) and as small as the surface needs.
 //!
-//! A face's size is the smallest of the body's longest side, the length over which the surface
+//! A flat face (a plane, or a spline lying in one) has no size: any triangulation of its
+//! boundary is exact, so it gets no interior cells and its straight edges no extra nodes.
+//! A curved face's size is the smallest of the body's longest side, the length over which the surface
 //! normal turns the caller's facet angle (when one is given, see [`Turn`]), and the chord that
 //! sags the tolerance; an edge takes the smaller size of its two faces, so a curved face and
 //! its flat neighbour meet at the same spacing.
@@ -141,7 +143,7 @@ pub(crate) fn face_size(s: &EvalSurface, dom: &Domain, rules: &Rules) -> FaceSiz
     };
     if let EvalSurface::Plane { du, dv, .. } = s {
         return plain(
-            rules.max_len,
+            f64::INFINITY,
             [
                 kernel::record_vec3(*du).len(),
                 kernel::record_vec3(*dv).len(),
@@ -153,7 +155,8 @@ pub(crate) fn face_size(s: &EvalSurface, dom: &Domain, rules: &Rules) -> FaceSiz
     };
     let mut unevaluated: Vec<[f64; 2]> = Vec::new();
     // A flat spline (sheet-metal walls, chamfers): no curvature to look for, only the speeds.
-    let samples = if planar(s) { 3 } else { SAMPLES };
+    let flat = planar(s);
+    let samples = if flat { 3 } else { SAMPLES };
     // The point, the unit normal (`None` at a pole, where it is undefined) and the speeds.
     let normal = |u: f64, v: f64| -> Result<(Vec3, Option<Vec3>, [f64; 2]), [f64; 2]> {
         let (p, su, sv) = s.derivs(u, v).map(kernel::record_triple).ok_or([u, v])?;
@@ -203,7 +206,12 @@ pub(crate) fn face_size(s: &EvalSurface, dom: &Domain, rules: &Rules) -> FaceSiz
         [1.0, 1.0]
     };
     FaceSize {
-        h: rules.for_curvature(k_max),
+        // A flat face is exact for any triangulation of its boundary: no length cap.
+        h: if flat {
+            f64::INFINITY
+        } else {
+            rules.for_curvature(k_max)
+        },
         speed: speed.map(|x| if x.is_finite() && x > 0.0 { x } else { 1.0 }),
         unevaluated,
     }
@@ -348,7 +356,7 @@ mod tests {
             &solidcore::eval::uv::domain(&patch(0.0)),
             &rules,
         );
-        assert_eq!(h, rules.max_len);
+        assert_eq!(h, f64::INFINITY);
         assert!(
             (speed[0] - 4.0).abs() < 1e-9 && (speed[1] - 3.0).abs() < 1e-9,
             "{speed:?}"
@@ -387,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn a_plane_takes_the_longest_side() {
+    fn a_plane_asks_for_no_side() {
         let s = EvalSurface::Plane {
             origin: solidcore::Vec3::ZERO,
             du: solidcore::Vec3::X,
@@ -396,7 +404,7 @@ mod tests {
         let rules = Rules::new(0.01, 100.0, THIRTY);
         assert_eq!(
             face_size(&s, &solidcore::eval::uv::domain(&s), &rules).h,
-            20.0
+            f64::INFINITY
         );
     }
 }

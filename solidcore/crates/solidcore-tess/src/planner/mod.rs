@@ -474,12 +474,19 @@ fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<(TessPl
         .map(|(fi, r)| refused.take(fi, r).flatten())
         .collect();
     let face_h = |f: usize| sizes.get(f).and_then(Option::as_ref).map(|s| s.h);
+    // A flat face asks for no size (infinite): an edge between flat faces is whole, one beside a
+    // curved face takes the curved face's size, so both meet at the same nodes. An edge that
+    // bounds no face keeps the longest side.
     let edge_h: Vec<f64> = edge_faces
         .iter()
         .map(|fs| {
-            fs.iter()
-                .filter_map(|&f| face_h(f))
-                .fold(rules.max_len, f64::min)
+            if fs.is_empty() {
+                rules.max_len
+            } else {
+                fs.iter()
+                    .filter_map(|&f| face_h(f))
+                    .fold(f64::INFINITY, f64::min)
+            }
         })
         .collect();
     let jobs: Vec<(usize, f64)> = edge_h.into_iter().enumerate().collect();
@@ -2124,8 +2131,15 @@ fn plan_face(
     // refined where triangles leave the surface, are too long or bend too much, then shaped by
     // Ruppert refinement.
     let step = [h / speed[0], h / speed[1]];
+    // A flat face with no size asked of it is its boundary nodes alone: no interior seeds, no
+    // refinement.
+    let bare = matches!(s, EvalSurface::Plane { .. }) && h.is_infinite();
     let delaunay = || -> std::result::Result<_, FaceError> {
-        let seeds = cdt::lattice(bbox, step, &polys, speed);
+        let seeds = if bare {
+            Vec::new()
+        } else {
+            cdt::lattice(bbox, step, &polys, speed)
+        };
         let eval = |u: f64, v: f64| sag_eval(s, u, v);
         let sag = cdt::Sag {
             eval: &eval,
@@ -2136,7 +2150,7 @@ fn plan_face(
         };
         let fill = cdt::Fill {
             seeds: &seeds,
-            refine: Some((sag, MAX_REFINE)),
+            refine: if bare { None } else { Some((sag, MAX_REFINE)) },
             shape: !matches!(s, EvalSurface::Plane { .. }),
             lenient: lenient == Lenient::Yes,
         };
@@ -2149,6 +2163,9 @@ fn plan_face(
     let planar = matches!(s, EvalSurface::Plane { .. });
     // The lenient fill is the constrained Delaunay alone: the caller names the face in the stats.
     let (extra, triangles) = if lenient == Lenient::Yes {
+        delaunay()?
+    } else if bare {
+        stats.planar += 1;
         delaunay()?
     } else {
         // A point of the box outside the face's loops is not the face's (as for the size

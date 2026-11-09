@@ -155,31 +155,18 @@ fn ok<T>(r: Result<T>) -> T {
 
 const PI: f64 = std::f64::consts::PI;
 
-/// Smallest corner angle (degrees) over the mesh.
-fn min_angle(m: &Mesh) -> f64 {
-    let mut least = 180.0f64;
-    for t in &m.triangles {
-        let [a, b, c] = t.map(|i| m.positions[i as usize]);
-        for (p, q, r) in [(a, b, c), (b, c, a), (c, a, b)] {
-            let (u, v) = (q - p, r - p);
-            if let (Some(u), Some(v)) = (u.normalized(), v.normalized()) {
-                least = least.min(u.dot(v).clamp(-1.0, 1.0).acos().to_degrees());
-            }
-        }
-    }
-    least
-}
 
+/// A plane is exact for any triangulation of its boundary: it asks for no size, a box's edges
+/// are whole, and each face is its four corners, two triangles. Whatever the box's size.
 #[test]
-fn a_box_is_a_regular_grid_on_every_face() {
-    // 40 × 30 × 20: sides at most 1/5 of the diagonal (10.77 mm), so 4 × 3 × 2 cells.
-    let b = fixture("box_40x30x20");
-    let (m, s) = plan_body(&b, 0.05);
-    assert_eq!(s.planar, 6);
-    assert_watertight(&m, "box");
-    let cells = 2 * (4 * 3 + 4 * 2 + 3 * 2);
-    assert_eq!(m.triangles.len(), 2 * cells, "two triangles per grid cell");
-    assert!(min_angle(&m) > 40.0, "{}", min_angle(&m));
+fn a_box_is_twelve_triangles_whatever_its_size() {
+    for name in ["box_10x6x4", "box_40x30x20"] {
+        let b = fixture(name);
+        let (m, s) = plan_body(&b, 0.05);
+        assert_eq!(s.planar, 6, "{name}");
+        assert_watertight(&m, name);
+        assert_eq!(m.triangles.len(), 12, "{name}");
+    }
 }
 
 #[test]
@@ -2155,8 +2142,8 @@ fn the_spline_coil_keeps_its_triangles() {
     let name = "smlib_coil_lower_half";
     let (b, size) = (fixture(name), size_of(name));
     for (t, want) in [
-        (MeshTolerance::display_of(size), 30_776),
-        (MeshTolerance::export_of(size), 30_808),
+        (MeshTolerance::display_of(size), 30_630),
+        (MeshTolerance::export_of(size), 30_662),
     ] {
         let (p, _) = plan(&b, &t, size).unwrap();
         let (m, _) = p.evaluate();
