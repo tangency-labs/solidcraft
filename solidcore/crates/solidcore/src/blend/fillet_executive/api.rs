@@ -86,8 +86,9 @@ const OP: &str = "blend::fillet_executive::api";
 /// (`fixes.fillet_refuse_non_manifold_result`, WR-212) names no entity, as the refused
 /// result's edge is gone with it. A kept result is `fillet`'s own: the snapshot shares
 /// nothing with `brep`, so `fillet` edits the caller's own objects (curve owners
-/// included). The snapshot fails, before anything is changed, only on geometry nested
-/// deeper than `MAX_GEOMETRY_NESTING`.
+/// included). The snapshot fails, before anything is changed, only where
+/// [`Brep::snapshot`] does: on geometry nested deeper than `MAX_GEOMETRY_NESTING`, or
+/// while a face's surface owner is cleared.
 ///
 /// A kernel whose cancel token fired returns `Cancelled` in place of `Ok` (#2136), with
 /// the body put back, as on any other failure.
@@ -667,6 +668,16 @@ mod tests {
         crate::primitive::api_primitives::create_box(k, Vec3::ZERO, 10.0, 20.0, 30.0).unwrap()
     }
 
+    /// The face count, every vertex's point and tolerance and every edge's tolerance, as bits.
+    fn shape(b: &Brep) -> Vec<u64> {
+        let mut bits = vec![u64::try_from(b.face_list().len()).unwrap()];
+        for (_, v) in b.vertices().iter() {
+            bits.extend([v.point.x, v.point.y, v.point.z, v.tolerance].map(f64::to_bits));
+        }
+        bits.extend(b.edges().iter().map(|(_, e)| e.tolerance.to_bits()));
+        bits
+    }
+
     /// A fillet that fails after it has edited the body leaves the body as it came in,
     /// whatever its error, and a refusal of a non-manifold result names no edge; a fillet
     /// that succeeds keeps its edit.
@@ -676,14 +687,6 @@ mod tests {
         let mut body = boxed(&mut k);
         let edge = p1::edges(&body, None).unwrap()[0];
         let vertex = body.vertices().ids().next().unwrap();
-        let shape = |b: &Brep| {
-            let mut bits = vec![u64::try_from(b.face_list().len()).unwrap()];
-            for (_, v) in b.vertices().iter() {
-                bits.extend([v.point.x, v.point.y, v.point.z, v.tolerance].map(f64::to_bits));
-            }
-            bits.extend(b.edges().iter().map(|(_, e)| e.tolerance.to_bits()));
-            bits
-        };
         let edit = |b: &mut Brep| -> Result<()> {
             b.vertex_mut(vertex)?.point.x += 1.0;
             b.edge_mut(edge)?.tolerance *= 2.0;
@@ -723,6 +726,18 @@ mod tests {
             })
         ));
         assert_eq!(shape(&body), before);
+
+        // a cancel that fires during the fillet ends it as `Cancelled`, the body put back
+        let token = crate::kernel::CancelToken::new();
+        k.set_cancel_token(token.clone());
+        let cancelled = failing_as_a_whole(&mut k, &mut body, |_, b| {
+            edit(b)?;
+            token.cancel();
+            Ok(())
+        });
+        assert!(matches!(cancelled, Err(SolidError::Cancelled { .. })));
+        assert_eq!(shape(&body), before);
+        k.clear_cancel_token();
 
         failing_as_a_whole(&mut k, &mut body, |_, b| edit(b)).unwrap();
         assert_ne!(shape(&body), before);
@@ -1130,6 +1145,7 @@ mod tests {
         let first = bilinear_surface(&FIRST_SURFACE);
         let second = bilinear_surface(&ADJACENT_SURFACE);
         let (mut body, faces) = sheet(&mut k, &[&first, &second]);
+        let before = shape(&body);
         let result = surface_surface_fillet(
             &mut k,
             FilletSurfaceArg::Face {
@@ -1151,6 +1167,7 @@ mod tests {
         ));
         crate::topology::integrity::check(&body).unwrap();
         assert_eq!(p1::faces(&body, None).unwrap().len(), 2);
+        assert_eq!(shape(&body), before);
     }
 
     #[test]
