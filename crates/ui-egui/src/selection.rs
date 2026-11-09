@@ -24,6 +24,7 @@ pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 
     let point = |s: &Sel| match s {
         Sel::SketchPoint { id } => Some(serde_json::json!(id)),
         Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
+        // Horizontal/Vertical takes no origin axis yet: a selection with one isn't consumed.
         _ => None,
     };
     let (a, b) = (point(a)?, point(b)?);
@@ -37,6 +38,8 @@ pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value
     let operand = |s: &Sel| match s {
         Sel::SketchPoint { id } | Sel::SketchCurve { id, .. } => Some(serde_json::json!(id)),
         Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
+        // An origin axis, either operand: the command projects it into the sketch.
+        Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Some(serde_json::json!({"axis": name})),
         _ => None,
     };
     let (a, b) = (operand(a)?, operand(b)?);
