@@ -24,7 +24,7 @@
 //!   a new [`Curve`] sized exactly as upstream sizes a NULL output, so the storage
 //!   error path does not exist. In-place and out-of-place upstream calls produce the
 //!   same curve.
-//! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
+//! - Out-params become return values; errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The `NL_STACKS` arguments and the memory error paths have no counterpart.
 //! - Upstream signed counts (`r` of `N_CrvInsertKnot`, `t` of `N_CrvElevateDegree`,
@@ -50,7 +50,7 @@
 // Index arithmetic follows upstream's signed `NL_INDEX` (`isize` here); every access
 // goes through `get`/`set`, which reject negative or too-large indices.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::nurbs::basis_basic::find_global_max;
 use crate::nurbs::bezier::{
     check_short_degree, elevate_degree as bez_elevate_degree, elevation_matrix,
@@ -64,10 +64,6 @@ use crate::nurbs::srf_basic::{WEIGHT_MAX, WEIGHT_MIN};
 /// Upstream `cto`: relative parameter tolerance of the basis maxima searched by
 /// [`Curve::remove_knot`] (scaled by the parameter range).
 pub const REMOVAL_PARAM_TOL: f64 = 1.0e-05;
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
 
 fn oob(operation: &'static str) -> SolidError {
     SolidError::InvalidInput {
@@ -134,7 +130,7 @@ pub struct KnotRemoval {
 impl Curve {
     /// Inserts the interior knot `u` `r` times (`N_CrvInsertKnot`).
     ///
-    /// Errors with [`NlibCode::Parameter`] when `u` is on or outside the ends of the
+    /// Errors with [`NurbsFailure::Parameter`] when `u` is on or outside the ends of the
     /// knot vector or when the multiplicity of `u` plus `r` exceeds the degree.
     pub fn insert_knot(&self, u: f64, r: usize) -> Result<Curve> {
         const OP: &str = "nurbs::crv_tool::p1::Curve::insert_knot";
@@ -149,11 +145,11 @@ impl Curve {
 
         // Check parameter and get knot span.
         if knt.is_end_param(u) {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
         }
         let (spn, mlt) = knt.find_span_and_mult(pu, u, Side::Left)?;
         if mlt.checked_add(r).is_none_or(|s| s > pu) {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
         }
         let (spn, mlt, r) = (sx(spn, OP)?, sx(mlt, OP)?, sx(r, OP)?);
         let mut k = spn - p;
@@ -212,7 +208,7 @@ impl Curve {
     /// `[U[0], u]` and `[u, U[m]]` (`N_CrvSplit`). A `u` within
     /// `1e-6 * (U[m-p] - U[p])` of a knot `U[p..=m-p]` is moved onto that knot first.
     ///
-    /// Errors with [`NlibCode::Parameter`] when (the adjusted) `u` is on or outside the
+    /// Errors with [`NurbsFailure::Parameter`] when (the adjusted) `u` is on or outside the
     /// ends of the knot vector.
     pub fn split(&self, u: f64) -> Result<(Curve, Curve)> {
         const OP: &str = "nurbs::crv_tool::p1::Curve::split";
@@ -240,7 +236,7 @@ impl Curve {
         // Check parameter for domain.
         let knt = self.knot_vector()?;
         if knt.is_end_param(u) {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
         }
 
         // Get span and knot multiplicity.
@@ -438,8 +434,8 @@ impl Curve {
     /// Refines the curve with the non-decreasing interior knots `x`
     /// (`N_CrvRefine`, algorithm A5.4).
     ///
-    /// Errors with [`NlibCode::Input`] for an empty `x` and with
-    /// [`NlibCode::Parameter`] when `x[0]` or its last knot is on or outside the ends
+    /// Errors with [`NurbsFailure::Input`] for an empty `x` and with
+    /// [`NurbsFailure::Parameter`] when `x[0]` or its last knot is on or outside the ends
     /// of the knot vector.
     pub fn refine(&self, x: &[f64]) -> Result<Curve> {
         const OP: &str = "nurbs::crv_tool::p1::Curve::refine";
@@ -455,12 +451,12 @@ impl Curve {
 
         // Check input parameters.
         if r < 0 {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         let x0 = get(x, 0, OP)?;
         let xr = get(x, r, OP)?;
         if knt.is_end_param(x0) || knt.is_end_param(xr) {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
         }
 
         let mut qw: Vec<CPoint> = storage(n + r + 1, OP)?;
@@ -527,7 +523,7 @@ impl Curve {
     /// Extracts the segment over `[ul, ur]` by knot insertion
     /// (`N_CrvExtractCrvSeg`); `U[0] <= ul < ur <= U[m]` must hold.
     ///
-    /// Errors with [`NlibCode::Input`] when `ur <= ul`; `InvalidInput` for parameters
+    /// Errors with [`NurbsFailure::Input`] when `ur <= ul`; `InvalidInput` for parameters
     /// outside the knot range where upstream would index outside its arrays.
     pub fn extract_seg(&self, ul: f64, ur: f64) -> Result<Curve> {
         const OP: &str = "nurbs::crv_tool::p1::Curve::extract_seg";
@@ -541,7 +537,7 @@ impl Curve {
 
         // Check parameters.
         if ur <= ul {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
 
         // Find knot spans and set new indexes.
@@ -560,7 +556,7 @@ impl Curve {
         let n = ie - is;
         let m = spr - spl - mlr + 2 * p + 1;
         if n < 0 {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
 
         let mut qw: Vec<CPoint> = storage(n, OP)?;
@@ -624,7 +620,7 @@ impl Curve {
     /// stopping at the first removal that would move the curve by more than `tol`
     /// (`N_CrvRemoveKnot`, algorithm A5.8 with the basis-maximum error bound).
     ///
-    /// Errors with [`NlibCode::Parameter`] when `u` is on or outside the ends of the
+    /// Errors with [`NurbsFailure::Parameter`] when `u` is on or outside the ends of the
     /// knot vector. A failing `N_BasisFindGlobalMax` is handled: its maximum is taken
     /// as `1`.
     pub fn remove_knot(&self, u: f64, nu: usize, tol: f64) -> Result<KnotRemoval> {
@@ -651,7 +647,7 @@ impl Curve {
 
         // Don't remove boundary knots.
         if knp.is_end_param(u) {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
         }
         let (spn, mlt) = knp.find_span_and_mult(pu, u, Side::Left)?;
         let nu = sx(nu.min(mlt), OP)?;
@@ -879,8 +875,8 @@ impl Curve {
     /// Elevates the degree by `t` (`N_CrvElevateDegree`, algorithm A5.9): Bezier
     /// segments are extracted, elevated and the knots between them removed again.
     ///
-    /// Errors with [`NlibCode::Degree`] when `p + t > MAX_DEGREE`, with
-    /// [`NlibCode::Knot`] for an invalid knot vector ([`KnotVector::validate`]), and
+    /// Errors with [`NurbsFailure::Degree`] when `p + t > MAX_DEGREE`, with
+    /// [`NurbsFailure::Knots`] for an invalid knot vector ([`KnotVector::validate`]), and
     /// with the errors of the Bezier elevation.
     pub fn elevate_degree(&self, t: usize) -> Result<Curve> {
         const OP: &str = "nurbs::crv_tool::p1::Curve::elevate_degree";
@@ -895,7 +891,7 @@ impl Curve {
 
         // Check error.
         if pu.checked_add(t).is_none_or(|q| q > MAX_DEGREE) {
-            return Err(nlib(OP, NlibCode::Degree));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Degree));
         }
         knt.validate(pu)?;
 
@@ -1115,15 +1111,7 @@ mod tests {
     #[test]
     fn insert_knot_errors() {
         let c = cubic();
-        let par = |e: SolidError| {
-            matches!(
-                e,
-                SolidError::Nlib {
-                    code: NlibCode::Parameter,
-                    ..
-                }
-            )
-        };
+        let par = |e: SolidError| matches!(e.nurbs_failure(), Some(NurbsFailure::Parameter));
         assert!(par(c.insert_knot(0.0, 1).unwrap_err()));
         assert!(par(c.insert_knot(1.0, 1).unwrap_err()));
         assert!(par(c.insert_knot(0.5, 3).unwrap_err()));
@@ -1185,10 +1173,7 @@ mod tests {
         assert!(c.split(1.0).is_err());
         assert!(matches!(
             c.extract_seg(0.5, 0.5),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 
@@ -1214,10 +1199,7 @@ mod tests {
         }
         assert!(matches!(
             c.refine(&[]),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 
@@ -1236,10 +1218,7 @@ mod tests {
         assert_eq!(c.elevate_degree(0).unwrap(), c);
         assert!(matches!(
             c.elevate_degree(15),
-            Err(SolidError::Nlib {
-                code: NlibCode::Degree,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Degree))
         ));
     }
 
