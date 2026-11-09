@@ -3811,7 +3811,7 @@ fn finite_input(raw: &mut egui::RawInput) {
 }
 
 /// After a sketch Move that let go of constraints tying the moved geometry to what stays (a
-/// corner on the origin; #2980): the status line names them, and a click on it undoes the move.
+/// corner on the origin; #2980): the status line names them, and its Undo button undoes the move.
 fn released_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: &Value) {
     let Some(released) = v.get("released").and_then(Value::as_array).filter(|r| !r.is_empty()) else { return };
     let mut names: Vec<&str> = Vec::new();

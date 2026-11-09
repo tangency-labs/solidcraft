@@ -3888,7 +3888,7 @@ fn holding(sk: &Sketch, moved: &[usize]) -> Vec<(String, &'static str)> {
             let touched = sk.constraint_points(&c.kind);
             touched.iter().any(|q| moved.contains(q)) && touched.iter().any(|q| !moved.contains(q))
         })
-        .filter(|(ci, _)| solidcraft_sketch::constraint_residual(sk, *ci).is_some_and(|r| r <= broken_at(sk)))
+        .filter(|(ci, c)| solidcraft_sketch::constraint_residual(sk, *ci).is_some_and(|r| r <= broken_at(sk, &c.kind)))
         .map(|(_, c)| (c.id.clone(), c.kind.name()))
         .collect()
 }
@@ -3903,16 +3903,26 @@ fn release_broken(sk: &mut Sketch, held: &[(String, &'static str)]) -> Vec<Value
         .iter()
         .enumerate()
         .filter(|(_, c)| held.iter().any(|(id, _)| *id == c.id))
-        .filter(|(ci, _)| solidcraft_sketch::constraint_residual(sk, *ci).is_some_and(|r| r > broken_at(sk)))
+        .filter(|(ci, c)| solidcraft_sketch::constraint_residual(sk, *ci).is_some_and(|r| r > broken_at(sk, &c.kind)))
         .map(|(_, c)| c.id.clone())
         .collect();
     sk.constraints.retain(|c| !broken.contains(&c.id));
     held.iter().filter(|(id, _)| !sk.constraints.iter().any(|c| c.id == *id)).map(|(id, kind)| json!({"id": id, "kind": kind})).collect()
 }
 
-/// A residual above this (mm, or radians) is a constraint that doesn't hold.
-fn broken_at(sk: &Sketch) -> f64 {
-    1e-7 * sk.points.iter().map(|p| p.pos.len()).fold(1.0, f64::max)
+/// A residual above this is a constraint that doesn't hold. A distance is judged against the size
+/// of the geometry the constraint itself touches, so a far-away point elsewhere in the sketch can't
+/// hide a broken one; the sine or cosine between two lines has no length to scale by.
+fn broken_at(sk: &Sketch, kind: &ConstraintKind) -> f64 {
+    let direction_only = match *kind {
+        ConstraintKind::Parallel { .. } | ConstraintKind::Perpendicular { .. } => true,
+        ConstraintKind::Horizontal { l } | ConstraintKind::Vertical { l } => sk.curves.get(l).is_some_and(|c| c.infinite),
+        _ => false,
+    };
+    if direction_only {
+        return 1e-7;
+    }
+    1e-7 * sk.constraint_points(kind).iter().filter_map(|&q| sk.points.get(q)).map(|p| p.pos.len()).fold(1.0, f64::max)
 }
 
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {

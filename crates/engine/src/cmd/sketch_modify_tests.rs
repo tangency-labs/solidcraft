@@ -5762,3 +5762,18 @@ fn moving_shapes_held_to_the_origin_moves_them_whole() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(sketch(&s).constraints.len(), sk.constraints.len(), "undo brings it back");
 }
+
+/// A point far from the move says nothing about how exactly the moved line has to stay level with
+/// the line that stays: a short move still breaks that relation, so it is still let go.
+#[test]
+fn a_far_away_point_does_not_keep_a_constraint_the_move_broke() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let stays = ids(&run(&mut s, "sketch.line", json!({"points": [[5, 5], [15, 5]], "connect": false}))["curves"])[0].clone();
+    let moved = ids(&run(&mut s, "sketch.line", json!({"points": [[30, 5], [30, 20]], "connect": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"points": [format!("{moved}.start"), format!("{stays}.end")], "mode": "horizontal"}));
+    let level = sketch(&s).constraints.iter().find(|c| matches!(c.kind, ConstraintKind::HorizontalPoints { .. })).map(|c| c.id.clone()).unwrap();
+    run(&mut s, "sketch.point", json!({"point": [1e8, 0], "id": "far"}));
+    let r = run(&mut s, "sketch.move", json!({"entities": [moved], "translate": [0, 1]}));
+    assert_eq!(r["released"], json!([{"id": level, "kind": "Horizontal"}]), "{r}");
+}
