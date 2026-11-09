@@ -9,9 +9,8 @@
 //! capped, nothing is allocated from a count read out of the file (lists grow as their items are
 //! read), and every refusal is an [`Error`], never a panic.
 //!
-//! Origin: SolidCraft's `crates/step/src/p21.rs` at `a5b71ca2` (MIT OR Apache-2.0). With the STEP
-//! merge (#2577) this becomes solidcore's one Part 21 implementation; `step-import`'s `part21.rs`
-//! goes with #2585.
+//! Origin: SolidCraft's `crates/step/src/p21.rs` at `a5b71ca2` (MIT OR Apache-2.0). This is
+//! solidcore's one Part 21 implementation (`step-import`'s `part21.rs` is gone, #14123).
 //!
 //! Deviations from SolidCraft: [`Exchange::entities`] is a `BTreeMap` (was a `HashMap`), so
 //! iterating it is in id order on every platform; what is stored and which definition wins a
@@ -197,9 +196,34 @@ impl Entity {
     }
 }
 
+/// The HEADER section's file description and file name, as written.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Header {
+    /// `FILE_DESCRIPTION` lines.
+    pub descriptions: Vec<String>,
+    /// `FILE_DESCRIPTION` implementation level.
+    pub implementation_level: String,
+    /// `FILE_NAME` name.
+    pub file_name: String,
+    /// `FILE_NAME` time stamp.
+    pub time_stamp: String,
+    /// `FILE_NAME` authors.
+    pub authors: Vec<String>,
+    /// `FILE_NAME` organizations.
+    pub organizations: Vec<String>,
+    /// `FILE_NAME` preprocessor version.
+    pub preprocessor_version: String,
+    /// `FILE_NAME` originating system.
+    pub originating_system: String,
+    /// `FILE_NAME` authorization.
+    pub authorization: String,
+}
+
 /// A parsed exchange file.
 #[derive(Clone, Debug, Default)]
 pub struct Exchange {
+    /// The HEADER's description and file name, field by field.
+    pub header: Header,
     /// `FILE_SCHEMA` names.
     pub schemas: Vec<String>,
     /// `FILE_NAME` originating system.
@@ -756,9 +780,39 @@ fn parse_limited(
                                     .filter_map(|p| p.as_str())
                                     .collect::<Vec<_>>()
                                     .join(" ");
+                                ex.header.descriptions = v
+                                    .iter()
+                                    .filter_map(|p| p.as_str().map(str::to_string))
+                                    .collect();
+                            }
+                            if let Some(level) = params.get(1).and_then(Param::as_str) {
+                                level.clone_into(&mut ex.header.implementation_level);
                             }
                         }
                         "FILE_NAME" => {
+                            let string = |i: usize| {
+                                params
+                                    .get(i)
+                                    .and_then(Param::as_str)
+                                    .unwrap_or("")
+                                    .to_string()
+                            };
+                            let strings = |i: usize| -> Vec<String> {
+                                params
+                                    .get(i)
+                                    .and_then(Param::as_list)
+                                    .unwrap_or(&[])
+                                    .iter()
+                                    .filter_map(|p| p.as_str().map(str::to_string))
+                                    .collect()
+                            };
+                            ex.header.file_name = string(0);
+                            ex.header.time_stamp = string(1);
+                            ex.header.authors = strings(2);
+                            ex.header.organizations = strings(3);
+                            ex.header.preprocessor_version = string(4);
+                            ex.header.originating_system = string(5);
+                            ex.header.authorization = string(6);
                             ex.preprocessor = params
                                 .get(4)
                                 .and_then(Param::as_str)

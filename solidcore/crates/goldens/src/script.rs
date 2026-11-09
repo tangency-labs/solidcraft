@@ -45,8 +45,8 @@
 //! once (the call takes it over).
 
 use crate::flat::{decode_curve, decode_surface, encode_curve, encode_surface};
-use crate::geom::{bspline_point, dot, scale, sub};
-use crate::model::{Body, BodyKind, Bound, Curve, Surface, P3};
+use solidcore_record::step::model::{Body, BodyKind, Bound, Curve, Surface, P3};
+use step_export::geom::{bspline_point, dot, scale, sub};
 
 /// First word of an encoded script.
 pub const MAGIC: f64 = 31.0;
@@ -607,7 +607,7 @@ pub fn from_body(body: &Body, options: FromBodyOptions) -> Script {
                 domain: [0.0; 4],
             });
             // outer loop first
-            let mut loops: Vec<&crate::model::Loop> =
+            let mut loops: Vec<&solidcore_record::step::model::Loop> =
                 face.loops.iter().filter(|l| l.outer).collect();
             loops.extend(face.loops.iter().filter(|l| !l.outer));
             for l in loops {
@@ -740,7 +740,7 @@ const EDGE_SAMPLES: usize = 32;
 /// The point of edge `e` at fraction `s` of its parameter range, from `t_start` to
 /// `t_end` (the mapper orders a periodic range in the edge's sense: `t_end > t_start`
 /// along the curve, `t_end < t_start` against it).
-pub fn edge_point(e: &crate::model::Edge, s: f64) -> Option<P3> {
+pub fn edge_point(e: &solidcore_record::step::model::Edge, s: f64) -> Option<P3> {
     let (t0, t1) = (e.t_start, e.t_end);
     match &e.curve {
         Curve::Line {
@@ -765,7 +765,7 @@ fn add(a: P3, b: P3) -> P3 {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 }
 
-fn conic(f: &crate::model::Frame, a: f64, b: f64, deg: f64) -> P3 {
+fn conic(f: &solidcore_record::step::model::Frame, a: f64, b: f64, deg: f64) -> P3 {
     let r = deg.to_radians();
     add(
         f.origin,
@@ -786,7 +786,7 @@ fn unwrap(prev: f64, x: f64) -> f64 {
 /// vertex loops add their point in the directions that are not periodic).
 /// `None` for a face without loops and for surfaces whose STEP parameters are not
 /// analytic here (revolution, extrusion, B-spline).
-pub fn step_uv_domain(body: &Body, face: &crate::model::Face) -> Option<[f64; 4]> {
+pub fn step_uv_domain(body: &Body, face: &solidcore_record::step::model::Face) -> Option<[f64; 4]> {
     let map: ParamMap = match &face.surface {
         Surface::Plane { frame } => {
             let f = *frame;
@@ -945,7 +945,11 @@ fn axis_range(loops: &[Vec<f64>], periodic: bool, extra: &[f64]) -> Option<(f64,
 /// cone, `r^2 cos v` for a sphere, `r (R + r cos v)` for a torus). Exact up to the
 /// polygon approximation of the loops in parameter space. `None` where
 /// [`step_uv_domain`] has no parameters.
-pub fn step_face_area(body: &Body, face: &crate::model::Face, samples: usize) -> Option<f64> {
+pub fn step_face_area(
+    body: &Body,
+    face: &solidcore_record::step::model::Face,
+    samples: usize,
+) -> Option<f64> {
     step_uv_domain(body, face)?;
     let (f, map): (AreaElement, ParamMap) = match &face.surface {
         Surface::Plane { frame } => {

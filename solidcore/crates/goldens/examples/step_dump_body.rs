@@ -1,7 +1,7 @@
 //! Prints one body of a STEP file: its debug form, or with `--flat` its flat encoding
 //! (one number per line), for debugging the importer and the C++ shim.
 //!
-//! `cargo run -p step-import --example dump_body -- <file.stp> <body index> [--flat]`
+//! `cargo run -p goldens --example step_dump_body -- <file.stp> <body index> [--flat]`
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -10,7 +10,7 @@ fn main() {
         std::process::exit(2);
     };
     let bytes = std::fs::read(path).unwrap_or_default();
-    let model = match step_import::import(&bytes, &step_import::Limits::default()) {
+    let model = match step_export::import(&bytes, &step_export::Limits::default()) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("parse error: {e}");
@@ -26,7 +26,7 @@ fn main() {
         std::process::exit(1);
     };
     if args.iter().any(|a| a == "--flat") {
-        for x in step_import::flat::encode(body) {
+        for x in goldens::flat::encode(body) {
             println!("{x:?}");
         }
     } else {

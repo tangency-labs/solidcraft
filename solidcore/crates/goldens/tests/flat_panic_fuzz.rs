@@ -17,13 +17,13 @@ mod panic_fuzz;
 
 use panic_fuzz::{assert_no_findings, fuzz, Family, Rng, Settings};
 use solidcore::CancelToken;
-use step_import::Limits;
+use step_export::Limits;
 
 /// The files whose bodies are encoded: the STEP fixtures step-brep's fuzz started from.
 fn bases() -> &'static [&'static [u8]] {
     &[
         include_bytes!("../../solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step"),
-        include_bytes!("../../goldens/src/units/topology_brep_constructor_tetra.stp"),
+        include_bytes!("../src/units/topology_brep_constructor_tetra.stp"),
     ]
 }
 
@@ -63,11 +63,11 @@ impl Family for FlatDecode {
     }
 
     fn run(case: FlatCase, _cancel: &CancelToken) {
-        let Ok(model) = step_import::import(bases()[case.base], &Limits::default()) else {
+        let Ok(model) = step_export::import(bases()[case.base], &Limits::default()) else {
             return;
         };
         for body in &model.bodies {
-            let mut flat = step_import::flat::encode(body);
+            let mut flat = goldens::flat::encode(body);
             if flat.is_empty() {
                 continue;
             }
@@ -78,7 +78,7 @@ impl Family for FlatDecode {
             if let Some(at) = case.truncate {
                 flat.truncate((at * flat.len() as f64) as usize);
             }
-            let _ = step_import::flat::decode(&flat);
+            let _ = goldens::flat::decode(&flat);
         }
     }
 }
