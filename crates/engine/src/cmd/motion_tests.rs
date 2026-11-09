@@ -16,6 +16,13 @@ fn occ(s: &Session, component: &str) -> u64 {
     s.doc.occurrence_of(c).map(|o| o.id).unwrap_or(0)
 }
 
+/// The call that deletes item `id` with `delete`: Edit Contact Set deletes with `delete: true`;
+/// Delete Motion Study and Delete Exploded View take only the item, and strict refuses any other
+/// key (#12155).
+fn deletion(delete: &str, key: &str, id: u64) -> Value {
+    if delete == "contact.edit" { json!({key: id, "delete": true}) } else { json!({key: id}) }
+}
+
 #[test]
 fn deleted_motion_item_ids_are_not_reused_after_reopening() {
     for (create, delete, key, params) in [
@@ -29,13 +36,13 @@ fn deleted_motion_item_ids_are_not_reused_after_reopening() {
             run(&mut s, "component.create", json!({"name": name}));
         }
         let first = run(&mut s, create, params.clone())[key].as_u64().unwrap();
-        let deletion = json!({key: first, "delete": true});
-        run(&mut s, delete, deletion.clone());
+        let deleting = deletion(delete, key, first);
+        run(&mut s, delete, deleting.clone());
         let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
         *s.doc_mut() = doc;
         let second = run(&mut s, create, params)[key].as_u64().unwrap();
         assert!(second > first, "{create}: deleted item {first} was reused as {second}");
-        assert!(s.execute(delete, &deletion).is_err());
+        assert!(s.execute(delete, &deleting).is_err());
     }
 }
 
@@ -60,7 +67,7 @@ fn default_names_skip_names_in_use() {
         let (first, one) = made(&mut s);
         let (_, two) = made(&mut s);
         assert_eq!([one, two], [format!("{prefix}1"), format!("{prefix}2")]);
-        run(&mut s, delete, json!({key: first, "delete": true}));
+        run(&mut s, delete, deletion(delete, key, first));
         assert_eq!(made(&mut s).1, format!("{prefix}1"), "{create}: the free name, not {prefix}2 again");
     }
     // Placements: with the first deleted, a copy takes a name none has.
@@ -678,6 +685,25 @@ fn motion_study_plays_and_exports() {
     assert!(s.execute("motion.study", &json!({"keys": [{"joint": "Rail", "index": 3, "points": [[0, 1]]}]})).is_err());
     run(&mut s, "motion.delete", json!({"study": "Push"}));
     assert_eq!(run(&mut s, "motion.list", json!({}))["studies"].as_array().map(Vec::len), Some(0));
+}
+
+/// A placement's name in a motion CSV is one field, whatever it holds (#12728). A comma is kept in
+/// quotes, where it used to become a space; a quote or a line break no longer splits the row; and a
+/// name that a spreadsheet would run as a formula opens as text.
+#[test]
+fn a_motion_csv_keeps_each_placement_name_in_its_field() {
+    let mut s = rail();
+    run(&mut s, "motion.study", json!({"name": "Push", "steps": 100, "keys": [{"joint": "Rail", "points": [[0, 10], [100, -5]]}]}));
+    run(&mut s, "component.rename", json!({"component": "B", "name": "=B, \"x\"\ny"}));
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-motion-names-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let csv = dir.join("names.csv");
+    run(&mut s, "motion.export", json!({"study": "Push", "samples": 2, "path": csv.to_string_lossy()}));
+    let text = std::fs::read_to_string(&csv).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(text.contains(",A:1,") && text.contains(",\"'=B, \"\"x\"\"\ny:1\","), "{text}");
+    // A header, a row for each placement at each of the two samples, and the line break in each of B's rows.
+    assert_eq!(text.matches('\n').count(), 1 + 2 * 2 + 2, "{text}");
 }
 
 /// Regression (#9741): `motion.study` takes degrees for angle keys, so `motion.list` must give

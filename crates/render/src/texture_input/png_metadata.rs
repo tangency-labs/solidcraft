@@ -312,7 +312,7 @@ impl PngMetadata {
         }
         Ok(matches!(self.phase, Phase::Done))
     }
-    #[cfg(all(test, feature = "raytrace-cpu"))]
+    #[cfg(test)]
     pub(crate) fn phase_name(&self) -> &'static str {
         match self.phase {
             Phase::Header => "metadata_header",

@@ -399,7 +399,7 @@ mod tests {
             damaged["features"][1]["profiles"]["associations"] = associations;
             assert!(validate_raw(&damaged).is_err());
             damaged["format"] = json!(crate::format::format_string(crate::format::FORMAT + 1));
-            assert!(crate::format::read(&damaged.to_string()).unwrap_err().to_string().contains("newer SolidCraft"));
+            assert!(crate::format::read(&damaged.to_string()).unwrap().newer_file.is_some());
         }
         // Absent metadata preserves the historical one-to-one chain representation.
         let mut legacy = fixture();
@@ -463,6 +463,7 @@ mod tests {
                             distance2: None,
                             start_offset: None,
                             through_all: false,
+                            second_follows_first: false,
                             taper: None,
                             corner: Default::default(),
                             to: None,

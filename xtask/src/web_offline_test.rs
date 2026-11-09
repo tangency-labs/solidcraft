@@ -535,6 +535,8 @@ const STATE_JS: &str = "(async () => {
   }
   const filling = (await navigator.locks.query()).held.map((l) => l.name).filter((n) => n.startsWith(prefix));
   return { search: location.search, ready: document.readyState, build: document.documentElement.dataset.build ?? null,
+    scriptStartedBuild: document.documentElement.dataset.started ?? null,
+    scriptSharedBuild: document.documentElement.dataset.shared ?? null,
     started: STARTED, controlled: !!navigator.serviceWorker.controller, caches: caches_, kept, retired, complete, filling,
     registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length };
 })()";

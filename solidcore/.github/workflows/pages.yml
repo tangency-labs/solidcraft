@@ -1,0 +1,68 @@
+name: Pages
+
+# Builds the progress site (site/build.py) and the unit checklist (harness/plan/progress.py,
+# published as PROGRESS.md on the site) from main and deploys them to GitHub Pages.
+# Requires Settings -> Pages -> Source = "GitHub Actions". Nothing is committed back: main
+# only changes through the merge queue.
+#
+# Triggers:
+# - push to main: every merge (statuses, upstream issues, the site itself).
+# - workflow_run of "CI" on main: refresh the source inventory after CI completes.
+# - schedule (hourly): claims from open "port: <unit id>" PRs.
+# - workflow_dispatch: manual rebuild.
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read  # download the optional primitives artifact
+  pull-requests: read  # open "port:" PRs for the checklist's claims
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          fetch-depth: 0 # full history for the progress timeline
+      - name: Fetch main's solids report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-solids.sh || echo "no solids report; the Solids page will say so"
+      - name: Test checklist generator
+        run: python3 -m unittest discover -s harness/plan -p 'test_*.py'
+      - name: Generate checklist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 harness/plan/progress.py --prs
+      - name: Build site
+        run: python3 site/build.py --out _site
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

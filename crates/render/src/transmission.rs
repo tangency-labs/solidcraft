@@ -9,6 +9,7 @@ use crate::surface::{SurfaceError, unit_direction};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Transmission {
+    model: Option<crate::glass_model::GlassModel>,
     absorption_per_mm: Vec3,
     thin_wall_thickness_mm: Option<f64>,
     shadow_transmission: bool,
@@ -17,6 +18,7 @@ pub struct Transmission {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransmissionError {
+    Model,
     Absorption,
     Scattering,
     Distance,
@@ -28,6 +30,7 @@ pub enum TransmissionError {
 impl std::fmt::Display for TransmissionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::Model => "glass model requires finite bounded roughness, dispersion and optical film parameters",
             Self::Scattering => "subsurface scattering requires a closed medium, finite scattering 0..100/mm, HG anisotropy -0.95..0.95 and disabled straight shadow transmission",
             Self::Absorption => "absorption_per_mm must be finite RGB coefficients in [0, 100] per mm",
             Self::Distance => "geometric absorption distance must be finite and nonnegative",
@@ -50,7 +53,15 @@ impl Transmission {
         if thin_wall_thickness_mm.is_some_and(|v| !v.is_finite() || !(0.0..=10000.0).contains(&v)) {
             return Err(TransmissionError::Thickness);
         }
-        Ok(Self { absorption_per_mm, thin_wall_thickness_mm, shadow_transmission: thin_wall_thickness_mm.is_some(), subsurface: None })
+        Ok(Self { model: None, absorption_per_mm, thin_wall_thickness_mm, shadow_transmission: thin_wall_thickness_mm.is_some(), subsurface: None })
+    }
+    pub fn with_model(mut self, model: crate::glass_model::GlassModel) -> Result<Self, TransmissionError> {
+        model.validate(1.5).map_err(|_| TransmissionError::Model)?;
+        self.model = Some(model);
+        Ok(self)
+    }
+    pub fn model(self) -> Option<crate::glass_model::GlassModel> {
+        self.model
     }
     /// Thin sheets enable straight shadow transmission by default; solids opt in.
     pub fn with_shadow_transmission(mut self, enabled: bool) -> Self {
@@ -130,7 +141,11 @@ pub fn refract(incident: Vec3, normal: Vec3, incident_ior: f64, transmitted_ior:
     if cosine < 0.0 {
         return Err(TransmissionError::Direction);
     }
-    let f = fresnel(cosine.min(1.0), incident_ior, transmitted_ior)?;
+    let cosine = cosine.min(1.0);
+    let f = fresnel(cosine, incident_ior, transmitted_ior)?;
+    if incident_ior == transmitted_ior {
+        return Ok(Some(d));
+    }
     Ok(f.transmitted_cosine.map(|ct| {
         let eta = incident_ior / transmitted_ior;
         d * eta + n * (eta * cosine - ct)
@@ -150,10 +165,19 @@ pub fn slab(
         return Err(TransmissionError::Thickness);
     }
     let f = fresnel(cosine, outside_ior, inside_ior)?;
-    let Some(ct) = f.transmitted_cosine.filter(|v| *v > 0.0) else {
+    let Some(ct) = f.transmitted_cosine else {
         return Ok((Vec3::new(1.0, 1.0, 1.0), Vec3::ZERO));
     };
-    let a = transmission.attenuation(thickness_mm / ct)?;
+    // A zero-thickness sheet has zero optical distance, including matched-index
+    // exact grazing. Positive thickness without a crossing has no finite path.
+    let distance = if thickness_mm == 0.0 {
+        0.0
+    } else if ct > 0.0 {
+        thickness_mm / ct
+    } else {
+        return Err(TransmissionError::Angle);
+    };
+    let a = transmission.attenuation(distance)?;
     let channel = |r: f64, a: f64| {
         let denominator = 1.0 - r * r * a * a;
         if denominator <= 0.0 {

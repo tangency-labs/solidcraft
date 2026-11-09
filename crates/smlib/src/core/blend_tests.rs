@@ -606,9 +606,10 @@ fn pocket_chamfer_on_a_boolean_body() {
 }
 
 /// The corner of r5 rounds at (60, 40, 20) on a 60 x 40 x 20 box, set back 8 and left open: the
-/// box's six faces and the three rounds (9 faces, 30 edges, 22 vertices), a sheet, and one hole
-/// of twelve edges (each section and face curve in two), chained end to start, each beside a face
-/// of the sheet.
+/// box's six faces and the three rounds (9 faces, 27 edges, 19 vertices), a sheet, and one hole
+/// of nine edges, chained end to start, each beside a face of the sheet. The marked corner is the
+/// blend corner's Setback (tangency-labs/solidcore#2988), whose sections and face curves are one
+/// edge each; the N x N patch it replaced split each in two (12 edges, 30 and 22).
 #[test]
 fn a_setback_corner_left_open_returns_its_hole() {
     let edges = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40.0, 10.0]];
@@ -616,17 +617,17 @@ fn a_setback_corner_left_open_returns_its_hole() {
         let b = Shape::Box([0.0; 3], [60.0, 40.0, 20.0]).core();
         blend_holes(&b, Blend::Round, &edges, &[5.0; 3], 0.1, &[[60.0, 40.0, 20.0]], &[8.0], Corners::Open).unwrap()
     });
-    assert_eq!(counts(&open).unwrap(), [9, 30, 22]);
+    assert_eq!(counts(&open).unwrap(), [9, 27, 19]);
     assert!(!super::is_manifold_solid(&open).unwrap());
     let [hole] = holes.as_slice() else { panic!("one corner: {holes:?}") };
-    assert_eq!(hole.edges.len(), 12);
+    assert_eq!(hole.edges.len(), 9);
     let flat = to_arrays(&open).unwrap();
     let (rec, _) = native(&flat).unwrap();
     solidcraft_geom::brep::check::validate(&rec).unwrap();
     let ends = &flat.ints[&crate::flat::EDGE_VERTICES];
     let end = |h: &crate::HoleEdge, last: bool| ends[2 * h.edge + usize::from(h.forward == last)];
     for (k, h) in hole.edges.iter().enumerate() {
-        let next = &hole.edges[(k + 1) % 12];
+        let next = &hole.edges[(k + 1) % 9];
         assert_eq!(end(h, true), end(next, false), "edge {k} ends where the next starts");
         assert!(h.face < 9);
     }

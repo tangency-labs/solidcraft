@@ -33,6 +33,12 @@ slow-timeout = { period = "60s" }
 [profile.ci.junit]
 path = "junit.xml"
 
+# Bound the whole test process, including Vulkan host initialization and teardown.
+# Cold runs can warm multiple pipelines before the first image starts rendering.
+[[profile.ci.overrides]]
+filter = "package(=solidcraft-ui-egui) & test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host)"
+slow-timeout = { period = "60s", terminate-after = 20 }
+
 # The action matrix sample runs its designs in parallel workers (ACTION_MATRIX_JOBS, set to match in
 # ci.yml). Its workers reserve that many of nextest's threads, so the cores are not oversubscribed
 # (a pi-case hole that takes 8 s alone went past the matrix's 90 s action limit when they were),

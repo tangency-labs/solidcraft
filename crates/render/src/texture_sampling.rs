@@ -59,7 +59,9 @@ impl<'a> TextureView<'a> {
         Ok(Self { rgba, width, height })
     }
 
-    /// Shape-only borrow of immutable storage validated incrementally by its builder.
+    /// Shape-only borrow of private immutable storage whose builder already
+    /// validated every sample incrementally. Never use on unvalidated external
+    /// pixels: this avoids an image-wide scan on every future mapped ray.
     #[cfg(feature = "raytrace-cpu")]
     pub(crate) fn from_admitted(rgba: &'a [f32], dimensions: [u32; 2]) -> Result<Self, SamplingError> {
         let [width, height] = dimensions;
@@ -71,6 +73,7 @@ impl<'a> TextureView<'a> {
         }
         Ok(Self { rgba, width: width as usize, height: height as usize })
     }
+
     /// Bilinear level-zero RGB for an explicitly opaque consumer. Alpha is validated
     /// but deliberately ignored (even zero-alpha RGB participates). This is NOT
     /// transparent compositing or premultiplied-alpha filtering.

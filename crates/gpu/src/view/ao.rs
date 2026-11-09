@@ -154,9 +154,10 @@ fn term_target(view: &wgpu::TextureView) -> Option<wgpu::RenderPassColorAttachme
     })
 }
 
-/// The opaque triangles of `batches`, as neither pass counts them in the performance overlay.
-fn draw_opaque(pass: &mut wgpu::RenderPass<'_>, pipelines: &OpaquePipelines, binds: [&wgpu::BindGroup; 2], batches: [&Batches; 2]) {
-    for (batch, bind) in batches.into_iter().zip(binds) {
+/// The opaque triangles of each scene in `layers` (its group 0 bind and batches), as neither pass
+/// counts them in the performance overlay.
+fn draw_opaque(pass: &mut wgpu::RenderPass<'_>, pipelines: &OpaquePipelines, layers: &[(&wgpu::BindGroup, &Batches)]) {
+    for &(bind, batch) in layers {
         pass.set_bind_group(0, bind, &[]);
         pass.set_pipeline(&pipelines.built);
         for tris in [&batch.tris, &batch.open_tris, &batch.ground_ao].into_iter().flatten() {
@@ -291,11 +292,10 @@ impl Resources {
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
-        binds: [&wgpu::BindGroup; 2],
         radius: f32,
         size_px: [f32; 2],
         reversed: bool,
-        batches: [&Batches; 2],
+        layers: &[(&wgpu::BindGroup, &Batches)],
     ) {
         let enabled = radius.is_finite() && radius > 0.0;
         // Bound memory at large window sizes; normalized coordinates also handle downsampling.
@@ -304,9 +304,10 @@ impl Resources {
             self.maps = maps(device, &self.layout, size);
             self.size = size;
         }
-        if !enabled {
+        // The blur reads the frame's uniform through the first scene's bind (the model's).
+        let Some(&(first, _)) = layers.first().filter(|_| enabled) else {
             return;
-        }
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sc_ao_prepass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -327,7 +328,7 @@ impl Resources {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        draw_opaque(&mut pass, &self.prepass, binds, batches);
+        draw_opaque(&mut pass, &self.prepass, layers);
         drop(pass);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sc_ao_term"),
@@ -342,7 +343,7 @@ impl Resources {
             multiview_mask: None,
         });
         pass.set_bind_group(2, &self.maps.bind, &[]);
-        draw_opaque(&mut pass, &self.term, binds, batches);
+        draw_opaque(&mut pass, &self.term, layers);
         drop(pass);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sc_ao_blur"),
@@ -353,7 +354,7 @@ impl Resources {
             multiview_mask: None,
         });
         pass.set_pipeline(&self.blur);
-        pass.set_bind_group(0, binds[0], &[]);
+        pass.set_bind_group(0, first, &[]);
         pass.set_bind_group(2, &self.maps.blur_bind, &[]);
         pass.draw(0..3, 0..1);
     }

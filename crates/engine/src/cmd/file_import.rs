@@ -320,6 +320,63 @@ pub(crate) fn add_in_component(
     Ok((id, Placed { component: top, occurrence: top_occ, name, components: comps.len(), joints: joint_ids }))
 }
 
+/// Move an import to the origin of the component it was inserted into (#12543): the box around
+/// its bodies, where they are placed, comes to sit centred on X and Y with its lowest point on
+/// Z = 0. The import's occurrence moves; the file's coordinates in the feature are kept, so the
+/// move is its placement and Move Occurrence takes it on from there. Returns the shift, in that
+/// component's frame; `None` when the import has no bodies to place.
+pub(crate) fn move_to_origin(s: &mut Session, placed: &Placed) -> Result<Option<Vec3>> {
+    let occ = placed.occurrence.ok_or_else(|| EngineError::Other("the import has no placement to move".into()))?;
+    // A component activated without a path is shown at its first placement, as elsewhere.
+    let active = s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(s.active_component));
+    // The frame the import was placed in: the origin it goes to.
+    let parent = s.doc.path_transform(s.active_component, &active).unwrap_or(IDENTITY);
+    let to_parent =
+        solidcraft_doc::mat_inverse(&parent).ok_or_else(|| EngineError::Other("the active component's placement can't be inverted".into()))?;
+    // This placement of the import only: the bodies whose path runs through its occurrence
+    // where it sits in the active component.
+    let ours: Vec<String> = s
+        .doc
+        .body_frames(&s.model.state())
+        .into_iter()
+        .filter(|(_, _, path, _)| path.starts_with(&active) && path.get(active.len()) == Some(&occ))
+        .map(|(name, ..)| name)
+        .collect();
+    let world = s.world_state()?;
+    let mut bounds = solidcraft_geom::Aabb3::EMPTY;
+    for body in world.bodies.iter().filter(|b| ours.contains(&b.name)) {
+        // Each body's own box in the active component's frame: a turned component's frame would
+        // only take a larger box around the world box's corners, leaving the mesh off Z = 0.
+        let b = if solidcraft_doc::is_identity(&to_parent) {
+            body.body.exact_bounds()?
+        } else {
+            solidcraft_doc::kernel::place_matrix(&body.body, to_parent)?.exact_bounds()?
+        };
+        if b.is_empty() {
+            continue;
+        }
+        bounds = bounds.union(&b);
+    }
+    if bounds.is_empty() {
+        return Ok(None);
+    }
+    let shift = Vec3::new(-(bounds.min.x + bounds.max.x) / 2.0, -(bounds.min.y + bounds.max.y) / 2.0, -bounds.min.z);
+    if ![shift.x, shift.y, shift.z].iter().all(|v| v.is_finite()) {
+        return Err(EngineError::Other("the import's bounds can't be placed at the origin".into()));
+    }
+    let mut by = IDENTITY;
+    by[3] = [shift.x, shift.y, shift.z, 1.0];
+    if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {
+        let moved = solidcraft_doc::mat_mul(&by, &o.transform);
+        if !solidcraft_doc::is_placement(&moved) {
+            return Err(EngineError::Other("moving the import to the origin takes it out of a placement within 1e9 mm".into()));
+        }
+        o.transform = moved;
+    }
+    s.refresh();
+    Ok(Some(shift))
+}
+
 /// Record that body `names[b]` lives in component `c`, placed by `offset`.
 fn put_bodies(s: &mut Session, names: &[Option<String>], moves: &[(usize, u64, Mat)]) {
     if moves.is_empty() {
