@@ -947,3 +947,23 @@ fn a_sketch_attaches_to_a_rim_a_join_left_flush_with_a_boss() {
     assert_eq!(error(&s, "Peg"), None);
     assert!((top(&s) - 35.0).abs() < 1e-6, "{}", top(&s));
 }
+
+/// Two pieces of the same face that both answer to a stored name are not guessed between: the
+/// feature asks for the face again, as it does for any name that finds several faces (#4325).
+#[test]
+fn two_pieces_that_both_answer_to_a_stored_name_are_not_guessed_between() {
+    let mut s = Session::default();
+    block(&mut s);
+    let block = id(&s, "Block");
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 2, "name": "Round"}));
+    // A slot through the front wall, top to bottom: the wall is two pieces, and each keeps the
+    // round's face along its own top edge.
+    run(&mut s, "solid.box", json!({"length": 10, "width": 12, "height": 12, "corner": [15, -1, 0], "body_name": "Slot"}));
+    run(&mut s, "solid.combine", json!({"target": "Body1", "tools": ["Slot"], "operation": "cut", "name": "SlotCut"}));
+    run(&mut s, "solid.offset_face", json!({"faces": [[5, 0, 4]], "distance": 2, "name": "Push"}));
+    let push = id(&s, "Push");
+    let stored = format!("F{block}:side:l1#[F{block}:top]");
+    s.doc_mut().feature_mut(push).unwrap().face_names = vec![stored.clone()];
+    s.refresh();
+    assert_eq!(reselect(&s, "Push"), Some(stored), "{:?}", error(&s, "Push"));
+}

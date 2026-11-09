@@ -220,4 +220,9 @@ fn a_piece_of_a_blend_face_finds_it_once_it_is_one_face_again() {
     assert_eq!(matches(&names, 0, "F3:blend:side#[top]|start"), None);
     // A qualifier on the side that is whole anyway is not a piece at all.
     assert_eq!(matches(&names, 0, "F3:blend:side|start"), Some(Match::Exact));
+    // A pattern copy's blend: the qualifier carries the copy's instance, as the faces around the
+    // copy do, and the name compares within that copy only.
+    let copied = qualify(named(&["F3:blend:side|start@F9.1", "side@F9.1", "start@F9.1"]), &[(0, 1), (0, 2)]);
+    assert_eq!(matches(&copied, 0, "F3:blend:side#[start@F9.1]|start@F9.1"), Some(Match::Piece));
+    assert_eq!(matches(&copied, 0, "F3:blend:side#[start@F9.1]|start@F9.2"), None, "another copy");
 }
