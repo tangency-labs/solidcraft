@@ -657,6 +657,12 @@ fn offset_and_angle_plane_section_defaults() {
         assert!(offset.bottom() <= through.top() + 0.5, "{command}: Through under Offset");
         assert!(through.bottom() <= axis.top() + 0.5, "{command}: Axis after Offset");
         assert!(axis.bottom() <= angle.top() + 0.5, "{command}: Angle under Axis");
+        // Open section is not force-locked after the first paint (#12038 review).
+        let open = if offset_open { "dialog:section:Offset" } else { "dialog:section:Angle" };
+        let open_row = if offset_open { "dialog:row:Offset" } else { "dialog:row:Axis" };
+        h.step(&json!({"click": {"handle": open}})).unwrap();
+        h.frames(2);
+        assert!(scenario::rect_of(open_row).is_none(), "{command}: open section collapses");
     }
 }
 

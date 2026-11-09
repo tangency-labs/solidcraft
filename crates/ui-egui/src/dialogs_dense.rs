@@ -911,14 +911,17 @@ fn offset_angle_plane_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names
     let section_id = if offset_command { "plane_offset" } else { "plane_angle" };
     let offset_section = format!("{section_id}_offset");
     let turn_section = format!("{section_id}_turn");
-    // Value-driven open wins over a prior collapsed click in this session (edit restore).
-    if offset_open {
-        let id = ui.make_persistent_id(&offset_section);
-        ui.ctx().data_mut(|data| data.insert_persisted(id, true));
-    }
-    if angle_open {
-        let id = ui.make_persistent_id(&turn_section);
-        ui.ctx().data_mut(|data| data.insert_persisted(id, true));
+    // Seed open once (start / edit restore). Later header clicks must stick (#12038).
+    if !d.plane_sections_seeded {
+        d.plane_sections_seeded = true;
+        if offset_open {
+            let id = ui.make_persistent_id(&offset_section);
+            ui.ctx().data_mut(|data| data.insert_persisted(id, true));
+        }
+        if angle_open {
+            let id = ui.make_persistent_id(&turn_section);
+            ui.ctx().data_mut(|data| data.insert_persisted(id, true));
+        }
     }
     enter |= ui_kit::section(ui, &offset_section, "Offset", offset_open, |ui| {
         let mut enter = false;
