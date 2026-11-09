@@ -5,8 +5,8 @@
 //! the hang limit as a hang finding (its kernel's [`solidcore::CancelToken`] is
 //! cancelled, and a case that still does not return is left running).
 //!
-//! Used by `tests/panic_fuzz.rs` (the kernel's entry points); the STEP reader's hostile
-//! input is tested in solidcore-step's own tests. Environment:
+//! Shared by `tests/panic_fuzz.rs` (the kernel's entry points), solidcore-step's
+//! `tests/panic_fuzz.rs` (STEP import) and step-import's (its flat arrays). Environment:
 //! - `SOLIDCORE_PANIC_FUZZ_CASES`: cases per family (default: each family's CI count).
 //! - `SOLIDCORE_PANIC_FUZZ_SEED`: the base seed (default 2490).
 //! - `SOLIDCORE_PANIC_FUZZ_HANG_SECS`: the hang limit per case (default 60 s in a debug
@@ -16,14 +16,20 @@
 //! - `SOLIDCORE_PANIC_FUZZ_REPRO=<family>:<case seed>`: run only that case of that family
 //!   (the seed a finding lists), printing its input.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing, dead_code)] // test helpers
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    dead_code
+)] // test helpers
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Write as _};
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::Once;
 use std::sync::mpsc;
+use std::sync::Once;
 use std::time::{Duration, Instant};
 
 /// splitmix64: small, seedable, and the same on every platform.
@@ -42,7 +48,11 @@ impl Rng {
 
     /// A value in `0..n` (`0` for `n == 0`).
     pub fn below(&mut self, n: usize) -> usize {
-        if n == 0 { 0 } else { (self.next_u64() % n as u64) as usize }
+        if n == 0 {
+            0
+        } else {
+            (self.next_u64() % n as u64) as usize
+        }
     }
 
     /// `true` with probability `p`.
@@ -68,7 +78,11 @@ impl Rng {
     /// A hostile value: one of the special values with probability `p`, else a size
     /// in `[lo, hi)`.
     pub fn hostile(&mut self, p: f64, lo: f64, hi: f64) -> f64 {
-        if self.chance(p) { self.pick(HOSTILE) } else { self.range(lo, hi) }
+        if self.chance(p) {
+            self.pick(HOSTILE)
+        } else {
+            self.range(lo, hi)
+        }
     }
 }
 
@@ -114,7 +128,10 @@ fn env_u64(name: &str) -> Option<u64> {
 /// `value` of the environment variable `name` as a `u64` (surrounding whitespace
 /// ignored); panics, naming the variable and the value, on any other form.
 pub fn parse_env_u64(name: &str, value: &str) -> u64 {
-    value.trim().parse().unwrap_or_else(|e| panic!("{name}={value:?}: expected a u64, e.g. `10000` ({e})"))
+    value
+        .trim()
+        .parse()
+        .unwrap_or_else(|e| panic!("{name}={value:?}: expected a u64, e.g. `10000` ({e})"))
 }
 
 /// `SOLIDCORE_PANIC_FUZZ_HANGS`'s value: `fail` (spaces trimmed) makes hangs findings; any
@@ -129,7 +146,10 @@ pub fn parse_hangs(value: &str) -> bool {
 /// `SOLIDCORE_PANIC_FUZZ_REPRO`'s `<family>:<u64 seed>`, split; panics on any other form
 /// (a malformed spec would otherwise skip every family, or run the CI set, silently).
 pub fn parse_repro(spec: &str) -> (&str, u64) {
-    let parsed = spec.split_once(':').and_then(|(f, seed)| Some((f.trim(), seed.trim().parse::<u64>().ok()?))).filter(|(f, _)| !f.is_empty());
+    let parsed = spec
+        .split_once(':')
+        .and_then(|(f, seed)| Some((f.trim(), seed.trim().parse::<u64>().ok()?)))
+        .filter(|(f, _)| !f.is_empty());
     match parsed {
         Some(p) => p,
         None => panic!(
@@ -161,17 +181,24 @@ impl Settings {
         let (repro, skip) = match std::env::var("SOLIDCORE_PANIC_FUZZ_REPRO") {
             Ok(spec) => {
                 let (f, seed) = parse_repro(&spec);
-                if f == family { (Some(seed), false) } else { (None, true) }
+                if f == family {
+                    (Some(seed), false)
+                } else {
+                    (None, true)
+                }
             }
             Err(_) => (None, false),
         };
         Self {
             cases: env_u64("SOLIDCORE_PANIC_FUZZ_CASES").unwrap_or(ci_cases),
             base_seed: env_u64("SOLIDCORE_PANIC_FUZZ_SEED").unwrap_or(2490),
-            hang: Duration::from_secs(env_u64("SOLIDCORE_PANIC_FUZZ_HANG_SECS").unwrap_or(hang_default)),
+            hang: Duration::from_secs(
+                env_u64("SOLIDCORE_PANIC_FUZZ_HANG_SECS").unwrap_or(hang_default),
+            ),
             repro,
             skip,
-            fail_on_hang: std::env::var_os("SOLIDCORE_PANIC_FUZZ_HANGS").is_some_and(|v| parse_hangs(&v.to_string_lossy())),
+            fail_on_hang: std::env::var_os("SOLIDCORE_PANIC_FUZZ_HANGS")
+                .is_some_and(|v| parse_hangs(&v.to_string_lossy())),
         }
     }
 }
@@ -239,10 +266,22 @@ fn install_hook() {
                 .map(|s| (*s).to_string())
                 .or_else(|| info.payload().downcast_ref::<String>().cloned())
                 .unwrap_or_else(|| "<non-string payload>".into());
-            let location = info.location().map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column())).unwrap_or_default();
-            let frame = if location.contains("crates/") { None } else { workspace_frame(&std::backtrace::Backtrace::force_capture().to_string()) };
+            let location = info
+                .location()
+                .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+                .unwrap_or_default();
+            let frame = if location.contains("crates/") {
+                None
+            } else {
+                workspace_frame(&std::backtrace::Backtrace::force_capture().to_string())
+            };
             LAST_PANIC.with(|p| {
-                *p.borrow_mut() = Some(Panic { message, location, frame, caught: false });
+                *p.borrow_mut() = Some(Panic {
+                    message,
+                    location,
+                    frame,
+                    caught: false,
+                });
             });
         }));
     });
@@ -302,7 +341,10 @@ pub fn run_one<F: Family>(input: F::Input, hang: Duration) -> Outcome {
                 (Ok(()), Some(p)) => Outcome::Panicked(Panic { caught: true, ..p }),
                 (Err(_), Some(p)) => Outcome::Panicked(p),
                 (Err(payload), None) => Outcome::Panicked(Panic {
-                    message: payload.downcast_ref::<String>().cloned().unwrap_or_else(|| "<no hook record>".into()),
+                    message: payload
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .unwrap_or_else(|| "<no hook record>".into()),
                     location: String::new(),
                     frame: None,
                     caught: false,
@@ -333,10 +375,17 @@ pub fn fuzz<F: Family>(family: &F, settings: &Settings) -> BTreeMap<String, Find
         return findings;
     }
     // each family its own seeds (FNV-1a of the name), so families don't share inputs
-    let family_seed = family.name().bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
+    let family_seed = family
+        .name()
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        });
     let seeds: Vec<u64> = match settings.repro {
         Some(seed) => vec![seed],
-        None => (0..settings.cases).map(|i| case_seed(settings.base_seed ^ family_seed, i)).collect(),
+        None => (0..settings.cases)
+            .map(|i| case_seed(settings.base_seed ^ family_seed, i))
+            .collect(),
     };
     let started = Instant::now();
     let mut slowest = (Duration::ZERO, 0);
@@ -355,7 +404,11 @@ pub fn fuzz<F: Family>(family: &F, settings: &Settings) -> BTreeMap<String, Find
             slowest = (took, seed);
         }
         if took > settings.hang / 2 && !matches!(outcome, Outcome::Hang { .. }) {
-            eprintln!("panic fuzz: {} case {seed} took {took:?} (hang limit {:?})", family.name(), settings.hang);
+            eprintln!(
+                "panic fuzz: {} case {seed} took {took:?} (hang limit {:?})",
+                family.name(),
+                settings.hang
+            );
         }
         let (key, panic) = match outcome {
             Outcome::Done => continue,
@@ -370,7 +423,11 @@ pub fn fuzz<F: Family>(family: &F, settings: &Settings) -> BTreeMap<String, Find
                      repro: SOLIDCORE_PANIC_FUZZ_REPRO={}:{seed}\n  input: {}",
                     family.name(),
                     settings.hang,
-                    if detached { ", ignores its cancel token (left running)" } else { "" },
+                    if detached {
+                        ", ignores its cancel token (left running)"
+                    } else {
+                        ""
+                    },
                     family.name(),
                     shown.chars().take(1500).collect::<String>()
                 );
@@ -380,7 +437,15 @@ pub fn fuzz<F: Family>(family: &F, settings: &Settings) -> BTreeMap<String, Find
                 (format!("hang #{hangs} (> {:?})", settings.hang), None)
             }
         };
-        findings.entry(key).and_modify(|f| f.count += 1).or_insert(Finding { panic, seed, input: shown, count: 1 });
+        findings
+            .entry(key)
+            .and_modify(|f| f.count += 1)
+            .or_insert(Finding {
+                panic,
+                seed,
+                input: shown,
+                count: 1,
+            });
     }
     eprintln!(
         "panic fuzz: {}: {} cases in {:?}, slowest {:?} (case {}), {} hangs \
@@ -402,16 +467,25 @@ pub fn assert_no_findings(family: &str, findings: &BTreeMap<String, Finding>) {
     if findings.is_empty() {
         return;
     }
-    let mut report = format!("panic fuzz `{family}`: {} distinct findings\n", findings.len());
+    let mut report = format!(
+        "panic fuzz `{family}`: {} distinct findings\n",
+        findings.len()
+    );
     for (key, f) in findings {
         let what = match &f.panic {
-            Some(p) if p.caught => format!("panic at {} `{}`, caught by library code (aborts under panic=abort)", p.location, p.message),
+            Some(p) if p.caught => format!(
+                "panic at {} `{}`, caught by library code (aborts under panic=abort)",
+                p.location, p.message
+            ),
             Some(p) => format!("panic at {} `{}`", p.location, p.message),
             None => "hang".to_string(),
         };
         let input: String = f.input.chars().take(1500).collect();
-        let _ =
-            write!(report, "\n- {key}\n  {what} ({} cases)\n  repro: SOLIDCORE_PANIC_FUZZ_REPRO={family}:{}\n  input: {input}\n", f.count, f.seed);
+        let _ = write!(
+            report,
+            "\n- {key}\n  {what} ({} cases)\n  repro: SOLIDCORE_PANIC_FUZZ_REPRO={family}:{}\n  input: {input}\n",
+            f.count, f.seed
+        );
     }
     panic!("{report}");
 }

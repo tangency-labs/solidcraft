@@ -12,6 +12,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)] // test helpers
 
+// solidcore's harness keeps solidcore's formatting, not this crate's.
+#[rustfmt::skip]
 #[path = "../../solidcore/tests/support/panic_fuzz.rs"]
 mod panic_fuzz;
 
