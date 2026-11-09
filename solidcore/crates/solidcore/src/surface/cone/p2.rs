@@ -213,7 +213,7 @@ fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<
         let inward = normal.cross(tangent);
         let radius = chord.length() / (2.0 * half.sin());
         // as `IsArc`: a radius too large for the arc's length makes no accurate circle
-        if !(radius <= (leg0.length() + leg1.length()) / EFF_ZERO_SQRT) {
+        if radius.is_nan() || radius > (leg0.length() + leg1.length()) / EFF_ZERO_SQRT {
             return Ok(None);
         }
         let centre = q0 + inward * radius;
