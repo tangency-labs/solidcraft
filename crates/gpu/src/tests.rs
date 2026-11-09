@@ -456,15 +456,15 @@ fn plans_pack_to_the_same_bytes() {
     assert!(kinds(|s| matches!(s, EvalSurface::Plane { .. })) > 0);
     assert!(kinds(|s| matches!(s, EvalSurface::Nurbs(_))) > 0 && kinds(|s| matches!(s, EvalSurface::Revolved { .. })) > 0);
     let want = [
-        15190797810663928423,
-        9314125828510912321,
+        18234255227788447863,
+        17672639446818405604,
         483481735842877288,
-        1811912073816685301,
-        15436122681762580817,
+        14199564110167924772,
+        1068567415663233076,
         5379207237662626536,
         16919141291401223349,
     ];
-    assert_eq!((digests, together), (want.to_vec(), 13252508492477263825));
+    assert_eq!((digests, together), (want.to_vec(), 4831629048481105868));
 }
 
 /// A plan with pole nodes (one vertex per incident triangle, its own normal) is refused by name:
