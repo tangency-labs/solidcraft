@@ -2166,14 +2166,8 @@ fn a_left_out_part_says_where_each_kind_of_setter_set_it() {
 /// The W23 assembly sheet's assembly (#11773) from its command script, and the occurrences the
 /// script names: the plate, the two holders and the block placed in each.
 fn assembly_sheet() -> (Session, [u64; 4]) {
-    let script: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/w23-assembly-sheet/assembly.json")).unwrap();
-    let mut s = Session::default();
-    let made = s.run_script(&script).unwrap();
-    let named = |name: &str| {
-        let step = script["commands"].as_array().unwrap().iter().position(|c| c["as"] == name).unwrap();
-        made[step]["occurrence"].as_u64().unwrap()
-    };
-    (s, ["plate", "first_holder", "second_holder", "block"].map(named))
+    let (session, named) = crate::tests::w23_assembly_sheet();
+    (session, ["plate", "first_holder", "second_holder", "block"].map(|name| named[name]))
 }
 
 /// Saved top views of the W23 assembly sheet at 1:1 that choose what they draw (#11873, #11773),
