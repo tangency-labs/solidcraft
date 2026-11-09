@@ -1095,10 +1095,12 @@ mod tests {
         let mut body = boxed(&mut k);
         let edge = p1::edges(&body, None).unwrap()[0];
         let result = variable_radius_fillet(&mut k, &mut body, &[edge], 0.5, 30.0, 1, 1);
-        assert!(matches!(
-            result,
-            Err(SolidError::Upstream { code, .. }) if code == crate::error::SM_ERR
-        ));
+        // refused with the size that builds: the 10 wide side holds a round of radius 10
+        let Err(SolidError::FilletRefused { code, fit, .. }) = result else {
+            panic!("{result:?}");
+        };
+        assert_eq!(code, crate::error::SM_ERR);
+        assert!((fit.size - 10.0).abs() < 1e-9, "{fit:?}");
         crate::topology::integrity::check(&body).unwrap();
         assert_eq!(p1::faces(&body, None).unwrap().len(), 6);
     }
