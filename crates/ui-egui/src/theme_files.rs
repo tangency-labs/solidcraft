@@ -588,7 +588,7 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
         None => default_requirements_level(),
         Some(value) => value.as_u64().ok_or("`requires` must be a nonnegative integer")?,
     };
-    let layer = parse_layer(v)?;
+    let layer = parse_layer(v, true)?;
     let tabs = parse_tabs(v.get("tabs"))?;
     let options = if requires > REQUIREMENTS_LEVEL { Vec::new() } else { parse_options(v.get("options"))? };
     if requires < 2 && options.iter().any(|option| option.effect.is_some()) {
@@ -638,7 +638,9 @@ fn parse_tabs(v: Option<&Value>) -> Result<BTreeMap<String, BTreeMap<String, Val
     Ok(parsed)
 }
 
-fn parse_layer(v: &Value) -> Result<ThemeLayer, String> {
+/// A theme's colours and shapes. With `ignore_unknown` (the base table of a file), a colour this
+/// version doesn't have is dropped with a warning; an overlay's table stays strict.
+fn parse_layer(v: &Value, ignore_unknown: bool) -> Result<ThemeLayer, String> {
     let mut src = match v.get("colors") {
         None => serde_json::Map::new(),
         Some(Value::Object(o)) => o.clone(),
@@ -650,6 +652,7 @@ fn parse_layer(v: &Value) -> Result<ThemeLayer, String> {
     src.retain(|key, _| !RETIRED_COLORS.contains(&key.as_str()));
     let mut probe = Tokens::light();
     let mut bad = Vec::new();
+    let mut ignored = Vec::new();
     for (k, c) in &src {
         if LEGACY_AXES.contains(&k.as_str()) {
             if let Err(e) = colors_of(c, 3) {
@@ -658,6 +661,7 @@ fn parse_layer(v: &Value) -> Result<ThemeLayer, String> {
             continue;
         }
         match slot(&mut probe, k) {
+            None if ignore_unknown => ignored.push(k.clone()),
             None => bad.push(format!("`{k}` is not a theme colour")),
             Some(s) => {
                 if let Err(e) = colors_for_key(k, c, s.len()) {
@@ -665,6 +669,10 @@ fn parse_layer(v: &Value) -> Result<ThemeLayer, String> {
                 }
             }
         }
+    }
+    if !ignored.is_empty() {
+        log::warn!("theme: ignoring colours this version does not have ({}); their defaults apply", ignored.join(", "));
+        src.retain(|key, _| !ignored.contains(key));
     }
     let radii = match v.get("radii") {
         None => BTreeMap::new(),
@@ -935,7 +943,7 @@ fn parse_overlays(v: Option<&Value>, options: &[OptionDef]) -> Result<Vec<Overla
         .map(|(position, value)| {
             let parse = || {
                 let when = parse_condition(value.get("when").ok_or("`when` is required")?, options)?;
-                Ok(Overlay { when, values: parse_layer(value)? })
+                Ok(Overlay { when, values: parse_layer(value, false)? })
             };
             parse().map_err(|e: String| format!("`overlays[{}]`: {e}", position + 1))
         })
@@ -3065,14 +3073,14 @@ mod tests {
             (r#"{"format":"solidcraft-theme/1","name":" ","base":"dark"}"#.into(), "name"),
             (r#"{"format":"solidcraft-theme/1","name":"x","base":"blue"}"#.into(), "base"),
             (format!(r#"{{{ok},"colors":[]}}"#), "colors"),
-            (format!(r##"{{{ok},"colors":{{"panle":"#000000","text":"red","triad":["#000000"],"icons.axes":"#000000"}}}}"##), "panle"),
+            (format!(r##"{{{ok},"colors":{{"text":"red","triad":["#000000"],"icons.axes":"#000000"}}}}"##), "text"),
             ("x".repeat(MAX_BYTES + 1), "KiB"),
         ] {
             let e = parse(&text).unwrap_err();
             assert!(e.contains(want), "{text:.80}: {e}");
         }
-        let e = parse(&format!(r##"{{{ok},"colors":{{"panle":"#000000","text":"red","triad":["#000000"]}}}}"##)).unwrap_err();
-        for k in ["panle", "text", "triad"] {
+        let e = parse(&format!(r##"{{{ok},"colors":{{"text":"red","triad":["#000000"]}}}}"##)).unwrap_err();
+        for k in ["text", "triad"] {
             assert!(e.contains(k), "{e}");
         }
         for c in ["#12345", "#1234567", "#gggggg", "282828", "#2828281"] {
@@ -3100,6 +3108,21 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn importing_a_theme_ignores_colour_keys_this_version_lacks() {
+        let file = json!({
+            "format": FORMAT, "name": "Old", "base": "dark",
+            "colors": {"panel": "#102030", "zigzag_face": "#abcdef", "zigzag_border": 5},
+        });
+        let imported = from_value(&file).expect("unknown colour keys never refuse a theme file");
+        assert!(!imported.colors.contains_key("zigzag_face") && !imported.colors.contains_key("zigzag_border"));
+        assert_eq!(resolve(&imported).panel, Color32::from_rgb(0x10, 0x20, 0x30));
+        let plain = resolve(&ThemeFile { colors: BTreeMap::new(), ..imported.clone() });
+        assert_eq!(resolve(&imported).navigator_face, plain.navigator_face, "defaults for the ignored colours");
+        let bad = json!({"format": FORMAT, "name": "Bad", "base": "dark", "colors": {"panel": "nope"}});
+        assert!(from_value(&bad).is_err(), "a known colour with a bad value is still an error");
     }
 
     #[test]

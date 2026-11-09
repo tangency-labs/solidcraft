@@ -8383,9 +8383,9 @@ mod tests {
         assert!(invalid["error"].as_str().is_some_and(|e| e.contains("radii.control_radius")));
         let out = h.call(
             "ui.prefs",
-            json!({"theme_import": "{\"format\":\"solidcraft-theme/1\",\"name\":\"x\",\"base\":\"dark\",\"colors\":{\"nope\":\"#000000\"}}"}),
+            json!({"theme_import": "{\"format\":\"solidcraft-theme/1\",\"name\":\"x\",\"base\":\"dark\",\"colors\":{\"text\":\"red\"}}"}),
         );
-        assert!(out["error"].as_str().is_some_and(|e| e.contains("nope")), "{out}");
+        assert!(out["error"].as_str().is_some_and(|e| e.contains("text")), "{out}");
         assert_eq!(h.app.preferences.theme, "paper", "a refused file changes nothing");
         assert!(h.call("ui.prefs", json!({"theme": "no-such-theme"}))["error"].is_string());
 
