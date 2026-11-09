@@ -834,7 +834,8 @@ fn the_schemas_take_what_the_occurrence_handlers_read() {
             (json!({"sketches": ["S"]}), false),
             (json!({"component": "B"}), false),
             (json!({"component": "B", "sketches": []}), false),
-            (json!({"component": "B", "sketches": [1]}), false),
+            (json!({"component": "B", "sketches": [1]}), true),
+            (json!({"component": "B", "sketches": [true]}), false),
         ],
     );
 }
@@ -924,8 +925,11 @@ fn the_check_reads_the_occurrence_keys_as_the_handlers_do() {
         issues("component.move_bodies", json!({"component": 1, "bodies": ["A"], "from_path": null})),
         ["`from_path` must list 0..64 occurrence ids"]
     );
-    assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": 5})), ["`sketches` must be a list of names; it is 5"]);
-    assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": ["S", 3]})), ["`sketches` must list names; the entry 2 is 3"]);
+    assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": 5})), ["`sketches` must be a list of names or ids; it is 5"]);
+    assert_eq!(
+        issues("component.move_sketches", json!({"component": 1, "sketches": ["S", true]})),
+        ["`sketches` must list names or ids; the entry 2 is true"]
+    );
     assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": null})), ["`sketches` must list sketches"]);
     assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": "S"})), none);
 }
