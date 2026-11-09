@@ -941,4 +941,87 @@ mod tests {
             assert!(close(p.z, 0.0, 1e-12), "t={t}: point {p:?} off z=0");
         }
     }
+    /// Restricts a scalar quadratic Bernstein polynomial to [a,b], exactly in real arithmetic.
+    fn review_restrict_quadratic(p: [f64; 3], a: f64, b: f64) -> [f64; 3] {
+        let value = |t: f64| (1.0 - t).powi(2) * p[0] + 2.0 * t * (1.0 - t) * p[1] + t * t * p[2];
+        let start = value(a);
+        [
+            start,
+            start + (b - a) * ((1.0 - a) * (p[1] - p[0]) + a * (p[2] - p[1])),
+            value(b),
+        ]
+    }
+
+    /// Equal xy coordinates force equal UV, where the two trimmed patches have a strict z gap.
+    #[test]
+    fn review_lost_hit_is_not_an_intersection_of_the_trimmed_patches() {
+        let case = crate::case::regression_case(&Runner, "gen0483");
+        let input: Inputs = case.parse().unwrap();
+        assert_eq!(input.a.kind, 0);
+        assert_eq!(input.b.kind, 0);
+        for (a, b) in input.a.net.iter().zip(&input.b.net) {
+            assert_eq!(&a[..2], &b[..2]);
+        }
+        let mut dx_du = f64::INFINITY;
+        let mut dy_dv = f64::INFINITY;
+        let mut dx_dv = 0.0_f64;
+        let mut dy_du = 0.0_f64;
+        for u in 0..2 {
+            for v in 0..3 {
+                let a = input.a.net[3 * u + v];
+                let b = input.a.net[3 * (u + 1) + v];
+                dx_du = dx_du.min(2.0 * (b[0] - a[0]));
+                dy_du = dy_du.max((2.0 * (b[1] - a[1])).abs());
+            }
+        }
+        for u in 0..3 {
+            for v in 0..2 {
+                let a = input.a.net[3 * u + v];
+                let b = input.a.net[3 * u + v + 1];
+                dy_dv = dy_dv.min(2.0 * (b[1] - a[1]));
+                dx_dv = dx_dv.max((2.0 * (b[0] - a[0])).abs());
+            }
+        }
+        // Derivative coefficient hulls make the symmetric xy Jacobian positive definite.
+        // Integrating it along a segment proves strong monotonicity, hence injectivity.
+        let off_diagonal = 0.5 * (dx_dv + dy_du);
+        assert!(dx_du > off_diagonal && dy_dv > off_diagonal);
+        let d = input.a.domain;
+        assert!(d.iter().all(|x| (0.0..=1.0).contains(x)));
+        let columns: [[f64; 3]; 3] = std::array::from_fn(|v| {
+            let column =
+                std::array::from_fn(|u| input.b.net[3 * u + v][2] - input.a.net[3 * u + v][2]);
+            review_restrict_quadratic(column, d[0], d[2])
+        });
+        let delta: [[f64; 3]; 3] =
+            std::array::from_fn(|u| std::array::from_fn(|v| columns[v][u]));
+        let upper = delta
+            .into_iter()
+            .flat_map(|row| review_restrict_quadratic(row, d[1], d[3]))
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            upper < -0.002,
+            "the shared-UV z gap stays strictly negative"
+        );
+        let k = Kernel::default();
+        let a = surface(&k, &input.a).unwrap();
+        let b = surface(&k, &input.b).unwrap();
+        let old = [
+            0.05113430312658039,
+            0.5433039577037712,
+            0.050544615256296214,
+            0.5421488725961695,
+        ];
+        let old_gap = a
+            .evaluate_point(&k, Point2::new(old[0], old[1]))
+            .unwrap()
+            .distance(b.evaluate_point(&k, Point2::new(old[2], old[3])).unwrap());
+        assert!(
+            old_gap < input.tol,
+            "the old approximate near-hit met its loose distance test"
+        );
+        assert_eq!(run_rust(&input).unwrap().ints["found"], [0]);
+        eprintln!("gen0483: injective xy margin {}; z difference <= {upper:e}; old near-hit gap {old_gap:e}", dx_du.min(dy_dv)-off_diagonal);
+    }
+
 }

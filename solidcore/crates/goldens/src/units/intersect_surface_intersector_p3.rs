@@ -1860,3 +1860,99 @@ impl UnitDiff for Runner {
         rust(k, &case.parse()?)
     }
 }
+
+#[cfg(test)]
+mod review_geometry_tests {
+    use super::*;
+    use solidcore::intersect::surface_intersector::p1::SrfIndex;
+
+    /// A changed candidate is geometrically consistent, but none of these steps accepts it.
+    #[test]
+    fn review_next_candidates_preserve_geometry_and_refusal() {
+        let k = Kernel::default();
+        for (name, prefix) in [
+            ("gen0396", 5),
+            ("gen0110", 1),
+            ("gen0607", 2),
+            ("gen0703", 2),
+        ] {
+            let case = crate::case::regression_case(&Runner, name);
+            let input: Inputs = case.parse().unwrap();
+            let a = rust_surface(&input.a).unwrap_or_else(|_| panic!("surface A"));
+            let b = input
+                .b
+                .as_ref()
+                .map(|s| rust_surface(s).unwrap_or_else(|_| panic!("surface B")));
+            let surfaces = [&a, b.as_ref().unwrap_or(&a)];
+            let curves = input
+                .curves
+                .iter()
+                .map(|c| rust_curve(c).unwrap_or_else(|_| panic!("curve")))
+                .collect::<Vec<_>>();
+            let mut si = SurfaceIntersector::new(
+                &k,
+                surfaces[0],
+                &ext(input.dom1),
+                surfaces[1],
+                &ext(input.dom2),
+                input.fillet,
+            )
+            .unwrap();
+            for point in &input.points {
+                si.alloc_point(rust_point(point).unwrap());
+            }
+            let mut run = Run {
+                outs: TsectCurves {
+                    curves_3d: curves.clone(),
+                    ..TsectCurves::default()
+                },
+                curves,
+                surfaces,
+                same: input.b.is_none(),
+                caches: None,
+                nprog: input.points.len(),
+            };
+            let mut record = Vec::new();
+            let mut start = 0;
+            for op in input.ops.iter().take(prefix) {
+                start = record.len();
+                run_op(&k, &mut run, &mut si, op, &mut record)
+                    .unwrap_or_else(|_| panic!("operation"));
+            }
+            assert_eq!(
+                &record[start..start + 2],
+                &[0.0, 0.0],
+                "{name}: success status with found_good_point=false"
+            );
+            let OpIn::Next { next, .. } = input.ops[prefix - 1] else {
+                panic!("next point");
+            };
+            let point = si.point(id(next)).unwrap();
+            let mut positions = Vec::new();
+            for (index, surface, domain) in [
+                (SrfIndex::First, surfaces[0], input.dom1),
+                (SrfIndex::Second, surfaces[1], input.dom2),
+            ] {
+                let uv = point.uv_pos(index);
+                assert!(domain[0] <= uv.x && uv.x <= domain[2], "{name}: u={}", uv.x);
+                assert!(domain[1] <= uv.y && uv.y <= domain[3], "{name}: v={}", uv.y);
+                let position = surface.evaluate_point(&k, uv).unwrap();
+                let rounding = 128.0 * f64::EPSILON * (1.0 + position.length());
+                assert!(position.distance(point.srf_pos(index)) <= rounding);
+                positions.push(position);
+            }
+            let gap = positions[0].distance(positions[1]);
+            let rounding =
+                128.0 * f64::EPSILON * (1.0 + positions[0].length() + positions[1].length());
+            assert!(gap <= si.this_approx_tol_3d());
+            assert!((point.deviation - gap / 2.0).abs() <= rounding);
+            assert!(
+                point.curve_pv[0].distance((positions[0] + positions[1]) * 0.5) <= rounding
+            );
+            eprintln!(
+                "{name}: unaccepted next candidate; surface gap {gap:e}, stored half-gap {}",
+                point.deviation
+            );
+        }
+    }
+}

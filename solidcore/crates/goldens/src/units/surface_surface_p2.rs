@@ -2966,6 +2966,125 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// Coefficient hulls, refined by de Casteljau, bound a degree-six residual everywhere.
+    fn review_residual_bound(coefficients: [f64; 7], rounding: f64, tolerance: f64) -> f64 {
+        let mut stack = vec![(coefficients, 0_u8)];
+        let mut bound = 0.0_f64;
+        while let Some((coefficients, depth)) = stack.pop() {
+            let hull = coefficients.iter().map(|x| x.abs()).fold(0.0_f64, f64::max) + rounding;
+            if hull <= tolerance {
+                bound = bound.max(hull);
+                continue;
+            }
+            assert!(depth < 8, "uncertified residual {hull:e}");
+            let mut work = coefficients;
+            let mut left = [0.0; 7];
+            let mut right = [0.0; 7];
+            left[0] = work[0];
+            right[6] = work[6];
+            for level in 1..=6 {
+                for i in 0..=6 - level {
+                    work[i] = 0.5 * work[i] + 0.5 * work[i + 1];
+                }
+                left[level] = work[0];
+                right[6 - level] = work[6 - level];
+            }
+            stack.push((right, depth + 1));
+            stack.push((left, depth + 1));
+        }
+        bound
+    }
+
+    /// Both full crossing branches are distinct, monotone in x, and enclosed on z=x²=y².
+    #[test]
+    fn review_crossing_node_has_both_complete_branches() {
+        let case = crate::case::regression_case(&Runner, "tc_parabolic_cylinders_crossing_node");
+        let input: Inputs = case.parse().unwrap();
+        let first = this_surface(input.this.as_ref().unwrap()).unwrap().unwrap();
+        let OpIn::Gssi {
+            dom,
+            other,
+            other_dom,
+            tol,
+            ..
+        } = input.op
+        else {
+            panic!("intersection case");
+        };
+        let second = Surface::from(bss_of(&other).unwrap());
+        let k = Kernel::default();
+        let result = first
+            .global_surface_intersect(
+                &k,
+                &dom_of(dom),
+                &second,
+                &dom_of(other_dom),
+                [true, true],
+                tol,
+                None,
+            )
+            .unwrap();
+        assert_eq!(result.curves_3d.len(), 2);
+        let tol = tol.unwrap();
+        let mut branches = Vec::new();
+        let mut worst = 0.0_f64;
+        for curve in &result.curves_3d {
+            let CurveKind::BSpline(curve) = curve.kind() else {
+                panic!("B-spline branch");
+            };
+            let net = curve.gw_nurb().unwrap();
+            assert_eq!(net.degree(), 3);
+            let start = net.cpts().first().unwrap();
+            let end = net.cpts().last().unwrap();
+            let sign = if start.x * start.y > 0.0 { 1 } else { -1 };
+            branches.push(sign);
+            assert!((start.x - 1.0).abs() < 1e-12 && (end.x + 1.0).abs() < 1e-12);
+            for segment in solidcore::nurbs::nurbs_crv::create_bez_segments(net).unwrap() {
+                let points = segment.cpts();
+                assert_eq!(points.len(), 4);
+                assert!(
+                    points.windows(2).all(|p| p[0].x > p[1].x),
+                    "monotone x covers the whole branch"
+                );
+                let magnitude = points
+                    .iter()
+                    .flat_map(|p| [p.x.abs(), p.y.abs(), p.z.abs()])
+                    .fold(1.0_f64, f64::max);
+                // At most 1024 rounded operations: cubic knot insertion, residual products,
+                // and eight levels of degree-six averaging. Bound their accumulated rounding.
+                let unit = f64::EPSILON / 2.0;
+                let gamma = 1024.0 * unit / (1.0 - 1024.0 * unit);
+                let rounding = gamma * (4.0 * magnitude * magnitude + 2.0 * magnitude + 1.0);
+                for point in points {
+                    assert_eq!(point.w, NOW);
+                    assert!((point.y - f64::from(sign) * point.x).abs() <= rounding);
+                }
+                let c3 = [1.0, 3.0, 3.0, 1.0];
+                let c6 = [1.0, 6.0, 15.0, 20.0, 15.0, 6.0, 1.0];
+                for coordinate in [false, true] {
+                    let mut coefficients = [0.0; 7];
+                    for n in 0_usize..=6 {
+                        for i in 0_usize..=3 {
+                            if let Some(j) = n.checked_sub(i).filter(|&j| j < 4) {
+                                let a = if coordinate { points[i].y } else { points[i].x };
+                                let b = if coordinate { points[j].y } else { points[j].x };
+                                coefficients[n] += c3[i] * c3[j] / c6[n] * (points[i].z - a * b);
+                            }
+                        }
+                    }
+                    worst = worst.max(review_residual_bound(coefficients, rounding, tol));
+                }
+            }
+        }
+        branches.sort_unstable();
+        assert_eq!(
+            branches,
+            [-1, 1],
+            "opposite branches cannot duplicate one another"
+        );
+        eprintln!("crossing node: complete branches y=±x; enclosed residual {worst:e} <= {tol:e}");
+    }
+
     /// The generators reach the ops with successful outcomes on the Rust side.
     #[test]
     fn generated_cases_cover_ops() {

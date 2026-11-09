@@ -1709,3 +1709,56 @@ impl UnitDiff for Runner {
         rust(&case.parse()?)
     }
 }
+
+#[cfg(test)]
+mod review_geometry_tests {
+    use super::*;
+
+    /// Refining a singularity of a surface against itself returns no isolated solution.
+    #[test]
+    fn review_same_surface_refinement_does_not_invent_a_solution() {
+        let case = crate::case::regression_case(&Runner, "gen1226");
+        let input: Inputs = case.parse().unwrap();
+        assert!(input.b.is_none());
+        let a = rust_surface(&input.a).unwrap_or_else(|_| panic!("surface"));
+        let curves = input
+            .curves
+            .iter()
+            .map(|c| rust_curve(c).unwrap_or_else(|_| panic!("curve")))
+            .collect::<Vec<_>>();
+        let k = Kernel::default();
+        let mut si = SurfaceIntersector::new(
+            &k,
+            &a,
+            &ext(input.dom1),
+            &a,
+            &ext(input.dom2),
+            input.fillet,
+        )
+        .unwrap();
+        for point in &input.points {
+            si.alloc_point(rust_point(point).unwrap());
+        }
+        for op in input.ops.iter().take(4) {
+            run_op(&k, &mut si, &curves, op, &mut Vec::new())
+                .unwrap_or_else(|_| panic!("setup operation"));
+        }
+        let mut before = Vec::new();
+        put_state(&mut before, &si);
+        let mut record = Vec::new();
+        assert!(matches!(input.ops[4], OpIn::Refine { ip_type: 5, .. }));
+        run_op(&k, &mut si, &curves, &input.ops[4], &mut record)
+            .unwrap_or_else(|_| panic!("refinement"));
+        assert_eq!(
+            record,
+            vec![0.0, 0.0],
+            "success status, followed by None rather than UV coordinates"
+        );
+        let mut after = Vec::new();
+        put_state(&mut after, &si);
+        assert_eq!(
+            before, after,
+            "no point or intersection state was manufactured"
+        );
+    }
+}

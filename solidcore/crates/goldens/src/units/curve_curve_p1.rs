@@ -1484,6 +1484,62 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// Bernstein signs prove a single at-distance root; the discarded endpoint is off target.
+    #[test]
+    fn review_at_distance_returns_the_only_root() {
+        let case = crate::case::regression_case(&Runner, "gen0014");
+        let input: OpIn = case.parse().unwrap();
+        let OpIn::Gps {
+            curve: CurveIn::Hermite(ref h),
+            p,
+            target,
+            ..
+        } = input
+        else {
+            panic!("Hermite at-distance case");
+        };
+        let target = target.unwrap();
+        let cp = [
+            v3(h.p1),
+            v3(h.p1) + v3(h.d1) / 3.0,
+            v3(h.p2) - v3(h.d2) / 3.0,
+            v3(h.p2),
+        ];
+        let c3 = [1.0, 3.0, 3.0, 1.0];
+        let c6 = [1.0, 6.0, 15.0, 20.0, 15.0, 6.0, 1.0];
+        let mut signs = Vec::new();
+        for (n, binomial) in c6.into_iter().enumerate() {
+            let mut coefficient = 0.0;
+            for (i, a) in cp.iter().enumerate() {
+                if let Some(j) = n.checked_sub(i).filter(|&j| j < 4) {
+                    coefficient += c3[i] * c3[j] / binomial
+                        * ((*a - v3(p)).dot(cp[j] - v3(p)) - target * target);
+                }
+            }
+            // Every coefficient is at least 0.4 from zero; its sign survives rounding.
+            assert!(coefficient.abs() > 0.1);
+            signs.push(coefficient.is_sign_positive());
+        }
+        assert!(!signs[0] && signs[6]);
+        assert_eq!(
+            signs.windows(2).filter(|pair| pair[0] != pair[1]).count(),
+            1
+        );
+        // Descartes in Bernstein form: at most one root; the endpoint signs give existence.
+        let output = rust(&input).unwrap();
+        let values = &output.values["out"];
+        assert_eq!(values[0], 1.0);
+        assert_eq!(values.len(), 7);
+        let t = values[6];
+        assert!((0.0..=1.0).contains(&t));
+        let point = cp[0] * (1.0 - t).powi(3)
+            + cp[1] * (3.0 * t * (1.0 - t).powi(2))
+            + cp[2] * (3.0 * t * t * (1.0 - t))
+            + cp[3] * t.powi(3);
+        assert!((point.distance(v3(p)) - target).abs() < 1e-12);
+        assert!((cp[3].distance(v3(p)) - target).abs() > 1.0);
+    }
+
     #[test]
     fn approximation_of_a_break_at_1e300_fails_softly() {
         // fuzz01255 (`tests/fuzz_corpus/curve.curve_p1.json`): the port's `approximate_curve` used to abort on a 6 GiB allocation and now stops

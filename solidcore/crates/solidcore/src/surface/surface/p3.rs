@@ -1557,7 +1557,6 @@ impl Surface {
             sq_node_tol,
         );
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
-        solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
         solver.set_desired_accuracy(EFF_ZERO_SQ);
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 3);
@@ -1628,7 +1627,6 @@ impl Surface {
         let mut equations =
             SsNormalizeEnfo::new(k, self, other, operation, Some(opt_vectors), EFF_ZERO_SQ);
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(periodicities));
-        solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
 
         // Solve it
@@ -1717,7 +1715,6 @@ impl Surface {
         // Construct the Newton-Raphson Solver class with the surf/surf/surf equation set
         let mut equations = SssIntersectEnfo::new(k, s1, s2, s3, EFF_ZERO_SQ);
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
-        solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
         // set the solver's exit behavior for solutions that run outside the boundary
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);

@@ -122,7 +122,6 @@ fn kernel() -> Kernel {
     k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.bspline_check_min_radius = true;
     k.fixes.curve_check_zero_speed_tangent_end = true;
-    k.fixes.oscillating_skips_failed_guesses = true;
     k
 }
 

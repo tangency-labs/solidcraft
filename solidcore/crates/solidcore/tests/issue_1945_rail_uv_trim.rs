@@ -2,8 +2,8 @@
 //! a round of the bar/boss arc got a UV trim with coincident control points. Root cause (traced
 //! by tdamsma on #1945): `SmLocalSolveNd::SolveIt` kept the unscaled point's Jacobian for a
 //! clamped-and-scaled step, so a near-tangent SSI's end landed 1.6e-8 off and the rail trim kept
-//! a 3.1e-8 span. The fork's tangency-labs/smlib@d2757e1 fixes it; the port carries it under
-//! WR-253's `fixes.oscillating_skips_failed_guesses`, with the commit's 1-D part.
+//! a 3.1e-8 span. The fork's tangency-labs/smlib@d2757e1 fixes it; the port now applies
+//! WR-253's correction unconditionally in both local solvers.
 //!
 //! The case reached that trim only with WR-641's `fillet_through_extended_rail_end`, removed
 //! in #2500; it now runs under SolidCraft's fixes, the blend corner building both rounds,

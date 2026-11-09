@@ -291,7 +291,6 @@
 {"case":"matrix_0264","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.5941267481055479,0.031052100906093404,0.0,0.0,0.0,0.0],"status":[0.0]}}
 {"case":"matrix_0265","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,3.0,3.0,1.0,1.195220170879863,1.2240551582871566,0.21905813304709676,1.0,0.0,1.0,1.0],"status":[0.0]}}
 {"case":"matrix_0266","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[6.0,1.744142932714938,0.5090529587479473,0.0,0.0,0.0,0.0],"status":[0.0]}}
-{"case":"matrix_0267","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,-0.7767981984343537,0.12290439938698587,6.978354978629408,0.0,2.0,0.0,1.0],"status":[0.0]}}
 {"case":"matrix_0268","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,3.0,0.0,1.0,-0.7116201799895867,1.0,2.3977557678379497,1.0,0.0,1.0,1.0],"status":[0.0]}}
 {"case":"matrix_0269","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,4.0,1.0,-0.16438761867876917,0.07470005147877097,1.603433088985558e-8,1.0,0.0,1.0,1.0],"status":[0.0]}}
 {"case":"matrix_0270","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.03302533384512363,0.7457102902443116,0.0,0.0,0.0,1.0],"status":[0.0]}}
@@ -361,7 +360,6 @@
 {"case":"matrix_0334","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,0.2320265390781798,0.9287935531047563,2.131922818734922,1.0,2.0,1.0,1.0],"status":[0.0]}}
 {"case":"matrix_0335","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[3.0,0.0,1.0,-1.0,0.0,0.0,1.0],"status":[1020.0]}}
 {"case":"matrix_0336","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,3.0,1.0,1.0,2.716223792148346,1.6598034175231362,10.400887001194626,1.0,0.0,1.0,1.0],"status":[0.0]}}
-{"case":"matrix_0337","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,0.01506701312722271,3.584510212652847,0.4483685594987209,0.0,2.0,0.0,1.0],"status":[0.0]}}
 {"case":"matrix_0338","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,1.0,1.0,0.27451746538209065,0.0,2.0,0.0,1.0],"status":[0.0]}}
 {"case":"matrix_0339","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0],"status":[0.0]}}
 {"case":"matrix_0340","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,1.0,1.0,0.23203709398712724,0.7165267369495318,1.2609709600486848e-15,1.0,0.0,1.0,1.0],"status":[0.0]}}
@@ -729,7 +727,7 @@
 {"case":"matrix_0702","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,1.5213691204237145,1.1942049825349432,1.56276094363635,1.0,2.0,1.0,1.0],"status":[0.0]}}
 {"case":"matrix_0703","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[3.0,0.8617042091378542,0.5956027799709429,-1.0,-1.0,0.0,1.0],"status":[1020.0]}}
 {"case":"matrix_0704","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,-0.15874241069839762,0.3736856832816603,4.912500223062702e-7,1.0,2.0,1.0,1.0],"status":[0.0]}}
-{"case":"matrix_0705","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,0.4212413466325005,0.9218680119803876,0.8678767831056028,0.0,2.0,0.0,1.0],"status":[0.0]}}
+{"case":"matrix_0705","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,0.4212413466324931,0.9218680119803991,0.8678767831056028,0.0,2.0,0.0,1.0],"status":[0.0]}}
 {"case":"matrix_0706","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,3.0,1.0,0.7529479175936401,-0.7922665728717445,0.000020685078422363817,1.0,0.0,1.0,1.0],"status":[0.0]}}
 {"case":"matrix_0707","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[6.0,2.0276655784178232,0.05425926607887854,0.0,0.0,0.0,1.0],"status":[0.0]}}
 {"case":"matrix_0708","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,2.2932111983467798,1.2843641593396533,0.9739854112134622,0.0,2.0,0.0,1.0],"status":[0.0]}}

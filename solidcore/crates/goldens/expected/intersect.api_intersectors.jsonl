@@ -40,7 +40,7 @@
 {"case":"gen0018","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[42190.552260004224,42252.340391329184,1055490.5869199135]],"n":71},"status":[1000.0]}}
 {"case":"gen0019","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14020.802347092957,14050.17125605923,27836.88325217354]],"n":24},"status":[1000.0]}}
 {"case":"gen0020","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0],"status":[1000.0]}}
-{"case":"gen0021","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[42104.90169256339,42114.14418322962,1052596.0424562672]],"n":70},"status":[1000.0]}}
+{"case":"gen0021","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[42104.90162984934,42114.144239031004,1052596.0385191683]],"n":70},"status":[1000.0]}}
 {"case":"gen0022","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,-1.0],"status":[1000.0]}}
 {"case":"gen0023","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[84094.74493145464,84096.6868224227,5002273.128195994]],"n":140},"status":[1000.0]}}
 {"case":"gen0024","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[42115.08955520244,42216.92744658118,1053962.6580230992]],"n":71},"status":[1000.0]}}
@@ -161,7 +161,7 @@
 {"case":"hit0043","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,2.0,0.47217077856108924,-0.9776874050283964,-0.2326012501654553,0.47217077856108924,-0.9776874050283964,1.0552731963006856],"status":[1000.0]}}
 {"case":"hit0044","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,2.0,-5.276019363332006,4.97717278566614,1.4096435490460766,-7.181750279549855,0.5386244059376094,1.4096435490460766],"status":[1000.0]}}
 {"case":"hit0045","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,2.0,-0.868312733759281,0.0976828936071826,-0.23584299200507342,0.7362085247747788,-0.08783840296021772,-0.23584299200507342],"status":[1000.0]}}
-{"case":"hit0046","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,2.0,-0.062219623582000935,-0.02725806419686731,0.016080532081063192,0.06825651884896698,-0.05586436870355107,0.01608053208106319],"status":[1000.0]}}
+{"case":"hit0046","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,2.0,-0.06221962358200093,-0.027258064196867316,0.01608053208106319,0.06825651884896698,-0.05586436870355107,0.01608053208106319],"status":[1000.0]}}
 {"case":"hit0047","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0],"status":[1001.0]}}
 {"case":"hit0048","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,2.0,35.423190188720675,-117.36180724549502,-20.53968034696331,35.423190188720675,-117.36180724549502,51.380235847204915],"status":[1000.0]}}
 {"case":"hit0049","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,2.0,-93.30596147411934,-44.89176560627317,-13.593357368455004,87.74546640639208,-23.603741809235274,-13.593357368455004],"status":[1000.0]}}
@@ -388,7 +388,7 @@
 {"case":"ssi0018","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14212.408807336007,14358.969620766231,29303.202835873934]],"n":24},"status":[1000.0]}}
 {"case":"ssi0019","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28069.154935539995,28069.653922081223,378923.9562291748]],"n":47},"status":[1000.0]}}
 {"case":"ssi0020","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28114.742465559917,28248.13178864477,380056.0332604768]],"n":47},"status":[1000.0]}}
-{"case":"ssi0021","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28071.75286612212,28085.203182336252,378846.59496578976]],"n":47},"status":[1000.0]}}
+{"case":"ssi0021","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28071.752866122068,28085.203182336303,378846.59496578836]],"n":47},"status":[1000.0]}}
 {"case":"ssi0022","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14035.637114820023,14040.681343156073,28110.845893586884]],"n":24},"status":[1000.0]}}
 {"case":"ssi0023","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56135.97363865382,49438816.026361346,673653268.6687521]],"n":93},"status":[1000.0]}}
 {"case":"ssi0024","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0],"status":[1001.0]}}
@@ -415,7 +415,7 @@
 {"case":"ssi0045","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56136.134632054614,56613.88289865939,2053389.2211094976]],"n":93},"status":[1000.0]}}
 {"case":"ssi0046","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14034.256300682033,14035.041483611049,28068.106196089284]],"n":24},"status":[1000.0]}}
 {"case":"ssi0047","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56132.11707773432,100779926.99932702,977809960.4505105]],"n":93},"status":[1000.0]}}
-{"case":"ssi0048","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14039.54512945128,14041.573780188946,28138.584326481825]],"n":24},"status":[1000.0]}}
+{"case":"ssi0048","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14038.636793854585,14041.23494483274,28124.50156677702]],"n":24},"status":[1000.0]}}
 {"case":"ssi0049","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14015.65605615692,14019.679911982163,28043.765879756214]],"n":24},"status":[1000.0]}}
 {"case":"ssi0050","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[54039.31468706956,60931.54744852047,1990660.8435620826]],"n":93},"status":[1000.0]}}
 {"case":"ssi0051","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[13951.711291569995,14948.681197837908,30276.326768970204]],"n":24},"status":[1000.0]}}

@@ -1724,6 +1724,31 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// A constant curve has one distance everywhere, so a different target has no root.
+    #[test]
+    fn review_constant_curve_cannot_satisfy_another_distance() {
+        let case = crate::case::regression_case(&Runner, "gen0101");
+        let input: OpIn = case.parse().unwrap();
+        let OpIn::PointSolve {
+            curve: CurveIn::Hermite(ref h),
+            p,
+            target,
+            ..
+        } = input
+        else {
+            panic!("constant Hermite");
+        };
+        assert_eq!(h.p1, h.p2);
+        assert_eq!(h.d1, [0.0; 3]);
+        assert_eq!(h.d2, [0.0; 3]);
+        assert!((v3(h.p1).distance(v3(p)) - target.unwrap()).abs() > 0.04);
+        let output = rust(&input).unwrap();
+        assert_eq!(
+            output.values["out"][0], 0.0,
+            "an unevaluated guess is not a root"
+        );
+    }
+
     /// Generated cases cover every op, with passing (not deferred) cases for the ops
     /// that can be ported now.
     #[test]

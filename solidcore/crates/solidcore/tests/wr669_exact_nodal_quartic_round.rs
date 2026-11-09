@@ -12,7 +12,8 @@
 //! Every sampled point of the round lies at the radius from the closed-form spine and its
 //! rails on their faces (to the fork's 1e-9, see [`OFF_BALL`]), and the round face's area
 //! matches the canal surface's between the rails and the end disc's plane (Gauss-Legendre)
-//! to [`AREA_TOL`]. Without the flag, or with the arm traced, the fillet fails.
+//! to [`AREA_TOL`]. The corrected default N-D solver also builds the traced round;
+//! that control checks its approximate sections (WR-708) and the body's validity.
 //! The spine is constructed directly in Bernstein form: its offset identities and the
 //! round's canal identity certify a bound of 0, also through its definition's record.
 #![allow(
@@ -295,9 +296,32 @@ fn pipes_touching_at_a_point_round_exactly_on_their_nodal_quartic() {
 }
 
 #[test]
-fn upstream_traces_the_round_between_pipes_touching_at_a_point_and_fails() {
-    let (_, _, res, _) = pipes(false);
-    assert!(res.is_err(), "the traced round fails: {res:?}");
+fn corrected_solver_builds_the_traced_round_between_touching_pipes() {
+    let (mut k, mut b, res, rounds) = pipes(false);
+    res.unwrap();
+    assert_eq!(rounds.len(), 1, "one traced round face");
+    let f = rounds[0];
+    let s = face::surface(&b, f).unwrap().unwrap().clone();
+    let (off, rails) = off_ball(&k, &s);
+    // This control uses the default polynomial sections, whose documented accuracy
+    // is 0.05% of the radius (WR-708). The exact class above keeps its 1e-9 bar.
+    let section_relative_accuracy = 5e-4;
+    let section_accuracy = FILLET * section_relative_accuracy;
+    assert!(off < section_accuracy, "traced round off the ball: {off:e}");
+    assert!(
+        rails < section_accuracy,
+        "traced rail off its face: {rails:e}"
+    );
+    let area = canal_area();
+    let got = solidcore::mass::integrator::properties::face_area(&k, &mut b, f, 1e-10).unwrap();
+    assert!((got - area).abs() < section_relative_accuracy * area);
+    let check = solidcore::topology::brep::validation::check_brep(
+        &mut k,
+        &mut b,
+        solidcore::topology::brep::validation::CheckLevel::Level2,
+    )
+    .unwrap();
+    assert!(check.lines().is_empty(), "{:?}", check.lines());
 }
 
 // ---- #2485: an exact round is a blend by its definition, its net the exact surface ----
