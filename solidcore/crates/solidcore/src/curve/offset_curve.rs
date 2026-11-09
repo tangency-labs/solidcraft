@@ -653,19 +653,17 @@ impl OffsetCurve {
             Extent1d::from_min_max(min_u - EFF_ZERO, max_u + EFF_ZERO)
         });
         let (base_knots, base_mults) = base.knots(k, base_ivl.as_ref())?;
-        let mut knots = Vec::with_capacity(base_knots.len());
-        let mut mults = Vec::with_capacity(base_mults.len());
-        for (u, m) in base_knots
+        let (knots, mults) = base_knots
             .into_iter()
             .rev()
             .zip(base_mults.into_iter().rev())
-        {
-            let t = self.base_parameter(u);
-            if interval.is_none_or(|ivl| ivl.contains_value(t, 0.0)) {
-                knots.push(t);
-                mults.push(m);
-            }
-        }
+            .filter_map(|(u, m)| {
+                let t = self.base_parameter(u);
+                interval
+                    .is_none_or(|ivl| ivl.contains_value(t, 0.0))
+                    .then_some((t, m))
+            })
+            .unzip();
         Ok((knots, mults))
     }
 
