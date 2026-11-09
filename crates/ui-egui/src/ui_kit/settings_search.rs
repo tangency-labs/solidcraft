@@ -1177,6 +1177,9 @@ mod tests {
             let at = h.widget(label).unwrap_or_else(|| panic!("{label} must match {query}"));
             assert!(body.contains(egui::pos2(at[0] as f32, at[1] as f32)), "{label} is drawn in the results");
             assert!(h.widget("Sketch").is_some(), "{query}: the page heading names where it is");
+            // The Drawing section's hidden checkbox columns leave no gap between heading and row.
+            let heading = h.widget("DRAWING").unwrap_or_else(|| panic!("{query}: the section heading is drawn"));
+            assert!(at[1] - heading[1] < 80.0, "{label} sits under its section heading, not {} points below", at[1] - heading[1]);
             let (_, _, hits) = nav(&h.ctx);
             let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
             assert_eq!(matching.len(), 1, "{label} must have one stop for the arrow keys: {:?}", hits.iter().map(|h| &h.label).collect::<Vec<_>>());
