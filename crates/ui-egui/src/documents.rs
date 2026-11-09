@@ -562,6 +562,11 @@ pub fn import(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     if let Some(name) = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) {
         doc.name = name.to_string();
     }
+    // Like a design opened from a file, it comes in without its print faces unless they are kept
+    // (#11512); dropped before the session starts, so it still opens saved with nothing to undo.
+    if !app.preferences.keep_print_faces {
+        doc.print_faces.clear();
+    }
     let replaced = app.docs.active;
     open_tab(app, Session::opened(doc, None))?;
     close(app, replaced, true);

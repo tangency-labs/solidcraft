@@ -210,4 +210,21 @@ mod tests {
         save_and_reopen(&mut app, "kept");
         assert!(app.session.doc.print_faces.contains_key("Block"), "and a save keeps it");
     }
+
+    #[test]
+    fn a_design_a_host_imports_comes_without_its_print_face_unless_kept() {
+        let mut app = app();
+        select_face(&mut app, [20.0, 5.0, 2.5]);
+        app.start("body.print_face");
+        // The design's text with its print face, as an older version or a kept save wrote it.
+        assert!(app.session.doc.print_faces.contains_key("Block"));
+        let text = String::from_utf8(solidcraft_engine::io::write_design(&app.session.doc)).unwrap();
+        crate::documents::import(&mut app, &json!({"text": text})).unwrap();
+        assert!(app.session.doc.print_faces.is_empty(), "imported without its print face");
+        assert!(!app.session.is_dirty(), "dropping it is not an unsaved change");
+        assert_eq!(app.session.doc.features.len(), 1, "and with everything else");
+        crate::prefs::set(&mut app, &json!({"keep_print_faces": true})).unwrap();
+        crate::documents::import(&mut app, &json!({"text": text})).unwrap();
+        assert!(app.session.doc.print_faces.contains_key("Block"), "kept, it comes with its print face");
+    }
 }
