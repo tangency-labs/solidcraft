@@ -520,7 +520,7 @@ fn net_rows(a: &mut Arrays, cps: impl Iterator<Item = ([f64; 3], f64)>) {
 fn plane(a: &mut Arrays, origin: [f64; 3], u: [f64; 3], v: [f64; 3], domain: [[f64; 2]; 2], analytic: bool) -> R<()> {
     let [[u0, u1], [v0, v1]] = domain;
     let unit = |x: [f64; 3]| (dot(x, x).sqrt() - 1.0).abs() <= 1e-12;
-    if !analytic && !(unit(u) && unit(v) && dot(u, v).abs() <= 1e-12) {
+    if !(analytic || unit(u) && unit(v) && dot(u, v).abs() <= 1e-12) {
         nurbs_face(a, &[u0, u0, u1, u1], &[v0, v0, v1, v1], 2, 2)?;
         let at = |s: f64, t: f64| add(origin, add(scale(u, s), scale(v, t)));
         net(a, [at(u0, v0), at(u0, v1), at(u1, v0), at(u1, v1)].into_iter().map(|p| (p, 1.0)));

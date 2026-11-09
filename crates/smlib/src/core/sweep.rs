@@ -150,7 +150,7 @@ fn nurbs(degree: usize, points: &[[f64; 4]], knots: &[f64]) -> Out<Curve> {
     let mut weights = Vec::with_capacity(count);
     let mut rational = false;
     for p in points {
-        if !coord_ok(&p[..3]) || !p[3].is_finite() || !(p[3] > 1e-12 && p[3] < 1e12) {
+        if !(coord_ok(&p[..3]) && p[3].is_finite() && p[3] > 1e-12 && p[3] < 1e12) {
             return Err(Error::Argument);
         }
         ps.push(Vec3::new(p[0], p[1], p[2]));
@@ -468,7 +468,7 @@ pub(crate) fn planar_faces(loops: &[Profile]) -> Result<Body> {
 /// `smlib_extrude`: the planar `profile` extruded `distance` along `direction`, straight
 /// (`SmApiCreateLinearSweep`) or drafted (`SmApiCreateTaperExtrude`).
 pub(crate) fn extrude(profile: &[Profile], direction: [f64; 3], distance: f64, draft: f64, corner: DraftCorner, cap: bool) -> Result<Body> {
-    if !distance.is_finite() || !(distance > 1e-9 && distance < MAX_COORD) || !draft.is_finite() || draft.abs() >= PI / 2.0 - 1e-6 {
+    if !(distance.is_finite() && distance > 1e-9 && distance < MAX_COORD && draft.is_finite()) || draft.abs() >= PI / 2.0 - 1e-6 {
         return Err(Error::Argument);
     }
     making("smlib_extrude", |k| {
@@ -540,7 +540,7 @@ fn refused(r: CornerRefusal) -> Error {
 /// `smlib_revolve`: the planar `profile` turned `angle` radians about the axis through `origin`
 /// along `axis` (`SmApiCreateRotationalSweep`).
 pub(crate) fn revolve(profile: &[Profile], origin: [f64; 3], axis: [f64; 3], angle: f64, cap: bool) -> Result<Body> {
-    if !coord_ok(&origin) || !angle.is_finite() || !(angle > 1e-9 && angle <= TAU * (1.0 + 1e-12)) {
+    if !(coord_ok(&origin) && angle.is_finite() && angle > 1e-9 && angle <= TAU * (1.0 + 1e-12)) {
         return Err(Error::Argument);
     }
     making("smlib_revolve", |k| {
@@ -1681,7 +1681,7 @@ pub(crate) fn screw_sweep(
         }
         for (i, (t, o)) in law.iter().enumerate() {
             let ascending = i == 0 || law.get(i - 1).is_some_and(|(p, _)| t > p);
-            if !(*t >= 0.0 && *t <= turns) || !ascending || !(o.abs() < MAX_COORD) {
+            if !(*t >= 0.0 && *t <= turns && ascending && o.abs() < MAX_COORD) {
                 return Err(Error::Argument);
             }
         }

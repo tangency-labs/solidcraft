@@ -412,7 +412,7 @@ fn is_script(path: &str) -> bool {
         return false;
     }
     serde_json::from_slice::<Value>(&bytes)
-        .is_ok_and(|v| !v.get("format").and_then(Value::as_str).is_some_and(|f| solidcraft_engine::doc::format::version_of(f).is_some()))
+        .is_ok_and(|v| v.get("format").and_then(Value::as_str).is_none_or(|f| solidcraft_engine::doc::format::version_of(f).is_none()))
 }
 
 /// `--json-out FILE`: where the JSON a command prints goes instead of stdout.

@@ -1735,7 +1735,7 @@ impl Dialog {
         }
         if self.active != 0
             || !matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. })
-            || !self.inputs.first().is_some_and(|i| i.accept & PROFILES != 0)
+            || self.inputs.first().is_none_or(|i| i.accept & PROFILES == 0)
             || !s.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
         {
             return false;

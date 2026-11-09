@@ -514,7 +514,7 @@ pub fn standalone_check(manifests: &[(String, String)]) -> Vec<String> {
             }
             if let Some(path) = spec.get("path").and_then(toml::Value::as_str) {
                 let joined = normalize_rel(&format!("{}/{path}", dir.join("/")));
-                if !joined.is_some_and(|p| p.first().map(String::as_str) == Some("solidcore")) {
+                if joined.is_none_or(|p| p.first().map(String::as_str) != Some("solidcore")) {
                     errors.push(format!("{file}: {what} dependency `{key}` has path `{path}`, which leaves solidcore/; {STANDALONE_RULE}"));
                 }
             }

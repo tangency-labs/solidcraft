@@ -301,8 +301,8 @@ pub(super) fn loaded(app: &mut SolveApp) {
     let view = &mut app.render_workspace.view.lights;
     let unknown = scope_changed
         || view.source.as_ref().is_some_and(|previous| {
-            !(previous.method == source.method && previous.settings.ptr_eq(&source.settings))
-                && !view.numeric_history.as_ref().is_some_and(|proof| proof.connects(previous, &source))
+            (previous.method != source.method || !previous.settings.ptr_eq(&source.settings))
+                && view.numeric_history.as_ref().is_none_or(|proof| !proof.connects(previous, &source))
         });
     view.source = Some(source);
     if unknown {

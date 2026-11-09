@@ -1357,7 +1357,7 @@ fn append_section(
         _ => HostResizeEdge::Left,
     };
     let (min, max) = tab_bounds(proposed, service.registry(), section)?;
-    if !section.collapsed && !(section.location.zone() == Zone::Bottom && min.height == max.height) {
+    if !(section.collapsed || section.location.zone() == Zone::Bottom && min.height == max.height) {
         add_control(
             out,
             HostPointerTarget::Resize { section: section.id.clone(), edge },

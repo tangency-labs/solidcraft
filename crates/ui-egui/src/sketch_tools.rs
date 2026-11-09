@@ -1788,10 +1788,10 @@ fn glyph_constraints(sk: &solidcraft_engine::sketch::Sketch) -> impl Iterator<It
         {
             return false;
         }
-        !(matches!(
+        !matches!(
             c.kind,
             solidcraft_engine::sketch::ConstraintKind::PatternPoint { .. } | solidcraft_engine::sketch::ConstraintKind::PatternRadius { .. }
-        ) && !sk.patterns.iter().any(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(&c.id)))
+        ) || sk.patterns.iter().any(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(&c.id))
     })
 }
 

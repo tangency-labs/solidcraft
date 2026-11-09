@@ -914,7 +914,7 @@ fn refresh_section_memory(
             Some(saved)
                 if dormant_tabs.contains(&saved.active)
                     && !section.tabs.contains(&saved.active)
-                    && !projected.as_ref().is_some_and(|last| last.active != section.active) =>
+                    && projected.as_ref().is_none_or(|last| last.active == section.active) =>
             {
                 saved.active.clone()
             }

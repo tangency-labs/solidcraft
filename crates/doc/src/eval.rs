@@ -6422,7 +6422,7 @@ fn from_profile_on_closed_path(segs: Vec<solidcore_record::Seg2>, path: &Plane, 
     let (Some(first), Some(last)) = (segs.first(), segs.last()) else { return segs };
     let size: f64 = segs.iter().map(solidcore_record::Seg2::length).sum();
     let on_plane = |p: Vec2| profile.height(path.to_world(p)).abs() <= (size * 1e-9).max(1e-9);
-    if !start.is_finite() || !(size > 0.0 && size.is_finite()) || last.end().dist(first.start()) > 1e-5 || on_plane(first.start()) {
+    if !(start.is_finite() && size > 0.0 && size.is_finite()) || last.end().dist(first.start()) > 1e-5 || on_plane(first.start()) {
         return segs;
     }
     let local = path.to_local(start);

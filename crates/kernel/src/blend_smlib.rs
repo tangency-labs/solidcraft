@@ -320,7 +320,7 @@ mod imp {
         if setbacks.is_empty() || setbacks.len() > solidcraft_smlib::MAX_POINTS {
             return Err(KernelError::Invalid(format!("{what}: give 1…{} corners", solidcraft_smlib::MAX_POINTS)));
         }
-        if setbacks.iter().any(|(p, d)| !p.is_finite() || !(d.is_finite() && *d > 1e-6 && *d < 1e6)) {
+        if setbacks.iter().any(|(p, d)| !(p.is_finite() && d.is_finite() && *d > 1e-6 && *d < 1e6)) {
             return Err(KernelError::Invalid(format!("{what}: each corner is a finite point with a positive, finite setback")));
         }
         let picked = resolve(body, edges)?;
@@ -344,7 +344,7 @@ mod imp {
         if setbacks.is_empty() || setbacks.len() > solidcraft_smlib::MAX_POINTS {
             return Err(KernelError::Invalid(format!("{what}: give 1…{} corners", solidcraft_smlib::MAX_POINTS)));
         }
-        if setbacks.iter().any(|(p, d)| !p.is_finite() || !(d.is_finite() && *d > 1e-6 && *d < 1e6)) {
+        if setbacks.iter().any(|(p, d)| !(p.is_finite() && d.is_finite() && *d > 1e-6 && *d < 1e6)) {
             return Err(KernelError::Invalid(format!("{what}: each corner is a finite point with a positive, finite setback")));
         }
         let picked = resolve(body, edges)?;
