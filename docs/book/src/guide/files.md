@@ -234,9 +234,11 @@ is left out. Other text in braces stays as typed.
 
 With `{part_number}_rev{revision}`, a design with part number RV-102 and revision C is offered as
 `RV-102_revC.step`. With `{design}-{body}`, the body Base of the design Bracket is offered as
-`Bracket-Base.stl`. Characters that file names cannot hold (`/ \ : * ? " < > |`) become `_`. Left
-empty, File → Export offers the design's name, and Save As Mesh and a body's Export… offer the
-body's name. The control channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
+`Bracket-Base.stl`. Characters that file names cannot hold (`/ \ : * ? " < > |`) become `_`. A
+name that Windows keeps for a device, such as `CON` or `NUL`, gets a `_` in front. A long name is
+cut to 200 characters and 240 bytes, so it fits with its extension. Left empty, File → Export
+offers the design's name, and Save As Mesh and a body's Export… offer the body's name. The control
+channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
 
 ## Design properties
 

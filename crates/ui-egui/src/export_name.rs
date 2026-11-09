@@ -11,8 +11,17 @@ const DESIGN: &str = "design";
 /// Placeholder name for the exported body's name.
 const BODY: &str = "body";
 
-/// Longest name offered, in characters; file systems commonly allow 255 bytes with the extension.
+/// Longest name offered, in characters.
 const MAX_CHARS: usize = 200;
+/// Longest name offered, in UTF-8 bytes: common file systems (ext4, APFS, NTFS's UTF-16 aside)
+/// allow 255 bytes for a file name, and this leaves room for the extension an export adds.
+const MAX_BYTES: usize = 240;
+
+/// Windows device names: a file named after one, with any extension (`CON.step`), can't be made.
+const WINDOWS_DEVICES: &[&str] = &[
+    "AUX", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "CON", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7",
+    "LPT8", "LPT9", "NUL", "PRN",
+];
 
 /// What the placeholders of a template stand for in one export.
 pub(crate) struct Names<'a> {
@@ -42,10 +51,29 @@ pub(crate) fn stem(template: &str, names: &Names, legacy: &str) -> String {
         return legacy.to_string();
     }
     let named = fill(template, names);
-    let safe: String = named.chars().map(|c| if forbidden(c) { '_' } else { c }).take(MAX_CHARS).collect();
+    let mut safe = String::new();
+    for c in named.chars().map(|c| if forbidden(c) { '_' } else { c }).take(MAX_CHARS) {
+        if safe.len() + c.len_utf8() > MAX_BYTES {
+            break;
+        }
+        safe.push(c);
+    }
     // Windows drops trailing dots and spaces; leading ones hide the file or read as a mistake.
     let safe = safe.trim_matches(|c: char| c.is_whitespace() || c == '.');
-    if safe.chars().all(|c| c == '_') { legacy.to_string() } else { safe.to_string() }
+    if safe.chars().all(|c| c == '_') {
+        legacy.to_string()
+    } else if is_windows_device(safe) {
+        format!("_{safe}")
+    } else {
+        safe.to_string()
+    }
+}
+
+/// Whether Windows reserves `name` for a device: its part before the first dot, without trailing
+/// spaces, is one of [`WINDOWS_DEVICES`] in any case (`con`, `NUL.tar`, `Com1 .x`).
+fn is_windows_device(name: &str) -> bool {
+    let base = name.split('.').next().unwrap_or_default().trim_end();
+    WINDOWS_DEVICES.iter().any(|device| device.eq_ignore_ascii_case(base))
 }
 
 /// The file name, without extension, that an export of `body` from the open design offers, from
@@ -164,6 +192,30 @@ mod tests {
         assert_eq!(name("{body}", "Bracket", Some(".."), "Old"), "Old", "nothing usable is left");
         assert_eq!(name("///", "Bracket", None, "Old"), "Old");
         assert_eq!(name(&"{design}".repeat(100), "Bracketé", None, "x").chars().count(), MAX_CHARS);
+    }
+
+    #[test]
+    fn a_long_name_of_wide_characters_fits_the_file_name_byte_limit() {
+        // 70 four-byte emoji are under the character cap, but 280 bytes.
+        let long = name(&"🔧".repeat(70), "Bracket", None, "x");
+        assert!(long.len() <= MAX_BYTES && long.len() + ".step".len() <= 255, "{} bytes", long.len());
+        assert_eq!(long, "🔧".repeat(MAX_BYTES / 4), "cut between characters, never inside one");
+        // Three-byte characters: cut at the last whole one within the limit.
+        let cjk = name(&"設".repeat(100), "Bracket", None, "x");
+        assert_eq!(cjk.chars().count(), MAX_BYTES / 3);
+    }
+
+    #[test]
+    fn a_windows_device_name_is_prefixed() {
+        for device in ["CON", "con", "Nul", "COM1", "lpt9", "AUX", "PRN"] {
+            assert_eq!(name("{design}", device, None, "x"), format!("_{device}"));
+        }
+        assert_eq!(name("{design}.tar", "CON", None, "x"), "_CON.tar", "with any extension");
+        assert_eq!(name("{design} .v2", "nul", None, "x"), "_nul .v2", "and trailing spaces");
+        for fine in ["CONSOLE", "COM10", "Bracket-CON", "LPT", "COM0"] {
+            assert_eq!(name("{design}", fine, None, "x"), fine, "only the exact device names");
+        }
+        assert_eq!(name("", "CON", None, "CON"), "CON", "an empty template keeps the old name as it was");
     }
 
     #[test]
