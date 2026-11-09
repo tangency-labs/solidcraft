@@ -41,17 +41,42 @@ impl DxfLinetype {
 }
 
 /// A layer: its name, AutoCAD colour index (1 red, 3 green, 5 blue, 7 white or black) and linetype.
+/// The 24 standard DXF lineweights in hundredths of a millimetre (group 370).
+const STANDARD_LINEWEIGHTS: [i16; 24] = [
+    0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158, 200, 211,
+];
+
+/// Snap an arbitrary lineweight in hundredths of a millimetre to the nearest standard DXF value.
+fn snap_lineweight(hundredths: i16) -> i16 {
+    let h = hundredths.clamp(0, 211);
+    *STANDARD_LINEWEIGHTS
+        .iter()
+        .min_by_key(|&&w| (w - h).abs())
+        .unwrap_or(&h)
+}
+
+/// A layer: its name, AutoCAD colour index (1 red, 3 green, 5 blue, 7 white or black), linetype
+/// and lineweight.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DxfLayer {
     pub name: String,
     pub color: i16,
     pub linetype: DxfLinetype,
+    /// The printed line width in hundredths of a millimetre (50 is 0.5 mm); `None` leaves the
+    /// viewer's default and writes nothing.
+    pub lineweight: Option<i16>,
 }
 
 impl DxfLayer {
     /// A continuous layer.
     pub fn new(name: impl Into<String>, color: i16) -> DxfLayer {
-        DxfLayer { name: name.into(), color, linetype: DxfLinetype::Continuous }
+        DxfLayer { name: name.into(), color, linetype: DxfLinetype::Continuous, lineweight: None }
+    }
+
+    /// The same layer printed `hundredths` of a millimetre wide. DXF specifies 24 standard
+    /// values (0.00 to 2.11 mm); other values are snapped to the nearest standard value.
+    pub fn weight(self, hundredths: i16) -> DxfLayer {
+        DxfLayer { lineweight: Some(snap_lineweight(hundredths)), ..self }
     }
 
     /// The same layer with a dashed line.
@@ -529,6 +554,9 @@ pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insu
         o.code(70, 0);
         o.code(62, l.color);
         o.code(6, l.linetype.name());
+        if let Some(w) = l.lineweight {
+            o.code(370, w);
+        }
     }
     o.code(0, "ENDTAB");
     // The one text style, which a TEXT entity uses when it names none.
@@ -1281,5 +1309,17 @@ mod tests {
         assert_eq!(pts.len(), 2);
         assert_eq!(pts[0], Vec2::new(0.0, 0.0));
         assert_eq!(pts[1], Vec2::new(10.0, 0.0));
+    }
+
+    #[test]
+    fn layer_lineweight_snaps_to_nearest_standard_value() {
+        let ents = [DxfEntity { layer: "WALL".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::X) }];
+        let layer = DxfLayer::new("WALL", 1).weight(48); // 48 snaps to 50 (0.50 mm)
+        assert_eq!(layer.lineweight, Some(50));
+        let dxf = write_dxf_drawing(&[layer], &ents).unwrap();
+        let p = pairs(&dxf);
+        let wall = p.iter().position(|(c, v)| (*c, v.as_str()) == (2, "WALL")).unwrap();
+        let code370 = p[wall..].iter().take_while(|(c, v)| (*c, v.as_str()) != (0, "ENDTAB")).find(|(c, _)| *c == 370);
+        assert_eq!(code370, Some(&(370, "50".to_string())));
     }
 }
