@@ -85,7 +85,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// not a closed form: the chamfer's sections integrated along the chain from the faces and the
 /// rails alone, the chain's ends sectioned with their end faces (`integrated_gain`, 79.82 +-
 /// 0.53 here, the stations near the ends with no section the main term of that error). The
-/// groove below has a closed form.
+/// groove below has a closed form. Two of the chamfers, run on past their faces on the faces'
+/// extensions, are their definitions (#13774; before, the trace's skinned B-splines).
 #[test]
 fn a_chamfered_rim_on_a_curved_face_builds() {
     let mut k = kernel();

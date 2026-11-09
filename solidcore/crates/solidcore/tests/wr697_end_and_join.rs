@@ -517,12 +517,16 @@ fn teardrop_boss(k: &mut Kernel) -> Brep {
 /// foot, rounded r 0.5 and r 1, is the blend corner's closed Turn, Mitred, at the tip
 /// (#2349; 543d25a makes a closed edge meeting itself G1 the Join). It replaced the closed
 /// Nx1 corner, the fork's angle case (smlib#113 caa67d0, 2ac7a17), with its construction
-/// step for step, so the volumes are unchanged: the port's own (no closed form; the fork
-/// was not run on this body), each body clean with the boss's round and the plate's.
+/// step for step. The volumes are the port's own (no closed form; the fork was not run on
+/// this body), each body clean with the boss's round and the plate's. The foot's round,
+/// run on past the teardrop's tip on the wall's extension, is its definition, the round
+/// of the wall and the plate to rounding (#13774; before, the trace's skinned B-spline,
+/// off that round by 1.5e-4 at its 90th percentile, and the volumes 3.1e-4 and 4.9e-4
+/// less).
 #[test]
 fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_turn() {
     let foot = [[15.5, 0.0, 0.0]];
-    for (r, want) in [(0.5, 7133.840112885839517), (1.0, 7140.722103719867846)] {
+    for (r, want) in [(0.5, 7133.840421559223614), (1.0, 7140.722593621167)] {
         let mut k = all_fixes();
         let mut b = teardrop_boss(&mut k);
         let cs = corners(&mut k, &mut b.clone_standing_for_self().unwrap(), &foot, r);

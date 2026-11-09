@@ -491,6 +491,28 @@ pub fn surface_partials_sided(
     lk: usize,
     sides: [i32; 2],
 ) -> Result<Partials<f64>> {
+    surface_partials_pinned(k, s, uv, uv, lk, sides)
+}
+
+/// [`surface_partials_sided`] with the pieces a side names chosen at `pin`, not at `uv`
+/// (not the fork's): a sided station solve keeps, for every iterate, the pieces its sides
+/// name at its seed, which its callers place on the knot line. Chosen at each iterate,
+/// an iterate as far from the line as the margin of [`sided_span`] took the other piece,
+/// and Newton cycled between the two (feet 2e-9 off the old boundary of a face's
+/// extension, which is only G1 there: the station failed). A coordinate without a side
+/// takes the span of `uv`, as [`surface_partials_sided`].
+///
+/// # Errors
+///
+/// As [`surface_partials`].
+pub fn surface_partials_pinned(
+    k: &Kernel,
+    s: &Surface,
+    uv: Point2,
+    pin: Point2,
+    lk: usize,
+    sides: [i32; 2],
+) -> Result<Partials<f64>> {
     if lk > MAX_K {
         return Err(SolidError::sm_err(OP));
     }
@@ -498,8 +520,9 @@ pub fn surface_partials_sided(
     let bs = if definition { None } else { as_b_spline(k, s)? };
     if let Some(bs) = bs {
         let n = Nurbs::of(&bs)?;
-        let ku = sided_span(&n.u, n.p, n.nu, uv.x, sides[0]);
-        let kv = sided_span(&n.v, n.q, n.nv, uv.y, sides[1]);
+        let at = |x: f64, p: f64, side: i32| if side == 0 { x } else { p };
+        let ku = sided_span(&n.u, n.p, n.nu, at(uv.x, pin.x, sides[0]), sides[0]);
+        let kv = sided_span(&n.v, n.q, n.nv, at(uv.y, pin.y, sides[1]), sides[1]);
         return Ok(nurbs_partials(&n, ku, kv, uv.x, uv.y, lk));
     }
     // Evaluate(crUV, lK, lK, lSideU >= 0, lSideV >= 0, TRUE, sD, FALSE): a side, the upper
@@ -1064,10 +1087,25 @@ fn solve_station_body(
     let lk = tr.s() + tr.e() + 1;
     let (l, t) = leader_series_sided(leader, s, tr, opts.before)?;
     let [f0, f1] = faces;
+    // (a side names a piece at the seed, on the knot line: every iterate keeps it)
     let partials_at = |x: &[f64; 4], order: usize| -> Result<[Partials<f64>; 2]> {
         Ok([
-            surface_partials_sided(k, f0, Point2::new(x[0], x[1]), order, [sides[0], sides[1]])?,
-            surface_partials_sided(k, f1, Point2::new(x[2], x[3]), order, [sides[2], sides[3]])?,
+            surface_partials_pinned(
+                k,
+                f0,
+                Point2::new(x[0], x[1]),
+                Point2::new(seed[0], seed[1]),
+                order,
+                [sides[0], sides[1]],
+            )?,
+            surface_partials_pinned(
+                k,
+                f1,
+                Point2::new(x[2], x[3]),
+                Point2::new(seed[2], seed[3]),
+                order,
+                [sides[2], sides[3]],
+            )?,
         ])
     };
 
