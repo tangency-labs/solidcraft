@@ -2017,6 +2017,14 @@ mod tests {
         }
         assert!(wrap(SolidError::cancelled("x")).is_cancelled());
         assert!(wrap(SolidError::unported("SmX", "x")).is_unported());
+        // a routine that failed on its input is a status answer, as the collapsed SM_ERR was
+        assert!(e.is_status_answer());
+        // a solidcore-side failure kept as the cause makes the method's failure one too
+        // (is_port_failure follows the cause chain): it is no answer of the operation
+        let port = wrap(SolidError::port_invariant("nurbs::crv_basic", "no curve"));
+        assert!(port.is_port_failure());
+        assert!(!port.is_status_answer());
+        assert_eq!(port.sm_status(), Some(SM_ERR));
     }
 
     /// The NURBS routines report their failures as `NurbsFailure`s: no source file of
