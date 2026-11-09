@@ -6,7 +6,7 @@
     "issue-2349-teardrop-full-r0.5": "tangency-labs/solidcore#2349: the closed round's first span is off the true round by 7.9e-4 against a 4e-5 edge tolerance; the curved-spine mitre and both exact pcurves remain unimplemented",
     "issue-2349-teardrop-full-r3": "tangency-labs/solidcore#2349: the closed-angle mitre is not certified; tangency-labs/solidcore#2404 tracks the refusal size whose fresh build fails validity",
     "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.5": "tangency-labs/solidcore#3053: with every fix off the round builds a body that is not closed (29 vertices, 44 edges, 9 faces, mass status 1007), where it was refused with status 1001",
-    "stubs4-open_shell-e5-r0.5": "tangency-labs/solidcore#2956: fillet reports success but Level-2 validation has nine gaps beyond tolerance (up to 3.019034068882236e-5); already wrong on main and unchanged by the N-D correction"
+    "stubs4-open_shell-e5-r0.5": "tangency-labs/solidcraft#13733: fillet reports success but Level-2 validation has nine gaps beyond tolerance (up to 3.019034068882236e-5); already wrong on main and unchanged by the N-D correction"
   },
   "intersect.topology_solver_p2": {
     "subdivided_1_14_1_12_11_2_1": "tangency-labs/solidcore#3147: the All projected minimum returns 7 of the 21 answers within tolerance; the 14 missing are line endpoints (t = 0 or 1), leaving 5 of 12 vertices without an answer",
@@ -148,11 +148,11 @@
     "gen0189": "tangency-labs/solidcore#2794: the same input as gen0092 (circle of radius 1e-3 swept along two 1e-2 legs at a right angle) returns success with an invalid body (vertex 1.8284271e-3 off its faces); fix in #2840"
   },
   "surface.surface_point_solve_p2": {
-    "gen0808": "tangency-labs/solidcore#3096: Maximize reports 9.059573038386699, but in-domain UV (1, 2.6941425697089785) has distance 10.036238095784272; main already reports a nonmaximum (9.169142033546262)",
-    "rev_gen0057": "tangency-labs/solidcore#3096: Maximize reports 3.027869047705328, but in-domain UV (0.6, 0) has distance 10.106374942763338; main already reports a nonmaximum (1.9529663001246003)"
+    "gen0808": "tangency-labs/solidcraft#13684: Maximize reports 9.059573038386699, but in-domain UV (1, 2.6941425697089785) has distance 10.036238095784272; main already reports a nonmaximum (9.169142033546262)",
+    "rev_gen0057": "tangency-labs/solidcraft#13684: Maximize reports 3.027869047705328, but in-domain UV (0.6, 0) has distance 10.106374942763338; main already reports a nonmaximum (1.9529663001246003)"
   },
   "surface.surface_point_solve_p3": {
-    "matrix_0267": "tangency-labs/solidcore#3096: Maximize reports 6.848382229992056, but in-domain UV (-0.7767981984343537, 1) has distance 8.510836007198144; main already reports a nonmaximum (6.978354978629408)",
-    "matrix_0337": "tangency-labs/solidcore#3096: Maximize reports 0.44831251217740314, but in-domain UV (0.5, 2.342948734736579) has distance 4.1697843031871535; main already reports a nonmaximum (0.4483685594987209); Nodes request is ignored"
+    "matrix_0267": "tangency-labs/solidcraft#13684: Maximize reports 6.848382229992056, but in-domain UV (-0.7767981984343537, 1) has distance 8.510836007198144; main already reports a nonmaximum (6.978354978629408)",
+    "matrix_0337": "tangency-labs/solidcraft#13684: Maximize reports 0.44831251217740314, but in-domain UV (0.5, 2.342948734736579) has distance 4.1697843031871535; main already reports a nonmaximum (0.4483685594987209); Nodes request is ignored"
   }
 }
