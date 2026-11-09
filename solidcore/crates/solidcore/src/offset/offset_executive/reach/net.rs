@@ -1471,6 +1471,53 @@ mod tests {
         Surface::from(BSplineSurface::from_gw_nurb(&patch))
     }
 
+    /// A quadratic strip given the knots 0, 0, 0, 1 − 1e-13, 1, 1, 1 in u: a span narrower
+    /// than the knots' scaled zero, which the stored surface takes as a repeat, so its u knots
+    /// are 0, 0, 0, a, a, a, a (`a = 1 − 1e-13`), the end knot four times for degree 2. Its
+    /// rows run at z = 0 but the last, at z = 1.
+    fn strip_with_a_sliver_of_a_span() -> Surface {
+        let row = |x: f64, z: f64| vec![CPoint::new(x, 0.0, z, NOW), CPoint::new(x, 10.0, z, NOW)];
+        let patch = Patch::new(
+            vec![row(0.0, 0.0), row(5.0, 0.0), row(10.0, 0.0), row(10.0, 1.0)],
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 1.0 - 1e-13, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        Surface::from(BSplineSurface::from_gw_nurb(&patch))
+    }
+
+    /// A net is its surface at its sides: the strip ends on its last row (z = 1 at the end
+    /// of its domain), while the rows before it, which a net clamped `p + 1` times would end
+    /// on, are at z = 0. Where the net is taken at all, what it encloses at the side holds
+    /// the surface's point there.
+    #[test]
+    fn a_net_is_taken_only_where_it_ends_on_its_surfaces_side() {
+        let k = Kernel::default();
+        let s = strip_with_a_sliver_of_a_span();
+        let side = s.natural_uv_domain_with_nurb(&k).unwrap().max().x;
+        let Some(n) = Net::of(&k, &s).unwrap() else {
+            return;
+        };
+        for v in [0.0, 0.5, 1.0] {
+            let want = s
+                .evaluate_point(&k, crate::geom::vector2d::Point2::new(side, v))
+                .unwrap();
+            assert!((want.z - 1.0).abs() < 1e-9, "{want:?}");
+            let Some(jet) = n.jet(Ivl::from(side), Ivl::from(v)).unwrap() else {
+                continue;
+            };
+            let [x, y, z] = jet.p;
+            let holds = |i: Ivl, w: f64| i.lo <= w && w <= i.hi;
+            assert!(
+                holds(x, want.x) && holds(y, want.y) && holds(z, want.z),
+                "at v {v}: {:?} against {want:?}",
+                jet.p
+            );
+        }
+    }
+
     /// A line along the normal through the bump's corner (u, v) = (1, 0), from 0.5 below it,
     /// meets it at the corner, 0.5 along: Krawczyk's box about the corner runs past both sides
     /// there, whose rows end in different weight ratios, and is enclosed all the same.
