@@ -141,10 +141,10 @@ impl ModifierCombo {
     pub fn shown_label(self) -> String {
         let platform = Platform::host();
         if self == Self::CTRL_ALT {
-            return crate::i18n::format("ui.modifiers_either", &[("first", ctrl_name_for(platform)), ("second", alt_name_for(platform))]);
+            return solidcraft_ui_text::format("ui.modifiers_either", &[("first", ctrl_name_for(platform)), ("second", alt_name_for(platform))]);
         }
         if self == Self::NONE {
-            return crate::i18n::tr_label("None").to_string();
+            return solidcraft_ui_text::tr_label("None").to_string();
         }
         self.label_for(platform)
     }

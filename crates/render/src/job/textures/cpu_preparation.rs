@@ -1,9 +1,9 @@
 //! Bounded CPU row preparation with complete linear area-filtered mip chains;
 //! callers prepay required_bytes and schedule these continuations on their worker.
-use super::{BaseColorMode, TextureBinding, TextureMap};
+use super::{BaseColorMode, TextureBinding, TextureMap, normal_direction_variance, unit_normal_texel};
 use crate::{
     job::{CancelToken, ErrorCode, JobError, Result},
-    surface::{MIN_ROUGHNESS, OpaqueSurface, srgb8_to_linear},
+    surface::{MIN_ROUGHNESS, srgb8_to_linear},
     surface_patterns::ShadingSurface,
     texture_input::{MapRole, png_metadata::PngMetadata},
     texture_sampling::{TextureView, mips},
@@ -119,6 +119,7 @@ pub struct MapTask {
     stage: Stage,
     working_bytes: u64,
     full_mips: bool,
+    normal_variance: bool,
 }
 impl MapTask {
     /// Source capacity + existing codec allowance + exact base/tail capacities,
@@ -159,9 +160,12 @@ impl MapTask {
             .ok_or_else(|| invalid("CPU map preparation accounting overflow"))
     }
     pub fn new(map: TextureMap, max_bytes: u64, cancel: CancelToken) -> Result<Self> {
-        Self::begin(map, max_bytes, cancel, true)
+        Self::new_with_quality(map, max_bytes, cancel, false)
     }
-    fn begin(map: TextureMap, max_bytes: u64, cancel: CancelToken, full_mips: bool) -> Result<Self> {
+    pub(crate) fn new_with_quality(map: TextureMap, max_bytes: u64, cancel: CancelToken, quality: bool) -> Result<Self> {
+        Self::begin(map, max_bytes, cancel, true, quality)
+    }
+    fn begin(map: TextureMap, max_bytes: u64, cancel: CancelToken, full_mips: bool, quality: bool) -> Result<Self> {
         cancel.check()?;
         let working_bytes = Self::required(&map, full_mips)?;
         if max_bytes > crate::job::CpuBudget::Compact.limits().max_job_bytes || working_bytes > max_bytes {
@@ -201,6 +205,7 @@ impl MapTask {
             stage: Stage::Metadata,
             working_bytes,
             full_mips,
+            normal_variance: quality && role == MapRole::NormalOpenGl,
         })
     }
     pub fn working_bytes(&self) -> u64 {
@@ -330,6 +335,10 @@ impl MapTask {
                         f32::from(rgba[index]) / 255.0
                     };
                 }
+                if self.normal_variance {
+                    let normal = unit_normal_texel([pixel[0], pixel[1], pixel[2]]);
+                    pixel[..3].copy_from_slice(&normal);
+                }
                 let base = self.levels.first_mut().ok_or_else(|| invalid("CPU map base missing"))?;
                 push_pixel(base, pixel)?;
                 if x + 1 == base.width as usize {
@@ -389,7 +398,7 @@ impl MapTask {
         if self.stage != Stage::Done || self.levels.iter().any(|level| level.pixels.len() != level.width as usize * level.height as usize) {
             return Err(invalid("CPU map preparation is incomplete"));
         }
-        Ok(PreparedMap { identity: self.map.identity(), role: self.map.role(), levels: self.levels })
+        Ok(PreparedMap { identity: self.map.identity(), role: self.map.role(), levels: self.levels, normal_variance: self.normal_variance })
     }
 }
 fn push_pixel(level: &mut Level, pixel: [f32; 4]) -> Result<()> {
@@ -413,13 +422,15 @@ pub struct PreparedMap {
     identity: ([u8; 32], u8),
     role: MapRole,
     levels: Vec<Level>,
+    normal_variance: bool,
 }
 impl PreparedMap {
     pub(crate) fn level_metadata_bytes() -> u64 {
         size_of::<Level>() as u64
     }
     pub fn identity(&self) -> (([u8; 32], u8), &'static str) {
-        (self.identity, mips::MIP_RECIPE_ID)
+        let recipe = if self.normal_variance { "solidcraft.unit-normal-area-mips/1" } else { mips::MIP_RECIPE_ID };
+        (self.identity, recipe)
     }
     pub fn level_count(&self) -> usize {
         self.levels.len()
@@ -457,9 +468,68 @@ impl PreparedMap {
         let b = sample(high)?;
         Ok(std::array::from_fn(|index| a[index] * (1.0 - fraction) + b[index] * fraction))
     }
-    /// Pure material seam for future image integration: maps precede aging and
-    /// the same result must feed BRDF, PDF and denoise guides. No geometry change.
+    /// Filter along the major axis of an unwrapped UV footprint with at most
+    /// eight taps. The minor axis sets the trilinear mip level.
+    pub(crate) fn sample_anisotropic(&self, uv: [f64; 2], dx: [f64; 2], dy: [f64; 2]) -> Result<([f64; 3], f64)> {
+        let [width, height] = self.dimensions(0).ok_or_else(|| invalid("CPU map base dimensions missing"))?;
+        let size = [f64::from(width), f64::from(height)];
+        let u = [dx[0] * size[0], dy[0] * size[0]];
+        let v = [dx[1] * size[1], dy[1] * size[1]];
+        let dot = |a: [f64; 2], b: [f64; 2]| a[0] * b[0] + a[1] * b[1];
+        let (a, b, c) = (dot(u, u), dot(u, v), dot(v, v));
+        let separation = (a - c).hypot(2.0 * b);
+        let eigenvalue = (a + c + separation) * 0.5;
+        let major = eigenvalue.max(0.0).sqrt();
+        let minor = ((a + c - separation) * 0.5).max(0.0).sqrt();
+        let filter_width = minor.max(major / 8.0).max(1.0);
+        let last = (self.level_count() - 1) as f64;
+        let lod = filter_width.log2().clamp(0.0, last);
+        let minification = if last == 0.0 { 0.0 } else { lod.max(major - 1.0).clamp(0.0, 1.0) };
+        if lod == last || major <= 1.0 {
+            return Ok((self.sample(uv, lod)?, minification));
+        }
+        let eigen = [b, eigenvalue - a];
+        let eigen_length = eigen[0].hypot(eigen[1]);
+        let axis = if eigen_length > 1e-12 {
+            [eigen[0] / eigen_length, eigen[1] / eigen_length]
+        } else if a >= c {
+            [1.0, 0.0]
+        } else {
+            [0.0, 1.0]
+        };
+        let taps = (major / filter_width).ceil().clamp(1.0, 8.0) as usize;
+        let mut result = [0.0; 3];
+        for tap in 0..taps {
+            let offset = ((tap as f64 + 0.5) / taps as f64 - 0.5) * major;
+            let sample = self.sample([uv[0] + axis[0] * offset / size[0], uv[1] + axis[1] * offset / size[1]], lod)?;
+            for channel in 0..3 {
+                result[channel] += sample[channel] / taps as f64;
+            }
+        }
+        Ok((result, minification))
+    }
     pub fn apply(&self, binding: &TextureBinding, point: MapPoint, original: ShadingSurface, lod: f64) -> Result<ShadingSurface> {
+        self.apply_sample(binding, point, original, self.sample(binding.uv(point.position)?, lod)?, lod.clamp(0.0, 1.0))
+    }
+    pub(crate) fn apply_anisotropic(
+        &self,
+        binding: &TextureBinding,
+        point: MapPoint,
+        original: ShadingSurface,
+        dx: [f64; 2],
+        dy: [f64; 2],
+    ) -> Result<ShadingSurface> {
+        let (rgb, minification) = self.sample_anisotropic(binding.uv(point.position)?, dx, dy)?;
+        self.apply_sample(binding, point, original, rgb, minification)
+    }
+    fn apply_sample(
+        &self,
+        binding: &TextureBinding,
+        point: MapPoint,
+        original: ShadingSurface,
+        rgb: [f64; 3],
+        minification: f64,
+    ) -> Result<ShadingSurface> {
         let shading = crate::surface::unit_direction(original.shading_normal).map_err(|error| invalid(error.to_string()))?;
         let geometric = crate::surface::unit_direction(point.geometric_normal).map_err(|error| invalid(error.to_string()))?;
         let view = crate::surface::unit_direction(point.view_direction).map_err(|error| invalid(error.to_string()))?;
@@ -478,10 +548,21 @@ impl PreparedMap {
         if source.as_ref().is_none_or(|source| source.identity() != self.identity) {
             return Err(invalid("CPU prepared map does not match its binding source/role"));
         }
-        let rgb = self.sample(binding.uv(point.position)?, lod)?;
         if self.role == MapRole::NormalOpenGl {
             let mapped = binding.frame.mapped_normal(normal, geometric, rgb, binding.normal_strength)?;
-            return Ok(ShadingSurface { surface: original.surface, shading_normal: if mapped.dot(view) > 0.0 { mapped } else { normal } });
+            let mut surface = original.surface;
+            if self.normal_variance && binding.normal_strength > 0.0 && minification > 0.0 {
+                let variance = normal_direction_variance(rgb) * minification;
+                // Constant directions can lose a few bits during float reconstruction.
+                if variance > 1e-6 {
+                    let alpha = surface.roughness() * surface.roughness();
+                    let broadened = (alpha * alpha + variance * binding.normal_strength.powi(2)).min(1.0).sqrt().sqrt();
+                    surface = surface
+                        .with_authored_finish(surface.base_color(), surface.metallic(), broadened)
+                        .map_err(|error| invalid(error.to_string()))?;
+                }
+            }
+            return Ok(ShadingSurface { surface, shading_normal: if mapped.dot(view) > 0.0 { mapped } else { normal } });
         }
         let surface = original.surface;
         let base = if self.role == MapRole::BaseColor {
@@ -496,7 +577,7 @@ impl PreparedMap {
         };
         let roughness = if self.role == MapRole::Roughness { rgb[0].clamp(MIN_ROUGHNESS, 1.0) } else { surface.roughness() };
         let metallic = if self.role == MapRole::Metallic { rgb[0] } else { surface.metallic() };
-        let changed = OpaqueSurface::new(base, metallic, roughness, surface.dielectric_ior()).map_err(|error| invalid(error.to_string()))?;
-        Ok(ShadingSurface { surface: surface.clear_coat().map_or(changed, |coat| changed.with_clear_coat(coat)), shading_normal: normal })
+        let changed = surface.with_authored_finish(base, metallic, roughness).map_err(|error| invalid(error.to_string()))?;
+        Ok(ShadingSurface { surface: changed, shading_normal: normal })
     }
 }

@@ -1,16 +1,22 @@
 //! Panel elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
 use super::{actions::icon_button_at, metrics::*, text::paint_text};
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{scenario, theme::Tokens};
 use egui::{Ui, vec2};
+use solidcraft_theme::Tokens;
 
 const WINDOW_PAGES_NARROW_WIDTH: f32 = 150.0;
 const WINDOW_PAGES_NARROW_AT: f32 = 700.0;
 
+/// `v` kept within `lo..=hi`, or `lo` when that range is empty: `f32::clamp` panics on
+/// `lo > hi`, which a rect squeezed to nothing between cards gives.
+pub(crate) fn within(v: f32, lo: f32, hi: f32) -> f32 {
+    if lo <= hi { v.clamp(lo, hi) } else { lo }
+}
+
 /// Shared active-tab hover tint for the browser and collapsible panel chrome.
 pub(crate) fn panel_header_hover(painter: &egui::Painter, rect: egui::Rect) {
     let t = Tokens::get();
-    painter.rect_filled(rect, t.radius_lg.saturating_sub(t.space_4 as u8), crate::theme::TabAccent::current(painter.ctx()).soft);
+    painter.rect_filled(rect, t.radius_lg.saturating_sub(t.space_4 as u8), solidcraft_theme::TabAccent::current(painter.ctx()).soft);
 }
 
 /// Feature title/icon/close band. Tokens: `form_header_height, form_icon_size, form_close_size, form_inset, font_label, text, dialog_rule, space_8/10; icon_button_at tokens`.
@@ -52,7 +58,7 @@ fn header_actions(
         vec2(t.form_icon_size, t.form_icon_size),
     );
     if icon.0.is_empty() {
-        ui.painter().circle_filled(icon_rect.center(), t.space_3, crate::theme::TabAccent::current(ui.ctx()).ink);
+        ui.painter().circle_filled(icon_rect.center(), t.space_3, solidcraft_theme::TabAccent::current(ui.ctx()).ink);
     } else if let Some(ink) = icon.1 {
         crate::icons::paint_ink(ui.painter(), icon_rect, icon.0, ink);
     } else {
@@ -64,7 +70,7 @@ fn header_actions(
     );
     if closeable {
         let close = icon_button_at(ui, close_rect, "close", "Close");
-        scenario::publish_handle("dialog:close", close.rect.center());
+        solidcraft_ui_registry::publish_handle("dialog:close", close.rect.center());
         if close.clicked() {
             on_close();
         }
@@ -83,12 +89,13 @@ fn header_actions(
             action_ui.set_clip_rect(ui.clip_rect().intersect(action_rect));
         }
         actions(&mut action_ui);
-        scenario::publish_rect("dialog:header:accessory", action_rect);
+        solidcraft_ui_registry::publish_rect("dialog:header:accessory", action_rect);
         action_rect.left() - t.space_8
     } else if let Some(collapsed) = collapsed {
         let fold = egui::Rect::from_min_size(egui::pos2(close_rect.left() - t.form_close_size - t.space_4, close_rect.top()), close_rect.size());
-        let response = super::disclosure_button_at(ui, fold, !*collapsed, crate::i18n::tr_label(if *collapsed { "Expand" } else { "Collapse" }));
-        scenario::publish_handle("dialog:collapse", response.rect.center());
+        let response =
+            super::disclosure_button_at(ui, fold, !*collapsed, solidcraft_ui_text::tr_label(if *collapsed { "Expand" } else { "Collapse" }));
+        solidcraft_ui_registry::publish_handle("dialog:collapse", response.rect.center());
         if response.clicked() {
             *collapsed = !*collapsed;
         }
@@ -100,10 +107,17 @@ fn header_actions(
     };
     let left = (icon_rect.right() + t.space_8).min(right);
     let title_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(right.max(left), rect.bottom()));
-    paint_text(ui, title_rect, title, crate::fonts::semibold(if icon.0.is_empty() { t.font_label } else { t.font_heading }), t.form_ink, false);
+    paint_text(
+        ui,
+        title_rect,
+        title,
+        crate::ui_kit::type_face::semibold(if icon.0.is_empty() { t.font_label } else { t.font_heading }),
+        t.form_ink,
+        false,
+    );
     let title_response = ui.interact(title_rect, ui.make_persistent_id("title_text"), egui::Sense::hover());
     title_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
-    scenario::publish_rect("dialog:header", rect);
+    solidcraft_ui_registry::publish_rect("dialog:header", rect);
     t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
 }
 
@@ -166,11 +180,11 @@ impl<'a> TopHeader<'a> {
         // left out: one control for one action, and its width goes to the title. Its handle
         // moves to Cancel, so automation that closes a panel keeps working.
         if let Some(cancel_rect) = actions.rect(super::Action::Cancel) {
-            scenario::publish_handle("dialog:close", cancel_rect.center());
+            solidcraft_ui_registry::publish_handle("dialog:close", cancel_rect.center());
         } else {
             let close_rect = target(right);
             let response = icon_button_at(ui, close_rect, "close", "Close");
-            scenario::publish_handle("dialog:close", response.rect.center());
+            solidcraft_ui_registry::publish_handle("dialog:close", response.rect.center());
             if response.clicked() {
                 *close = true;
             }
@@ -178,8 +192,9 @@ impl<'a> TopHeader<'a> {
         }
         if let Some(collapsed) = collapsed {
             let fold = target(right);
-            let response = super::disclosure_button_at(ui, fold, !*collapsed, crate::i18n::tr_label(if *collapsed { "Expand" } else { "Collapse" }));
-            scenario::publish_handle("dialog:collapse", response.rect.center());
+            let response =
+                super::disclosure_button_at(ui, fold, !*collapsed, solidcraft_ui_text::tr_label(if *collapsed { "Expand" } else { "Collapse" }));
+            solidcraft_ui_registry::publish_handle("dialog:collapse", response.rect.center());
             if response.clicked() {
                 *collapsed = !*collapsed;
             }
@@ -192,8 +207,8 @@ impl<'a> TopHeader<'a> {
         let left = (icon.right() + t.space_8).min(right);
         let title = egui::Rect::from_min_max(egui::pos2(left, band.top()), egui::pos2(right.max(left), band.bottom()));
         // Dragging the panel by its title must not start on a button.
-        scenario::publish_handle("dialog:title", title.center());
-        scenario::publish_rect("dialog:header", band);
+        solidcraft_ui_registry::publish_handle("dialog:title", title.center());
+        solidcraft_ui_registry::publish_rect("dialog:header", band);
         t.secondary_hline(ui.painter(), band.x_range(), band.bottom(), t.dialog_rule);
         Self { icon, title, actions }
     }
@@ -204,15 +219,15 @@ impl<'a> TopHeader<'a> {
         let t = Tokens::get();
         if state.busy {
             egui::Spinner::new().size(t.space_14).paint_at(ui, self.icon);
-            let status = state.text.as_deref().unwrap_or_else(|| crate::i18n::tr_label("Updating the preview"));
+            let status = state.text.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr_label("Updating the preview"));
             ui.interact(self.icon, ui.scope_id().with("compute_status"), egui::Sense::hover()).backing_on_hover_text(status);
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         } else {
             crate::icons::paint_icon(ui.painter(), self.icon, icon, 1.0);
         }
-        let heading = crate::fonts::semibold(t.font_heading);
+        let heading = crate::ui_kit::type_face::semibold(t.font_heading);
         match state.text.as_deref() {
-            Some(status) => paint_text(ui, self.title, status, crate::fonts::medium(t.font_label), t.form_dim, false),
+            Some(status) => paint_text(ui, self.title, status, crate::ui_kit::type_face::medium(t.font_label), t.form_dim, false),
             None => paint_text(ui, self.title, title, heading.clone(), t.form_ink, false),
         }
         let title_response = ui.interact(self.title, ui.make_persistent_id("title_text"), egui::Sense::hover());
@@ -237,13 +252,13 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
     let mut action = None;
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), header_height()), egui::Sense::hover());
     let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + (t.space_16 + t.space_4), rect.center().y), vec2(t.space_14, t.space_14));
-    crate::icons::paint_ink(ui.painter(), icon_rect, icon, crate::theme::TabAccent::current(ui.ctx()).ink);
+    crate::icons::paint_ink(ui.painter(), icon_rect, icon, solidcraft_theme::TabAccent::current(ui.ctx()).ink);
     let close_rect = egui::Rect::from_center_size(
         egui::pos2(rect.right() - (t.space_16 + t.space_4), rect.center().y),
         vec2(t.form_close_size, t.form_close_size),
     );
-    let close = super::icon_button_at(ui, close_rect, "close", crate::i18n::tr_label("Close"));
-    scenario::publish_target("render:appearance:close", close.rect);
+    let close = super::icon_button_at(ui, close_rect, "close", solidcraft_ui_text::tr_label("Close"));
+    solidcraft_ui_registry::publish_target("render:appearance:close", close.rect);
     if close.clicked() {
         action = Some(InspectorAction::Close);
     }
@@ -252,13 +267,14 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
         let mut more_ui = ui.new_child(egui::UiBuilder::new().id_salt("inspector_more").max_rect(more_rect));
         let ui = &mut more_ui;
         super::Menu::text(ui, "…", |ui| {
-            if super::MenuItem::new("render:appearance:remove", crate::i18n::tr("render.inspector_remove"), "").show(ui).clicked() {
+            if super::MenuItem::new("render:appearance:remove", solidcraft_ui_text::tr("render.inspector_remove"), "").show(ui).clicked() {
                 action = Some(InspectorAction::Remove);
                 ui.close();
             }
         });
     }
-    let badge_width = ui.painter().layout_no_wrap(kind.to_owned(), crate::fonts::semibold(t.font_small), t.form_ink).size().x + t.space_16;
+    let badge_width =
+        ui.painter().layout_no_wrap(kind.to_owned(), crate::ui_kit::type_face::semibold(t.font_small), t.form_ink).size().x + t.space_16;
     let badge = egui::Rect::from_center_size(
         egui::pos2(more_rect.left() - t.space_8 - badge_width / 2.0, rect.center().y),
         vec2(badge_width, t.space_16 + t.space_4),
@@ -268,11 +284,11 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
         super::workspace_chip(&mut badge_ui, kind);
     }
     let name = egui::Rect::from_min_max(egui::pos2(icon_rect.right() + t.space_8, rect.top()), egui::pos2(badge.left() - t.space_8, rect.bottom()));
-    paint_text(ui, name, title, crate::fonts::semibold(t.font_label), t.form_ink, false);
+    paint_text(ui, name, title, crate::ui_kit::type_face::semibold(t.font_label), t.form_ink, false);
     ui.interact(name, ui.make_persistent_id("inspector_title"), egui::Sense::hover())
         .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
     t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
-    scenario::publish_rect("dialog:header", rect);
+    solidcraft_ui_registry::publish_rect("dialog:header", rect);
     action
 }
 
@@ -376,7 +392,7 @@ impl<'a> Panel<'a> {
                 let band = ui.max_rect().expand2(vec2(t.space_12, t.space_8));
                 ui.painter().rect_filled(band, egui::CornerRadius { nw: 0, ne: 0, sw: t.radius_xl, se: t.radius_xl }, t.dialog_footer);
                 t.secondary_hline(ui.painter(), band.x_range(), band.top(), t.dialog_rule);
-                scenario::publish_rect("dialog:editor_footer", band);
+                solidcraft_ui_registry::publish_rect("dialog:editor_footer", band);
                 add(ui)
             })
     }
@@ -523,18 +539,18 @@ impl<'a> Panel<'a> {
                 let grip = ui
                     .interact(grip_rect, ui.scope_id().with("workspace_grip"), egui::Sense::click_and_drag())
                     .on_hover_cursor(egui::CursorIcon::Grab);
-                scenario::publish_target(&format!("{}:grip", options.id), grip.rect);
+                solidcraft_ui_registry::publish_target(&format!("{}:grip", options.id), grip.rect);
                 super::Menu::context(&grip, |ui| {
                     let (target, label) = if left { ("right", "Move to right side") } else { ("left", "Move to left side") };
                     let item = super::MenuItem::new("view.render_dock", label, "").show(ui);
-                    scenario::publish_target(&format!("{}:move_side", options.id), item.rect);
+                    solidcraft_ui_registry::publish_target(&format!("{}:move_side", options.id), item.rect);
                     if item.clicked() {
                         move_side = Some(target);
                         ui.close();
                     }
                 });
                 header(ui, &options);
-                scenario::publish_rect(&format!("{}:header", options.id), band);
+                solidcraft_ui_registry::publish_rect(&format!("{}:header", options.id), band);
                 if grip.dragged() {
                     let frame_nr = ui.ctx().cumulative_frame_nr();
                     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_dock_drag_frame"), frame_nr));
@@ -575,7 +591,7 @@ impl<'a> Panel<'a> {
             );
             let resize =
                 ui.interact(rail, ui.scope_id().with("workspace_resize"), egui::Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-            scenario::publish_target(&format!("{}:resize", options.id), rail);
+            solidcraft_ui_registry::publish_target(&format!("{}:resize", options.id), rail);
             if resize.dragged() && !options.compact {
                 let delta = ui.input(|i| i.pointer.delta().x) * if left { 1.0 } else { -1.0 };
                 if delta.is_finite() {
@@ -594,12 +610,12 @@ impl<'a> Panel<'a> {
     }
 
     /// Feature surface; shared container policy supplies the border and shadow.
-    pub(crate) fn feature_frame(ctx: &egui::Context, layout: crate::shell::LayoutMode, side: crate::frame::Side) -> egui::Frame {
+    pub(crate) fn feature_frame(ctx: &egui::Context, layout: super::LayoutMode, side: crate::frame::Side) -> egui::Frame {
         super::Container::for_layout(layout, super::Surface::Feature).frame(ctx, Tokens::get().dialog_body, side).inner_margin(0.0)
     }
 
     /// Sketch palette uses the same layout policy as every other workspace panel.
-    pub(crate) fn palette_frame(ctx: &egui::Context, layout: crate::shell::LayoutMode) -> egui::Frame {
+    pub(crate) fn palette_frame(ctx: &egui::Context, layout: super::LayoutMode) -> egui::Frame {
         let t = Tokens::get();
         super::Container::for_layout(layout, super::Surface::Palette)
             .frame(ctx, t.panel.gamma_multiply(t.sketch_palette_alpha), crate::frame::Side::Right)
@@ -680,7 +696,7 @@ impl<'a> Panel<'a> {
                 viewport.left() + width,
                 (viewport.right() - if gap > 0.0 { Tokens::get().space_8 } else { 0.0 }).max(viewport.left() + width),
             ),
-            crate::frame::Side::Left => crate::shell::within(self.anchor.x, viewport.left(), viewport.right() - width),
+            crate::frame::Side::Left => within(self.anchor.x, viewport.left(), viewport.right() - width),
         };
         let t = Tokens::get();
         let chrome = t.form_header_height + t.form_footer_height + t.form_gap_y * 2.0 + self.frame.total_margin().sum().y + gap;
@@ -792,7 +808,7 @@ impl<'a> Panel<'a> {
             let min = ui.cursor().min;
             let band = egui::Rect::from_min_size(min, vec2(ui.available_width(), super::header_height()));
             if heading.drag_key.is_empty() {
-                scenario::publish_handle("dialog:title", band.center());
+                solidcraft_ui_registry::publish_handle("dialog:title", band.center());
             } else {
                 crate::frame::drag_dock(ui, band, heading.drag_key, heading.moved, self.bounded_anchor(ui.ctx()) - heading.docked);
             }
@@ -816,7 +832,7 @@ impl<'a> Panel<'a> {
             let fields_height = self.body_rows.map_or(fields_height, |rows| fields_height.min(rows * t.control_height + t.space_12 * 2.0));
             let fields_rect = egui::Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), fields_height));
             let state = if collapsed.as_deref().copied().unwrap_or(false) {
-                scenario::publish_count("dialog:body:content_height", 0.0);
+                solidcraft_ui_registry::publish_count("dialog:body:content_height", 0.0);
                 ComputeStatus { text: None, busy: disabled, applying: disabled }
             } else {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(fields_rect), |ui| {
@@ -839,9 +855,9 @@ impl<'a> Panel<'a> {
                                 .show(ui, body)
                                 .inner
                         });
-                    scenario::publish_count("dialog:body:content_height", f64::from(scroll.content_size.y));
-                    scenario::publish_count("dialog:body:scroll_y", f64::from(scroll.state.clamped_offset().y));
-                    scenario::publish_rect("dialog:body:viewport", scroll.inner_rect);
+                    solidcraft_ui_registry::publish_count("dialog:body:content_height", f64::from(scroll.content_size.y));
+                    solidcraft_ui_registry::publish_count("dialog:body:scroll_y", f64::from(scroll.state.clamped_offset().y));
+                    solidcraft_ui_registry::publish_rect("dialog:body:viewport", scroll.inner_rect);
                     scroll.inner
                 })
                 .inner
@@ -864,8 +880,8 @@ impl<'a> Panel<'a> {
                     if state.busy {
                         let (rect, _) = ui.allocate_exact_size(vec2(t.space_16, ui.available_height()), egui::Sense::hover());
                         egui::Spinner::new().size(t.space_14).paint_at(ui, rect);
-                        scenario::publish_rect("dialog:footer:spinner", rect);
-                        let status = state.text.as_deref().unwrap_or_else(|| crate::i18n::tr_label("Updating the preview"));
+                        solidcraft_ui_registry::publish_rect("dialog:footer:spinner", rect);
+                        let status = state.text.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr_label("Updating the preview"));
                         ui.interact(rect, ui.scope_id().with("compute_status"), egui::Sense::hover()).backing_on_hover_text(status);
                         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
                     }
@@ -915,7 +931,7 @@ impl<'a> Panel<'a> {
                                 .show(ui, body)
                         })
                         .inner;
-                    scenario::publish_rect("sketch_palette:options", scroll.inner_rect);
+                    solidcraft_ui_registry::publish_rect("sketch_palette:options", scroll.inner_rect);
                 }
                 if !at_top {
                     add(ui, Part::Footer);
@@ -928,7 +944,7 @@ impl<'a> Panel<'a> {
                     .min_scrolled_height(0.0)
                     .auto_shrink([false, true])
                     .show(ui, contents);
-                scenario::publish_rect("sketch_palette:options", scroll.inner_rect);
+                solidcraft_ui_registry::publish_rect("sketch_palette:options", scroll.inner_rect);
             } else {
                 contents(ui);
             }
@@ -1154,38 +1170,34 @@ impl<'a> Window<'a> {
         self,
         ctx: &egui::Context,
         selected: &mut usize,
-        pages: &[WindowPage<S>],
+        pages: &[WindowPage<'_, S>],
         state: &mut S,
         left: impl FnOnce(&mut Ui),
     ) -> (bool, super::Action) {
-        self.show_pages_inner(ctx, selected, pages, state, None, None, None, left)
+        self.show_pages_inner(ctx, selected, pages, state, None, left)
     }
 
-    /// Page navigation with a strip above the page body (Preferences search).
-    /// `on_select` runs when a page tab is clicked, before that page is drawn.
+    /// Page navigation with a strip above the page body (Preferences search), a hook for a page
+    /// tab's click and an optional block under the list.
     pub(crate) fn show_pages_with_header<S>(
         self,
         ctx: &egui::Context,
         selected: &mut usize,
-        pages: &[WindowPage<S>],
+        pages: &[WindowPage<'_, S>],
         state: &mut S,
-        header: fn(&mut Ui, &mut S),
-        on_select: fn(&mut S),
-        sidebar_footer: Option<(f32, fn(&mut Ui, &mut S))>,
+        hooks: &PageListHooks<'_, S>,
         left: impl FnOnce(&mut Ui),
     ) -> (bool, super::Action) {
-        self.show_pages_inner(ctx, selected, pages, state, Some(header), Some(on_select), sidebar_footer, left)
+        self.show_pages_inner(ctx, selected, pages, state, Some(hooks), left)
     }
 
     fn show_pages_inner<S>(
         mut self,
         ctx: &egui::Context,
         selected: &mut usize,
-        pages: &[WindowPage<S>],
+        pages: &[WindowPage<'_, S>],
         state: &mut S,
-        header: Option<fn(&mut Ui, &mut S)>,
-        on_select: Option<fn(&mut S)>,
-        sidebar_footer: Option<(f32, fn(&mut Ui, &mut S))>,
+        hooks: Option<&PageListHooks<'_, S>>,
         left: impl FnOnce(&mut Ui),
     ) -> (bool, super::Action) {
         self.body_padding = false;
@@ -1194,6 +1206,7 @@ impl<'a> Window<'a> {
         let padding = self.page_padding;
         let in_titlebar = self.page_header_in_titlebar;
         let (icon, title, closeable) = (self.icon, self.title, self.closeable);
+        let header = hooks.map(|hooks| hooks.header);
         let header_closed = std::cell::Cell::new(false);
         let result = self.show_with_left(
             ctx,
@@ -1216,18 +1229,7 @@ impl<'a> Window<'a> {
                         Some((Tokens::get().space_24 * 9.0 + Tokens::get().space_14, &mut accessory)),
                     );
                 }
-                page_list_sized(
-                    ui,
-                    selected,
-                    pages,
-                    state,
-                    rows,
-                    padding,
-                    if in_titlebar { None } else { header },
-                    on_select,
-                    sidebar_footer,
-                    header.is_some(),
-                );
+                page_list_sized(ui, selected, pages, state, rows, padding, if in_titlebar { None } else { header }, hooks, header.is_some());
             },
             left,
         );
@@ -1254,7 +1256,7 @@ impl<'a> Window<'a> {
                     super::Container::finish_content(ui, frame);
                     result
                 });
-            scenario::publish_rect("dialog:window", shown.response.rect);
+            solidcraft_ui_registry::publish_rect("dialog:window", shown.response.rect);
             return shown.inner;
         }
         let window = super::Container::new(ctx, super::Surface::Window)
@@ -1281,39 +1283,49 @@ impl<'a> Window<'a> {
             result
         });
         if let Some(shown) = &shown {
-            scenario::publish_rect("dialog:window", shown.response.rect);
+            solidcraft_ui_registry::publish_rect("dialog:window", shown.response.rect);
         }
         shown.and_then(|r| r.inner).unwrap_or((false, super::Action::None))
     }
 }
 
-/// A page's existing icon, translated label key, stable handle and draw callback.
-pub(crate) struct WindowPage<S> {
-    pub icon: &'static str,
-    pub label: &'static str,
-    pub group: Option<&'static str>,
-    pub handle: &'static str,
+/// A page's icon, translated label key, stable handle and draw callback.
+pub(crate) struct WindowPage<'a, S> {
+    pub icon: super::Icon<'a>,
+    pub label: &'a str,
+    pub group: Option<&'a str>,
+    pub handle: &'a str,
     pub scroll: bool,
-    pub draw: fn(&mut Ui, &mut S),
+    pub draw: &'a dyn Fn(&mut Ui, &mut S),
+}
+
+/// What a page list draws besides its pages: a strip above the page body (Preferences search),
+/// what runs when a page tab is clicked (with that page's index, before it is drawn), and a block
+/// pinned under the list with its height.
+pub(crate) struct PageListHooks<'a, S> {
+    pub header: &'a dyn Fn(&mut Ui, &mut S),
+    pub on_select: &'a dyn Fn(&mut S, usize),
+    pub sidebar_footer: Option<(f32, &'a dyn Fn(&mut Ui, &mut S))>,
 }
 
 #[cfg(test)]
-pub(super) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<S>], state: &mut S) {
-    page_list_sized(ui, selected, pages, state, 16.0, egui::Margin::same(Tokens::get().space_16 as i8), None, None, None, false);
+pub(super) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<'_, S>], state: &mut S) {
+    page_list_sized(ui, selected, pages, state, 16.0, egui::Margin::same(Tokens::get().space_16 as i8), None, None, false);
 }
 
 fn page_list_sized<S>(
     ui: &mut Ui,
     selected: &mut usize,
-    pages: &[WindowPage<S>],
+    pages: &[WindowPage<'_, S>],
     state: &mut S,
     rows: f32,
     padding: egui::Margin,
-    header: Option<fn(&mut Ui, &mut S)>,
-    on_select: Option<fn(&mut S)>,
-    sidebar_footer: Option<(f32, fn(&mut Ui, &mut S))>,
+    header: Option<&dyn Fn(&mut Ui, &mut S)>,
+    hooks: Option<&PageListHooks<'_, S>>,
     search_scroll: bool,
 ) {
+    let on_select = hooks.map(|hooks| hooks.on_select);
+    let sidebar_footer = hooks.and_then(|hooks| hooks.sidebar_footer);
     let t = Tokens::get();
     // The search strip, the gap under it, and the following item spacing sit above the page.
     // They must not eat the rows the page already had, or the graphics checkboxes fall out of view.
@@ -1330,7 +1342,7 @@ fn page_list_sized<S>(
     let nav = egui::Rect::from_min_size(body.min, vec2(width, body.height()));
     ui.painter().rect_filled(nav, 0.0, t.dialog_footer);
     t.secondary_vline(ui.painter(), nav.right(), nav.y_range(), t.dialog_rule);
-    scenario::publish_rect("dialog:pages", nav);
+    solidcraft_ui_registry::publish_rect("dialog:pages", nav);
     *selected = (*selected).min(pages.len().saturating_sub(1));
     let nav_inner = if sidebar_footer.is_some() {
         egui::Rect::from_min_max(nav.min + vec2(t.space_8, t.space_6), nav.max - vec2(t.space_8, t.space_10))
@@ -1354,15 +1366,22 @@ fn page_list_sized<S>(
                     ui.add_space(t.space_8);
                     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_24), egui::Sense::hover());
                     let rect = rect.shrink2(vec2(t.space_10, 0.0));
-                    paint_text(ui, rect, &crate::i18n::tr(group).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim, true);
+                    paint_text(
+                        ui,
+                        rect,
+                        &solidcraft_ui_text::tr(group).to_uppercase(),
+                        crate::ui_kit::type_face::semibold(t.font_small),
+                        t.form_dim,
+                        true,
+                    );
                 }
-                let label = crate::i18n::tr(page.label);
+                let label = solidcraft_ui_text::tr(page.label);
                 let (rect, response) =
                     ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height + t.space_4), egui::Sense::click());
                 if response.clicked() {
                     *selected = index;
                     if let Some(on_select) = on_select {
-                        on_select(state);
+                        on_select(state, index);
                     }
                 }
                 let on = *selected == index;
@@ -1375,13 +1394,16 @@ fn page_list_sized<S>(
                 let ink = if on { t.form_primary } else { t.form_ink };
                 let icon =
                     egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_10 + t.space_8, rect.center().y), vec2(t.space_16, t.space_16));
-                crate::icons::paint_ink(ui.painter(), icon, page.icon, if on { ink } else { t.form_dim });
+                match page.icon {
+                    super::Icon::Kit(name) => crate::icons::paint_ink(ui.painter(), icon, name, if on { ink } else { t.form_dim }),
+                    host => host.paint(ui.painter(), icon, 1.0),
+                }
                 let text_rect = egui::Rect::from_min_max(egui::pos2(icon.right() + super::NAV_ROW_GAP, rect.top()), rect.right_bottom());
                 paint_text(
                     ui,
                     text_rect,
                     label,
-                    if on { crate::fonts::semibold(t.font_label) } else { egui::FontId::proportional(t.font_label) },
+                    if on { crate::ui_kit::type_face::semibold(t.font_label) } else { egui::FontId::proportional(t.font_label) },
                     ink,
                     false,
                 );
@@ -1389,7 +1411,7 @@ fn page_list_sized<S>(
                 if response.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
-                scenario::publish_target(page.handle, rect);
+                solidcraft_ui_registry::publish_target(page.handle, rect);
                 response.backing_on_hover_text(label);
             }
         });
@@ -1400,7 +1422,7 @@ fn page_list_sized<S>(
             ui.set_clip_rect(ui.clip_rect().intersect(rect));
             footer(ui, state);
         });
-        scenario::publish_rect("dialog:pages_footer", rect);
+        solidcraft_ui_registry::publish_rect("dialog:pages_footer", rect);
     }
     let content = egui::Rect::from_min_max(egui::pos2(nav.right(), body.top()), body.max);
     let padding = egui::epaint::MarginF32 {
@@ -1421,14 +1443,14 @@ fn page_list_sized<S>(
             if let Some(header) = header {
                 header(ui, state);
             }
-            let force_scroll = search_scroll && crate::prefs_search::force_scroll(ui.ctx());
+            let force_scroll = search_scroll && super::settings_search::force_scroll(ui.ctx());
             if let Some(page) = pages.get(*selected) {
                 if page.scroll || force_scroll {
                     let scroll = super::settings_scroll(ui, ("sc_prefs_page", *selected), |ui| (page.draw)(ui, state));
-                    scenario::publish_rect("dialog:page_body", scroll.inner_rect);
+                    solidcraft_ui_registry::publish_rect("dialog:page_body", scroll.inner_rect);
                 } else {
                     (page.draw)(ui, state);
-                    scenario::publish_rect("dialog:page_body", content);
+                    solidcraft_ui_registry::publish_rect("dialog:page_body", content);
                 }
             }
         },

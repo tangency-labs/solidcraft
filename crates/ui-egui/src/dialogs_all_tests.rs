@@ -454,7 +454,7 @@ fn motion_dialog_hints_are_translated() {
     }
     let mut h = fixture();
     h.app.preferences.language = "ja".into();
-    let _japanese = crate::i18n::scope("ja");
+    let _japanese = solidcraft_ui_text::scope("ja");
     for (command, english) in [("motion.study", "add a key for a joint first"), ("motion.trace", "select a point on a component")] {
         let mut d = Dialog::for_command(&h.app, command).unwrap();
         let mut painted = Vec::new();
@@ -473,7 +473,7 @@ fn motion_dialog_hints_are_translated() {
             out.shapes.iter().for_each(|shape| texts(&shape.shape, &mut painted));
         }
         assert!(!painted.iter().any(|p| p == english), "{command} paints {english:?} in Japanese");
-        assert!(painted.iter().any(|p| p == crate::i18n::tr_label(english)), "{command} paints {painted:?}");
+        assert!(painted.iter().any(|p| p == solidcraft_ui_text::tr_label(english)), "{command} paints {painted:?}");
     }
 }
 
@@ -747,7 +747,7 @@ fn hand_drawn_dialog_texts_are_translated() {
     }
     let mut h = fixture();
     h.app.preferences.language = "ja".into();
-    let _japanese = crate::i18n::scope("ja");
+    let _japanese = solidcraft_ui_text::scope("ja");
     for (command, english) in [
         ("joint.gear", "▶ Play"),
         ("motion.study", "Loop"),
@@ -791,7 +791,7 @@ fn revolve_layout_fixture_builds_a_valid_solid() {
 
 #[test]
 fn new_cards_settle_before_the_first_click_in_both_layouts() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         for command in ["solid.box", "solid.revolve", "solid.shell", "joint.create"] {
             let mut h = fixture();
             h.call("ui.set", json!({"layout":mode}));
@@ -1116,6 +1116,7 @@ fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
                 positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
                 triangles: mesh.triangles.iter().flatten().copied().collect(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),
@@ -1488,13 +1489,13 @@ fn extrude_builds_the_one_region_clicked_where_the_face_outline_cuts_a_profile()
 #[test]
 fn every_selection_field_label_is_translated() {
     let h = fixture();
-    let _japanese = crate::i18n::scope("ja");
+    let _japanese = solidcraft_ui_text::scope("ja");
     let mut missing = std::collections::BTreeSet::new();
     for spec in solidcraft_engine::command_specs() {
         let Some(d) = Dialog::for_command(&h.app, spec.id) else { continue };
         for input in &d.inputs {
             let label = input.label.trim();
-            if label.chars().any(|c| c.is_ascii_alphabetic()) && crate::i18n::tr_label(label) == label {
+            if label.chars().any(|c| c.is_ascii_alphabetic()) && solidcraft_ui_text::tr_label(label) == label {
                 missing.insert(format!("{}: {label}", spec.id));
             }
         }
@@ -1657,9 +1658,9 @@ fn pattern_says_why_a_clicked_sketch_is_not_taken() {
         }
     }
     assert!(crate::dialogs::missing_pick(crate::dialogs::SKETCH_NOT_OBJECT), "shown as what to pick, with no Create Issue");
-    let _japanese = crate::i18n::scope("ja");
-    assert!(!crate::i18n::tr_label(crate::dialogs::SKETCH_NOT_OBJECT).is_ascii(), "the hint reads in the user's language");
-    assert!(!crate::i18n::tr("ui.pattern_object_type_tip").is_ascii(), "so does the Object Type tooltip");
+    let _japanese = solidcraft_ui_text::scope("ja");
+    assert!(!solidcraft_ui_text::tr_label(crate::dialogs::SKETCH_NOT_OBJECT).is_ascii(), "the hint reads in the user's language");
+    assert!(!solidcraft_ui_text::tr("ui.pattern_object_type_tip").is_ascii(), "so does the Object Type tooltip");
 }
 
 /// Features stored with bare numbers edit with their units written out, as the Plastic ones do
@@ -1769,7 +1770,7 @@ fn dialog_sketch_selection_labels_translate_and_keep_identifiers() {
         (Sel::SketchConstraint { id: "k3".into() }, "Constraint k3", "Bedingung k3"),
     ] {
         for (language, expected) in [("en", english), ("de", german)] {
-            let _language = crate::i18n::scope(language);
+            let _language = solidcraft_ui_text::scope(language);
             assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, &d, &d.inputs[0], &sel), expected);
         }
     }

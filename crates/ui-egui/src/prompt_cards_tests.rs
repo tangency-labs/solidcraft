@@ -212,12 +212,12 @@ fn settings_reset_notice_dismisses_or_opens_the_graphics_page() {
     h.app.settings_reset = vec![crate::prefs::SettingReset::Msaa { requested: 8, reset: 4, supported: vec![1, 4] }];
     card_is_drawn(&mut h);
     press(&mut h, "OK");
-    assert!(h.app.settings_reset.is_empty() && !h.app.prefs_window.open);
+    assert!(h.app.settings_reset.is_empty() && !h.app.prefs_window.shell.open);
     h.app.settings_reset = vec![crate::prefs::SettingReset::Msaa { requested: 8, reset: 4, supported: vec![1, 4] }];
     h.frames(3);
     press(&mut h, "Open Preferences");
-    assert!(h.app.settings_reset.is_empty() && h.app.prefs_window.open);
-    assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GRAPHICS);
+    assert!(h.app.settings_reset.is_empty() && h.app.prefs_window.shell.open);
+    assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GRAPHICS);
 }
 
 #[test]

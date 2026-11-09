@@ -1,0 +1,161 @@
+{
+  "area": "tessellation",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b16": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "1263-concave-arc-knife-edge-plate",
+  "expected": {
+    "area_mm2": 3491.479,
+    "body_count": 1,
+    "faces": 6,
+    "method": "Plate x 0..41.1667, y -21..0, z 0..10 (area 864.5 in plan). Corner box x 41.1667..62.1667, y -21..0 less the cylinder r=21 centred at (62.1667,-21): the cylinder takes the quarter disc pi 21^2/4 = 346.361 out of the 441 plan area, leaving 94.639 (it meets the back face y=0 at the tip (62.1667,0), tangentially). Plan area 959.139, V = 10 * 959.139 = 9591.394. Surface: top and bottom 2*959.139, left wall 21*10, front wall 41.1667*10 (the arc starts at the corner box's front-left corner, so the corner adds no front wall), back wall 62.1667*10, arc wall (pi*21/2)*10: A = 3491.479. Six faces.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1263"
+    ],
+    "volume_mm3": 9591.394,
+    "what": "a plate with a concave quarter-round wall that meets the back face tangentially at a knife-edge tip (a box and a box less a cylinder, united): its display tessellation used to fail with 'boundary does not lie on the surface' before anything was filleted"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "records": "1263-concave-arc-knife-edge-plate.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3491.4793818076564,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 9591.394099236863
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1263"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a plate with a concave quarter-round wall that meets the back face tangentially at a knife-edge tip (a box and a box less a cylinder, united): its display tessellation used to fail with 'boundary does not lie on the surface' before anything was filleted",
+  "why_not": []
+}

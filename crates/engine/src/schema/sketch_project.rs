@@ -154,6 +154,15 @@ fn read_link_flag(o: &Map<String, Value>) -> Result<Option<bool>, String> {
     }
 }
 
+/// `construction`: a boolean (`null` is refused too); left out, the session's preference decides.
+fn read_construction(o: &Map<String, Value>) -> Result<Option<bool>, String> {
+    match o.get("construction") {
+        None => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(_) => Err("`construction` must be a boolean".into()),
+    }
+}
+
 /// `refs` and `ref` are one of them required: left out, the handler refuses with its own message.
 fn refs_required(schema: &mut Schema) {
     schema.insert("anyOf".into(), json!([{"required": ["refs"]}, {"required": ["ref"]}]));
@@ -180,6 +189,11 @@ pub struct ProjectParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub projection_link: Option<bool>,
+    /// Make the created curves construction geometry (dashed, left out of profiles; they stay
+    /// linked). Default: the "Project references as construction geometry" preference, off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub construction: Option<bool>,
 }
 
 impl<'de> Deserialize<'de> for ProjectParams {
@@ -188,7 +202,8 @@ impl<'de> Deserialize<'de> for ProjectParams {
         // The handler reads `projection_link` before the references.
         let projection_link = read_link_flag(&o).map_err(|why| D::Error::custom(whole(why)))?;
         let (refs, reference) = read_refs(&o).map_err(|why| D::Error::custom(whole(why)))?;
-        Ok(ProjectParams { refs, reference, projection_link })
+        let construction = read_construction(&o).map_err(|why| D::Error::custom(whole(why)))?;
+        Ok(ProjectParams { refs, reference, projection_link, construction })
     }
 }
 
@@ -212,6 +227,11 @@ pub struct IntersectParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub projection_link: Option<bool>,
+    /// Make the created curves construction geometry (dashed, left out of profiles; they stay
+    /// linked). Default: the "Project references as construction geometry" preference, off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub construction: Option<bool>,
 }
 
 impl<'de> Deserialize<'de> for IntersectParams {
@@ -219,7 +239,8 @@ impl<'de> Deserialize<'de> for IntersectParams {
         let o = Map::<String, Value>::deserialize(d)?;
         let projection_link = read_link_flag(&o).map_err(|why| D::Error::custom(whole(why)))?;
         let (refs, reference) = read_refs(&o).map_err(|why| D::Error::custom(whole(why)))?;
-        Ok(IntersectParams { refs, reference, projection_link })
+        let construction = read_construction(&o).map_err(|why| D::Error::custom(whole(why)))?;
+        Ok(IntersectParams { refs, reference, projection_link, construction })
     }
 }
 
@@ -237,13 +258,19 @@ pub struct Include3dParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(rename = "ref", with = "ProjectRefs")]
     pub reference: Option<ProjectRefs>,
+    /// Make the created curves construction geometry (dashed, left out of profiles; they stay
+    /// linked). Default: the "Project references as construction geometry" preference, off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub construction: Option<bool>,
 }
 
 impl<'de> Deserialize<'de> for Include3dParams {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let o = Map::<String, Value>::deserialize(d)?;
         let (refs, reference) = read_refs(&o).map_err(|why| D::Error::custom(whole(why)))?;
-        Ok(Include3dParams { refs, reference })
+        let construction = read_construction(&o).map_err(|why| D::Error::custom(whole(why)))?;
+        Ok(Include3dParams { refs, reference, construction })
     }
 }
 
