@@ -22,7 +22,7 @@ mod history;
 mod history_group;
 mod layout;
 mod look_chain;
-mod menu;
+pub mod menu;
 mod metrics;
 mod name_list;
 mod navigation;

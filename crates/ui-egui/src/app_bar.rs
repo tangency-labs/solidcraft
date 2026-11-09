@@ -756,7 +756,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
                 .fixed_pos(pos2(mr.left(), r.bottom()))
                 .order(egui::Order::Foreground)
                 .show(ui.ctx(), |ui| {
-                    crate::context_menu::menu_frame(ui, |ui| {
+                    crate::ui_kit::menu::menu_frame(ui, |ui| {
                         for (i, tab) in strip.tabs.iter().enumerate() {
                             let label = format!("{}{}", tab.list_name, if tab.dirty { " •" } else { "" });
                             if crate::ui_kit::list_picker(ui, &format!("{}{i}", h.more_row), &label, i == strip.selected).clicked() {
@@ -780,7 +780,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
             .fixed_pos(at)
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui| {
-                crate::context_menu::menu_frame(ui, |ui| {
+                crate::ui_kit::menu::menu_frame(ui, |ui| {
                     let mut chosen = None;
                     for row in strip.menu {
                         let mut item = crate::ui_kit::Item::action(row.id, row.label, "");
@@ -789,7 +789,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
                         }
                         item.enabled = !row.needs_others || n > 1;
                         let top = ui.cursor().top();
-                        let picked = crate::context_menu::list_row(ui, &item);
+                        let picked = crate::ui_kit::menu::list_row(ui, &item);
                         let rect = Rect::from_min_max(pos2(ui.min_rect().left(), top), pos2(ui.min_rect().right(), ui.cursor().top()));
                         solidcraft_ui_registry::publish_handle(&format!("{}{}", h.menu_row, row.id), rect.center());
                         if picked.is_some() {
@@ -874,7 +874,7 @@ fn file_rows(ui: &mut egui::Ui, rows: &[FileRow], chosen: &mut Option<String>, i
         match row {
             FileRow::Item(item) => {
                 let row = crate::ui_kit::Item::action(&item.label, &item.label, &item.icon).key(&item.key).on_if(item.enabled);
-                if crate::context_menu::list_row(ui, &row).is_some() {
+                if crate::ui_kit::menu::list_row(ui, &row).is_some() {
                     *chosen = Some(item.id.clone());
                     if in_sub {
                         ui.close();
@@ -882,7 +882,7 @@ fn file_rows(ui: &mut egui::Ui, rows: &[FileRow], chosen: &mut Option<String>, i
                 }
             }
             FileRow::Button { item, tip } => {
-                let response = crate::context_menu::button(ui, &item.label, &item.icon);
+                let response = crate::ui_kit::menu::button(ui, &item.label, &item.icon);
                 let response = match tip {
                     Some(tip) => response.backing_on_hover_text(tip),
                     None => response,

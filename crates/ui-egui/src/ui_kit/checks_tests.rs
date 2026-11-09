@@ -224,7 +224,7 @@ fn surface(
         }),
         "preferences" => crate::prefs::show(app, ui.ctx()),
         "menu" => {
-            crate::context_menu::menu_frame(ui, |ui| crate::toolbar::selection_filter(app, ui));
+            crate::ui_kit::menu::menu_frame(ui, |ui| crate::toolbar::selection_filter(app, ui));
         }
         _ => panic!("unknown surface {name}"),
     }
@@ -377,7 +377,7 @@ fn grid_palette_inline_and_menu_share_every_box_state() {
                                                     ui_kit::checkbox_row(ui, "option", "Option", value);
                                                 }
                                                 "menu" => {
-                                                    crate::context_menu::menu_frame(ui, |ui| {
+                                                    crate::ui_kit::menu::menu_frame(ui, |ui| {
                                                         checkbox(ui, "Option", &mut value);
                                                     });
                                                 }

@@ -135,7 +135,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
             .constrain(true)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                crate::context_menu::menu_frame(ui, |ui| {
+                crate::ui_kit::menu::menu_frame(ui, |ui| {
                     for (id, label, icon) in [
                         ("docs", "Documentation", "library"),
                         ("about", "About SolidCraft", "help"),
@@ -151,13 +151,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                     .filter(|(id, ..)| *id != "install_cli" || cfg!(target_os = "macos"))
                     {
                         let item = crate::ui_kit::Item::action(id, label, icon).on_if(available(app, id));
-                        if crate::context_menu::list_row(ui, &item).is_some() {
+                        if crate::ui_kit::menu::list_row(ui, &item).is_some() {
                             pick = Some(id);
                         }
                         // A layout without the version in the application bar lists it here.
                         if id == "about" && app.header.version == crate::toolbar::VersionPlace::HelpMenu {
                             let label = solidcraft_ui_text::format("help.version", &[("version", crate::update::current_version())]);
-                            if crate::context_menu::list_row(ui, &crate::ui_kit::Item::action("version", &label, "update")).is_some() {
+                            if crate::ui_kit::menu::list_row(ui, &crate::ui_kit::Item::action("version", &label, "update")).is_some() {
                                 pick = Some("version");
                             }
                         }

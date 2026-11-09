@@ -380,6 +380,23 @@ impl<'a> MenuItem<'a> {
         Self { id, label, icon, shortcut: "", enabled: true, highlighted: false, checked: None, swatch: None, danger: false, submenu: false }
     }
 
+    /// The row for a menu entry, `lit` when it is chosen with the keys or its flyout is open. A
+    /// `current` shortcut marks the checked entry of a choice.
+    pub(crate) fn from_item(item: &'a Item, lit: bool) -> Self {
+        Self {
+            id: &item.id,
+            label: &item.label,
+            icon: &item.icon,
+            shortcut: if item.shortcut == "current" { "" } else { &item.shortcut },
+            enabled: item.enabled,
+            highlighted: lit,
+            danger: item.icon == "delete",
+            checked: (item.shortcut == "current").then_some(true),
+            swatch: item.swatch.map(|c| Color32::from_rgb(c[0], c[1], c[2])),
+            submenu: !item.children.is_empty(),
+        }
+    }
+
     pub(crate) fn show(&self, ui: &mut Ui) -> Response {
         let t = Tokens::get();
         // Areas first measure intrinsic content. Filling their provisional available
@@ -469,6 +486,43 @@ impl<'a> MenuItem<'a> {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
     }
+}
+
+/// A list menu's popup surface, [`LIST_W`] wide, around `add`.
+pub fn menu_frame<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    Menu::show(ui, LIST_W, add)
+}
+
+/// A menu row that acts as a button.
+pub fn button(ui: &mut Ui, label: &str, icon: &str) -> Response {
+    button_enabled(ui, label, icon, true)
+}
+
+/// [`button`], greyed out and inert when `enabled` is false.
+pub fn button_enabled(ui: &mut Ui, label: &str, icon: &str, enabled: bool) -> Response {
+    let mut item = MenuItem::new(label, label, icon);
+    item.enabled = enabled;
+    item.show(ui)
+}
+
+/// One entry of a list menu: a separator, a heading or a row. Returns the entry when its row was
+/// clicked while enabled.
+pub fn list_row(ui: &mut Ui, item: &Item) -> Option<Item> {
+    list_row_lit(ui, item, false)
+}
+
+/// [`list_row`] with the row lit (chosen with the keys, or its flyout open).
+pub fn list_row_lit(ui: &mut Ui, item: &Item, lit: bool) -> Option<Item> {
+    if item.is_sep() {
+        Menu::separator(ui);
+        return None;
+    }
+    if item.is_heading() {
+        Menu::heading(ui, &item.label);
+        return None;
+    }
+    let row = MenuItem::from_item(item, lit);
+    (row.show(ui).clicked() && item.enabled).then(|| item.clone())
 }
 
 pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<usize>, height: f32) -> Option<Item> {
