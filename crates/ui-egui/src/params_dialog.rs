@@ -1303,7 +1303,7 @@ mod tests {
         assert!(crate::keymap::capturing(&h.app));
         escape_key(&mut h, true);
         assert!(!crate::keymap::capturing(&h.app));
-        assert!(h.app.prefs_window.open && h.app.params.is_some(), "Escape cancels only shortcut capture");
+        assert!(h.app.prefs_window.shell.open && h.app.params.is_some(), "Escape cancels only shortcut capture");
         assert_eq!(escape_state(&h), before);
     }
 
