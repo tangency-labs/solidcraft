@@ -178,14 +178,14 @@ fn scan_skipping(root: &Path, modules: &[(&str, &str)], functions: &[(&str, &str
     Ok(found)
 }
 
-fn relative(root: &Path, path: &Path) -> String {
+pub(crate) fn relative(root: &Path, path: &Path) -> String {
     path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
 }
 
 /// The source files of the module at `file` and of every non-test module below it, into `out`.
 /// `owns_dir` is whether `file` is a `lib.rs` or `mod.rs` (its submodules sit beside it) rather
 /// than `name.rs` (its submodules sit in `name/`).
-fn module_files(file: &Path, owns_dir: bool, out: &mut Vec<PathBuf>) -> Result<(), String> {
+pub(crate) fn module_files(file: &Path, owns_dir: bool, out: &mut Vec<PathBuf>) -> Result<(), String> {
     let source = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
     let ast = syn::parse_file(&source).map_err(|e| format!("{}: cannot parse Rust source: {e}", file.display()))?;
     out.push(file.to_path_buf());
@@ -244,7 +244,7 @@ fn path_attribute(attrs: &[syn::Attribute]) -> Option<String> {
 
 /// Whether `attrs` keep an item to test builds: `#[test]`, `#[cfg(test)]` or
 /// `#[cfg(all(.., test, ..))]`.
-fn test_only(attrs: &[syn::Attribute]) -> bool {
+pub(crate) fn test_only(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|a| {
         if a.path().is_ident("test") {
             return true;
@@ -310,7 +310,7 @@ impl Finder {
     }
 }
 
-fn type_name(ty: &syn::Type) -> String {
+pub(crate) fn type_name(ty: &syn::Type) -> String {
     match ty {
         syn::Type::Path(p) => p.path.segments.last().map_or_else(|| "<type>".to_owned(), |s| s.ident.to_string()),
         syn::Type::Reference(r) => type_name(&r.elem),

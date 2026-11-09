@@ -3,6 +3,7 @@
 //! Rust workspace tooling. External tools (`cargo`, and Python 3.11+ for the
 //! original icon collection) are invoked through `std::process::Command`.
 
+mod app_geometry;
 mod app_icons;
 mod assets;
 mod book;
@@ -121,6 +122,12 @@ commands:
                   geometry: fails on a function outside display, export, previews and mesh bodies
                   that uses a mesh and xtask/mesh-decisions.txt does not list, and on a listed one
                   that no longer does (the list only shrinks)
+  app-geometry [--print]
+                  check that apps compute no geometry: fails on a function in crates/doc, engine,
+                  ui-egui, io, kernel or geom that does vector maths, solves or mesh queries and
+                  xtask/app-geometry.txt does not list, and on a listed one that no longer does
+                  (the list only shrinks); prints the listed count per crate. --print writes the
+                  sites found, in the list's format
   test [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary at once
                   (and the doc tests alongside); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
@@ -136,7 +143,7 @@ commands:
                   check in headless Chrome that the web app works offline and updates to a new
                   build (a stand-in app, or the web build in DIR such as dist/web)
   ci              fmt --check, assets, icons, licences --check, lists, skills, layers, shared,
-                  ui-containers, mesh-decisions, clippy -D warnings, then the tests
+                  ui-containers, mesh-decisions, app-geometry, clippy -D warnings, then the tests
                   with the wasm check alongside, then web-offline-test when Chrome is installed
                   (stops at the first failing step)
 ";
@@ -166,6 +173,7 @@ fn main() -> ExitCode {
         Some("fold-pending") => pending::run(&root()),
         Some("skills") => skills::run(&root()),
         Some("mesh-decisions") => mesh_decisions::run(&root()),
+        Some("app-geometry") => app_geometry::run(&root(), &rest),
         Some("lists") => lists::run(&root(), rest.contains(&"--fix")),
         Some("test") => {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
@@ -477,6 +485,7 @@ fn cmd_ci() -> Result<(), String> {
     shared::run(&root())?;
     ui_containers::run(&root())?;
     mesh_decisions::run(&root())?;
+    app_geometry::run(&root(), &[])?;
     let mut c = cargo();
     c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
     run(c, "cargo clippy -D warnings")?;
