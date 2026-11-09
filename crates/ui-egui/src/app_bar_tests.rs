@@ -55,6 +55,7 @@ impl BarRig {
             settings: BarButton { id: "settings", icon: "settings", tip: "Settings", enabled: true, narrow: false, wide_only: false },
             report: Report { label: "Report", tip: "Report a problem", icon_only: false },
             search: false,
+            search_shortcut: Some("S"),
             assistant: true,
             version: Some(Version { text: "v1.0", url: "https://example.invalid/notes" }),
             handles: HANDLES,

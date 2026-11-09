@@ -94,6 +94,9 @@ pub struct AppBar<'a> {
     pub report: Report<'a>,
     /// The bar holds the command search field, just before Settings.
     pub search: bool,
+    /// The shortcut the closed search field shows, as the keymap displays it; it sets the field's
+    /// width.
+    pub search_shortcut: Option<&'a str>,
     /// The bar keeps a place for the app's assistant button.
     pub assistant: bool,
     pub version: Option<Version<'a>>,
@@ -183,9 +186,9 @@ pub fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32, 
 /// The closed search field in the bar, ending `right`: whole when the document tabs keep the room
 /// Report a bug's label leaves them (`tabs_room`: theirs without the field), else just its
 /// magnifier.
-pub fn search_rect(ctx: &egui::Context, bar: Rect, right: f32, tabs_room: f32) -> Rect {
+pub fn search_rect(ctx: &egui::Context, shortcut: Option<&str>, bar: Rect, right: f32, tabs_room: f32) -> Rect {
     let height = 26.0;
-    let full = crate::ui_kit::CommandSearch::closed_width(ctx);
+    let full = crate::ui_kit::CommandSearch::closed_width(ctx, shortcut);
     let whole = bar.width() >= COMPACT && tabs_room - full - SEARCH_GAP >= 216.0;
     let width = if whole { full } else { crate::ui_kit::CommandSearch::compact_width(height) };
     Rect::from_min_size(pos2(right - width, bar.center().y - height / 2.0), vec2(width, height))
@@ -308,7 +311,8 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     // Settings' left edge; the search field, when the bar holds it, sits just before it and moves
     // the assistant and the end of the document tabs left by its width.
     let gear_left = report.left() - 68.0;
-    let search = data.search.then(|| search_rect(ui.ctx(), r, gear_left - SEARCH_GAP, report.left() - CLUSTER_BUTTONS - tabs_start));
+    let search =
+        data.search.then(|| search_rect(ui.ctx(), data.search_shortcut, r, gear_left - SEARCH_GAP, report.left() - CLUSTER_BUTTONS - tabs_start));
     let search_shift = search.map_or(0.0, |s| s.width() + SEARCH_GAP);
     if let Some(search) = search {
         solidcraft_ui_registry::publish_target(h.search, search);

@@ -226,6 +226,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let file_open = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
             let quick = app.toolbar_custom.quick_access.iter().filter(|id| solidcraft_engine::find_command(id).is_some()).count();
             let action = |id, icon, tip, enabled, wide_only| app_bar::BarButton { id, icon, tip, enabled, narrow: true, wide_only };
+            let palette_shortcut = crate::keymap::display_for(app, "ui.palette");
             // Narrow windows retain Save; Undo and Redo remain available from their shortcuts and menus.
             let bar = app_bar::AppBar {
                 mark: &|painter, at| crate::icons::glyphs::brand_mark(painter, at),
@@ -247,6 +248,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     icon_only: app.header.report == ReportButton::Icon,
                 },
                 search: search_in_header(app) && design_shown(app),
+                search_shortcut: palette_shortcut.as_deref(),
                 assistant: crate::agent_chat::app_bar_button_shown(app),
                 version: (app.header.version == VersionPlace::Header).then_some(app_bar::Version { text: &version, url: &url }),
                 handles: APP_BAR_HANDLES,
@@ -819,7 +821,11 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
             // Render workspace's one tab can't be hidden.
             add: (!render).then_some(add_tip.as_str()),
             menu_open_from: &|rect| crate::context_menu::open_from(app, rect, &crate::context_menu::Target::Toolbar),
-            search_width: if in_ribbon { crate::ui_kit::CommandSearch::closed_width(ui.ctx(), crate::keymap::display_for(app, "ui.palette").as_deref()) } else { 0.0 },
+            search_width: if in_ribbon {
+                crate::ui_kit::CommandSearch::closed_width(ui.ctx(), crate::keymap::display_for(app, "ui.palette").as_deref())
+            } else {
+                0.0
+            },
             buttons: jobs
                 .iter()
                 .map(|(id, label, ready)| ribbon::TabButton { id, label, ready: ready.as_ref().map(|_| ()).map_err(String::as_str) })
