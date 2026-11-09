@@ -40,6 +40,7 @@ solidcraft-control = { path = "crates/control" }
 solidcraft-control-egui = { path = "crates/control-egui" }
 solidcraft-derive = { path = "crates/derive" }
 solidcraft-3dx-client = { path = "crates/threedx-client" }
+solidcraft-collab-wire = { path = "crates/collab-wire" }
 # The Rust port of NVIDIA's SMLib (Apache-2.0), the B-rep kernel behind crates/smlib. Vendored with
 # `git subtree` at solidcore: that tree is the source of truth, and
 # .github/workflows/solidcore-mirror.yml pushes changes in it back to its own repository (#13153).
@@ -63,6 +64,9 @@ schemars = "1.2"
 serde_path_to_error = "0.1"
 log = "0.4"
 sha2 = "0.10"
+# Deflate for the co-editing mesh codec, with an output limit against decompression bombs (MIT OR
+# Zlib OR Apache-2.0, pure Rust; already in the tree through flate2).
+miniz_oxide = "0.9"
 moxcms = { version = "0.8.1", default-features = false, features = ["extended_range"] }
 semver = "1"
 
