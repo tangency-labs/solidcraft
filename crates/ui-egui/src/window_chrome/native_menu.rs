@@ -32,6 +32,18 @@ pub struct MenuBar {
     pub menus: Vec<Item>,
 }
 
+/// The app menu's About entry for an app named `title`, in the current language.
+#[cfg(any(target_os = "macos", test))]
+fn about_label(title: &str) -> String {
+    solidcraft_ui_text::format("ui.window_about", &[("title", title)])
+}
+
+/// The app menu's Hide entry for an app named `title`, in the current language.
+#[cfg(any(target_os = "macos", test))]
+fn hide_label(title: &str) -> String {
+    solidcraft_ui_text::format("ui.window_hide", &[("title", title)])
+}
+
 /// An entry the system provides and runs itself.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum System {
@@ -175,7 +187,7 @@ pub use native::NativeMenu;
 
 #[cfg(target_os = "macos")]
 mod native {
-    use super::{MenuBar, MenuTable, Row, System};
+    use super::{MenuBar, MenuTable, Row, System, about_label, hide_label};
     use crate::ui_kit::Item;
     use muda::{AboutMetadata, IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu, accelerator::Accelerator};
     use serde_json::Value;
@@ -270,11 +282,11 @@ mod native {
             let title = self.title.as_str();
             match s {
                 System::About => PredefinedMenuItem::about(
-                    Some(&format!("About {title}")),
+                    Some(&about_label(title)),
                     Some(AboutMetadata { name: Some(title.into()), version: Some(self.version.clone()), ..Default::default() }),
                 ),
                 System::Services => PredefinedMenuItem::services(None),
-                System::Hide => PredefinedMenuItem::hide(Some(&format!("Hide {title}"))),
+                System::Hide => PredefinedMenuItem::hide(Some(&hide_label(title))),
                 System::HideOthers => PredefinedMenuItem::hide_others(None),
                 System::ShowAll => PredefinedMenuItem::show_all(None),
                 System::Minimize => PredefinedMenuItem::minimize(None),
@@ -378,6 +390,14 @@ mod tests {
                 submenu(WINDOW, "Window", vec![entry("ui.agent_chat", "Agent Chat")]).on_if(false),
             ],
         }
+    }
+
+    #[test]
+    fn about_and_hide_name_the_app_in_the_current_language() {
+        let _english = solidcraft_ui_text::scope("en");
+        assert_eq!((about_label("Craft"), hide_label("Craft")), ("About Craft".to_string(), "Hide Craft".to_string()));
+        let _german = solidcraft_ui_text::scope("de");
+        assert_eq!((about_label("Craft"), hide_label("Craft")), ("Über Craft".to_string(), "Craft ausblenden".to_string()));
     }
 
     #[test]

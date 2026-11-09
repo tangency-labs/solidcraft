@@ -1,0 +1,10 @@
+{
+  "en": { "ui.window_about": "About {title}", "ui.window_hide": "Hide {title}", "ui.window_maximize": "Maximize", "ui.window_minimize": "Minimize", "ui.window_restore": "Restore" },
+  "ar": { "ui.window_about": "حول {title}", "ui.window_hide": "إخفاء {title}", "ui.window_maximize": "تكبير", "ui.window_minimize": "تصغير", "ui.window_restore": "استعادة" },
+  "de": { "ui.window_about": "Über {title}", "ui.window_hide": "{title} ausblenden", "ui.window_maximize": "Maximieren", "ui.window_minimize": "Minimieren", "ui.window_restore": "Wiederherstellen" },
+  "he": { "ui.window_about": "אודות {title}", "ui.window_hide": "הסתרת {title}", "ui.window_maximize": "הגדלה", "ui.window_minimize": "מזעור", "ui.window_restore": "שחזור" },
+  "ja": { "ui.window_about": "{title}について", "ui.window_hide": "{title}を隠す", "ui.window_maximize": "最大化", "ui.window_minimize": "最小化", "ui.window_restore": "元のサイズに戻す" },
+  "ko": { "ui.window_about": "{title} 정보", "ui.window_hide": "{title} 가리기", "ui.window_maximize": "최대화", "ui.window_minimize": "최소화", "ui.window_restore": "이전 크기로 복원" },
+  "vi": { "ui.window_about": "Giới thiệu về {title}", "ui.window_hide": "Ẩn {title}", "ui.window_maximize": "Phóng to", "ui.window_minimize": "Thu nhỏ", "ui.window_restore": "Khôi phục" },
+  "zh": { "ui.window_about": "关于 {title}", "ui.window_hide": "隐藏 {title}", "ui.window_maximize": "最大化", "ui.window_minimize": "最小化", "ui.window_restore": "还原" }
+}
