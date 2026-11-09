@@ -424,3 +424,100 @@ fn bench_plate() {
         println!("| {tol} | {:.1} ms | {:.1} ms | {:.1} ms | {g} | {nr} / {np} |", median(r), median(p), median(c));
     }
 }
+
+/// Plans that use every packed field: a plane face with a pinned node, a flipped rational NURBS
+/// face closed along u, and a revolved face with its parameters swapped under a mirroring transform.
+fn synthetic_plans() -> Vec<TessPlan> {
+    use solidcraft_geom::tess::{EvalCurve, EvalSurface, FacePlan};
+    let plane = EvalSurface::Plane { origin: Vec3::new(1.0, 2.0, 3.0), du: Vec3::new(0.5, 0.0, 0.0), dv: Vec3::new(0.0, 0.25, 0.0) };
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let ctrl = vec![[1.0, 0.0, 0.0, 1.0], [w, w, 0.0, w], [0.0, 1.0, 0.0, 1.0], [1.0, 0.0, 2.0, 1.0], [w, w, 2.0 * w, w], [0.0, 1.0, 2.0, 1.0]];
+    let nurbs = EvalSurface::Nurbs {
+        degree: [2, 1],
+        knots: [vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
+        count: [3, 2],
+        ctrl,
+        closed: [true, false],
+    };
+    let profile = EvalCurve { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], ctrl: vec![[2.0, 0.0, 0.0, 1.0], [3.0, 0.0, 1.5, 1.0]] };
+    let revolved = EvalSurface::Revolved {
+        profile,
+        origin: Vec3::new(0.0, 0.0, -1.0),
+        axis: Vec3::Z,
+        transform: [[-1.0, 0.0, 0.0, 4.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.5]],
+        swap: true,
+    };
+    let face = |face: u32, surface: u32, flip: bool, fixed: Vec<Vec3>| FacePlan {
+        face,
+        surface: Some(surface),
+        uv: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.75, 0.5]],
+        fixed,
+        normals: Vec::new(),
+        flip,
+        triangles: vec![[0, 1, 2], [1, 3, 2]],
+    };
+    vec![
+        TessPlan {
+            surfaces: vec![plane, nurbs],
+            faces: vec![face(0, 0, false, vec![Vec3::new(1.0, 2.0, 3.0)]), face(1, 1, true, Vec::new())],
+            edges: vec![vec![Vec3::new(1.0, 2.0, 3.0), Vec3::new(1.5, 2.0, 3.0)]],
+            edge_faces: vec![vec![0]],
+        },
+        TessPlan { surfaces: vec![revolved], faces: vec![face(0, 0, false, Vec::new())], edges: Vec::new(), edge_faces: Vec::new() },
+    ]
+}
+
+/// FNV-1a over what the shader reads of packed plans (surface headers, data, vertices) and what
+/// the blocking evaluation restores (the pinned nodes), so packing is pinned byte for byte.
+fn packed_digest(plans: &[&TessPlan]) -> u64 {
+    let packed = ok(pack(plans));
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |bytes: &[u8]| {
+        for b in bytes {
+            h = (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3);
+        }
+    };
+    for w in &packed.surfaces {
+        eat(&w.to_le_bytes());
+    }
+    for x in &packed.data {
+        eat(&x.to_bits().to_le_bytes());
+    }
+    for w in &packed.vertices {
+        eat(&w.to_le_bytes());
+    }
+    eat(&(packed.count as u64).to_le_bytes());
+    for (k, p) in &packed.fixed {
+        eat(&(*k as u64).to_le_bytes());
+        for c in [p.x, p.y, p.z] {
+            eat(&c.to_bits().to_le_bytes());
+        }
+    }
+    h
+}
+
+/// What the shader is given for real and synthetic plans, byte for byte, alone and packed together.
+#[test]
+fn plans_pack_to_the_same_bytes() {
+    let tol = solidcraft_kernel::MeshTolerance::chord(0.05);
+    let real: Vec<TessPlan> = bodies().into_iter().map(|(_, b)| ok(b.mesh_plan(&tol))).collect();
+    let synthetic = synthetic_plans();
+    let digests: Vec<u64> = real.iter().chain(&synthetic).map(|p| packed_digest(&[p])).collect();
+    let all: Vec<&TessPlan> = real.iter().chain(&synthetic).collect();
+    let together = packed_digest(&all);
+    let kinds = |k: fn(&solidcraft_geom::tess::EvalSurface) -> bool| all.iter().flat_map(|p| &p.surfaces).filter(|s| k(s)).count();
+    use solidcraft_geom::tess::EvalSurface as S;
+    assert!(
+        kinds(|s| matches!(s, S::Plane { .. })) > 0 && kinds(|s| matches!(s, S::Nurbs { .. })) > 0 && kinds(|s| matches!(s, S::Revolved { .. })) > 0
+    );
+    let want = [
+        15190797810663928423,
+        9314125828510912321,
+        483481735842877288,
+        1811912073816685301,
+        15436122681762580817,
+        5379207237662626536,
+        16919141291401223349,
+    ];
+    assert_eq!((digests, together), (want.to_vec(), 13252508492477263825));
+}
