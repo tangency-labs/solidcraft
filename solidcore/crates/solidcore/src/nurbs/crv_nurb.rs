@@ -100,7 +100,7 @@ pub fn greville_abscissa(knots: &[f64], degree: usize, idx: usize) -> Result<f64
     let window = idx
         .checked_add(degree)
         .and_then(|end| knots.get(idx + 1..=end))
-        .ok_or(SolidError::nurbs(OP, NurbsFailure::Index))?;
+        .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Index))?;
     // The Greville abscissa is the average of 'degree' knot values.
     let mut g = 0.0;
     for &k in window {

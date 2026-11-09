@@ -36,7 +36,7 @@ use solidcore::nurbs::crv_basic::Curve;
 use solidcore::nurbs::crv_fit::p1::{param_values, ParamMethod};
 use solidcore::nurbs::crv_fit::p3::{self as fit, EndTangents, ParamSource, VectorKind};
 use solidcore::nurbs::math::CPoint;
-use solidcore::{Result as SolidResult, SolidError};
+use solidcore::{Result as SolidResult};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;

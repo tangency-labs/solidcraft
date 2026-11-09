@@ -27,7 +27,7 @@ use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_basic::{
     make_rat_compatible, size_arrays, Direction, Surface, SurfaceIndices,
 };
-use solidcore::{Result as SolidResult, SolidError};
+use solidcore::{Result as SolidResult};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;

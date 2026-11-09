@@ -35,7 +35,7 @@ use solidcore::nurbs::funcs_basic::CurveFunction;
 use solidcore::nurbs::geom::Interval;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_basic::{Surface, SurfaceIndices};
-use solidcore::{Result as SolidResult, SolidError};
+use solidcore::{Result as SolidResult};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;

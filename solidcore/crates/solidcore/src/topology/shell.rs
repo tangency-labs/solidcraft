@@ -979,8 +979,8 @@ fn native_bounds(
 ) -> Result<crate::geom::extent3d::Extent3d> {
     match status {
         // Native SER returns the box unioned so far.
-        Ok(()) | Err(SolidError::Upstream { .. }) => Ok(bounds),
-        Err(e) if e.is_nurbs_failure() => Ok(bounds),
+        Ok(()) => Ok(bounds),
+        Err(e) if matches!(e, SolidError::Upstream { .. }) || e.is_nurbs_failure() => Ok(bounds),
         // Missing dependencies and safety errors must not become ordinary native
         // status results or disappear into an initialized extent.
         Err(error) => Err(error),

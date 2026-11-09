@@ -126,11 +126,9 @@ pub enum NurbsFailure {
 }
 
 impl NurbsFailure {
-    /// The status the C++ reports for the failure (a comparison detail): its `Sm*`
+    /// The status the C++ reports for any of the failures (a comparison detail): its `Sm*`
     /// callers surface an NLib failure as `SER(SM_ERR)`.
-    pub(crate) const fn comparison_status(&self) -> i32 {
-        SM_ERR
-    }
+    pub(crate) const COMPARISON_STATUS: i32 = SM_ERR;
 
     /// The `NL_*_ERR` number the C++ stores for the failure (a comparison detail).
     pub(crate) const fn nlib_number(&self) -> i32 {

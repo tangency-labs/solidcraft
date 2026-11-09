@@ -407,7 +407,7 @@ impl Surface {
 
                     let mut cur_p =
                         cur_a.offset_pt_sampling_cancellable(nn, d, pq, false, par, tol, cancel)?;
-                    let dir = dir.ok_or(SolidError::nurbs(OP, NurbsFailure::CallFailed))?;
+                    let dir = dir.ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::CallFailed))?;
                     let sur_q = extrude_crv(&mut cur_p, aa, st.r1, dir)?;
                     let mut sur_q = orient(sur_q, np)?;
                     if options.normalize_extrusion_direction && par == OffsetParam::Inherited {

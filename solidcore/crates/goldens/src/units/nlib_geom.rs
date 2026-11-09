@@ -31,7 +31,7 @@ use solidcore::nurbs::geom::{
     Plane, Rectangle,
 };
 use solidcore::nurbs::math::{combine2_pts, CPoint, RealMatrix, NOW, NOZ};
-use solidcore::{Result as SolidResult, SolidError, Vec3};
+use solidcore::{Result as SolidResult, Vec3};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;

@@ -26,7 +26,7 @@ use solidcore::nurbs::knots::Side;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_adv::p2 as adv;
 use solidcore::nurbs::srf_basic::Surface;
-use solidcore::{Result as SolidResult, SolidError};
+use solidcore::{Result as SolidResult};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;

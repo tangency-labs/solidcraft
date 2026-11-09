@@ -25,7 +25,7 @@ use serde_json::Value;
 
 use solidcore::error::nurbs::nlib_number;
 use solidcore::nurbs::spiral::{self as sp, Hand, SpiralSpec, Volume};
-use solidcore::{Result as SolidResult, SolidError};
+use solidcore::{Result as SolidResult};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;

@@ -38,7 +38,7 @@ use solidcore::nurbs::knots::Side;
 use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::{Direction, Surface};
 use solidcore::nurbs::srf_common::{extrude_crv, revolved_srf};
-use solidcore::{Result as SolidResult, SolidError};
+use solidcore::{Result as SolidResult};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;

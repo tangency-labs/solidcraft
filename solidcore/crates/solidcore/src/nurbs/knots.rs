@@ -570,7 +570,7 @@ impl<'a> KnotVector<'a> {
                     OP,
                     NurbsFailure::IndexOutOfRange {
                         index: i,
-                        len: m.checked_sub(p).unwrap_or(0),
+                        len: m.saturating_sub(p),
                     },
                 ))
             }
@@ -686,7 +686,7 @@ impl<'a> KnotVector<'a> {
                     OP,
                     NurbsFailure::IndexOutOfRange {
                         index: i,
-                        len: m.checked_sub(p).unwrap_or(0),
+                        len: m.saturating_sub(p),
                     },
                 ))
             }

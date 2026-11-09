@@ -716,9 +716,8 @@ impl Reason {
     #[must_use]
     pub fn entity(&self) -> Option<EntityRef> {
         match self {
-            Self::Failed(_) => None,
+            Self::Failed(_) | Self::Nurbs(_) => None,
             Self::Offset(o) => o.entity(),
-            Self::Nurbs(_) => None,
         }
     }
 
@@ -728,7 +727,7 @@ impl Reason {
         match self {
             Self::Failed(_) => SM_ERR,
             Self::Offset(o) => o.comparison_status(),
-            Self::Nurbs(n) => n.comparison_status(),
+            Self::Nurbs(_) => nurbs::NurbsFailure::COMPARISON_STATUS,
         }
     }
 
@@ -1681,6 +1680,40 @@ mod tests {
         );
         assert!(!collapsed.is_nurbs_failure());
         assert_eq!(collapsed.root_cause().nurbs_failure(), Some(&N::Singular));
+    }
+
+    /// The NURBS routines report their failures as `NurbsFailure`s: no source file of
+    /// `src/nurbs` builds or names an NLib error number any more. (`crv_common.rs` is
+    /// the one file left, until the change that edits it lands.)
+    #[test]
+    fn the_nurbs_sources_construct_no_nlib_errors() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let mut entries: Vec<_> = std::fs::read_dir(dir)
+                .expect("read_dir")
+                .map(|e| e.expect("entry").path())
+                .collect();
+            entries.sort();
+            for path in entries {
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|x| x == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/nurbs");
+        let mut files = Vec::new();
+        walk(&root, &mut files);
+        assert!(files.len() > 40, "{} files under {root:?}", files.len());
+        for path in files {
+            if path.file_name().is_some_and(|n| n == "crv_common.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("read");
+            for needle in ["SolidError::Nlib", "NlibCode", "SolidError::nlib("] {
+                assert!(!text.contains(needle), "{needle} in {path:?}");
+            }
+        }
     }
 
     #[test]
