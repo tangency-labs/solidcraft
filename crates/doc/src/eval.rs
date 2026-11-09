@@ -7181,24 +7181,41 @@ fn object_face(st: &ModelState, name: Option<&str>, p: Vec3, normal: Option<Vec3
 
 /// Whether `p` lies where a plane parallel to `n` meets another face of the body of `face`, and no
 /// plane square to `n` is there: the pick is then a vertex or an edge point, whose level is the
-/// end, not the surface of whichever neighbour came first (#12968).
+/// end, not the surface of whichever neighbour came first (#12968). Decided on the B-rep: the
+/// faces round a vertex of the record at `p`, else those along the edge whose own curve passes
+/// through `p`, and those faces' exact planes.
 fn on_edge_without_cap(st: &ModelState, face: (usize, usize), p: Vec3, n: Vec3) -> bool {
     let Some(b) = st.bodies.get(face.0) else { return false };
+    if b.body.is_mesh() {
+        return false;
+    }
     let tol = (b.body.size() * 1e-3).max(1e-3);
-    let Ok(faces) = b.body.faces(tol) else { return false };
-    let mesh = b.mesh();
-    let near: std::collections::BTreeSet<usize> = mesh
-        .triangles
-        .iter()
-        .zip(&mesh.tri_face)
-        .filter_map(|(tri, fi)| {
-            let [a, b, c] = mesh.tri(tri)?;
-            (crate::appearance::closest_on_triangle(p, a, b, c).dist(p) <= tol).then_some(*fi as usize)
+    let record = b.body.record();
+    let vertex_at_p = |v: u32| {
+        record.vertices.get(v as usize).is_some_and(|v| {
+            let [x, y, z] = v.point;
+            Vec3::new(x, y, z).dist(p) <= tol
         })
-        .collect();
+    };
+    let mut edges: Vec<usize> =
+        (0..record.edges.len()).filter(|e| record.edges.get(*e).is_some_and(|e| e.vertices.iter().any(|v| vertex_at_p(*v)))).collect();
+    if edges.is_empty() {
+        match kernel::comb_edge_near(&b.body, p) {
+            Ok(Some((d, e))) if d <= tol => edges.push(e),
+            _ => return false,
+        }
+    }
+    let near: std::collections::BTreeSet<usize> =
+        edges.iter().filter_map(|e| record.edges.get(*e)).flat_map(|e| e.uses.iter().map(|u| u.face as usize)).collect();
     // Only where a plane the extrusion runs along meets another face: the seam of a curved wall,
     // or the corner of two slanted facets, is a place on a surface to run to.
-    let normals: Vec<Vec3> = near.iter().filter_map(|fi| faces.iter().find(|f| f.index == *fi).and_then(|f| f.plane_normal)).collect();
+    let normals: Vec<Vec3> = near
+        .iter()
+        .filter_map(|fi| match kernel::face_surface(&b.body, *fi) {
+            Some(kernel::FaceSurface::Plane { normal, .. }) => Some(normal.vec()),
+            _ => None,
+        })
+        .collect();
     near.len() > 1 && normals.iter().any(|fnrm| fnrm.dot(n).abs() < 1e-6) && !normals.iter().any(|fnrm| fnrm.cross(n).len() < 1e-6)
 }
 
