@@ -32,6 +32,7 @@ pub mod blend;
 pub mod body;
 pub mod boolean;
 pub mod check;
+pub mod continuity;
 pub mod error;
 pub mod extend;
 pub mod file;

@@ -6,6 +6,7 @@
 
 pub mod api_queries;
 pub mod brep;
+pub mod continuity;
 pub mod distance_bound;
 pub mod edge;
 pub mod edge_turn;
