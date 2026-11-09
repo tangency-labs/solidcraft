@@ -203,10 +203,8 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                 );
                 let saved_plane = match &status {
                     FaceAttachmentStatus::Healthy { plane, target, path } => {
-                        let attached = solidcraft_ui_text::format(
-                            "sketch_panel.attached",
-                            &[("body", &target.body), ("path", &path_label(app, path))],
-                        );
+                        let attached =
+                            solidcraft_ui_text::format("sketch_panel.attached", &[("body", &target.body), ("path", &path_label(app, path))]);
                         ui_kit::value_row(ui, "Attachment", &attached);
                         Some(*plane)
                     }
