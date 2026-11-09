@@ -664,7 +664,7 @@ fn is_font_file(s: &str) -> bool {
 /// The application supplies families/file recognition; the kit owns search and list widgets.
 /// The symbol of a horizontal alignment (0 left, 1 centre, 2 right): three lines of a paragraph set that way.
 fn paragraph_glyph(p: &egui::Painter, r: egui::Rect, align: usize, ink: egui::Color32) {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let width = r.width().min(t.space_16 + t.space_2);
     let stroke = egui::Stroke::new(1.5, ink);
     for (row, share) in [1.0_f32, 0.6, 0.8].into_iter().enumerate() {
@@ -681,9 +681,9 @@ fn paragraph_glyph(p: &egui::Painter, r: egui::Rect, align: usize, ink: egui::Co
 /// The symbol of a vertical alignment: "Ag" with an accent line where the text's anchor is, at the
 /// capitals' tops, halfway down them, on the baseline or under the g's tail.
 fn vertical_glyph(p: &egui::Painter, r: egui::Rect, align: TextVerticalAlign, ink: egui::Color32) {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let size = t.font_label;
-    let galley = p.layout_no_wrap("Ag".to_owned(), crate::fonts::semibold(size), ink);
+    let galley = p.layout_no_wrap("Ag".to_owned(), crate::ui_kit::type_face::semibold(size), ink);
     let at = r.center() - galley.size() / 2.0;
     // The baseline: where the first row's glyphs stand, else an estimate from the font size.
     let baseline = galley.rows.first().and_then(|row| row.row.glyphs.first().map(|g| row.pos.y + g.pos.y)).unwrap_or(galley.size().y * 0.8);
