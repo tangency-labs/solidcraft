@@ -1,0 +1,391 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/14000",
+ "test": "none: open on SolidCraft main (solidcore); the geometry is the report's script (box, cylinder along a tilted axis, join, fillet)",
+ "summary": "A 1 mm round at the foot of a cylinder boss whose axis leans a few degrees off square to the block it is joined to is refused on SolidCraft main (#14000) with 'SMLib fillet: operation: SMLib failed (status 1001)', since 59a85a164 (#13900, tangency-labs/solidcore#3066, 'a circle-class round is certified on its own torus'); its parent 4890cebd3 builds it. The geometry is the report's script: a block 40 x 40 x 10 at (-20, -20, 0), a boss of radius 5 and height 15 from (0, 0, 5) along (sin a, 0, cos a) (sunk 5 into the block), joined, and a 1 mm round on the boss's foot, picked at (5 tan a, 5, 10). The report and its triage (CLI builds of 8f13e948a and 4890cebd3) find the round refused at 0.5, 1 and 2 degrees (and at 3 on macOS) and built at 0 and 5. The report traces it to keep_definition in blend/fillet_exact.rs: the commit replaced keep_round_if_proved, which kept a round without its definition when its certificate failed within the body's tolerance, with round.recertify(k, surface)?, so a canal-class round (its spine is an ellipse when the boss leans) whose spine, computed in floating point, is not exactly on the faces' offsets now refuses the fillet ('the spine is off the faces' offsets', from surface::implicit::check_exact_net). No fix yet. The cases are box, cylinder, union and fillet steps at tilts 0 (the control, a torus round), 0.5, 1, 2, 3 and 5 degrees. Volume: the block 16000, the boss above the block's top 25 pi (15 - 5 / cos a) (a cylinder cut on a slant holds pi r^2 times its axis length), and the round, a pipe of radius 1 about the ellipse where z = 11 meets the boss offset by 1, integrated in tube coordinates about that ellipse (Gauss-Legendre across the section, split at the foot, and the trapezoid rule along the spine; converged to 1e-13 mm^3). At 0 the round is a torus section and the total has the closed form 16000 + 250 pi + (1 - pi/4) 2 pi (5 + (10 - 3 pi)/(12 - 3 pi)). Checked by a randomised QMC of the round, and against the report's volumes on 4890cebd3 (within 1e-6 mm^3 at every tilt). The tolerance, 0.001 mm^3, is above the volume integral's 1e-8 relative accuracy (1.7e-4 mm^3 here) and below what a round that ignores the tilt changes from 1 degree up (0.003 mm^3 at 1 degree) or a radius 0.1% off (0.014 mm^3). The result is one lump and a manifold solid. Expected values are analytic; nothing comes from a commercial CAD product.",
+ "cases": [
+  {
+   "name": "square_boss",
+   "note": "The control: the boss is square to the block, so the round is a torus section, the circle class #13900 certifies on its own torus.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -20.0,
+      -20.0,
+      0.0
+     ],
+     "size": [
+      40.0,
+      40.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      0.0,
+      5.0
+     ],
+     "axis": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "radius": 5.0,
+     "height": 15.0
+    },
+    {
+     "op": "union",
+     "id": "joined",
+     "a": "block",
+     "b": "boss"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "joined",
+     "edges": [
+      [
+       0.0,
+       5.0,
+       10.0
+      ]
+     ],
+     "radius": 1.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 16792.441264486,
+     "tol": 0.001,
+     "formula": "16000 (the block) + 25*pi*10 (the boss above it) + (1 - pi/4)*2*pi*(5 + (10 - 3*pi)/(12 - 3*pi)) (the round, Pappus); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "tilt_half_degree",
+   "note": "The boss leans 0.5 degrees off square, so the round's spine is an ellipse (the canal class).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -20.0,
+      -20.0,
+      0.0
+     ],
+     "size": [
+      40.0,
+      40.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      0.0,
+      5.0
+     ],
+     "axis": [
+      0.008726535498373935,
+      0.0,
+      0.9999619230641713
+     ],
+     "radius": 5.0,
+     "height": 15.0
+    },
+    {
+     "op": "union",
+     "id": "joined",
+     "a": "block",
+     "b": "boss"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "joined",
+     "edges": [
+      [
+       0.04363433895379395,
+       5.0,
+       10.0
+      ]
+     ],
+     "radius": 1.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 16792.427063303,
+     "tol": 0.001,
+     "formula": "16000 (the block) + 25*pi*(15 - 5/cos(0.5 deg)) (the boss above it) + 7.043853253 (the round, a pipe of radius 1 about the ellipse z = 11 on the boss offset by 1, integrated in tube coordinates); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "tilt_1_degree",
+   "note": "The boss leans 1 degree off square, so the round's spine is an ellipse (the canal class).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -20.0,
+      -20.0,
+      0.0
+     ],
+     "size": [
+      40.0,
+      40.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      0.0,
+      5.0
+     ],
+     "axis": [
+      0.01745240643728351,
+      0.0,
+      0.9998476951563913
+     ],
+     "radius": 5.0,
+     "height": 15.0
+    },
+    {
+     "op": "union",
+     "id": "joined",
+     "a": "block",
+     "b": "boss"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "joined",
+     "edges": [
+      [
+       0.08727532464108792,
+       5.0,
+       10.0
+      ]
+     ],
+     "radius": 1.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 16792.384454313,
+     "tol": 0.001,
+     "formula": "16000 (the block) + 25*pi*(15 - 5/cos(1 deg)) (the boss above it) + 7.046109999 (the round, a pipe of radius 1 about the ellipse z = 11 on the boss offset by 1, integrated in tube coordinates); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "tilt_2_degrees",
+   "note": "The boss leans 2 degrees off square, so the round's spine is an ellipse (the canal class).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -20.0,
+      -20.0,
+      0.0
+     ],
+     "size": [
+      40.0,
+      40.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      0.0,
+      5.0
+     ],
+     "axis": [
+      0.03489949670250097,
+      0.0,
+      0.9993908270190958
+     ],
+     "radius": 5.0,
+     "height": 15.0
+    },
+    {
+     "op": "union",
+     "id": "joined",
+     "a": "block",
+     "b": "boss"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "joined",
+     "edges": [
+      [
+       0.17460384745873864,
+       5.0,
+       10.0
+      ]
+     ],
+     "radius": 1.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 16792.213936709,
+     "tol": 0.001,
+     "formula": "16000 (the block) + 25*pi*(15 - 5/cos(2 deg)) (the boss above it) + 7.055140798 (the round, a pipe of radius 1 about the ellipse z = 11 on the boss offset by 1, integrated in tube coordinates); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "tilt_3_degrees",
+   "note": "The boss leans 3 degrees off square, so the round's spine is an ellipse (the canal class).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -20.0,
+      -20.0,
+      0.0
+     ],
+     "size": [
+      40.0,
+      40.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      0.0,
+      5.0
+     ],
+     "axis": [
+      0.052335956242943835,
+      0.0,
+      0.9986295347545738
+     ],
+     "radius": 5.0,
+     "height": 15.0
+    },
+    {
+     "op": "union",
+     "id": "joined",
+     "a": "block",
+     "b": "boss"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "joined",
+     "edges": [
+      [
+       0.26203889641520606,
+       5.0,
+       10.0
+      ]
+     ],
+     "radius": 1.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 16791.929450095,
+     "tol": 0.001,
+     "formula": "16000 (the block) + 25*pi*(15 - 5/cos(3 deg)) (the boss above it) + 7.070205711 (the round, a pipe of radius 1 about the ellipse z = 11 on the boss offset by 1, integrated in tube coordinates); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "tilt_5_degrees",
+   "note": "The boss leans 5 degrees off square, so the round's spine is an ellipse (the canal class).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -20.0,
+      -20.0,
+      0.0
+     ],
+     "size": [
+      40.0,
+      40.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      0.0,
+      5.0
+     ],
+     "axis": [
+      0.08715574274765817,
+      0.0,
+      0.9961946980917455
+     ],
+     "radius": 5.0,
+     "height": 15.0
+    },
+    {
+     "op": "union",
+     "id": "joined",
+     "a": "block",
+     "b": "boss"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "joined",
+     "edges": [
+      [
+       0.43744331762962,
+       5.0,
+       10.0
+      ]
+     ],
+     "radius": 1.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 16791.016644521,
+     "tol": 0.001,
+     "formula": "16000 (the block) + 25*pi*(15 - 5/cos(5 deg)) (the boss above it) + 7.118527819 (the round, a pipe of radius 1 about the ellipse z = 11 on the boss offset by 1, integrated in tube coordinates); tol 0.001 mm^3"
+    }
+   }
+  }
+ ]
+}
