@@ -362,6 +362,7 @@ mod tests {
 
     #[test]
     fn caption_tooltips_follow_the_language_and_the_window_state() {
+        crate::i18n::install();
         let tips = |max| CAPTIONS.map(|c| caption_tip(c, max));
         let _english = solidcraft_ui_text::scope("en");
         assert_eq!(tips(false), ["Minimize", "Maximize", "Close"], "SolidCraft's English tooltips are unchanged");

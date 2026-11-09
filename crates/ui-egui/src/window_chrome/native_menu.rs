@@ -394,6 +394,7 @@ mod tests {
 
     #[test]
     fn about_and_hide_name_the_app_in_the_current_language() {
+        crate::i18n::install();
         let _english = solidcraft_ui_text::scope("en");
         assert_eq!((about_label("Craft"), hide_label("Craft")), ("About Craft".to_string(), "Hide Craft".to_string()));
         let _german = solidcraft_ui_text::scope("de");
