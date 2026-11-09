@@ -19,6 +19,7 @@
 
 use super::certificate::{
     arc_rows, gn_certify_span_reusing, law_series, CertifiedLevel, GnLaw, GnVarying, NurbsCurve,
+    SpanReuse,
 };
 use super::definition_box::{definition_enclosable, gn_def_face_of, GnDefs};
 use super::form::{gn_form, gn_form_normalized, hermite_knots, hermite_points_sided};
@@ -1903,13 +1904,20 @@ impl GnSectionFsg {
         let mut levels: Vec<Option<Arc<CertifiedLevel>>> = vec![None; bounds.len()];
         loop {
             let mut all = true;
+            // a span's first level tried, where it inherits none (not the fork's, which
+            // tries every level from 0): one coarser than the span before first proved
+            let mut hint = 0_u32;
             for (j, (bj, lj)) in bounds.iter_mut().zip(levels.iter_mut()).enumerate() {
                 k.check_cancelled(OP_CERTIFY)?;
                 if *bj < 0.0 {
                     let (Some(a), Some(b)) = (stations.get(j), stations.get(j + 1)) else {
                         return Err(SolidError::sm_err(OP));
                     };
-                    let mut kept = None;
+                    let mut reuse = SpanReuse {
+                        inherit: lj.as_deref(),
+                        start: hint,
+                        ..SpanReuse::default()
+                    };
                     *bj = gn_certify_span_reusing(
                         k,
                         face_n,
@@ -1925,11 +1933,16 @@ impl GnSectionFsg {
                         if equal_area { Some(&mut vary) } else { None },
                         law,
                         if any_defs { Some(&mut defs) } else { None },
-                        lj.as_deref(),
-                        &mut kept,
+                        &mut reuse,
                     )?;
+                    // the next span's first level: one coarser than this one's first proved
+                    hint = reuse.first.map_or(0, |f| f.saturating_sub(1));
                     let within = *bj <= target;
-                    *lj = if within { None } else { kept.map(Arc::new) };
+                    *lj = if within {
+                        None
+                    } else {
+                        reuse.kept.map(Arc::new)
+                    };
                 }
                 let within = *bj <= target;
                 if !within {

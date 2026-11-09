@@ -31,7 +31,7 @@
 //! | [`SpanAt`], [`gn_enclose_over`], [`face_partials_over`] | `sm_GnSpanAt`, `sm_GnEncloseOver`, `sm_FacePartialsOver` (c5b6bb7) |
 //! | [`gn_fourth_over`]                | `sm_GnFourthOver`                       |
 //! | [`gn_certify_span`]               | `sm_GnCertifySpan`                      |
-//! | [`gn_certify_span_reusing`], [`CertifiedLevel`], [`CertifiedPiece`] | — (not the fork's: a halved span's halves start from its pieces) |
+//! | [`gn_certify_span_reusing`], [`SpanReuse`], [`CertifiedLevel`], [`CertifiedPiece`] | — (not the fork's: a halved span's halves start from its pieces) |
 //! | `gn_try!` (private)               | `SM_GN_TRY`                             |
 //!
 //! Deviations:
@@ -70,6 +70,12 @@
 //!   coarser levels (which a long span's halves never prove before the inherited one), and
 //!   its bound can differ from the fork's in the last digits (its pieces' ends are the
 //!   parent's stations, not its own).
+//! - **A span's first level (not the fork's).** Where a span inherits no level, the section
+//!   build starts its levels one coarser than the level the span before first proved
+//!   ([`SpanReuse::start`]); a level not tried bounds nothing, so the bound returned is as
+//!   sound as the fork's, but it can be another level's. A level's end stations that the
+//!   level before solved (every other one: the same s from the same seed) are taken from
+//!   it, bit for bit what solving them again gives.
 //! - **Indices.** Knots and nets are read by checked indices (a knot or a coordinate
 //!   outside reads NaN, which shows in the result); the fork's indices stay inside.
 
@@ -2261,20 +2267,38 @@ pub fn gn_certify_span(
     law: Option<&GnLaw<'_>>,
     defs: Option<&mut GnDefs<'_>>,
 ) -> Result<f64> {
-    let mut kept = None;
+    let mut reuse = SpanReuse::default();
     gn_certify_span_reusing(
-        k, faces_n, leader_n, faces, center, a, b, r, side, n, target, vary, law, defs, None,
-        &mut kept,
+        k, faces_n, leader_n, faces, center, a, b, r, side, n, target, vary, law, defs, &mut reuse,
     )
 }
 
-/// [`gn_certify_span`] for a half of a span the caller halved (not the fork's): `inherit`
-/// is the halved span's finest proved level ([`CertifiedLevel`]), whose pieces that meet
-/// this span cover it. Their bounds hold over every point of them, so over this span; they
-/// are its level one coarser than theirs was (the span is half as long), taken without an
-/// enclosure, and the levels go on from the next one as [`gn_certify_span`]'s do. The
-/// pieces' row terms are taken again about this span's first station. `kept` receives this
-/// span's finest proved level, for its own halves.
+/// What [`gn_certify_span_reusing`] takes from a span's neighbours and gives back (not the
+/// fork's, which certifies every span from level 0). The default takes nothing: the span's
+/// certificate is then [`gn_certify_span`]'s.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SpanReuse<'a> {
+    /// In: the finest proved level of the span this one is a half of.
+    pub inherit: Option<&'a CertifiedLevel>,
+    /// In: the first level tried where nothing is inherited (the coarser ones are not).
+    pub start: u32,
+    /// Out: this span's finest proved level, for its own halves.
+    pub kept: Option<CertifiedLevel>,
+    /// Out: the first level this span proved (an inherited one as its level here).
+    pub first: Option<u32>,
+}
+
+/// [`gn_certify_span`] taking from and giving to its neighbours ([`SpanReuse`]), not the
+/// fork's. `reuse.inherit`: the span is a half of one the caller halved, and that span's
+/// finest proved level ([`CertifiedLevel`]) has pieces that meet this span and cover it.
+/// Their bounds hold over every point of them, so over this span; they are its level one
+/// coarser than theirs was (the span is half as long), taken without an enclosure, and the
+/// levels go on from the next one as [`gn_certify_span`]'s do. The pieces' row terms are
+/// taken again about this span's first station. Otherwise the levels start at
+/// `reuse.start` (the caller's guess from the span before; a level not tried bounds
+/// nothing, so the bound returned holds as [`gn_certify_span`]'s). A level's end stations
+/// that the level before solved (every other one, at the same parameter from the same
+/// seed) are taken from it.
 ///
 /// # Errors
 ///
@@ -2295,8 +2319,7 @@ pub fn gn_certify_span_reusing(
     mut vary: Option<&mut GnVarying>,
     law: Option<&GnLaw<'_>>,
     mut defs: Option<&mut GnDefs<'_>>,
-    inherit: Option<&CertifiedLevel>,
-    kept: &mut Option<CertifiedLevel>,
+    reuse: &mut SpanReuse<'_>,
 ) -> Result<f64> {
     crate::profile::profile_scope!(k, "blend::certificate::gn_certify_span");
     // the series' orders are checked once (the fork leaves them to its callers)
@@ -2339,7 +2362,8 @@ pub fn gn_certify_span_reusing(
         target,
     };
     // a halved span's pieces over this half: its level one coarser than theirs
-    let mut start = 0_u32;
+    let mut start = reuse.start.min(6);
+    let inherit = reuse.inherit;
     if let Some(pieces) = inherit.and_then(|l| covering(l, a.s, b.s)) {
         start = inherit.map_or(1, |l| l.level.max(1));
         let mut acc = LevelAcc::new(bar.w.len());
@@ -2367,26 +2391,36 @@ pub fn gn_certify_span_reusing(
                 level: start - 1,
                 pieces: pieces.into_iter().cloned().collect(),
             };
-            match close_level(
+            let flow = close_level(
                 &acc,
                 &ctx,
                 &bar,
                 &mut bound_out,
                 &mut last,
                 vary.as_deref_mut(),
-            ) {
+            );
+            if !matches!(flow, Flow::Skip) {
+                reuse.first = reuse.first.or(Some(own.level));
+            }
+            match flow {
                 Flow::Skip => {}
-                Flow::Next => *kept = Some(own),
+                Flow::Next => reuse.kept = Some(own),
                 Flow::Stop => {
-                    *kept = Some(own);
+                    reuse.kept = Some(own);
                     return Ok(bound_out);
                 }
             }
         }
     }
+    // the last level whose end stations were all solved, and those stations
+    let mut solved_ends: Option<(u32, Vec<GnStation>)> = None;
     for level in start..=6_u32 {
         k.check_cancelled(OP_CERTIFY_SPAN)?;
         let pieces = 1_usize << level;
+        let coarser = match &solved_ends {
+            Some((l, e)) if l + 1 == level => Some(e),
+            _ => None,
+        };
         // the pieces' end stations
         let mut ends = Vec::new();
         ends.push(*a);
@@ -2394,6 +2428,13 @@ pub fn gn_certify_span_reusing(
         let mut i = 1;
         while i < pieces && solved {
             k.check_cancelled(OP_CERTIFY_SPAN)?;
+            // every other end is the coarser level's, at the same s from the same seed
+            let known = coarser.filter(|_| i % 2 == 0).and_then(|e| e.get(i / 2));
+            if let Some(st) = known {
+                ends.push(*st);
+                i += 1;
+                continue;
+            }
             let t = i as f64 / pieces as f64;
             let s = a.s + t * h;
             let mut seed = [0.0_f64; 4];
@@ -2431,6 +2472,7 @@ pub fn gn_certify_span_reusing(
             continue;
         }
         ends.push(*b);
+        solved_ends = Some((level, ends.clone()));
         let mut acc = LevelAcc::new(bar.w.len());
         let mut level_pieces = Vec::new();
         for pair in ends.windows(2) {
@@ -2491,18 +2533,22 @@ pub fn gn_certify_span_reusing(
             level,
             pieces: level_pieces,
         };
-        match close_level(
+        let flow = close_level(
             &acc,
             &ctx,
             &bar,
             &mut bound_out,
             &mut last,
             vary.as_deref_mut(),
-        ) {
+        );
+        if !matches!(flow, Flow::Skip) {
+            reuse.first = reuse.first.or(Some(own.level));
+        }
+        match flow {
             Flow::Skip => {}
-            Flow::Next => *kept = Some(own),
+            Flow::Next => reuse.kept = Some(own),
             Flow::Stop => {
-                *kept = Some(own);
+                reuse.kept = Some(own);
                 break;
             }
         }
