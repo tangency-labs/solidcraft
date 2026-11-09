@@ -75,7 +75,10 @@ def run_one(label, command, path, timeout):
         vol = sum(b.get("volume_mm3") or 0.0 for b in bodies)
         faces = sum(b.get("faces") or 0 for b in bodies)
         closed = sum(1 for b in bodies if b.get("closed", b.get("solid")) is True)
-        return {"status": "opened", "bodies": len(bodies), "closed": closed, "faces": faces, "volume": vol, "wall_s": wall}
+        # Faces the import left out, as its warnings name them ("left out: face #…").
+        warnings = " ".join(str(t.get("warning") or "") for t in data.get("timeline") or [])
+        left_out = warnings.count("left out:")
+        return {"status": "opened", "bodies": len(bodies), "closed": closed, "faces": faces, "volume": vol, "wall_s": wall, "left_out": left_out}
 
 
 def references():
@@ -111,7 +114,7 @@ def main():
         for fut in concurrent.futures.as_completed(futs):
             results[futs[fut]] = fut.result()
     os.makedirs(a.out, exist_ok=True)
-    cols = ["status", "bodies", "closed", "faces", "volume", "wall_s", "error"]
+    cols = ["status", "bodies", "closed", "faces", "volume", "wall_s", "left_out", "error"]
     with open(os.path.join(a.out, "per-file.tsv"), "w") as f:
         f.write("\t".join(["file", "section", "ref_volume"] + [f"{l}:{c}" for l, _ in readers for c in cols]) + "\n")
         for sha, section, rel, _ in files:
@@ -135,6 +138,7 @@ def main():
     row("refused", lambda l: len(of(l, "refused")))
     row("timed out", lambda l: len(of(l, "timeout")))
     row("crashed", lambda l: len(of(l, "crashed")))
+    row("opened with faces left out (named in its warnings)", lambda l: sum(1 for rel in of(l, "opened") if results[(l, rel)].get("left_out")))
     row("opened, every body closed", lambda l: sum(1 for rel in of(l, "opened") if results[(l, rel)]["closed"] == results[(l, rel)]["bodies"]))
     ref_live = [(sha, rel) for sha, rel in live if sha in refs]
 

@@ -2369,6 +2369,20 @@ fn can_with_its_lid_at(lid_z: f64) -> String {
     )
 }
 
+/// SMLib's refusal of a face by its index in the record (NIST CTC 02's face whose NURBS form is
+/// not its analytic surface, which SMLib numbers 90) names the file's face, so the face is left
+/// out and the import's warning says which: "face #1202".
+#[test]
+fn a_face_smlib_refuses_by_its_index_is_named_as_the_files_face() {
+    let msg = "SMLib: solidcore: flat arrays: face 2: a NURBS form that is not its analytic surface";
+    let named = super::parallel::name_record_face(msg, &[15, 20, 1202]);
+    assert_eq!(named, format!("face #1202: {msg}"));
+    assert_eq!(solidcore_step::topology::named_face(&named), Some(1202));
+    // An index past the record's faces, or no index, leaves the message as it is.
+    assert_eq!(super::parallel::name_record_face(msg, &[15]), msg);
+    assert_eq!(super::parallel::name_record_face("SMLib: no face here", &[15]), "SMLib: no face here");
+}
+
 /// A solid no B-rep can be made of comes in as an open surface body of its exact faces, the
 /// faces that make it refused left out and named, as Poppy Humanoid's stock head (a face around
 /// an open surface of revolution with one bound) and Congé19 (an edge further off its face than

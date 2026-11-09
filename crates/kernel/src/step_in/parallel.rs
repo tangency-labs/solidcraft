@@ -277,10 +277,10 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
         let skip: std::collections::HashSet<u64> = left_out.iter().map(|(f, _)| *f).collect();
         let read =
             solidcraft_profile::scope("import", "step.read_without", || solidcore_step::topology::read_solid_without(ex, item, units, trims, &skip));
-        match read
-            .map_err(|msg| Failure { read: true, msg })
-            .and_then(|solid| Ok((solid_part(&solid)?, solid.notes.into_iter().map(Note::Repaired).collect::<Vec<_>>())))
-        {
+        match read.map_err(|msg| Failure { read: true, msg }).and_then(|solid| {
+            let part = solid_part(&solid).map_err(|f| Failure { msg: name_record_face(&f.msg, &solid.face_origin), ..f })?;
+            Ok((part, solid.notes.into_iter().map(Note::Repaired).collect::<Vec<_>>()))
+        }) {
             Ok((mut part, mut notes)) => {
                 part.file_faces = faces.len();
                 part.refused = Some(refused.msg);
@@ -297,6 +297,12 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
     let mut notes = Vec::new();
     let mut pieces = Vec::with_capacity(faces.len());
     for f in &faces {
+        // A face the solid's shells use more than once (an outer shell and its voids written
+        // with one face) is one piece, once.
+        if pieces.iter().any(|(g, _)| *g == f.face) {
+            notes.push(Note::LeftOut(format!("left out: face #{}: a further use of it by another shell of the solid", f.face)));
+            continue;
+        }
         match f.record.clone().map_err(KernelError::Failed).and_then(Body::from_record) {
             Ok(b) => pieces.push((f.face, b)),
             Err(e) => notes.push(Note::LeftOut(format!("left out: {}", e.to_string().trim_start_matches("the operation failed: ")))),
@@ -310,11 +316,28 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
     Ok((part, notes))
 }
 
+/// A refusal of SMLib's that names a face of the record it was given by its index there
+/// ("flat arrays: face 12: …"), with that face named as the file's entity too ("face #1167"), so
+/// the face can be left out and the import say which it was.
+pub(super) fn name_record_face(msg: &str, face_origin: &[u64]) -> String {
+    let Some(at) = msg.find("flat arrays: face ") else { return msg.to_string() };
+    let Some(rest) = msg.get(at + "flat arrays: face ".len()..) else { return msg.to_string() };
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    match digits.parse::<usize>().ok().and_then(|i| face_origin.get(i)) {
+        Some(step) => format!("face #{step}: {msg}"),
+        None => msg.to_string(),
+    }
+}
+
 /// The one-face surface bodies `pieces` (each with its file face) stitched by SMLib into one
 /// surface body, where their edges coincide within ten times the pieces' tolerance.
 fn stitched_part(pieces: &[(u64, Body)], file_faces: usize, refused: &str) -> crate::Result<Part> {
     if pieces.is_empty() {
         return Err(KernelError::Failed("no face read".into()));
+    }
+    // One face read alone is the sheet: nothing to stitch it to.
+    if let [(face, body)] = pieces {
+        return Ok(Part { body: body.clone(), closed: false, file_faces, face_origin: vec![*face], refused: Some(refused.to_string()) });
     }
     let tol = 10.0 * pieces.iter().map(|(_, b)| b.record().tolerance).fold(0.0, f64::max);
     let bodies: Vec<&Body> = pieces.iter().map(|(_, b)| b).collect();
