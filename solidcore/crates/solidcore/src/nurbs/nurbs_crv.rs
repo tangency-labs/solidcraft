@@ -44,12 +44,12 @@
 //!   storage. [`allocate_nurb_curve`] returns a zero-filled curve (upstream
 //!   `smos_Calloc`); [`copy_nurb_curve`] returns a compact copy.
 //! - Errors: where upstream returns its error flag after `N_ErrSet` or
-//!   `smos_ErrorMessage(NL_*_ERR, ..)` the port returns [`SolidError::Nlib`] with that
+//!   `smos_ErrorMessage(NL_*_ERR, ..)` the port returns [`SolidError::Failed`] with that
 //!   number. Where it returns the flag without a number (near-zero basis
 //!   denominators, an empty trim interval) the port returns
 //!   [`SolidError::Degenerate`]; for `sm_BasisFindGlobalMax`'s exhausted Newton
 //!   restarts, [`SolidError::NotConverged`]. `sm_CrvTrim` returns the flag value
-//!   `NL_INP_ERR` (14) for `ur <= ul`: [`NlibCode::Input`]. `sm_BasisEval` returns
+//!   `NL_INP_ERR` (14) for `ur <= ul`: [`NurbsFailure::Input`]. `sm_BasisEval` returns
 //!   its flag at the domain ends after filling `N` (so `sm_CrvEval` fails there):
 //!   [`SolidError::Unsupported`].
 //! - `sm_CrvEval` reads `Pw[spn - p + i]` unchecked. At a NaN parameter on a curve
@@ -66,7 +66,7 @@
 //!   `GW_MAX_DERIV` rows (UB-33: the last row is written past them). The port holds
 //!   `MAX_DERIV + 1` rows (as the fork, smlib#79 2391302) and so evaluates `der ==
 //!   MAX_DERIV`; [`crv_derivs`] rejects `der > MAX_DERIV` with
-//!   [`NlibCode::MaxDerivative`] (upstream's own check returns the plain flag).
+//!   [`NurbsFailure::DerivativeOrder`] (upstream's own check returns the plain flag).
 //! - Every array access is bounds checked. Where upstream would index outside its
 //!   arrays (degrees of `GW_MAX_DEGREE` or more, malformed curves, indices the
 //!   routines do not check) the port returns [`SolidError::InvalidInput`]; for every
@@ -90,7 +90,7 @@
 // Branches keep upstream's `if( x NEQ NL_NOZ ) ... else ...` order for traceability.
 #![allow(clippy::if_not_else)]
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -141,10 +141,6 @@ const OP_MAXERR: &str = "nurbs::nurbs_crv::crv_remove_knot_max_err";
 const OP_IDERIVS: &str = "nurbs::nurbs_crv::basis_i_derivs";
 const OP_GMAX: &str = "nurbs::nurbs_crv::basis_find_global_max";
 const OP_ALLOC: &str = "nurbs::nurbs_crv::allocate_nurb_curve";
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
 
 fn degenerate(operation: &'static str) -> SolidError {
     SolidError::Degenerate {
@@ -535,7 +531,7 @@ pub fn create_bez_segments(cur: &Curve) -> Result<Vec<Curve>> {
 /// Splits a curve at `u` into the pieces over `[U[0], u]` and `[u, U[m]]`
 /// (`sm_CrvSplit`).
 ///
-/// Errors with [`NlibCode::Parameter`] when `u <= U[0]` or `u >= U[m]`.
+/// Errors with [`NurbsFailure::Parameter`] when `u <= U[0]` or `u >= U[m]`.
 pub fn crv_split(cur: &Curve, u: f64) -> Result<(Curve, Curve)> {
     const OP: &str = OP_SPLIT;
     let pu = cur.degree();
@@ -549,7 +545,7 @@ pub fn crv_split(cur: &Curve, u: f64) -> Result<(Curve, Curve)> {
 
     // Check parameter.
     if knt.is_end_param(u) {
-        return Err(nlib(OP, NlibCode::Parameter));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
     }
 
     // Get span and knot multiplicity.
@@ -615,7 +611,7 @@ pub fn crv_split(cur: &Curve, u: f64) -> Result<(Curve, Curve)> {
 /// The piece of a curve over `[ul, ur]` (`sm_CrvTrim`): the control points of the
 /// spans covering the interval, with `ul` and `ur` inserted `p` times.
 ///
-/// Errors with [`NlibCode::Input`] when `ur <= ul` (upstream returns the flag
+/// Errors with [`NurbsFailure::Input`] when `ur <= ul` (upstream returns the flag
 /// `NL_INP_ERR`), with [`SolidError::Degenerate`] when the interval covers no
 /// control point, and with the errors of
 /// [`KnotVector::find_span_and_mult`](crate::nurbs::knots::KnotVector::find_span_and_mult).
@@ -630,7 +626,7 @@ pub fn crv_trim(cur: &Curve, ul: f64, ur: f64) -> Result<Curve> {
 
     // Check parameters.
     if ur <= ul {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // Find knot spans and set new indexes (exact checks, no tolerances).
@@ -713,7 +709,7 @@ pub fn crv_trim(cur: &Curve, ul: f64, ur: f64) -> Result<Curve> {
 
 /// The Euclidean images of control points `k..=l` (`sm_CrvGetEPolygon`).
 ///
-/// Errors with [`NlibCode::Index`] when `k > l` or `l > n`.
+/// Errors with [`NurbsFailure::Index`] when `k > l` or `l > n`.
 pub fn crv_get_epolygon(cur: &Curve, k: usize, l: usize) -> Result<Vec<Vec3>> {
     cur.epolygon(k, l)
 }
@@ -982,12 +978,18 @@ pub fn crv_rational_basis_derivs(
 /// (`sm_CrvDerivs`): the (rational) basis derivatives times the Euclidean control
 /// points.
 ///
-/// Errors with [`NlibCode::MaxDerivative`] when `der > MAX_DERIV`, with the errors of
-/// [`basis_derivs`] and with [`NlibCode::Index`] when the span's control points are
+/// Errors with [`NurbsFailure::DerivativeOrder`] when `der > MAX_DERIV`, with the errors of
+/// [`basis_derivs`] and with [`NurbsFailure::Index`] when the span's control points are
 /// missing.
 pub fn crv_derivs(cur: &Curve, u: f64, side: Side, der: usize) -> Result<Vec<Vec3>> {
     if der > MAX_DERIV {
-        return Err(nlib(OP_CDERIVS, NlibCode::MaxDerivative));
+        return Err(SolidError::nurbs(
+            OP_CDERIVS,
+            NurbsFailure::DerivativeOrder {
+                given: der,
+                max: MAX_DERIV,
+            },
+        ));
     }
     let mut cd = vec![Vec3::ZERO; der + 1];
     crv_derivs_into(cur, u, side, &mut cd)?;
@@ -997,12 +999,21 @@ pub fn crv_derivs(cur: &Curve, u: f64, side: Side, der: usize) -> Result<Vec<Vec
 /// [`crv_derivs`] into the caller's slice: `out[k] = C^(k)(u)` for `k < out.len()`
 /// (`der = out.len() - 1`), without a heap allocation.
 ///
-/// Errors as [`crv_derivs`]; an empty `out` is [`NlibCode::MaxDerivative`] as well.
+/// Errors as [`crv_derivs`]; an empty `out` is [`NurbsFailure::Input`].
 pub fn crv_derivs_into(cur: &Curve, u: f64, side: Side, out: &mut [Vec3]) -> Result<()> {
     const OP: &str = OP_CDERIVS;
     let der = match out.len().checked_sub(1) {
         Some(der) if der <= MAX_DERIV => der,
-        _ => return Err(nlib(OP, NlibCode::MaxDerivative)),
+        Some(der) => {
+            return Err(SolidError::nurbs(
+                OP,
+                NurbsFailure::DerivativeOrder {
+                    given: der,
+                    max: MAX_DERIV,
+                },
+            ))
+        }
+        None => return Err(SolidError::nurbs(OP, NurbsFailure::Input)),
     };
     if cur.degree() < SMALL_DEGREE {
         crv_derivs_n::<SMALL_DEGREE>(cur, u, side, der, out)
@@ -1034,7 +1045,7 @@ fn crv_derivs_n<const N: usize>(
 
     let k0 = spn
         .checked_sub(pu)
-        .ok_or_else(|| nlib(OP, NlibCode::Index))?;
+        .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Index))?;
     // `crv_get_epolygon` into a stack array (`pu < N`, so `pu + 1` points fit).
     let mut pts = [Vec3::ZERO; N];
     let mut npts = 0;
@@ -1629,7 +1640,7 @@ fn copy_into(dst: &mut [f64], src: &[f64], op: &'static str) -> Result<()> {
 /// Index check of the basis-maximum routines: `0 <= i <= m - p - 1`.
 fn check_basis_index(m: usize, i: usize, p: usize, op: &'static str) -> Result<()> {
     if m.checked_sub(p + 1).is_none_or(|top| i > top) {
-        return Err(nlib(op, NlibCode::Index));
+        return Err(SolidError::nurbs(op, NurbsFailure::Index));
     }
     Ok(())
 }
@@ -1637,8 +1648,8 @@ fn check_basis_index(m: usize, i: usize, p: usize, op: &'static str) -> Result<(
 /// The minimum and maximum of basis function `N[i, p]` over each of its `p + 1` knot
 /// spans and the parameter of its global maximum (`sm_BasisFindAllSpanMaxima`).
 ///
-/// Errors with [`NlibCode::Index`] when `i > m - p - 1`, with
-/// [`NlibCode::Convergence`] when the global maximum lies in no span of the support,
+/// Errors with [`NurbsFailure::Index`] when `i > m - p - 1`, with
+/// [`NurbsFailure::NotConverged`] when the global maximum lies in no span of the support,
 /// and with the errors of [`basis_find_global_max`] and [`basis_i_eval`].
 pub fn basis_find_all_span_maxima(
     knt: &KnotVector<'_>,
@@ -1702,7 +1713,7 @@ pub fn basis_find_all_span_maxima(
         }
     }
     if spn == -1 {
-        return Err(nlib(OP, NlibCode::Convergence));
+        return Err(SolidError::nurbs(OP, NurbsFailure::NotConverged));
     }
 
     let n_at = |x: f64| basis_i_eval(knt, i, p, x, Side::Left);
@@ -1725,7 +1736,7 @@ pub fn basis_find_all_span_maxima(
 
 /// Basis function `N[i, p]` at `u` (`sm_BasisIEval`; clamped knot vectors).
 ///
-/// Errors with [`NlibCode::Index`] when `i > m - p - 1`.
+/// Errors with [`NurbsFailure::Index`] when `i > m - p - 1`.
 pub fn basis_i_eval(knt: &KnotVector<'_>, i: usize, p: usize, u: f64, side: Side) -> Result<f64> {
     const OP: &str = OP_IEVAL;
     check_degree(p, OP)?;
@@ -1737,7 +1748,7 @@ pub fn basis_i_eval(knt: &KnotVector<'_>, i: usize, p: usize, u: f64, side: Side
 
     // Check index.
     if ii > n {
-        return Err(nlib(OP, NlibCode::Index));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Index));
     }
 
     // Special cases for end values.
@@ -1808,7 +1819,7 @@ pub fn basis_i_eval(knt: &KnotVector<'_>, i: usize, p: usize, u: f64, side: Side
 /// (`sm_BasisIDerivs`; clamped knot vectors). [`Side::Left`] gives right
 /// derivatives at knots, [`Side::Right`] left derivatives.
 ///
-/// Errors with [`NlibCode::Index`] when `i > m - p - 1`.
+/// Errors with [`NurbsFailure::Index`] when `i > m - p - 1`.
 pub fn basis_i_derivs(
     knt: &KnotVector<'_>,
     i: usize,
@@ -1830,7 +1841,7 @@ pub fn basis_i_derivs(
 
     // Check index.
     if ii > n {
-        return Err(nlib(OP, NlibCode::Index));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Index));
     }
 
     let mut nt = [[0.0_f64; NT]; NT];
@@ -1944,7 +1955,7 @@ pub fn basis_i_derivs(
 /// `N > tol`) with up to 20 re-brackets. Degree 1 and functions with a `p`-fold inner
 /// knot peak at `U[i+1]` with value 1.
 ///
-/// Errors with [`NlibCode::Index`] when `i > m - p - 1`, with [`NlibCode::Numerical`]
+/// Errors with [`NurbsFailure::Index`] when `i > m - p - 1`, with [`NurbsFailure::Numerical`]
 /// when `N'' == 0` in a Newton step, with [`SolidError::NotConverged`] after 20
 /// re-brackets, and with `InvalidInput` where upstream would loop forever.
 pub fn basis_find_global_max(
@@ -2026,7 +2037,7 @@ pub fn basis_find_global_max(
                 break;
             }
             if nd[2] == 0.0 {
-                return Err(nlib(OP, NlibCode::Numerical));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
             }
             u0 -= nd[1] / nd[2];
             if u0 <= ui || u0 >= ue {
@@ -2221,17 +2232,11 @@ mod tests {
         }
         assert!(matches!(
             crv_split(&c, 0.0),
-            Err(SolidError::Nlib {
-                code: NlibCode::Parameter,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Parameter))
         ));
         assert!(matches!(
             crv_trim(&c, 0.5, 0.5),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 
