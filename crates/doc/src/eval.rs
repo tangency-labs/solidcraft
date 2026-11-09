@@ -4993,7 +4993,14 @@ fn hole_tools_and_prisms(
         return Err(DocError::Invalid("hole diameter must be positive".into()));
     }
     let size = hole_axis_size(st, position, dir);
-    let top = (size * 0.01).max(0.1);
+    let mut top = (size * 0.01).max(0.1);
+    // A hole that starts inside the part (a sketch on a plane through it, #11538) starts there:
+    // the reach above a face, there so the tool's top never lies on that face, would cut the
+    // material above the plane.
+    let above = *position - dir * (top * 0.5);
+    if st.bodies.iter().any(|b| matches!(b.body.classify_point(above), Ok(kernel::PointClass::Inside))) {
+        top = size * 1e-4;
+    }
     let bottom = match depth {
         Some(d) => -val(vals, d, Kind::Length)?,
         None => -(size * 2.0 + 1.0),

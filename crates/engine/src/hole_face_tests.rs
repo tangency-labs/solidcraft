@@ -591,6 +591,8 @@ fn hole_from_a_sketch_on_an_offset_plane_inside_the_part_starts_at_the_plane() {
     // The tool runs a hair past its start, so the walls are checked, not the volume.
     assert!(solid_at(&s, 20.0, 20.0, 6.5) && !solid_at(&s, 20.0, 20.0, 7.5) && !solid_at(&s, 20.0, 20.0, 11.5));
     assert!(solid_at(&s, 20.0, 20.0, 14.5) && solid_at(&s, 20.0, 20.0, 18.0) && base - volume(&mut s) < pi() * 25.0 * 6.0);
+    // Nothing above the plane goes: the tool's reach above a face is not used inside the part.
+    assert!(solid_at(&s, 20.0, 20.0, 12.05) && solid_at(&s, 20.0, 20.0, 12.3), "the material just above the plane stays");
 }
 
 /// A sketch on a standard plane through the middle of a part keeps drilling from the part's
