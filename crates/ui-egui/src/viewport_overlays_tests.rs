@@ -2805,9 +2805,9 @@ fn a_section_card_shows_every_row_and_reads_like_its_pill() {
 #[test]
 fn status_item_actions_are_round_and_their_card_is_opaque() {
     use crate::ui_kit::{StatusItem, StatusKind, StatusPresentation, viewport_status_item};
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         let t = Tokens::get();
         let ctx = crate::fonts::test_context();
         let item = StatusItem {
@@ -2846,5 +2846,5 @@ fn status_item_actions_are_round_and_their_card_is_opaque() {
         assert!(card.stroke.width > 0.0 && card.shadow.blur > 0, "dark {dark}: the card has a border and a shadow");
         assert_eq!(card.corner_radius, egui::CornerRadius::same(t.radius_lg));
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
