@@ -1,8 +1,9 @@
 //! Command-search composition: one expanding ribbon editor and a clipped results sheet.
 //! Domain ranking and command dispatch stay with the caller.
+use crate::icons;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{icons, theme::Tokens};
 use egui::{FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Copy)]
 pub(crate) enum SearchBadge {
@@ -50,17 +51,23 @@ impl CommandSearch {
     }
 
     /// Reserve the translated hint at the exact editor font, plus compact controls.
-    /// The small text allowance covers pixel rounding and the editor's caret.
-    pub(crate) fn closed_width(ctx: &egui::Context) -> f32 {
+    /// The small text allowance covers pixel rounding and the editor's caret. `key` is command
+    /// search's own key (#12190): its cap, or none when the user took it away.
+    pub(crate) fn closed_width(ctx: &egui::Context, key: Option<&str>) -> f32 {
         let t = Tokens::get();
         let spacing = FieldSpacing::at(0.0);
-        let (hint, key) = ctx.fonts_mut(|fonts| {
+        let (hint, cap) = ctx.fonts_mut(|fonts| {
             (
-                fonts.layout_no_wrap(crate::i18n::tr_label("Search commands").to_owned(), FontId::proportional(t.font_button), t.form_dim).size().x,
-                fonts.layout_no_wrap("S".to_owned(), FontId::monospace(t.font_small), t.form_dim).size().x,
+                fonts
+                    .layout_no_wrap(solidcraft_ui_text::tr_label("Search commands").to_owned(), FontId::proportional(t.font_button), t.form_dim)
+                    .size()
+                    .x,
+                key.map_or(0.0, |key| {
+                    fonts.layout_no_wrap(key.to_owned(), FontId::monospace(t.font_small), t.form_dim).size().x + spacing.key_gap + spacing.key_padding
+                }),
             )
         });
-        (spacing.left + t.space_16 + spacing.icon_gap + hint + spacing.key_gap + key + spacing.key_padding + spacing.right + t.space_2).ceil()
+        (spacing.left + t.space_16 + spacing.icon_gap + hint + cap + spacing.right + t.space_2).ceil()
     }
 
     /// The closed field as just its magnifier, for a bar short of room: a square button.
@@ -88,13 +95,14 @@ impl CommandSearch {
         focus: bool,
         open: bool,
         geometry: SearchFieldGeometry,
+        key: Option<&str>,
         limit: usize,
     ) -> Response {
         let t = Tokens::get();
         let SearchFieldGeometry { height, radius, progress } = geometry;
         let spacing = FieldSpacing::at(progress);
         let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-        let focused = open && (focus || ui.memory(|m| m.has_focus(egui::Id::new("sc_sbox_text"))));
+        let focused = open && (focus || ui.memory(|m| m.has_focus(egui::Id::unique("sc_sbox_text"))));
         let ink = if invalid {
             t.form_error
         } else if focused {
@@ -120,12 +128,14 @@ impl CommandSearch {
             bevel.paint(ui.painter(), r.shrink(if focused || invalid { 1.0 } else { 0.0 }), radius, true, ui.is_enabled());
         }
         // Closed with less room than its hint takes (a narrow bar): just the magnifier.
-        if !open && progress == 0.0 && r.width() + 0.5 < Self::closed_width(ui.ctx()) {
+        if !open && progress == 0.0 && r.width() + 0.5 < Self::closed_width(ui.ctx(), key) {
             icons::paint_icon(ui.painter(), Rect::from_center_size(r.center(), vec2(t.space_16, t.space_16)), "zoom", 1.0);
-            crate::scenario::publish_target("ribbon:search", r);
-            crate::scenario::publish_target("shortcut:search", r);
-            crate::scenario::publish_target("palette:search", r);
-            return ui.interact(r, egui::Id::new("sc_sbox_compact"), Sense::click()).backing_on_hover_text(crate::i18n::tr_label("Search commands"));
+            solidcraft_ui_registry::publish_target("ribbon:search", r);
+            solidcraft_ui_registry::publish_target("shortcut:search", r);
+            solidcraft_ui_registry::publish_target("palette:search", r);
+            return ui
+                .interact(r, egui::Id::unique("sc_sbox_compact"), Sense::click())
+                .backing_on_hover_text(solidcraft_ui_text::tr_label("Search commands"));
         }
         icons::paint_icon(
             ui.painter(),
@@ -133,27 +143,28 @@ impl CommandSearch {
             "zoom",
             1.0,
         );
-        let cap = if open { "Esc" } else { "S" };
-        let key_width = Self::key_with_padding(ui, r.right_center() - vec2(spacing.right, 0.0), cap, spacing.key_padding);
+        let cap = if open { Some("Esc") } else { key };
+        let key_width = cap
+            .map_or(0.0, |cap| Self::key_with_padding(ui, r.right_center() - vec2(spacing.right, 0.0), cap, spacing.key_padding) + spacing.key_gap);
         let editor_left = (r.left() + spacing.left + t.space_16 + spacing.icon_gap).min(r.right());
-        let editor = Rect::from_min_max(
-            pos2(editor_left, r.top()),
-            pos2((r.right() - spacing.right - key_width - spacing.key_gap).max(editor_left), r.bottom()),
-        );
+        let editor = Rect::from_min_max(pos2(editor_left, r.top()), pos2((r.right() - spacing.right - key_width).max(editor_left), r.bottom()));
         let mono = value.contains('{');
         let response = ui
             .scope_builder(egui::UiBuilder::new().max_rect(editor), |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(editor));
+                // egui 0.37 floors a text edit's height at the theme's interact height, which centred
+                // the text below the field's middle.
+                ui.spacing_mut().interact_size.y = height;
                 ui.add_sized(
                     editor.size(),
                     super::fields::text_input(egui::TextEdit::singleline(value))
                         .min_size(vec2(0.0, height))
                         .margin(vec2(spacing.editor_margin, 0.0))
-                        .id(egui::Id::new("sc_sbox_text"))
+                        .id(egui::Id::unique("sc_sbox_text"))
                         .char_limit(limit)
                         .interactive(open)
                         .frame(egui::Frame::NONE)
-                        .hint_text(crate::i18n::tr_label("Search commands"))
+                        .hint_text(solidcraft_ui_text::tr_label("Search commands"))
                         .font(if mono { FontId::monospace(t.font_label) } else { FontId::proportional(t.font_button) }),
                 )
             })
@@ -164,9 +175,9 @@ impl CommandSearch {
         if ui.rect_contains_pointer(r) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
         }
-        crate::scenario::publish_target("ribbon:search", r);
-        crate::scenario::publish_target("shortcut:search", r);
-        crate::scenario::publish_target("palette:search", r);
+        solidcraft_ui_registry::publish_target("ribbon:search", r);
+        solidcraft_ui_registry::publish_target("shortcut:search", r);
+        solidcraft_ui_registry::publish_target("palette:search", r);
         response
     }
 
@@ -185,7 +196,7 @@ impl CommandSearch {
     }
 
     pub(crate) fn heading(ui: &mut Ui, label: &str, count: usize) {
-        super::Menu::heading(ui, &format!("{}  {count}", crate::i18n::tr(label)));
+        super::Menu::heading(ui, &format!("{}  {count}", solidcraft_ui_text::tr(label)));
     }
 
     pub(crate) fn detail(ui: &mut Ui, text: &str) {
@@ -203,7 +214,7 @@ impl CommandSearch {
     /// remembered natural height is refreshed with a sizing pass when results change.
     pub(crate) fn sheet(ui: &mut Ui, width: f32, progress: f32, command: bool, add: impl FnOnce(&mut Ui)) -> Rect {
         let t = Tokens::get();
-        let id = ui.id().with("search_sheet_height");
+        let id = ui.scope_id().with("search_sheet_height");
         let known = ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
         let origin = ui.cursor().min;
         let clip = Rect::from_min_size(origin, vec2(width, known * progress));
@@ -234,8 +245,8 @@ impl CommandSearch {
         ui.painter().rect_stroke(sheet, t.radius_xl, frame.stroke, egui::StrokeKind::Inside);
         super::Container::paint_inset(ui.painter(), sheet, frame);
         ui.allocate_rect(sheet, Sense::hover());
-        crate::scenario::publish_target("ribbon:search_popup", sheet);
-        crate::scenario::publish_target("palette:outer", sheet);
+        solidcraft_ui_registry::publish_target("ribbon:search_popup", sheet);
+        solidcraft_ui_registry::publish_target("palette:outer", sheet);
         sheet
     }
 
@@ -246,13 +257,13 @@ impl CommandSearch {
         let background = ui.painter().add(egui::Shape::Noop);
         egui::Frame::NONE.inner_margin(egui::Margin::symmetric(t.space_14 as i8, t.space_3 as i8)).show(ui, |ui| {
             ui.set_width((width - t.space_14 * 2.0).max(0.0));
-            super::text(ui, crate::i18n::tr(if command { "search.command_keys" } else { "search.keys" }), super::Text::Note("search_keys"));
+            super::text(ui, solidcraft_ui_text::tr(if command { "search.command_keys" } else { "search.keys" }), super::Text::Note("search_keys"));
         });
         let r = Rect::from_min_max(start, pos2(start.x + width, ui.min_rect().bottom()));
         let frame = egui::Frame::NONE.fill(t.dialog_footer).corner_radius(egui::CornerRadius { nw: 0, ne: 0, sw: t.radius_xl, se: t.radius_xl });
         super::Container::set_backing(ui.painter(), background, frame, r);
         t.secondary_hline(ui.painter(), r.x_range(), r.top(), t.dialog_rule);
-        crate::scenario::publish_rect("ribbon:search_footer", r);
+        solidcraft_ui_registry::publish_rect("ribbon:search_footer", r);
     }
 }
 
@@ -284,7 +295,7 @@ impl super::MenuItem<'_> {
                 SearchBadge::Valid => t.form_success,
                 SearchBadge::Invalid => t.form_error,
             };
-            let galley = painter.layout_no_wrap(self.shortcut.to_owned(), crate::fonts::semibold(t.font_small), ink);
+            let galley = painter.layout_no_wrap(self.shortcut.to_owned(), crate::ui_kit::type_face::semibold(t.font_small), ink);
             let size = galley.size() + vec2(t.space_16, t.space_4);
             let rect = Rect::from_min_size(pos2(right - size.x, r.center().y - size.y / 2.0), size);
             painter.rect_filled(
@@ -326,7 +337,11 @@ impl super::MenuItem<'_> {
             .flatten();
         if let Some((start, end)) = hit {
             job.append(label.get(..start).unwrap_or_default(), 0.0, normal.clone());
-            job.append(label.get(start..end).unwrap_or_default(), 0.0, egui::TextFormat::simple(crate::fonts::bold(t.font_label), t.selected_ink));
+            job.append(
+                label.get(start..end).unwrap_or_default(),
+                0.0,
+                egui::TextFormat::simple(crate::ui_kit::type_face::bold(t.font_label), t.selected_ink),
+            );
             job.append(label.get(end..).unwrap_or_default(), 0.0, normal);
         } else {
             job.append(label, 0.0, normal);
@@ -352,8 +367,8 @@ impl super::MenuItem<'_> {
         } else {
             super::text::paint_text(ui, path_rect, path, FontId::proportional(t.font_small), t.form_dim, false);
         }
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, self.enabled, label));
-        crate::scenario::publish_target(&format!("menu:{}", self.id), r);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, self.enabled, label));
+        solidcraft_ui_registry::publish_target(&format!("menu:{}", self.id), r);
         response
     }
 }
@@ -380,7 +395,7 @@ mod tests {
                 let ctx = crate::fonts::test_context();
                 let mut query = String::new();
                 let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                    CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, 4096);
+                    CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, Some("S"), 4096);
                 });
                 output.textures_delta.clear();
                 let shapes: Vec<_> = output
@@ -406,16 +421,17 @@ mod tests {
     #[test]
     fn square_theme_search_and_focus_ring_stay_square_through_expansion() {
         let tokens = Tokens { radius_sm: 0, radius_md: 0, radius_lg: 0, radius_xl: 0, control_radius: 0, sketch_mode_radius: 0, ..Tokens::dark() };
-        let _theme = crate::theme::scoped_tokens(tokens);
+        let _theme = solidcraft_theme::scoped_tokens(tokens);
         let mut radii = Vec::new();
         for floating in [false, true] {
             for progress in [0.0, 0.5, 1.0] {
                 let radius = CommandSearch::field_radius(progress, floating);
                 let ctx = crate::fonts::test_context();
                 let mut query = String::new();
-                let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                    CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, 4096);
+                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, Some("S"), 4096);
                 });
+                output.textures_delta.clear();
                 for shape in output.shapes {
                     if let egui::Shape::Rect(rect) = shape.shape
                         && (rect.fill == tokens.control_fill || rect.fill == tokens.accent_soft)

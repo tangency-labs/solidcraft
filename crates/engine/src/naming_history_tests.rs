@@ -125,6 +125,47 @@ fn an_upstream_cut_that_splits_a_face_keeps_the_edge_that_bounded_it() {
     assert!(solid_at(&s, [0.1, 15.0, 9.9]), "the left one is not");
 }
 
+/// Three pockets of a pattern open onto the block's front wall, and a channel at their depth
+/// joins their floors into one face: the three edges between the wall and that floor share one
+/// name, numbered by where they lie, and a chamfer keeps all three. With the channel shallower,
+/// each pocket has its own floor again, and only the first pocket's edge lies between the wall
+/// and the floor the names name. The chamfer asks for its edges again instead of chamfering
+/// that one edge for all three (#13332); with the floors joined again, it finds all three.
+#[test]
+fn edges_numbered_between_two_faces_are_not_all_taken_for_the_one_left_there() {
+    let mut s = Session::default();
+    block(&mut s);
+    run(&mut s, "parameters.add", json!({"name": "channel_floor", "expression": "5 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "PocketSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [3, -5], "p1": [9, 6]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "PocketSketch", "distance": 12, "start_offset": 5, "operation": "cut", "name": "Pocket"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Pocket"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 12, "name": "Row"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "ChannelSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [3, 3], "p1": [33, 9]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let channel = json!({"sketch": "ChannelSketch", "distance": 12, "start_offset": "channel_floor", "operation": "cut", "name": "Channel"});
+    run(&mut s, "solid.extrude", channel);
+    run(&mut s, "solid.chamfer", json!({"edges": [[6, 0, 5], [18, 0, 5], [30, 0, 5]], "distance": 1, "name": "Chamfer"}));
+    let (block, pocket) = (id(&s, "Block"), id(&s, "Pocket"));
+    let chamfer = s.doc.find_feature("Chamfer").cloned().unwrap();
+    let mut stored = chamfer.edge_names.clone();
+    stored.sort();
+    assert_eq!(stored, (1..=3).map(|k| format!("F{block}:side:l1|F{pocket}:top~{k}")).collect::<Vec<_>>());
+    // Inside the block just below each pocket's floor, at the front: cut away by a chamfer there.
+    let chamfered = |s: &Session| [6.0, 18.0, 30.0].map(|x| !solid_at(s, [x, 0.2, 4.8]));
+    assert_eq!(chamfered(&s), [true; 3]);
+
+    change(&mut s, "channel_floor", "6 mm");
+    let asked = reselect(&s, "Chamfer");
+    assert!(asked.as_ref().is_some_and(|name| chamfer.edge_names.contains(name)), "{asked:?}, {:?}", error(&s, "Chamfer"));
+    assert_eq!(chamfered(&s), [false; 3], "no pocket's edge is chamfered for another's");
+
+    change(&mut s, "channel_floor", "5 mm");
+    assert_eq!(error(&s, "Chamfer"), None);
+    assert_eq!(chamfered(&s), [true; 3]);
+}
+
 #[test]
 fn a_blend_follows_its_named_edge_to_a_moved_lid_instead_of_the_body_below() {
     for (command, size, removed) in [("solid.fillet", "radius", (4.0 - std::f64::consts::PI) * 5.0), ("solid.chamfer", "distance", 2.0 * 5.0)] {
@@ -786,4 +827,62 @@ fn a_chamfer_running_past_the_side_edges_it_takes_up_is_named_by_its_edge() {
     let on = |z: f64| Vec3::new(0.0, -11.0 * (1.0 - z / 220.0), z);
     let at = solidcraft_doc::naming::face_names_at(&s.model.state(), &[on(40.0), on(150.0)]);
     assert_eq!(at, vec![blends[0].clone(), blends[0].clone()]);
+}
+
+/// A line extruded into a surface and thickened into a slab. Every face of the slab is named
+/// from that history, and a sketch on the offset face attaches and follows the thickness (#7641).
+#[test]
+fn a_sketch_on_a_thickened_surface_follows_the_face() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "thick", "expression": "2 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Line"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Line", "curves": ["l1"], "distance": 30, "body_name": "Sheet"}));
+    run(&mut s, "surface.thicken", json!({"bodies": ["Sheet"], "thickness": "thick", "body_name": "Slab"}));
+    // The offset face is the copy at y = -2. Its frame is X and Z, origin on that plane.
+    let made = run(&mut s, "sketch.create", json!({"plane": {"face": [30.0, -2.0, 10.0]}, "name": "OnFace"}));
+    assert_eq!(made["attachment"], "exact_face", "{made}");
+    let named = names(&s, "Slab");
+    assert!(named.iter().all(|(_, exact)| *exact), "a thickened face must keep exact history: {named:?}");
+    // Kept face keeps the sheet's name; the offset and the edge walls are the thicken feature's.
+    assert!(named.iter().any(|(n, _)| n == "F2:side:l1"), "{named:?}");
+    assert!(named.iter().any(|(n, _)| n == "F3:inner:F2:side:l1"), "{named:?}");
+    assert_eq!(named.iter().filter(|(n, _)| n.starts_with("F3:blend:")).count(), 4, "{named:?}");
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 15], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "OnFace", "distance": 4, "operation": "join", "name": "Boss"}));
+    // An end wall (the face at x = 0) takes a sketch too.
+    let wall = run(&mut s, "sketch.create", json!({"plane": {"face": [0.0, -1.0, 15.0]}, "name": "OnWall"}));
+    assert_eq!(wall["attachment"], "exact_face", "{wall}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    let slab = |s: &Session| {
+        let body = s.model.state().body("Slab").unwrap().body.clone();
+        let measured = solidcraft_kernel::measure(&body).unwrap();
+        (measured.volume, measured.bbox.min.y)
+    };
+    let (volume, min_y) = slab(&s);
+    let boss = std::f64::consts::PI * 9.0 * 4.0;
+    // The join of the cylinder is a hair under the analytic sum (about 0.02 mm³ here).
+    assert!((volume - (2400.0 + boss)).abs() < 0.05, "slab 40×30×2 plus the boss {}: got {volume}", 2400.0 + boss);
+    assert!((min_y - (-6.0)).abs() < 1e-6, "the boss stands 4 mm off y = -2: {min_y}");
+    assert_eq!(error(&s, "OnFace"), None);
+    assert_eq!(error(&s, "Boss"), None);
+    assert_eq!(warning(&s, "Boss"), None);
+
+    change(&mut s, "thick", "4 mm");
+    assert_eq!(error(&s, "OnFace"), None);
+    assert_eq!(error(&s, "Boss"), None);
+    assert_eq!(warning(&s, "OnFace"), None);
+    assert_eq!(warning(&s, "Boss"), None);
+    let (volume, min_y) = slab(&s);
+    assert!((volume - (4800.0 + boss)).abs() < 0.05, "the slab grew with the thickness and the boss stayed whole {}: got {volume}", 4800.0 + boss);
+    assert!((min_y - (-8.0)).abs() < 1e-6, "the boss followed the face to y = -4: {min_y}");
+
+    let mut cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    cold.refresh();
+    let (volume, min_y) = slab(&cold);
+    assert!((volume - (4800.0 + boss)).abs() < 0.05 && (min_y - (-8.0)).abs() < 1e-6, "reopened: {volume} {min_y}");
+    assert_eq!(error(&cold, "Boss"), None);
 }

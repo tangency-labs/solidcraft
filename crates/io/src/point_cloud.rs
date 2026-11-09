@@ -34,7 +34,7 @@ pub struct CloudFile {
     pub colors: Vec<u8>,
     /// Points in the file.
     pub source_points: u64,
-    /// The file's other properties of the points (PLY).
+    /// Segments, triangles and the file's other properties (PLY).
     pub complex: solidcraft_doc::point_cloud::Complex,
     pub warnings: Vec<String>,
 }
@@ -91,15 +91,25 @@ pub fn read_point_cloud(bytes: &[u8], file: &str, scale: f64, max_points: usize)
         stride = r.vertices.div_ceil(r.positions.len().max(1) as u64).max(1);
         keep.colored = r.colors.is_some();
         let colors = r.colors.unwrap_or_default();
+        let mut read = Vec::with_capacity(r.positions.len());
         for (i, p) in r.positions.iter().enumerate() {
+            let bad = keep.bad;
             keep.push(*p, colors.get(i).copied());
+            read.push(keep.bad == bad);
         }
-        // A point left out would shift every number after it.
-        if keep.bad > 0 && !r.complex.is_empty() {
-            return Err(IoError::Invalid(format!("{} point(s) are not finite numbers within range", keep.bad)));
+        // A point left out takes with it its numbers and whatever ends on it.
+        let (complex, cut) = if keep.bad > 0 { r.complex.induced(&read) } else { (r.complex, 0) };
+        if cut > 0 {
+            keep.out.warnings.push(format!("{cut} segment(s) and triangle(s) left out, since a point they end on could not be read"));
+        }
+        if r.bad_faces > 0 {
+            keep.out.warnings.push(format!("{} face(s) could not be read and were left out", r.bad_faces));
+        }
+        if r.cells_left_out > 0 {
+            keep.out.warnings.push(format!("{} edge(s) and face(s) left out, since thinning the points would cut them", r.cells_left_out));
         }
         keep.out.source_points = r.vertices;
-        keep.out.complex = r.complex;
+        keep.out.complex = complex;
     } else {
         stride = read_xyz(bytes, &mut keep)?;
     }
@@ -191,6 +201,8 @@ fn read_xyz(bytes: &[u8], keep: &mut Keep) -> Result<u64> {
 
 #[cfg(test)]
 mod tests {
+    use solidcraft_doc::point_cloud::On;
+
     use super::*;
 
     fn ply_points(n: usize) -> Vec<u8> {
@@ -215,9 +227,41 @@ mod tests {
         assert_eq!(&c.points[3..6], &[2000.0, 0.0, 0.0]);
         assert!(c.colors.is_empty());
         assert_eq!(c.warnings.len(), 1, "{:?}", c.warnings);
+        // A thinned file leaves out the edges thinning would cut, and says so.
+        let edged = "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\n\
+            element edge 2\nproperty int vertex1\nproperty int vertex2\nend_header\n0 0 0\n1 0 0\n2 0 0\n3 0 0\n0 1\n2 3\n";
+        let e = read_point_cloud(edged.as_bytes(), "path.ply", 1.0, 2).unwrap();
+        assert_eq!((e.points.len(), e.complex.segment_count()), (6, 0));
+        assert!(e.warnings.iter().any(|w| w.starts_with("2 edge(s) and face(s) left out")), "{:?}", e.warnings);
         let all = read_point_cloud(&ply_points(10), "scan.PLY", 1.0, DEFAULT_MAX_POINTS).unwrap();
         assert_eq!((all.points.len(), all.warnings.len()), (30, 0));
         assert!(read_point_cloud(&ply_points(10), "scan.ply", 0.0, 5).is_err());
+    }
+
+    #[test]
+    fn a_point_that_cannot_be_read_takes_only_what_ends_on_it() {
+        let text = "ply\nformat ascii 1.0\ncomment role: 7 wall\nelement vertex 5\nproperty float x\nproperty float y\nproperty float z\nproperty float t\n\
+            element edge 3\nproperty int vertex1\nproperty int vertex2\nproperty int role\n\
+            element face 2\nproperty list uchar int vertex_indices\nproperty int layer\nend_header\n\
+            0 0 0 10\nnan 0 0 11\n2 0 0 12\n3 0 0 13\n4 0 0 14\n0 1 7\n2 3 8\n3 4 9\n3 0 2 3 5\n3 1 2 3 6\n";
+        let c = read_point_cloud(text.as_bytes(), "path.ply", 1.0, DEFAULT_MAX_POINTS).unwrap();
+        assert_eq!(c.points, [0., 0., 0., 2., 0., 0., 3., 0., 0., 4., 0., 0.]);
+        assert_eq!(&*c.complex.segments.0, &[1, 2, 2, 3], "numbered among the points that are left");
+        assert_eq!(&*c.complex.triangles.0, &[0, 1, 2]);
+        assert_eq!(&*c.complex.column("t", On::Point).unwrap().values.0, &[10., 12., 13., 14.]);
+        assert_eq!(&*c.complex.column("role", On::Segment).unwrap().values.0, &[8., 9.]);
+        assert_eq!(&*c.complex.column("layer", On::Triangle).unwrap().values.0, &[5.]);
+        assert_eq!(c.complex.names("role").and_then(|n| n.name(7)), Some("wall"));
+        c.complex.check(4).unwrap();
+        assert_eq!(
+            c.warnings,
+            ["2 segment(s) and triangle(s) left out, since a point they end on could not be read", "1 point(s) could not be read and were left out"]
+        );
+        // Edges alone, no numbers on the points: the same, not a refused file.
+        let edged = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\n\
+            element edge 2\nproperty int vertex1\nproperty int vertex2\nend_header\nnan 0 0\n1 0 0\n2 0 0\n0 1\n1 2\n";
+        let e = read_point_cloud(edged.as_bytes(), "path.ply", 1.0, DEFAULT_MAX_POINTS).unwrap();
+        assert_eq!((e.points.len(), &*e.complex.segments.0), (6, &[0u32, 1][..]));
     }
 
     #[test]

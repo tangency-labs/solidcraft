@@ -546,6 +546,47 @@ fn a_refused_rule_names_the_value_at_fault() {
     run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 2, "bend_radius": 0}));
 }
 
+/// #9623: `Thickness` in a rule's expressions is the rule's thickness, also when the design has a
+/// parameter of that name; the rule's own `thickness` may still use that parameter.
+#[test]
+fn thickness_in_a_rule_is_the_rules_even_beside_a_parameter_of_that_name() {
+    fn build(param: Option<&str>, rule: Value) -> (Value, f64) {
+        let mut s = Session::default();
+        if let Some(e) = param {
+            run(&mut s, "parameters.add", json!({"name": "Thickness", "expression": e}));
+        }
+        run(&mut s, "sheet.manage_rules", rule);
+        base(&mut s, 100.0, 50.0);
+        let t = s.model.state().sheets[0].t;
+        run(&mut s, "sheet.flange", json!({"edges": [[50, 0, t], [100, 25, t]], "height": 20}));
+        let failing: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        assert!(failing.is_empty(), "{failing:?}");
+        let l = run(&mut s, "sheet.rules", json!({}));
+        let values = l["rules"].as_array().and_then(|r| r.iter().find(|r| r["rule"]["name"] == "R")).map(|r| r["values"].clone()).unwrap_or_default();
+        (values, volume(&mut s))
+    }
+    let rule = json!({"name": "R", "thickness": 2, "k_factor": 0.5, "bend_radius": 2, "corner_relief_shape": "round", "active": true});
+    let (want, v) = build(None, rule.clone());
+    for (k, x) in [("thickness", 2.0), ("gap", 2.0), ("relief_width", 2.0), ("relief_depth", 1.0), ("corner_relief", 8.0), ("bend_radius", 2.0)] {
+        assert_eq!(want[k].as_f64(), Some(x), "{k}: {want}");
+    }
+    assert!(rel(v, 14651.157) < 1e-4, "{v}");
+    let (got, w) = build(Some("10 mm"), rule);
+    assert_eq!(got, want);
+    assert!(rel(w, v) < 1e-9, "{w} against {v}");
+    // A bend radius of `Thickness` is the rule's 2 mm, not the parameter's 10.
+    let rule = json!({"name": "R", "thickness": 2, "k_factor": 0.5, "bend_radius": "Thickness", "corner_relief_shape": "round", "active": true});
+    let (got, w) = build(Some("10 mm"), rule);
+    assert_eq!(got, want);
+    assert!(rel(w, v) < 1e-9, "{w} against {v}");
+    // The rule's thickness itself reads the design's `Thickness`, and the rest follow it.
+    let rule =
+        json!({"name": "R", "thickness": "Thickness", "k_factor": 0.5, "bend_radius": "Thickness", "corner_relief_shape": "round", "active": true});
+    let (got, w) = build(Some("2 mm"), rule);
+    assert_eq!(got, want);
+    assert!(rel(w, v) < 1e-9, "{w} against {v}");
+}
+
 #[test]
 fn contour_flange_hem_and_tray() {
     // Oracle 72.
@@ -2026,6 +2067,17 @@ fn a_flange_bent_inside_keeps_the_base_sketchs_arcs_in_the_flat_pattern_and_the_
             assert!(rel(volume(&mut s), want * 2.0) < 1e-3, "{position} {command:?}: {} vs {}", volume(&mut s), want * 2.0);
         }
     }
+}
+
+/// A rule or body name that starts as a spreadsheet formula does is written as text (#12728).
+#[test]
+fn bend_table_writes_a_formula_like_name_as_text() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "=A1+1", "thickness": 2, "bend_radius": 3, "k_factor": 0.4}));
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20}));
+    let text = run(&mut s, "sheet.export_bend_table", json!({}))["text"].as_str().unwrap_or_default().to_string();
+    assert!(text.lines().nth(1).is_some_and(|row| row.contains(",\"'=A1+1\",2.000000000,")), "{text}");
 }
 
 #[test]
@@ -4530,7 +4582,9 @@ fn a_corner_relief_of_an_edge_flange_is_saved_with_it_and_designs_without_one_sa
     // timeline.edit changes the relief of a saved feature, and null takes it back to the rule's.
     let id = s.doc.features.iter().rev().nth(1).map_or(0, |f| f.id);
     run(&mut s, "timeline.edit", json!({"feature": id, "set": {"corner_relief_shape": "rectangular"}}));
-    assert!(relief_drawing(&mut s).0.is_empty());
+    // No arc of the 6 mm round relief is left (the torn ends where the two features' flanges meet
+    // are drawn as arcs too).
+    assert!(relief_drawing(&mut s).0.iter().all(|(_, r)| (r - 3.0).abs() > 1e-6));
     run(&mut s, "timeline.edit", json!({"feature": id, "set": {"corner_relief_shape": null, "corner_relief": null}}));
     assert!(flange_features(&s)[0].get("corner_relief_shape").is_none());
     assert!(flange_features(&s)[0].get("corner_relief").is_none());

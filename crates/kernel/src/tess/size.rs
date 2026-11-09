@@ -1,7 +1,9 @@
 //! Target triangle size: one side length per face, so triangles come out about equilateral
 //! (well-shaped triangles shade evenly) and as small as the surface needs.
 //!
-//! A face's size is the smallest of the body's longest side, the length over which the surface
+//! A flat face (a plane, or a spline lying in one) has no size: any triangulation of its
+//! boundary is exact, so it gets no interior cells and its straight edges no extra nodes.
+//! A curved face's size is the smallest of the body's longest side, the length over which the surface
 //! normal turns the caller's facet angle (when one is given, see [`Turn`]), and the chord that
 //! sags the tolerance; an edge takes the smaller size of its two faces, so a curved face and
 //! its flat neighbour meet at the same spacing.
@@ -107,11 +109,12 @@ pub(crate) fn extent(points: impl Iterator<Item = Vec3>) -> f64 {
 /// so the size is never larger than the face needs).
 pub(crate) fn face_size(s: &EvalSurface, dom: &Domain, rules: &Rules) -> (f64, [f64; 2]) {
     if let EvalSurface::Plane { du, dv, .. } = s {
-        return (rules.max_len, [du.len(), dv.len()]);
+        return (f64::INFINITY, [du.len(), dv.len()]);
     }
     let (Some(ru), Some(rv)) = (dom.range[0], dom.range[1]) else { return (rules.max_len, [1.0, 1.0]) };
+    let flat = planar(s);
     // A flat spline (sheet-metal walls, chamfers): no curvature to look for, only the speeds.
-    let samples = if planar(s) { 3 } else { SAMPLES };
+    let samples = if flat { 3 } else { SAMPLES };
     let normal = |u: f64, v: f64| -> Option<(Vec3, Vec3, [f64; 2])> {
         let (p, su, sv) = s.derivs(u, v)?;
         Some((p, su.cross(sv).normalized()?, [su.len(), sv.len()]))
@@ -141,7 +144,9 @@ pub(crate) fn face_size(s: &EvalSurface, dom: &Domain, rules: &Rules) -> (f64, [
         }
     }
     let speed = if count > 0 { [speed[0] / count as f64, speed[1] / count as f64] } else { [1.0, 1.0] };
-    (rules.for_curvature(k_max), speed.map(|x| if x.is_finite() && x > 0.0 { x } else { 1.0 }))
+    // A flat face is exact for any triangulation of its boundary: no length cap.
+    let size = if flat { f64::INFINITY } else { rules.for_curvature(k_max) };
+    (size, speed.map(|x| if x.is_finite() && x > 0.0 { x } else { 1.0 }))
 }
 
 /// A spline surface whose control points lie in one plane, with positive weights: the
@@ -211,7 +216,7 @@ mod tests {
         assert!(!planar(&patch(0.5)));
         let rules = Rules::new(0.01, 100.0, THIRTY);
         let (h, speed) = face_size(&patch(0.0), &super::super::uv::domain(&patch(0.0)), &rules);
-        assert_eq!(h, rules.max_len);
+        assert_eq!(h, f64::INFINITY);
         assert!((speed[0] - 4.0).abs() < 1e-9 && (speed[1] - 3.0).abs() < 1e-9, "{speed:?}");
         // The twisted patch (a hyperbolic paraboloid) has curvature: a smaller side.
         assert!(face_size(&patch(0.5), &super::super::uv::domain(&patch(0.5)), &rules).0 < rules.max_len);
@@ -232,9 +237,9 @@ mod tests {
     }
 
     #[test]
-    fn a_plane_takes_the_longest_side() {
+    fn a_plane_has_no_size_cap() {
         let s = EvalSurface::Plane { origin: Vec3::ZERO, du: Vec3::X, dv: Vec3::Y };
         let rules = Rules::new(0.01, 100.0, THIRTY);
-        assert_eq!(face_size(&s, &super::super::uv::domain(&s), &rules).0, 20.0);
+        assert_eq!(face_size(&s, &super::super::uv::domain(&s), &rules).0, f64::INFINITY);
     }
 }

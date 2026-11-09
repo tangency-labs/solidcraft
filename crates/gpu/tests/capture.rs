@@ -301,7 +301,7 @@ fn pictures_show_the_surface_analysis() {
     s.execute("inspect.curvature_map", &json!({})).unwrap();
     let curvature = picture(&s);
     let near = |p: [u8; 4], c: [u8; 3]| (0..3).all(|k| (i32::from(p[k]) - i32::from(c[k])).abs() < 60);
-    let flat = solidcraft_engine::render::AnalysisColors::DEFAULT.curvature[0].map(|v| (v * 255.0).round() as u8);
+    let flat = solidcraft_color::AnalysisColors::DEFAULT.curvature[0].map(|v| (v * 255.0).round() as u8);
     let flats = |img: &[u8]| pixels(img).filter(|p| near(*p, flat)).count();
     // The flat colour is dark, so the plain picture's edge lines come near it in places.
     assert!(
@@ -317,7 +317,7 @@ fn pictures_show_the_surface_analysis() {
     assert!(black > 500 && white > 500, "zebra: {black} black, {white} white pixels");
     s.execute("inspect.accessibility", &json!({})).unwrap();
     let access = picture(&s);
-    let [ok, blocked] = colors_of(solidcraft_engine::render::AnalysisColors::DEFAULT.access);
+    let [ok, blocked] = colors_of(solidcraft_color::AnalysisColors::DEFAULT.access);
     let (reachable, under) = (pixels(&access).filter(|p| near(*p, ok)).count(), pixels(&access).filter(|p| near(*p, blocked)).count());
     assert!(reachable > 1000 && under > 1000, "accessibility: {reachable} reachable, {under} blocked pixels");
 }

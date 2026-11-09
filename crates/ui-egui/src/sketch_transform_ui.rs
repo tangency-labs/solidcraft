@@ -1,7 +1,8 @@
 //! Transform in the viewport: the picked sketch curves and points get a box with a handle at each
 //! corner to scale (the opposite corner stays put, the aspect is kept), the box itself to move,
 //! and a knob above it to turn (Shift snaps to 15 degrees). The handles edit the same Position,
-//! Scale and Angle the window shows, and the entities are drawn where OK would put them.
+//! Scale and Angle the window shows, and the entities are drawn where OK would put them. Scale and
+//! Angle work about the window's Center point when one is picked (#11718), else the box middle.
 
 use egui::{Pos2, Sense, Stroke, Vec2 as Screen, vec2};
 use solidcore_record::{Plane, Vec2};
@@ -43,8 +44,9 @@ pub struct Drag {
     at: Frame,
 }
 
-/// The box as placed: where its middle is, how much it is scaled, how far turned, and its own
-/// size before scaling.
+/// The box as placed: where its pivot is (the point it scales and turns about), how much it is
+/// scaled, how far turned, its own size before scaling, and where the pivot and the box middle
+/// were before the move.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Frame {
     x: f64,
@@ -52,6 +54,13 @@ struct Frame {
     scale: f64,
     angle: f64,
     natural: (f64, f64),
+    pivot: Vec2,
+    middle: Vec2,
+}
+
+/// Where the box's middle is placed.
+fn center(f: &Frame) -> Vec2 {
+    Vec2::new(f.x, f.y) + turn((f.middle - f.pivot) * f.scale, f.angle)
 }
 
 fn turn(v: Vec2, degrees: f64) -> Vec2 {
@@ -61,7 +70,7 @@ fn turn(v: Vec2, degrees: f64) -> Vec2 {
 
 /// A spot of the box in its own frame (`u`, `v` in half sizes) on the sketch.
 fn spot(f: &Frame, u: f64, v: f64) -> Vec2 {
-    Vec2::new(f.x, f.y) + turn(Vec2::new(u * f.natural.0 * f.scale / 2.0, v * f.natural.1 * f.scale / 2.0), f.angle)
+    center(f) + turn(Vec2::new(u * f.natural.0 * f.scale / 2.0, v * f.natural.1 * f.scale / 2.0), f.angle)
 }
 
 fn on_screen(plane: &Plane, proj: &Proj, q: Vec2) -> Option<Pos2> {
@@ -113,24 +122,34 @@ pub fn refresh(app: &mut SolveApp) {
     }
 }
 
+/// The window's Center point on the sketch, when one is picked.
+fn picked_pivot(app: &SolveApp, d: &crate::dialogs::Dialog) -> Option<Vec2> {
+    let state = crate::open_meshing::session_world(&app.session);
+    let sk = &state.sketch(app.session.active_sketch?)?.sketch;
+    let sel = d.inputs.get(1)?.items.first()?;
+    crate::sketch_modify_ui::point_id(&app.session, sel).and_then(|id| sk.resolve_point(id)).and_then(|i| sk.point(i))
+}
+
 /// The placement the window's fields describe, as a frame.
-fn frame_of(app: &SolveApp, k: &Mod) -> Option<(Frame, [f64; 2])> {
-    let Mod::Transform { x, y, factor, angle, frame } = k else { return None };
+fn frame_of(app: &SolveApp, d: &crate::dialogs::Dialog) -> Option<Frame> {
+    let Kind::SketchModify(Mod::Transform { x, y, factor, angle, frame }) = &d.kind else { return None };
     let (middle, size) = (*frame)?;
+    let middle = Vec2::new(middle[0], middle[1]);
+    let pivot = picked_pivot(app, d).unwrap_or(middle);
     let (dx, dy) =
         (crate::sketch_modify_ui::value(app, x, ValueKind::Length, "X").ok()?, crate::sketch_modify_ui::value(app, y, ValueKind::Length, "Y").ok()?);
     let scale = crate::sketch_modify_ui::factor(app, factor).ok()?;
     let turned = crate::sketch_modify_ui::value(app, angle, ValueKind::Angle, "Angle").ok()?.to_degrees();
-    Some((Frame { x: middle[0] + dx, y: middle[1] + dy, scale, angle: turned, natural: (size[0], size[1]) }, middle))
+    Some(Frame { x: pivot.x + dx, y: pivot.y + dy, scale, angle: turned, natural: (size[0], size[1]), pivot, middle })
 }
 
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 
 /// Write a frame back into the window's fields.
-fn store(k: &mut Mod, f: &Frame, middle: [f64; 2]) {
+fn store(k: &mut Mod, f: &Frame) {
     if let Mod::Transform { x, y, factor, angle, .. } = k {
-        *x = format!("{} mm", plain(f.x - middle[0]));
-        *y = format!("{} mm", plain(f.y - middle[1]));
+        *x = format!("{} mm", plain(f.x - f.pivot.x));
+        *y = format!("{} mm", plain(f.y - f.pivot.y));
         *factor = format!("{}", (f.scale * 1e6).round() / 1e6);
         *angle = format!("{} deg", plain(f.angle));
     }
@@ -146,9 +165,12 @@ fn apply(drag: &Drag, p: Vec2, snap: bool) -> Frame {
             now.y = start.y + (p.y - drag.from.y);
         }
         Part::Turn => {
-            let to = p - Vec2::new(start.x, start.y);
-            if to.len() > 1e-9 {
-                let a = to.angle().to_degrees() - 90.0;
+            // Turned about the pivot by as much as the pointer has turned about it since the drag
+            // began; with the box middle as the pivot that keeps the knob under the pointer.
+            let pivot = Vec2::new(start.x, start.y);
+            let (to, from) = (p - pivot, drag.from - pivot);
+            if to.len() > 1e-9 && from.len() > 1e-9 {
+                let a = start.angle + (to.angle() - from.angle()).to_degrees();
                 let a = if snap { (a / 15.0).round() * 15.0 } else { a };
                 now.angle = (a + 180.0).rem_euclid(360.0) - 180.0;
             }
@@ -161,18 +183,19 @@ fn apply(drag: &Drag, p: Vec2, snap: bool) -> Frame {
             if k.is_finite() {
                 let reach = turn(Vec2::new(u * k * start.natural.0 / 2.0, v * k * start.natural.1 / 2.0), start.angle);
                 now.scale = k;
-                now.x = fixed.x + reach.x;
-                now.y = fixed.y + reach.y;
+                // The pivot goes where it keeps the box middle at `fixed + reach`.
+                let pivot = fixed + reach - turn((start.middle - start.pivot) * k, start.angle);
+                now.x = pivot.x;
+                now.y = pivot.y;
             }
         }
     }
     now
 }
 
-/// Where a point of the original box goes: scaled and turned about the middle, then moved.
-fn moved(f: &Frame, middle: [f64; 2], q: Vec2) -> Vec2 {
-    let m = Vec2::new(middle[0], middle[1]);
-    Vec2::new(f.x, f.y) + turn((q - m) * f.scale, f.angle)
+/// Where a point of the original box goes: scaled and turned about the pivot, then moved.
+fn moved(f: &Frame, q: Vec2) -> Vec2 {
+    Vec2::new(f.x, f.y) + turn((q - f.pivot) * f.scale, f.angle)
 }
 
 /// The Transform window's picks with their handles; a drag on them edits the window's values.
@@ -182,15 +205,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
         return;
     };
     let Some((lines, _, _)) = picked_box(app, d) else { return };
-    let Kind::SketchModify(k) = &d.kind else { return };
-    let Some((frame, middle)) = frame_of(app, k) else { return };
+    let Some(frame) = frame_of(app, d) else { return };
     let Some(plane) = app.session.active_sketch.and_then(|id| crate::canvas::profile_plane(app, id)) else { return };
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let painter = ui.painter().clone();
     let stroke = Stroke::new(1.5, t.accent);
     // The picks where OK would leave them.
     for line in &lines {
-        let pts: Vec<Pos2> = line.iter().filter_map(|q| on_screen(&plane, proj, moved(&frame, middle, *q))).collect();
+        let pts: Vec<Pos2> = line.iter().filter_map(|q| on_screen(&plane, proj, moved(&frame, *q))).collect();
         if pts.len() > 1 {
             painter.add(egui::Shape::line(pts, Stroke::new(2.5, t.preview_sketch)));
         }
@@ -211,8 +233,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
         parts.push((egui::Rect::from_center_size(*c, Screen::splat(HANDLE * 3.0)), Part::Corner(u, v), egui::CursorIcon::ResizeNwSe));
     }
     parts.push((egui::Rect::from_center_size(knob, Screen::splat(HANDLE * 3.0)), Part::Turn, egui::CursorIcon::Crosshair));
+    // While Center waits for its pick, a click goes to the sketch: a rectangle's corner, the
+    // point most often picked there, is under a corner handle (#11718). Once it has one, the
+    // handles work again; Clear (×) empties it to pick another point there.
+    if d.active == 1 && d.inputs.get(1).is_some_and(|i| i.items.is_empty()) && app.viewport.transform_drag.is_none() {
+        return;
+    }
     for (i, (rect, part, cursor)) in parts.into_iter().enumerate() {
-        let response = ui.interact(rect, egui::Id::new(("sc_transform_handle", i)), Sense::drag()).on_hover_cursor(cursor);
+        let response = ui.interact(rect, egui::Id::unique(("sc_transform_handle", i)), Sense::drag()).on_hover_cursor(cursor);
         crate::scenario::publish_handle(&format!("transform:handle:{i}"), rect.center());
         if response.drag_started()
             && let Some(from) = response.interact_pointer_pos().and_then(|p| pointer_on_sketch(&plane, proj, p))
@@ -228,7 +256,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
         {
             let now = apply(&drag, p, ui.input(|i| i.modifiers.shift));
             if let Some(Kind::SketchModify(k)) = app.dialog.as_mut().map(|d| &mut d.kind) {
-                store(k, &now, middle);
+                store(k, &now);
             }
         }
         if response.drag_stopped() {
@@ -242,7 +270,35 @@ mod tests {
     use super::*;
 
     fn frame() -> Frame {
-        Frame { x: 10.0, y: 5.0, scale: 1.0, angle: 0.0, natural: (20.0, 10.0) }
+        let middle = Vec2::new(10.0, 5.0);
+        Frame { x: 10.0, y: 5.0, scale: 1.0, angle: 0.0, natural: (20.0, 10.0), pivot: middle, middle }
+    }
+
+    /// The box of `frame()` with its lower left corner (0, 0) as the pivot.
+    fn cornered() -> Frame {
+        Frame { x: 0.0, y: 0.0, pivot: Vec2::ZERO, ..frame() }
+    }
+
+    /// #11718: with a picked Center, the knob turns and a corner scales about it, and the moved
+    /// entities and the box agree.
+    #[test]
+    fn a_picked_center_stays_put_while_the_box_turns_and_scales() {
+        let f = cornered();
+        assert!(center(&f).dist(Vec2::new(10.0, 5.0)) < 1e-9 && spot(&f, -1.0, -1.0).dist(Vec2::ZERO) < 1e-9, "unmoved, the box is where it was");
+        // The pointer goes a quarter turn round the pivot: from (10, 0) up to (0, 10).
+        let turned = apply(&drag(Part::Turn, Vec2::new(10.0, 0.0), f), Vec2::new(0.0, 10.0), false);
+        assert!((turned.angle - 90.0).abs() < 1e-9, "{}", turned.angle);
+        assert!(moved(&turned, Vec2::ZERO).dist(Vec2::ZERO) < 1e-9, "the pivot stays");
+        assert!(moved(&turned, Vec2::new(20.0, 0.0)).dist(Vec2::new(0.0, 20.0)) < 1e-9, "the far corner turns about it");
+        assert!(spot(&turned, 1.0, -1.0).dist(Vec2::new(0.0, 20.0)) < 1e-9, "the box turns with the entities");
+        // A corner drag still keeps the opposite corner, the pivot following the box.
+        let fixed = spot(&turned, -1.0, -1.0);
+        let pulled = spot(&turned, 1.0, 1.0) + turn(Vec2::new(20.0, 10.0), 90.0);
+        let scaled = apply(&drag(Part::Corner(1.0, 1.0), spot(&turned, 1.0, 1.0), turned), pulled, false);
+        assert!((scaled.scale - 2.0).abs() < 1e-9 && spot(&scaled, -1.0, -1.0).dist(fixed) < 1e-9, "{scaled:?}");
+        for (u, v, q) in [(-1.0, -1.0, Vec2::ZERO), (1.0, 1.0, Vec2::new(20.0, 10.0))] {
+            assert!(moved(&scaled, q).dist(spot(&scaled, u, v)) < 1e-9, "a corner of the entities is a corner of the box");
+        }
     }
 
     fn drag(part: Part, from: Vec2, at: Frame) -> Drag {

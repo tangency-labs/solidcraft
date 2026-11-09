@@ -275,3 +275,23 @@ fn broad_lobe_importance_estimate_agrees_with_integrated_energy() {
     assert!(sampled.x > 0.0 && sampled.x <= 1.001);
     close_rgb(integrated, sampled, 0.003);
 }
+
+#[test]
+fn authored_isotropic_optical_finish_keeps_point_zero_two_without_broadening_public_axes() {
+    let old = OpaqueSurface::new(Vec3::new(0.8, 0.5, 0.2), 1.0, MIN_ROUGHNESS, 1.5).unwrap();
+    let finish = old.with_authored_finish(old.base_color(), 1.0, 0.02).unwrap();
+    assert_eq!(finish.roughness(), 0.02);
+    assert!(OpaqueSurface::new(old.base_color(), 1.0, 0.02, 1.5).is_err());
+    assert!(AnisotropicSurface::new(old.base_color(), 1.0, 0.02, 0.02, 1.5).is_err());
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, 0.02f64.next_down(), 1.0f64.next_up()] {
+        assert!(old.with_authored_finish(old.base_color(), 1.0, bad).is_err());
+    }
+    assert!(old.with_authored_finish(Vec3::new(f64::NAN, 0.0, 0.0), 1.0, 0.02).is_err());
+    assert!(old.with_authored_finish(Vec3::X, -0.01, 0.02).is_err());
+    let finish = AnisotropicSurface::from_isotropic_optical(finish);
+    assert_eq!(finish.roughness(), [0.02; 2]);
+    let d = 1.0 / (PI * 0.02_f64.powi(4));
+    close(finish.distribution(frame(), Vec3::Z).unwrap(), d, 1e-14);
+    close(finish.visible_reflection_pdf(frame(), Vec3::Z, Vec3::Z, Vec3::Z).unwrap(), d / 4.0, 1e-14);
+    close_rgb(finish.specular_brdf(frame(), Vec3::Z, Vec3::Z, Vec3::Z).unwrap(), old.base_color() * (d / 4.0), 1e-14);
+}

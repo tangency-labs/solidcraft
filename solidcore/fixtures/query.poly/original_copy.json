@@ -1,0 +1,17 @@
+{
+  "description": "Real SmFace to SmPolyFace SetOriginalFace notification; Copy long, Reference color and noncopied Temp long. Snapshots compare source identity, flags, all marks, payloads, users and aliasing, then source mutation, source attribute removal and destination cleanup. No fake original pointer enters this route.",
+  "upstream_ref": "source/SMLib/src/SmPoly.cpp:14432-14450",
+  "cases": [
+    {"name":"original_copy_changed", "inputs":{"brep":{"tol":0.00001,"regions":[],"vertices":[],"faces":[]},"op":{"kind":"original_copy","steps":[[1,true]]}}},
+    {"name":"original_copy_unchanged", "inputs":{"brep":{"tol":0.00001,"regions":[],"vertices":[],"faces":[]},"op":{"kind":"original_copy","steps":[[1,false],[1,true]]}}},
+    {"name":"original_copy_null", "inputs":{"brep":{"tol":0.00001,"regions":[],"vertices":[],"faces":[]},"op":{"kind":"original_copy","steps":[[1,true],[0,true]]}}},
+    {"name":"original_copy_disabled", "inputs":{"brep":{"tol":0.00001,"regions":[],"vertices":[],"faces":[]},"op":{"kind":"original_copy","steps":[[1,false],[2,false]]}}},
+    {"name":"original_copy_new_source", "inputs":{"brep":{"tol":0.00001,"regions":[],"vertices":[],"faces":[]},"op":{"kind":"original_copy","steps":[[1,true],[2,true]]}}},
+    {"name":"original_copy_repeat_enabled", "inputs":{"brep":{"tol":0.00001,"regions":[],"vertices":[],"faces":[]},"op":{"kind":"original_copy","steps":[[1,true],[1,true]]}}},
+    {"name":"original_copy_null_initial", "inputs":{"brep":{"tol":0.00001,"regions":[],"vertices":[],"faces":[]},"op":{"kind":"original_copy","steps":[[0,true]]}}},
+    {"name":"original_copy_after_disabled", "inputs":{"brep":{"tol":0.00001,"regions":[],"vertices":[],"faces":[]},"op":{"kind":"original_copy","steps":[[1,false],[2,true]]}}},
+    {"name":"original_copy_composite_changed", "inputs":{"brep":{"tol":0.00001,"regions":[],"vertices":[],"faces":[]},"op":{"kind":"original_copy","composite":true,"steps":[[1,true]]}}},
+    {"name":"original_copy_composite_unchanged", "inputs":{"brep":{"tol":0.00001,"regions":[],"vertices":[],"faces":[]},"op":{"kind":"original_copy","composite":true,"steps":[[1,false],[1,true]]}}},
+    {"name":"original_copy_composite_new_source", "inputs":{"brep":{"tol":0.00001,"regions":[],"vertices":[],"faces":[]},"op":{"kind":"original_copy","composite":true,"steps":[[1,true],[2,true]]}}}
+  ]
+}

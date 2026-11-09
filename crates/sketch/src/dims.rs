@@ -11,7 +11,7 @@
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
 
-use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
+use crate::model::{ConstraintKind, CurveKind, MAX_COORD, Sketch, TwoCircles};
 use crate::union_find::{find, union};
 
 /// What a dimension measures, in a form that can be drawn.
@@ -297,6 +297,13 @@ fn nearest_on(s: (Vec2, Vec2), q: Vec2) -> Vec2 {
     s.0 + d * ((q - s.0).dot(d) / l2).clamp(0.0, 1.0)
 }
 
+/// How far a line from the centre of an upright text box of half size `half` runs along the
+/// unit `u` before it leaves the box. An axis `u` doesn't move along gives `h / 0` (infinite,
+/// or NaN for an empty box), which `min` passes over.
+fn box_exit(half: Vec2, u: Vec2) -> f64 {
+    (half.x / u.x.abs()).min(half.y / u.y.abs())
+}
+
 /// Lay a dimension out. `text` is the stored text position (None: the default place), `px`
 /// the sketch length of one screen pixel and `half` the half size of the text box (sketch
 /// units), which the dimension line leaves a gap for.
@@ -308,6 +315,9 @@ pub fn dim_layout(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2) -> DimL
 /// point of the geometry in `reach` ([`dim_reach`]) instead of the measured points.
 pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2, reach: [Option<(Vec2, Vec2)>; 2]) -> DimLayout {
     let px = if px.is_finite() && px > 0.0 { px } else { 1.0 };
+    // A text box is no larger than a sketch can be.
+    let size = |h: f64| if h.is_finite() { h.clamp(0.0, MAX_COORD) } else { 0.0 };
+    let half = Vec2::new(size(half.x), size(half.y));
     let arrow = 9.0 * px;
     let gap = 3.0 * px;
     let over = 4.0 * px;
@@ -337,16 +347,18 @@ pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2
             let len = (q1 - q0).dot(dir);
             let (lo, hi) = if len >= 0.0 { (q0, q1) } else { (q1, q0) };
             let span = len.abs();
-            // Half the text along the line (it is drawn level on screen).
+            // The text is drawn level on screen: it fits between the arrows when its whole box
+            // does (`along`, its farthest corner), and the line stops where it meets the box.
             let along = (half.x * dir.x.abs() + half.y * dir.y.abs()) + gap;
+            let meet = box_exit(half, dir) + gap;
             let inside = s.abs() + along <= span * 0.5;
             if span > 2.0 * arrow + 2.0 * along && inside {
                 // Arrows inside, pointing out, the line broken around the text.
                 out.arrows.push((lo, -dir));
                 out.arrows.push((hi, dir));
                 let tc = m + n * h + dir * s;
-                out.lines.push(vec![lo, tc - dir * along]);
-                out.lines.push(vec![tc + dir * along, hi]);
+                out.lines.push(vec![lo, tc - dir * meet]);
+                out.lines.push(vec![tc + dir * meet, hi]);
             } else {
                 // Too tight (or the text pulled out): arrows outside pointing in, short tails.
                 out.arrows.push((lo, dir));
@@ -358,7 +370,7 @@ pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2
                 let reach = (tc - m - n * h).dot(dir);
                 if reach.abs() > span * 0.5 + tail {
                     let end = if reach > 0.0 { hi + dir * tail } else { lo - dir * tail };
-                    out.lines.push(vec![end, tc - dir * (along * reach.signum())]);
+                    out.lines.push(vec![end, tc - dir * (meet * reach.signum())]);
                 }
             }
         }
@@ -377,7 +389,8 @@ pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2
                     }
                 }
             }
-            let rim = half.x * u.x.abs() + half.y * u.y.abs() + gap;
+            // The leader stops where it meets the (level) text box.
+            let rim = box_exit(half, u) + gap;
             let from = if diameter { center - u * radius } else { center };
             if d > radius {
                 // Leader from the far side (or centre) out to the text, arrows on the rim.
@@ -613,5 +626,74 @@ mod tests {
         let l = sk.add_line(Vec2::new(0.0, -100.0), Vec2::new(0.0, 100.0), None, None, None).unwrap_or(0);
         let q = sk.add_point(Vec2::new(30.0, -80.0), None).unwrap_or(0);
         assert!(dim_reach(&sk, &ConstraintKind::PointLineDistance { p: q, l, value: 30.0 })[1].is_none());
+    }
+
+    /// Where a line from the centre of an upright text box of half size `half` leaves it, along `u`.
+    fn exit(half: Vec2, u: Vec2) -> f64 {
+        (half.x / u.x.abs()).min(half.y / u.y.abs())
+    }
+
+    #[test]
+    fn a_line_through_its_text_stops_at_the_text_box() {
+        // A leader or a dimension line at an angle stops the gap past the text box's edge, not
+        // where the box's farthest corner reaches along it.
+        let (px, half) = (0.1, Vec2::new(2.5, 0.8));
+        let gap = 3.0 * px;
+        let deg = std::f64::consts::PI / 180.0;
+        for a in [0.0, 1e-9, 30.0 * deg, 45.0 * deg, 90.0 * deg - 1e-9, 90.0 * deg, 135.0 * deg, 270.0 * deg] {
+            let u = Vec2::from_angle(a);
+            let want = exit(half, u) + gap;
+            for diameter in [false, true] {
+                let circle = DimFrame::Radial { center: Vec2::new(5.0, -3.0), radius: 10.0, diameter, arc: None };
+                // Text outside: the leader ends `want` short of the text.
+                let lay = dim_layout(&circle, Some(u * 30.0), px, half);
+                let end = lay.lines[0][lay.lines[0].len() - 1];
+                assert!((end.dist(lay.text) - want).abs() < 1e-9, "{a} {diameter}: {} vs {want}", end.dist(lay.text));
+                // Text inside: the line breaks `want` either side of it.
+                let lay = dim_layout(&circle, Some(u * 4.0), px, half);
+                assert_eq!(lay.lines.len(), 2, "{a} {diameter}");
+                assert!((lay.lines[0][1].dist(lay.text) - want).abs() < 1e-9 && (lay.lines[1][0].dist(lay.text) - want).abs() < 1e-9);
+            }
+        }
+        // An aligned linear dimension at 0°, 45° and 90°: the line breaks `want` either side of its text.
+        for a in [0.0, 45.0 * deg, 90.0 * deg] {
+            let dir = Vec2::from_angle(a);
+            let f = DimFrame::Linear { p0: Vec2::ZERO, p1: dir * 100.0, dir };
+            let lay = dim_layout(&f, Some(Vec2::new(0.0, 10.0)), px, half);
+            let want = exit(half, dir) + gap;
+            assert_eq!(lay.lines.len(), 4, "{a}");
+            assert!((lay.lines[2][1].dist(lay.text) - want).abs() < 1e-9, "{a}: {} vs {want}", lay.lines[2][1].dist(lay.text));
+            assert!((lay.lines[3][0].dist(lay.text) - want).abs() < 1e-9);
+            // Pulled out past the extension lines: the leader along the line reaches it too.
+            let lay = dim_layout(&f, Some(Vec2::new(80.0, 10.0)), px, half);
+            assert_eq!(lay.lines.len(), 4, "{a}");
+            assert!((lay.lines[3][1].dist(lay.text) - want).abs() < 1e-9, "{a}: {} vs {want}", lay.lines[3][1].dist(lay.text));
+        }
+        // Whether the text fits between the arrows still goes by the whole box: at 45° a 6 long
+        // dimension fits the line's crossing of the box (2.86 with the gaps) but not its corners.
+        let dir = Vec2::from_angle(45.0 * deg);
+        let l = dim_layout(&DimFrame::Linear { p0: Vec2::ZERO, p1: dir * 6.0, dir }, Some(Vec2::new(0.0, 10.0)), px, half);
+        assert!(close(l.arrows[0].1, dir) && close(l.arrows[1].1, -dir), "arrows outside: {:?}", l.arrows);
+    }
+
+    #[test]
+    fn hostile_text_boxes_lay_out_finite() {
+        let frames = [
+            DimFrame::Radial { center: Vec2::ZERO, radius: 10.0, diameter: false, arc: None },
+            DimFrame::Radial { center: Vec2::ZERO, radius: 10.0, diameter: true, arc: Some((0.0, 1.0)) },
+            DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(70.0, 70.0), dir: Vec2::new(1.0, 1.0) * std::f64::consts::FRAC_1_SQRT_2 },
+            DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(100.0, 0.0), dir: Vec2::X },
+        ];
+        let sizes = [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e300, 1e-300, f64::MAX];
+        let texts = [Vec2::new(20.0, 20.0), Vec2::new(3.0, 0.0), Vec2::new(0.0, 1e-9), Vec2::new(300.0, 10.0), Vec2::new(-300.0, -10.0)];
+        for f in &frames {
+            for (hx, hy) in sizes.iter().flat_map(|x| sizes.iter().map(move |y| (*x, *y))) {
+                for text in texts {
+                    let lay = dim_layout(f, Some(text), 0.1, Vec2::new(hx, hy));
+                    let mut points = lay.lines.iter().flatten().chain(lay.arrows.iter().map(|(p, _)| p));
+                    assert!(lay.text.is_finite() && points.all(|p| p.is_finite()), "{f:?} {hx} {hy} {text:?}: {:?}", lay.lines);
+                }
+            }
+        }
     }
 }

@@ -264,11 +264,11 @@ fn gpu_atrous_matches_f64_guides_and_leaves_input_unchanged() {
     let dummy = make("denoise unused geometry", &[0; 64]);
     let mut task = Task::new(context.clone(), plane(), request(13), JobOptions::default(), CancelToken::default()).unwrap();
     task.sample = 1;
-    let filter = Resources::new(&context, &task.uniform, [&dummy, &dummy, &dummy, &dummy, &dummy], &raw, bytes.len() as u64).unwrap();
+    let filter = Resources::new(&context, &task.uniform, [&dummy, &dummy, &dummy, &dummy, &dummy], &raw, bytes.len() as u64, false).unwrap();
     let guide_bytes: Vec<u8> = guides.iter().flatten().flatten().flat_map(|x| (*x as f32).to_le_bytes()).collect();
     context.queue.write_buffer(&filter._guides, 0, &guide_bytes);
     let before = task.read_linear_buffer(&raw).unwrap();
-    filter.run_filter(&task).unwrap();
+    filter.run_filter(&task, false).unwrap();
     assert_eq!(before, task.read_linear_buffer(&raw).unwrap());
     let actual = task.read_linear_buffer(filter.output()).unwrap();
     let mut expected = input;

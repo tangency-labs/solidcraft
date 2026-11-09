@@ -1,7 +1,7 @@
 //! `kernel-cases --export=DIR`: one kernel rig case as a corpus entry for solidcore's rig. The
 //! case's commands run as the rig runs them while the kernel's operations are traced
-//! (`smlib_trace`); the entry holds the operation (or the chain of operations) that made the
-//! bodies the case ends with, each operand that came in as a record given as that record (the
+//! (`smlib_trace`); the entry holds every operation in execution order, including discarded
+//! tool construction and handled refusals, each operand that came in as a record (the
 //! B-rep record, solidcore-record's JSON), the fix set, the case's expected values and the rig's
 //! own result. A case whose result no kernel operation alone accounts for is written too, with
 //! the reasons, so nothing is dropped silently.
@@ -96,32 +96,6 @@ impl<'a> Trace<'a> {
     fn operands(&self) -> BTreeSet<u64> {
         self.calls.iter().flat_map(|c| c.1.iter().copied()).collect()
     }
-}
-
-/// The operations `ends` need, in the order they ran: each body's maker, and its operands' makers
-/// in turn, back to bodies made from records. Operands made by nothing traced are listed in
-/// `unknown`.
-fn chain(t: &Trace<'_>, ends: &[u64], unknown: &mut BTreeSet<u64>) -> Vec<usize> {
-    let mut need = BTreeSet::new();
-    let mut todo: Vec<u64> = ends.to_vec();
-    while let Some(id) = todo.pop() {
-        if t.imports.contains_key(&id) {
-            continue;
-        }
-        match t.producer.get(&id) {
-            Some(&i) => {
-                if need.insert(i)
-                    && let Some(c) = t.calls.get(i)
-                {
-                    todo.extend(c.1.iter().copied());
-                }
-            }
-            None => {
-                unknown.insert(id);
-            }
-        }
-    }
-    need.into_iter().collect()
 }
 
 /// The entry of case `dir`, run with result `out`, into `root/<area>/<id>.json`, and the fix set
@@ -220,14 +194,18 @@ pub fn write(root: &Path, dir: &str, out: &Value, capture: Capture) -> Result<()
     }
 
     let mut unknown = BTreeSet::new();
-    let mut order = chain(&t, &ends, &mut unknown);
+    let mut available: BTreeSet<u64> = t.imports.keys().copied().collect();
+    for (_, inputs, _, outputs) in &t.calls {
+        unknown.extend(inputs.iter().filter(|id| !available.contains(id)).copied());
+        if let Ok(made) = outputs {
+            available.extend(made.iter().copied());
+        }
+    }
+    unknown.extend(ends.iter().filter(|id| !available.contains(id)).copied());
     if !unknown.is_empty() {
         why_not.push(format!("operands made by nothing traced: {unknown:?}"));
     }
-    if let Some(i) = failed_call.filter(|i| !order.contains(i)) {
-        order.push(i);
-    }
-    // Operand records: every body the chain takes, or the case ends with, that came in as a record.
+    // Operand records: every body a call takes, or the case ends with, that came in as a record.
     let mut bodies = BTreeMap::new();
     let given = |id: u64, bodies: &mut BTreeMap<String, Value>| {
         if let Some((record, trusted, splines)) = t.imports.get(&id) {
@@ -235,14 +213,21 @@ pub fn write(root: &Path, dir: &str, out: &Value, capture: Capture) -> Result<()
         }
     };
     let mut calls: Vec<Value> = Vec::new();
-    for (op, inputs, params, outputs) in order.iter().filter_map(|&i| t.calls.get(i)) {
+    for (i, (op, inputs, params, outputs)) in t.calls.iter().enumerate() {
         for &id in inputs.iter() {
             given(id, &mut bodies);
         }
         let mut c = json!({"op": op, "inputs": inputs.iter().map(|i| format!("b{i}")).collect::<Vec<_>>(), "params": params});
         match outputs {
             Ok(made) => c["outputs"] = json!(made.iter().map(|i| format!("b{i}")).collect::<Vec<_>>()),
-            Err(e) => c["error"] = json!(e),
+            Err(e) => {
+                c["error"] = json!(e);
+                // The application handled this refusal. Replay must continue to any later
+                // calls and grade the final bodies, even when this was the last attempt.
+                if failed_call != Some(i) {
+                    c["continued"] = json!(true);
+                }
+            }
         }
         calls.push(c);
     }
@@ -289,6 +274,134 @@ pub fn write(root: &Path, dir: &str, out: &Value, capture: Capture) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn empty_record() -> Brep {
+        Brep { version: 4, tolerance: 1e-6, regions: Vec::new(), shells: Vec::new(), faces: Vec::new(), edges: Vec::new(), vertices: Vec::new() }
+    }
+
+    fn call(op: &'static str, inputs: &[u64], outputs: Result<Vec<u64>, String>) -> Event {
+        Event::Call { op, inputs: inputs.to_vec(), params: json!({}), outputs }
+    }
+
+    fn exported_case(name: &str, events: Vec<Event>, ran: Result<Vec<(String, Brep)>, String>) -> Value {
+        let root = std::env::temp_dir().join(format!("solidcraft-export-{}-{name}", std::process::id()));
+        let dir = root.join("tests/kernel-cases/traces").join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("expected.json"), "{}").unwrap();
+        let output = root.join("export");
+        write(&output, dir.to_str().unwrap(), &json!({"status": "pass"}), Capture { events, ran: Some(ran) }).unwrap();
+        let entry = output.join("traces").join(format!("{name}.json"));
+        serde_json::from_str(&std::fs::read_to_string(entry).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn discarded_tool_construction_is_exported_in_execution_order() {
+        let record = empty_record();
+        let e = exported_case(
+            "discarded-tool",
+            vec![call("extrude", &[], Ok(vec![1])), call("extrude", &[], Ok(vec![2])), Event::Export { id: 1, record: Box::new(record.clone()) }],
+            Ok(vec![("Part".into(), record)]),
+        );
+        assert_eq!(e["calls"].as_array().unwrap().len(), 2);
+        assert_eq!(e["calls"][0]["outputs"], json!(["b1"]));
+        assert_eq!(e["calls"][1]["outputs"], json!(["b2"]));
+        assert_eq!(e["traced_ops"], json!(["extrude", "extrude"]));
+    }
+
+    #[test]
+    fn handled_refusals_are_exported_without_becoming_terminal() {
+        let record = empty_record();
+        let e = exported_case(
+            "handled-refusal",
+            vec![
+                call("extrude", &[], Ok(vec![1])),
+                call("fillet", &[1], Err("too large".into())),
+                call("fillet", &[1], Ok(vec![2])),
+                Event::Export { id: 2, record: Box::new(record.clone()) },
+            ],
+            Ok(vec![("Part".into(), record)]),
+        );
+        assert_eq!(e["calls"].as_array().unwrap().len(), 3);
+        assert_eq!(e["calls"][1]["error"], "too large");
+        assert_eq!(e["calls"][1]["continued"], true);
+    }
+
+    #[test]
+    fn a_handled_last_attempt_keeps_the_retained_body_as_the_result() {
+        let record = empty_record();
+        let e = exported_case(
+            "handled-last-attempt",
+            vec![
+                call("extrude", &[], Ok(vec![1])),
+                call("fillet", &[1], Err("too large".into())),
+                Event::Export { id: 1, record: Box::new(record.clone()) },
+            ],
+            Ok(vec![("Part".into(), record)]),
+        );
+        assert_eq!(e["calls"][1]["continued"], true);
+        assert_eq!(e["result"], json!([{"body": "Part", "made": "b1"}]));
+        assert_eq!(e["operation_expressible"], true);
+    }
+
+    #[test]
+    fn the_final_refusal_still_ends_replay() {
+        let e = exported_case(
+            "terminal-refusal",
+            vec![
+                call("extrude", &[], Ok(vec![1])),
+                call("fillet", &[1], Err("too large".into())),
+                call("fillet", &[1], Err("no room".into())),
+                call("copy", &[1], Ok(vec![2])),
+            ],
+            Err("no room".into()),
+        );
+        assert_eq!(e["calls"].as_array().unwrap().len(), 4);
+        assert_eq!(e["calls"][1]["continued"], true);
+        assert!(e["calls"][2].get("continued").is_none());
+        assert_eq!(e["outcome"]["kernel_error"], "no room");
+    }
+
+    #[test]
+    fn discarded_operations_still_require_their_operand_records() {
+        let record = empty_record();
+        let e = exported_case(
+            "missing-tool-operand",
+            vec![call("extrude", &[], Ok(vec![1])), call("copy", &[99], Ok(vec![2])), Event::Export { id: 1, record: Box::new(record.clone()) }],
+            Ok(vec![("Part".into(), record)]),
+        );
+        assert_eq!(e["operation_expressible"], false);
+        assert!(e["why_not"].as_array().unwrap().iter().any(|why| why.as_str().unwrap().contains("99")));
+    }
+
+    #[test]
+    fn discarded_operations_keep_their_imported_operands() {
+        let record = empty_record();
+        let e = exported_case(
+            "imported-tool-operand",
+            vec![
+                call("extrude", &[], Ok(vec![1])),
+                Event::Import { id: 9, record: Box::new(record.clone()), trusted: false, keeping_splines: true },
+                call("copy", &[9], Ok(vec![2])),
+                Event::Export { id: 1, record: Box::new(record.clone()) },
+            ],
+            Ok(vec![("Part".into(), record.clone())]),
+        );
+        assert_eq!(e["bodies"]["b9"], json!({"record": record, "trusted": false, "keeping_splines": true}));
+        assert_eq!(e["calls"][1]["inputs"], json!(["b9"]));
+        assert_eq!(e["operation_expressible"], true);
+    }
+
+    #[test]
+    fn a_later_output_cannot_supply_an_earlier_discarded_operation() {
+        let record = empty_record();
+        let e = exported_case(
+            "future-tool-operand",
+            vec![call("copy", &[9], Ok(vec![2])), call("extrude", &[], Ok(vec![9])), Event::Export { id: 9, record: Box::new(record.clone()) }],
+            Ok(vec![("Part".into(), record)]),
+        );
+        assert_eq!(e["operation_expressible"], false);
+        assert!(e["why_not"].as_array().unwrap().iter().any(|why| why.as_str().unwrap().contains("9")));
+    }
 
     #[test]
     fn the_area_is_the_path_under_kernel_cases() {

@@ -157,16 +157,16 @@ fn occurrence_second_row_selects_exact_path_and_menu_actions() {
     let bounds = crate::viewport::selection_bounds(&h.app).unwrap();
     assert!((bounds.center().x - 55.0).abs() < 1e-8);
     let target = Target::Occurrence { path: vec![second] };
-    let items = context_menu::items(&h.app, &target);
+    let items = context_menu::entries(&h.app, &target);
     // Copy takes this placement (the row right-clicked). Paste New pastes an independent copy of
     // it into the design, never into itself: off on its own row, on on the design's.
     let copy = items.iter().find(|i| i.id == "ui.copy").unwrap();
     assert!(copy.enabled);
     context_menu::run_item(&mut h.app, copy, egui::Pos2::ZERO);
     assert_eq!(h.app.copied_placements, vec![vec![second]]);
-    let own = context_menu::items(&h.app, &target);
+    let own = context_menu::entries(&h.app, &target);
     assert!(!own.iter().find(|i| i.id == "ui.pasteNew").unwrap().enabled, "not into itself");
-    let design = context_menu::items(&h.app, &Target::Component { id: 0 });
+    let design = context_menu::entries(&h.app, &Target::Component { id: 0 });
     let independent = design.iter().find(|i| i.id == "ui.pasteNew").unwrap();
     assert!(independent.enabled);
     assert_eq!(independent.params.as_ref().unwrap()["component"], 0);
@@ -192,7 +192,7 @@ fn turn_up_axis_follows_the_placement_right_clicked() {
     // Whichever placement comes first, a grounded one can't turn and a free one can.
     let (mut h, _, first, second) = fixture();
     let turns = |h: &Harness, occurrence: u64| {
-        let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![occurrence] });
+        let items = context_menu::entries(&h.app, &Target::Occurrence { path: vec![occurrence] });
         let turn = items.into_iter().find(|i| i.id == "ui.turnUpAxis").unwrap();
         let children: Vec<_> = turn.children.iter().map(|c| (c.enabled, c.params.as_ref().unwrap()["occurrence"].as_u64())).collect();
         (turn.enabled, children)
@@ -275,7 +275,7 @@ fn occurrence_delete_targets_second_copy_even_if_first_was_selected() {
 fn occurrence_new_component_keeps_inactive_second_parent_authoring_context() {
     let (mut h, _, first, second) = fixture();
     assert_eq!(h.app.session.active_component, 0);
-    let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![second] });
+    let items = context_menu::entries(&h.app, &Target::Occurrence { path: vec![second] });
     let create = items.iter().find(|i| i.id == "component.create").unwrap();
     assert_eq!(create.params.as_ref().unwrap()["parent_path"], json!([second]));
     context_menu::run_item(&mut h.app, create, egui::Pos2::ZERO);
@@ -398,7 +398,7 @@ fn a_copied_component_pastes_into_its_parent_not_into_itself() {
     click(&mut h, &[second], "row");
     let own = Target::Occurrence { path: vec![second] };
     let design = Target::Component { id: 0 };
-    let find = |h: &Harness, target: &Target, id: &str| context_menu::items(&h.app, target).into_iter().find(|i| i.id == id).unwrap();
+    let find = |h: &Harness, target: &Target, id: &str| context_menu::entries(&h.app, target).into_iter().find(|i| i.id == id).unwrap();
     assert!(!find(&h, &own, "ui.pasteNew").enabled, "nothing copied yet");
     let copy = find(&h, &own, "ui.copy");
     context_menu::run_item(&mut h.app, &copy, egui::Pos2::ZERO);
@@ -462,6 +462,39 @@ fn bodies_folders_fold_by_the_preference_but_never_the_designs_or_a_hidden_one()
 /// deep, with no Bodies row, even when that folder was closed while it was still drawn (nothing
 /// could open it again). Always draws the folder, closed as it was left, then open with the body
 /// two levels under the placement.
+/// #8768: while the Browser's rows start closed (Preferences › Layout), a placement's contents
+/// stay hidden until its arrow opens it, even with "Components start open" on (#9274), Find in
+/// Browser opens the placements holding its body, and Collapse All and Expand All close and open
+/// them.
+#[test]
+fn placements_start_closed_with_the_preference_and_find_in_browser_opens_the_path_to_its_body() {
+    let mut h = Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"browser_components_open": true, "browser_rows_start_closed": true}))["ok"], true);
+    let outer = h.app.run("component.create", json!({"name":"Frame"})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Deep"})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.frames(3);
+    let row = |path: &str| crate::scenario::handle_at(&format!("row:occurrence:{path}"));
+    assert!(row(&outer.to_string()).is_some(), "the top-level placement shows");
+    assert!(row(&format!("{outer}/{inner}")).is_none(), "a placement's contents stay hidden until it is opened");
+    click(&mut h, &[outer], "fold");
+    assert!(row(&format!("{outer}/{inner}")).is_some(), "opening a placement shows its children");
+    click(&mut h, &[outer], "fold");
+    assert!(row(&format!("{outer}/{inner}")).is_none(), "closing it hides them again");
+    let deep = h.app.session.occurrence_bodies(&[outer, inner], false).unwrap()[0].clone();
+    crate::browser::reveal_body(&mut h.app, &deep);
+    h.frames(3);
+    assert!(h.app.tree.expanded.contains(&format!("o:{outer}")) && h.app.tree.expanded.contains(&format!("o:{outer}/{inner}")));
+    assert!(row(&format!("{outer}/{inner}")).is_some(), "Find in Browser opened the placements holding the body");
+    h.app.run("browser.collapse_all", json!({})).unwrap();
+    h.frames(3);
+    assert!(row(&format!("{outer}/{inner}")).is_none(), "Collapse All closes the placements");
+    h.app.run("browser.expand_all", json!({})).unwrap();
+    h.frames(3);
+    assert!(row(&format!("{outer}/{inner}")).is_some(), "Expand All opens them");
+}
+
 #[test]
 fn a_folded_body_sits_one_level_under_its_nested_placement() {
     use crate::prefs::BodiesFolders;
@@ -524,17 +557,24 @@ fn find_in_browser_reaches_a_folded_body() {
 fn a_folded_folders_menu_items_move_to_the_placements_menu() {
     use crate::prefs::BodiesFolders;
     let (mut h, component, first, _) = fixture();
+    let target = Target::Occurrence { path: vec![first] };
+    let has = |h: &Harness, id: &str| context_menu::entries(&h.app, &target).iter().any(|i| i.id == id);
+    let items = context_menu::items(&h.app, &target);
+    assert!(!has(&h, "component.from_bodies"), "a component's only body is not offered as a component of its own");
+    assert!(items.last().is_some_and(|i| i.id != "-"), "and leaves no separator behind");
     h.app.run("component.activate", json!({"component":component})).unwrap();
     h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[20,0,0],"body_name":"Second"})).unwrap();
     h.app.run("component.activate", json!({"component":0})).unwrap();
-    let target = Target::Occurrence { path: vec![first] };
-    let has = |h: &Harness, id: &str| context_menu::items(&h.app, &target).iter().any(|i| i.id == id);
     assert!(!has(&h, "component.from_bodies"), "Several bodies only: two bodies keep their folder");
     h.app.preferences.browser_bodies_folders = BodiesFolders::Never;
     let items = context_menu::items(&h.app, &target);
     let from = items.iter().find(|i| i.id == "component.from_bodies").unwrap();
     assert_eq!(from.params.as_ref().unwrap()["bodies"], json!(["Body1", "Second"]));
-    assert!(has(&h, "ui.newGroup") && has(&h, "ui.showAll"), "on every component's menu");
+    assert!(has(&h, "ui.newGroup"), "on every component's menu");
+    assert!(!has(&h, "ui.showAll"), "Show All Bodies only while something is hidden");
+    h.app.run("browser.visibility", json!({"items": ["Second"], "visible": false})).unwrap();
+    assert!(has(&h, "ui.showAll"), "a hidden body anywhere brings it back");
+    h.app.run("browser.visibility", json!({"items": ["Second"], "visible": true})).unwrap();
     assert!(!has(&h, "ui.groupSelected"), "nothing selected");
     h.app.session.selection = vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Second".into() }];
     let group = context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "ui.groupSelected").unwrap();

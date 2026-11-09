@@ -17,6 +17,11 @@ the pending/ready/failed host, and failures are not retried on each viewport ins
 It opens its independent job device on the viewport's selected adapter,
 so software fallback and safe mode do not rediscover a failing hardware driver.
 An incompatible explicit GPU policy leaves progressive rendering unavailable there.
+A driver that crashes the process while it compiles the path pipeline (#9236) is beyond error
+scopes and unwind guards, so a running setup keeps `gpu-path-setup.json` (its adapter key) in the
+settings folder and removes it when the setup answers or the app closes normally. A launch that
+finds it for the same adapter key leaves the setup failed with that explanation until the user
+chooses **Try again**; a driver update changes the key and so tries again.
 The path tracer runs on Vulkan, or on Metal on macOS (#3217). A viewport on D3D12 is reopened on the
 same GPU through Vulkan. Where there is no Vulkan or Metal driver (Windows over
 Remote Desktop or on the WARP software adapter, older drivers), the path executor reports
@@ -30,8 +35,24 @@ checking or starting an image. These controls are transient image-job
 intent that can also be retained in typed saved setups. Each new saved concept
 uses the pending-format mechanism, without manually changing a version number.
 The canvas switches between live product preview and a large completed-image result,
-with Fit and 100% framing. Jobs report sample progress and export the completed PNG;
-partial accumulation buffers are not displayed on the canvas.
+with Fit and 100% framing. Fixed-sampling jobs publish an immutable PNG after every
+complete nonfinal production pass, using the same transport, denoising and finishing
+as the completed image. Partially computed passes are not displayed. The host retains
+at most two prepaid snapshots; pinned external snapshots may skip a publication without
+stalling final rendering, and this is counted in `preview_retention_skips`. Screen repaints may coalesce fast complete-pass updates.
+Provisional PNGs never become exportable results or retained linear EXR masters.
+Adaptive jobs also publish each complete pilot pass and production iteration. Pilot
+images show the pilot mean; those samples remain excluded from the final master.
+Production images normalize unfinished sums by their completed iteration count and
+retain already finished pixel means. Neither readback nor the optional preview
+denoiser writes the production accumulation. Progress labels distinguish pilots
+from production iterations because production counts vary per pixel. The host
+target includes pilots plus the configured maximum production count.
+
+Adaptive readback reserves one additional float4 plane (16 bytes per pixel). When
+denoising is selected, another independently reserved float4 plane supplies a
+normalized display input to the same filter; final denoising keeps its original
+production input. Final PNG and raw EXR remain identical with preview work disabled.
 
 ```json
 {"command":"render.start","params":{"settings":{"width":800,"height":600,"exposure_ev":0},"progressive":true,"samples":64,"max_depth":8,"seed":0}}
@@ -78,9 +99,10 @@ transmission record is rejected by the path executor. Runtime
 [area lights](render-studio-lighting.md), [sun/HDR environment lighting](render-environment.md)
 and [opaque planar color/normal maps](render-runtime-textures.md) are available
 through explicit job inputs. They do not add saved document fields. An optional bounded edge-aware a-trous
-[denoiser](render-denoise.md) filters the final output while preserving raw accumulation.
-Texture LOD/mipmap selection, EXR and Final mode remain unimplemented by this
-executor; a path-traced preview does not declare those capabilities.
+[denoiser](render-denoise.md) filters progressive and final display images while preserving
+raw accumulation. Optional raw scene-linear EXR masters are retained only for completed
+images, before display filters. Texture LOD/mipmap selection and Final mode remain
+unimplemented by this executor; a path-traced preview does not declare those capabilities.
 
 Each job builds a BVH over its immutable captured meshes with a sixteen-bin
 surface-area heuristic on triangle centres; there is no cross-document cache to
@@ -155,3 +177,8 @@ fraction. This applies to the specular term and both diffuse transmission factor
 The existing actual-GPU BRDF oracle checks the limit at normal, oblique and grazing
 angles against the f64 surface, including mixed metallic values. Clear-coat and
 physical transmission contracts are unchanged by this base-lobe correction.
+
+The normal GPU Samples editor keeps the exact requested count, including values
+such as 17 or 31; every complete pass is published. Merely opening a saved setup
+does not round its count. **Use previous Render image defaults** retains the
+previous power-of-two rounding for an edited GPU Samples value.

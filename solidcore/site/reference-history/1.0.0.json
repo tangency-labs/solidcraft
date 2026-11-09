@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "commit": "c9c5979",
+  "peak": {
+    "green": 261,
+    "units": 261,
+    "date": "2026-10-27",
+    "commit": "dcaf0f3dd",
+    "pr": 1212,
+    "note": "every difftest unit green against C++ 1.0.0 (CI run 40433011219)"
+  },
+  "final": {
+    "green": 260,
+    "partial": 1,
+    "commit": "aaed3de5e",
+    "note": "blend.fillet_executive_p3 partial: three sweep5 cases added later as known mismatches"
+  },
+  "superseded_by": {"version": "1.0.1", "pr": 1277, "date": "2026-10-27"}
+}

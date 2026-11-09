@@ -842,7 +842,7 @@ impl<'d> Reader<'d, '_, '_> {
 
 /// A linear base colour channel as an 8-bit sRGB code; one that isn't a number reads as 0.8.
 fn srgb(c: f32) -> u8 {
-    solidcraft_geom::srgb::encode8(if c.is_finite() { f64::from(c) } else { 0.8 })
+    solidcraft_color::srgb::encode8(if c.is_finite() { f64::from(c) } else { 0.8 })
 }
 
 /// A material's look: base colour, alpha when blended, metallic/roughness when opaque.

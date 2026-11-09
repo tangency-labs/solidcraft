@@ -188,3 +188,26 @@ fn max_file_size_raises_the_limit_and_refuses_bad_sizes() {
     assert!(!output.status.success() && !stderr.contains("too large"), "{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #10111: a line for a stderr whose reader has gone (the pipe closed before it, as an agent may
+/// leave the MCP server's, and the app that one starts) is dropped, and the command ends as it
+/// would with stderr open: here a script that isn't there fails with 1, where `eprintln!`
+/// panicked with "failed printing to stderr" (101).
+#[test]
+fn a_closed_stderr_does_not_stop_the_cli() {
+    for _ in 0..5 {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
+            .args(["run", "no-such-script.json"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        drop(child.stderr.take());
+        assert_eq!(child.wait().unwrap().code(), Some(1));
+    }
+    // The old name's alias writes its deprecation notice first: an agent still configured with
+    // `solvecraft-cli mcp` must get the server, not that panic.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_solvecraft-cli")).arg("--help").stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
+    drop(child.stderr.take());
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+}

@@ -76,7 +76,8 @@ pub struct DocJobs {
 
 /// How a command asked to run off the window thread goes.
 enum Start {
-    /// It computes off the window thread.
+    /// It computes off the window thread (never in the browser build, which has one thread).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Later(Deferred),
     /// It runs now, with what was evaluated for it ahead (if anything).
     Now(Option<solidcraft_engine::Evaluated>, Option<std::sync::Arc<solidcraft_engine::doc::KeptResults>>),

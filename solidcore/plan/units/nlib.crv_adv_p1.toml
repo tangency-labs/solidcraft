@@ -1,0 +1,12 @@
+id = "nlib.crv_adv_p1"
+upstream = ["source/SMLib/src/NL_CrvAdv.cpp"]
+rust_module = "nurbs::crv_adv::p1"
+depends_on = ["nlib.crv_basic", "nlib.crv_nurb", "nlib.crv_tool_p1", "nlib.geom", "nlib.knots", "nlib.math"]
+soft_depends_on = ["nlib.basis_basic", "nlib.crv_geom"]
+est_lines = 2031
+layer = 8
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-nlib.crv_adv_p1-a1"
+claimed_at = "2026-10-12T21:44:23Z"
+notes = "difftest: 2670 cases (670 fixtures on the six pt_TestFiles .smc curves, SM_API_test rectangle/hexagon edges and edge cases + 2000 generated), 2670 pass bit-for-bit, 0 deferred; 100,670-case run clean; no UNPORTED(nlib.crv_adv_p1) stubs to wire; ST_curxcdr/ST_curxcrr ported as Curve::extend_by_dist_at_depth / extend_by_param_dist_at_depth (wrappers N_CrvExtendBy* are in nlib.crv_adv_p2); in-place ST_curxcrr G2 recursion frees an uninitialised curve upstream (findings.md); 7 fns; largest: ST_curxcdr, ST_curxcrr, N_CrvEvalEvenSpacedPts, N_CrvGetMax2ndDeriv"

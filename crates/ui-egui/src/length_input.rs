@@ -127,7 +127,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
                 vec![distance]
             }
             Surf::Thicken { thickness, .. } => vec![thickness],
-            Surf::Stitch { tolerance } => vec![tolerance],
+            Surf::Stitch { tolerance } | Surf::Fair { tolerance, .. } => vec![tolerance],
             _ => vec![],
         },
         D::Sheet(k) => match k {
