@@ -1606,3 +1606,21 @@ fn pattern_of_an_untargeted_cut_still_cuts_its_own_components_body() {
     assert!((one_hole - body1).abs() < 0.02 * hole, "Body1 untouched: {one_hole} -> {body1}");
     assert!((plate - plate2 - 9.0 * hole).abs() < 0.02 * hole, "Plate2 cut: {plate} -> {plate2}");
 }
+
+/// Issue #10: fuzzer seed 141. Revolve a section, then cut a sphere. The boolean cut's result is
+/// refused as "SMLib's result is not a closed solid". Every failing seed of the boolean fuzzer is
+/// a reproducible bug, fixed with a regression test that fails without the fix.
+/// TODO: root cause not yet found — topologically different from seed 73's "Bad Gap" tolerance issue.
+#[ignore = "fails until the boolean cut root cause for seed 141 is found (#10)"]
+#[test]
+fn fuzz_seed_141_boolean_cut_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_141_boolean_cut.json"));
+    let state = s.model.state();
+    // Every step ran: every body is a sound solid, and the cut produced one body.
+    assert_eq!(state.bodies.len(), 1, "the cut must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the cut body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the cut must be a real solid: {}", m.volume);
+    println!("#10 seed 141: cut body volume {volume:.2} mm³", volume = m.volume);
+}
