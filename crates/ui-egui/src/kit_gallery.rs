@@ -1,8 +1,8 @@
 //! The kit's gallery: table-driven layout/paint references in both themes, drawn with
 //! SolidCraft's data (its tab icons, its menus). No window or GPU required.
+use crate::dialogs_surface::{continuity_row, continuity_row_explained, continuity_tip};
 use crate::ui_kit::preferences_figures::{ThemeSample, paint_theme_thumbnail};
 use crate::ui_kit::*;
-use crate::dialogs_surface::{continuity_row, continuity_row_explained, continuity_tip};
 use crate::ui_kit::{Container, Surface};
 use egui::{Ui, vec2};
 use solidcraft_engine::kernel::Continuity;
@@ -1128,7 +1128,12 @@ const ELEMENTS: &[Element] = &[
         FileView::recovery_banner(
             ui,
             "gallery:recovery-summary",
-            crate::ui_kit::file_view::RecoveryMessage { title: "2 designs have unsaved changes", before_filename: "", filename: "", after_filename: "" },
+            crate::ui_kit::file_view::RecoveryMessage {
+                title: "2 designs have unsaved changes",
+                before_filename: "",
+                filename: "",
+                after_filename: "",
+            },
             "Review",
             None,
         );
