@@ -1180,11 +1180,8 @@ fn feature_row_body(
         .results
         .get(&id)
         .and_then(|at| app.session.model.results.get(*at).filter(|result| result.id == id).or_else(|| app.session.model.result(id)));
-    let elapsed = result.map(|r| r.ms);
     let error = result.and_then(|result| result.error.clone());
     let warning = result.and_then(crate::timeline::warning_text);
-    // What the tooltip says of the error and the warning, as every History tooltip does (#8834).
-    let status = (error.is_some() || warning.is_some()).then(|| crate::timeline::feature_status_tip(name, ty, result));
     let rolled = match row_kind {
         RowKind::Reference { parent } => parent >= marker,
         RowKind::Own | RowKind::Nested => index >= marker,
@@ -1229,25 +1226,10 @@ fn feature_row_body(
     let mut tooltip = egui::Tooltip::for_enabled(&response);
     tooltip.popup = tooltip.popup.align(egui::RectAlign::RIGHT_START);
     crate::ui_kit::Container::show_tooltip(response.id, tooltip, |ui| {
-        let summary = app
-            .session
-            .doc
-            .features
-            .get(index)
-            .and_then(|f| f.kind.expressions().first().map(ToString::to_string))
-            .unwrap_or_else(|| elapsed.map_or_else(String::new, |ms| format!("{ms:.1} ms")));
-        let kind = solidcraft_ui_text::tr_label(ty.strip_suffix("Feature").unwrap_or(ty));
-        // A value row is one line: the summary has it, and what follows (the error and the
-        // warning as every History tooltip shows them, #8834) wraps under it.
-        crate::ui_kit::text(ui, &format!("{name} · {kind} · {summary}"), crate::ui_kit::Text::Value("history", false));
-        let mut lines = Vec::new();
-        // Greyed out says only "not shown": say why (#8100).
-        if rolled {
-            lines.push(solidcraft_ui_text::tr("timeline.feature_rolled_back").to_string());
-        }
-        lines.extend(sketch_state.map(|state| state.text()));
-        // The summary line already names the feature.
-        crate::ui_kit::StatusTip { head: String::new(), tail: lines.join("\n"), ..status.clone().unwrap_or_default() }.show(ui);
+        // The tooltip the bottom History shows, so the two stay identical (#14027); written only
+        // while it shows.
+        crate::timeline::feature_tooltip(name, ty, app.session.model.result(id), rolled, sketch_state).show(ui);
+        // Where the sketch is listed gets a row of its own, under the shared tooltip.
         if let Some(host) = listed_under.filter(|_| reference) {
             let listed = solidcraft_ui_text::format("ui.history_sketch_listed_under", &[("feature", host)]);
             crate::ui_kit::text(ui, &listed, crate::ui_kit::Text::Value("history_listed_under", false));
@@ -1334,6 +1316,38 @@ mod tests {
         let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|t| t.galley.text()).collect();
         assert!(texts.contains(&"フィーチャーと入れ子のフォルダーを履歴に残します"), "{texts:?}");
         assert_eq!(h.app.session.doc.timeline_groups.len(), 1, "hovering does not delete the folder");
+    }
+
+    /// Both Histories draw one shared tooltip: a feature's warning and its time appear in the
+    /// left History exactly as they do in the bottom one.
+    #[test]
+    fn feature_tooltips_show_the_same_warning_and_time_in_both_histories() {
+        for left in [false, true] {
+            let mut h = Harness::new();
+            h.app.preferences.timeline_left = left;
+            h.app.home.open = false;
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"Block","body_name":"Block"})).unwrap();
+            // R6 on a 10 × 10 × 10 box is reduced to 5, so the feature warns.
+            h.app.run("solid.fillet", json!({"edges":[[0,0,5],[10,0,5],[10,10,5],[0,10,5]],"radius":6,"fit":"reduce","body":"Block"})).unwrap();
+            h.settle();
+            let id = h.app.session.doc.find_feature("Fillet1").map(|f| f.id).expect("the fillet is in the timeline");
+            let warning = h.app.session.model.results.iter().find(|r| r.id == id).and_then(|r| r.warning.clone());
+            assert!(warning.as_deref().is_some_and(|w| w.contains("reduced")), "the fillet warns: {warning:?}");
+            h.app.session.model.results.iter_mut().find(|r| r.id == id).expect("the fillet has a result").ms = 12.5;
+            h.frames(4);
+            let at = handle_at("timeline:Fillet1").expect("the Fillet's chip");
+            h.app.synthetic.push(egui::Event::PointerMoved(at));
+            h.frames(90);
+            let output = egui::FullOutput { shapes: h.shapes.clone(), ..Default::default() };
+            let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|t| t.galley.text().to_string()).collect();
+            assert!(texts.iter().any(|t| t == "Fillet1  (Fillet)"), "left={left}: the tooltip shows the name and type: {texts:?}");
+            assert!(texts.iter().any(|t| t.contains("12.5 ms")), "left={left}: the tooltip shows the time: {texts:?}");
+            assert!(texts.iter().any(|t| t.contains("reduced")), "left={left}: the tooltip shows the warning: {texts:?}");
+            assert!(
+                !texts.iter().any(|t| t.contains("FilletFeature")),
+                "left={left}: the tooltip shows the translated type, not the raw one: {texts:?}"
+            );
+        }
     }
 
     #[test]
