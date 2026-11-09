@@ -381,9 +381,11 @@ pub fn closed(app: &mut SolveApp, d: &mut Dialog, applied: bool) {
     }
 }
 
-/// The occurrence placements of `after` that differ from `before` (as pending moves).
-fn moved(before: &Session, after: &Session) -> BTreeMap<u64, Mat> {
-    let mut out = before.pending_moves.clone();
+/// The occurrence placements of `after` that differ from `before`, as pending moves over `base`:
+/// the moves shown before the dialog showed a pose of its own. Not over the pose it showed last:
+/// a part this pose puts back where the design has it would stay where that pose left it (#13511).
+fn moved(base: &BTreeMap<u64, Mat>, before: &Session, after: &Session) -> BTreeMap<u64, Mat> {
+    let mut out = base.clone();
     for o in &after.doc.occurrences {
         let was = before.doc.occurrences.iter().find(|b| b.id == o.id).map(|b| b.transform);
         if was != Some(o.transform) {
@@ -393,12 +395,12 @@ fn moved(before: &Session, after: &Session) -> BTreeMap<u64, Mat> {
     out
 }
 
-/// The study's pose at `step`, computed on a scratch copy.
-fn study_pose(app: &SolveApp, params: &Value, step: u32) -> Result<BTreeMap<u64, Mat>, String> {
+/// The study's pose at `step`, computed on a scratch copy, over `base` ([`moved`]).
+fn study_pose(app: &SolveApp, params: &Value, step: u32, base: &BTreeMap<u64, Mat>) -> Result<BTreeMap<u64, Mat>, String> {
     let mut sc = app.session.scratch();
     let id = scratch_study(&mut sc, params)?;
     sc.execute("motion.play", &json!({"study": id, "step": step})).map_err(|e| e.to_string())?;
-    Ok(moved(&app.session, &sc))
+    Ok(moved(base, &app.session, &sc))
 }
 
 /// Save the study being edited as an animated GIF, seen from the viewport's camera. Drawn on a
@@ -740,7 +742,9 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         h.finish()
     };
     if *shown != Some((u64::from(now), key)) {
-        match params.and_then(|p| study_pose(app, &p, now)) {
+        // The moves from before the dialog showed anything (it keeps them in `saved`).
+        let base = saved.as_ref().unwrap_or(&app.session.pending_moves);
+        match params.and_then(|p| study_pose(app, &p, now, base)) {
             Ok(m) => {
                 display(app, saved, m);
                 *error = None;
