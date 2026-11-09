@@ -4121,6 +4121,7 @@ impl SolveApp {
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
         edit_in_place::tick(self);
+        browser_links::refresh(self, ctx);
         let typing = ctx.egui_wants_keyboard_input();
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);
