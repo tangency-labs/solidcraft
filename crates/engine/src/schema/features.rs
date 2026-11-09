@@ -665,7 +665,11 @@ impl<'de> Deserialize<'de> for PathEdgePoints {
         if items.is_empty() || items.len() > 1000 {
             return Err(D::Error::custom(whole("the path needs 1…1000 edges")));
         }
-        items.iter().map(|item| Point3::deserialize(item).map_err(|_| D::Error::custom(whole("each `path_edges` entry must be a point [x,y,z]")))).collect::<Result<_, _>>().map(PathEdgePoints)
+        items
+            .iter()
+            .map(|item| Point3::deserialize(item).map_err(|_| D::Error::custom(whole("each `path_edges` entry must be a point [x,y,z]"))))
+            .collect::<Result<_, _>>()
+            .map(PathEdgePoints)
     }
 }
 
