@@ -2729,3 +2729,28 @@ fn a_cut_that_removes_nothing_says_so() {
     assert!(reply["warning"].is_null(), "{reply}");
     assert!(volume(&mut s) < before - 400.0);
 }
+
+/// #9969 through sheet metal: a cut the flat pattern takes, drawn clear of the sheet, changes
+/// nothing and says so; the same cut over the sheet takes material and says nothing.
+#[test]
+fn a_sheet_metal_cut_that_removes_nothing_says_so() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    let before = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Away"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [200, 200], "p1": [210, 210]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"sketch": "Away", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    let warning = reply["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("the cut removes no material"), "{reply}");
+    assert!((volume(&mut s) - before).abs() < 1e-9 * before);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Over"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [20, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"sketch": "Over", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    assert!(!reply["warning"].as_str().unwrap_or_default().contains("removes no material"), "{reply}");
+    assert!(volume(&mut s) < before - 50.0);
+}
