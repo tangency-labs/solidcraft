@@ -106,6 +106,13 @@ pub enum PanelAction {
     Approve(u64, bool),
     /// Allow a held request and its kind from now on.
     ApproveAlways(u64),
+    /// What the agent (none: every agent without its own choice) may do without asking.
+    SetPermission {
+        agent: Option<String>,
+        mode: agents::Mode,
+    },
+    /// Attach a picture from the clipboard.
+    AttachPicture(super::paste::Picture),
     /// The assistant's page in Preferences.
     OpenSettings,
     /// Preferences, adding an agent.
@@ -158,6 +165,15 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
         PanelAction::AnswerPermission(n, option) => answer_permission(app, n, option.as_deref()),
         PanelAction::Approve(id, allow) => approve(app, id, allow),
         PanelAction::ApproveAlways(id) => approve_always(app, id),
+        PanelAction::SetPermission { agent: Some(id), mode } => {
+            app.preferences.agent_permissions.insert(id, mode);
+        }
+        PanelAction::SetPermission { agent: None, mode } => app.preferences.ai_permissions = mode,
+        PanelAction::AttachPicture(p) => {
+            if let Err(e) = attach_rgba(app, p.width, p.height, &p.rgba) {
+                app.agent_chat.notice(e, true);
+            }
+        }
         PanelAction::OpenSettings => crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT),
         PanelAction::AddAgent => super::settings::open_add(app),
     }
@@ -167,6 +183,119 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
 fn run_actions(app: &mut SolveApp, ctx: &egui::Context) {
     for action in std::mem::take(&mut app.agent_chat.actions) {
         run(app, ctx, action);
+    }
+}
+
+/// What the panel shows of the app that hosts it, read when the panel is about to be drawn.
+/// Everything the panel changes in the app goes back as a [`PanelAction`].
+#[derive(Clone)]
+pub struct PanelView {
+    /// AI features are on: otherwise nothing of the chat is drawn.
+    pub shown: bool,
+    /// The app's layout (floating panels, and the frame a feature panel gets).
+    pub layout: ui_kit::LayoutMode,
+    /// The history bar when it is on the right: the floating panel stops above it.
+    pub history: Option<Rect>,
+    /// The open design's name, for the chat window's title.
+    pub document: String,
+    /// The open design, to mark which messages changed it. A follow-up gives conversation items a
+    /// host-neutral handle in place of the engine's document.
+    pub doc: Arc<solidcraft_engine::doc::Document>,
+    /// Length units and decimals for the summaries of what the agent did.
+    pub units: String,
+    pub decimals: u8,
+    /// The agents to choose from, and the one this conversation uses.
+    pub agents: Vec<agents::Entry>,
+    pub current: Option<agents::Entry>,
+    /// The agent the permissions picker sets (the running one, else the chosen one; none: the
+    /// default), and what it may do.
+    pub permission_agent: Option<String>,
+    pub permission: agents::Mode,
+    /// How many things are selected in the model.
+    pub selected: usize,
+    /// A tool or dialog is open (picking context waits for it).
+    pub dialog_open: bool,
+    /// Changes allowed in one turn (0: no limit).
+    pub turn_limit: u32,
+    /// Why the chosen model may not work, if it may not.
+    pub model_warning: Option<String>,
+    /// The chat buttons' tooltip: name and shortcut.
+    pub tip: String,
+    /// The keys that show or hide the chat, and whether the keymap editor is taking keys.
+    pub toggle_keys: Vec<String>,
+    pub capturing_keys: bool,
+    /// The interface reads right to left: a wide shared panel puts the conversation on the right.
+    pub rtl: bool,
+    /// The shared panel host is drawing and measuring this content: the agent controls scroll with
+    /// the agent list, above a composer of the measured height.
+    pub shared: bool,
+    /// The composer's height the shared host measured last time, if it has.
+    pub composer_height: Option<f32>,
+}
+
+impl PanelView {
+    /// The view of SolidCraft's state the panel draws from now.
+    pub fn of(app: &mut SolveApp, ctx: &egui::Context) -> Self {
+        let current = agents::current(app);
+        let permission_agent =
+            if app.agent_chat.state().running() { Some(app.agent_chat.running_id.clone()) } else { current.as_ref().map(|e| e.id.clone()) };
+        let permission = permission_agent.as_deref().map_or(app.preferences.ai_permissions, |id| agents::mode_for(&app.preferences, id));
+        PanelView {
+            shown: shown(app),
+            layout: app.ui.layout,
+            history: app.shell.history.filter(|_| app.ui.show_timeline && !app.preferences.timeline_left),
+            document: app.session.doc.name.clone(),
+            doc: app.session.doc.clone(),
+            units: app.session.doc.units.clone(),
+            decimals: app.preferences.length_decimals,
+            agents: agents::entries(app),
+            current,
+            permission_agent,
+            permission,
+            selected: selected_count(app),
+            dialog_open: app.dialog.is_some(),
+            turn_limit: app.preferences.agent_chat_turn_limit,
+            model_warning: settings::model_warning(app),
+            tip: tip(app),
+            toggle_keys: crate::keymap::keys(app, "ui.assistant"),
+            capturing_keys: crate::keymap::capturing(app),
+            rtl: crate::i18n::panel_direction(&app.preferences.language) == solidcraft_engine::panels::Direction::Rtl,
+            shared: crate::panel_runtime::shared_content_measurement(ctx),
+            composer_height: crate::panel_runtime::shared_content_composer_height(ctx),
+        }
+    }
+
+    fn floating(&self) -> bool {
+        Container::for_layout(self.layout, Surface::Panel).floating()
+    }
+}
+
+/// What the content tells the shared panel host it is drawn in: kept while the panel draws and
+/// handed to the host after ([`hand_over`]).
+#[derive(Clone, Default)]
+pub struct ContentReport {
+    /// The composer's height this frame.
+    pub composer_height: Option<f32>,
+    /// The layer the content was drawn on, the top of its body and the height it needs.
+    pub extent: Option<(egui::LayerId, f32, f32)>,
+    /// The text fields that take the keyboard, in the order they were drawn.
+    pub focus: Vec<egui::Response>,
+}
+
+/// Give the shared panel host what the content reported while it was drawn in `ui` (nothing
+/// happens outside the shared host's body).
+fn hand_over(app: &mut SolveApp, ui: &egui::Ui) {
+    let report = std::mem::take(&mut app.agent_chat.report);
+    for response in &report.focus {
+        crate::panel_runtime::register_content_focus(ui.ctx(), response);
+    }
+    if let Some(height) = report.composer_height {
+        crate::panel_runtime::report_content_composer_height(ui.ctx(), height);
+    }
+    if let Some((layer, top, height)) = report.extent
+        && layer == ui.layer_id()
+    {
+        crate::panel_runtime::report_content_extent(ui, top, height, false);
     }
 }
 
@@ -297,65 +426,71 @@ pub(crate) fn owns_keyboard_input(app: &mut SolveApp, ctx: &egui::Context) -> bo
 
 /// The panel, when the chat is turned on and open. Call before the central viewport is laid out.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let mut prefs = AgentPanelPrefs::read(&app.preferences);
-    show_panel(app, ui, &mut prefs);
-    prefs.write(&mut app.preferences);
-    run_actions(app, &ui.ctx().clone());
-}
-
-fn show_panel(app: &mut SolveApp, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
     let ctx = ui.ctx().clone();
     poll(app, &ctx);
+    let view = PanelView::of(app, &ctx);
+    let mut prefs = AgentPanelPrefs::read(&app.preferences);
+    draw(&mut app.agent_chat, &view, &mut prefs, ui);
+    prefs.write(&mut app.preferences);
+    hand_over(app, ui);
+    run_actions(app, &ctx);
+}
+
+/// The panel drawn from the chat's state, the host's view and the panel's own preferences; what
+/// was asked is left in `chat.actions`.
+pub fn draw(chat: &mut AgentChat, view: &PanelView, prefs: &mut AgentPanelPrefs, ui: &mut egui::Ui) {
+    let ctx = ui.ctx().clone();
     // Set again below if the chat is drawn this frame.
-    app.agent_chat.drop_rect = None;
+    chat.drop_rect = None;
     // Retain the previous card for shortcut hover routing below; clear it when hidden.
-    if !shown(app) || !app.agent_chat.open {
-        app.agent_chat.panel_rect = None;
+    if !view.shown || !chat.open {
+        chat.panel_rect = None;
     }
     // With AI features off nothing of the chat is drawn, and the shortcut does nothing.
-    if !shown(app) {
+    if !view.shown {
         return;
     }
     // A window that isn't drawn this frame closes; the next one opens at the saved place.
-    if !(app.agent_chat.open && prefs.popped) {
-        app.agent_chat.window_placed = false;
+    if !(chat.open && prefs.popped) {
+        chat.window_placed = false;
     }
-    new_chat_shortcut(app, &ctx);
-    if !app.agent_chat.open {
+    new_chat_shortcut(chat, &ctx);
+    if !chat.open {
         return;
     }
     // Look for installed agents the first time the panel opens (in the background).
     #[cfg(not(target_arch = "wasm32"))]
-    if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
-        app.agent_chat.actions.push(PanelAction::Refresh);
+    if chat.detection.is_none() && chat.detecting.is_none() {
+        chat.actions.push(PanelAction::Refresh);
     }
     #[cfg(not(target_arch = "wasm32"))]
     if prefs.popped {
-        window(app, &ctx, prefs);
-        show_drop_hint(app, &ctx);
+        window(chat, view, &ctx, prefs);
+        show_drop_hint(chat, &ctx);
         return;
     }
-    if Container::for_layout(app.ui.layout, Surface::Panel).floating() {
-        floating(app, ui, prefs);
-        show_drop_hint(app, &ctx);
+    if view.floating() {
+        floating(chat, view, ui, prefs);
+        show_drop_hint(chat, &ctx);
         return;
     }
     let available = ui.available_rect_before_wrap();
     let screen = ctx.content_rect();
-    app.agent_chat.dock_space = Some(Rect::from_x_y_ranges(screen.x_range(), available.y_range()));
+    chat.dock_space = Some(Rect::from_x_y_ranges(screen.x_range(), available.y_range()));
     let t = Tokens::get();
     let left = prefs.left;
     let host = Container::new(ui.ctx(), Surface::Panel);
     let side = |salt: &'static str| host.edge(salt, if left { Edge::Left } else { Edge::Right });
     if prefs.minimized {
-        let r =
-            host.show_edge(ui, side("sc_agent_chat_strip").exact_size(STRIP).resizable(false), host.edge_frame(t.panel), |ui| strip(app, ui, prefs));
-        app.agent_chat.drop_rect = Some(r.response.rect);
-        show_drop_hint(app, &ctx);
+        let r = host.show_edge(ui, side("sc_agent_chat_strip").exact_size(STRIP).resizable(false), host.edge_frame(t.panel), |ui| {
+            strip(chat, view, ui, prefs)
+        });
+        chat.drop_rect = Some(r.response.rect);
+        show_drop_hint(chat, &ctx);
         return;
     }
     let width = prefs.width.clamp(MIN_WIDTH, MAX_WIDTH);
-    if std::mem::take(&mut app.agent_chat.forget_width) {
+    if std::mem::take(&mut chat.forget_width) {
         // A panel's state is keyed by the Ui it is shown in and its salt; either side's would
         // override the preference once the panel moves there.
         let scope = ui.scope_id();
@@ -369,14 +504,14 @@ fn show_panel(app: &mut SolveApp, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs
         ui,
         side(panel_salt(left)).default_size(width).size_range(MIN_WIDTH..=MAX_WIDTH).resizable(true),
         host.edge_frame(t.dialog_body),
-        |ui| ui_kit::scope(ui, |ui| body(app, ui, left, prefs)),
+        |ui| ui_kit::scope(ui, |ui| body(chat, view, ui, left, prefs)),
     );
     solidcraft_ui_registry::publish_rect("agent_chat:panel", r.response.rect);
-    app.agent_chat.panel_rect = Some(r.response.rect);
+    chat.panel_rect = Some(r.response.rect);
     #[cfg(not(target_arch = "wasm32"))]
-    gallery_window(app, &ctx);
-    app.agent_chat.drop_rect = Some(r.response.rect);
-    show_drop_hint(app, &ctx);
+    gallery_window(chat, &ctx);
+    chat.drop_rect = Some(r.response.rect);
+    show_drop_hint(chat, &ctx);
     let w = r.response.rect.width();
     if w.is_finite() && (MIN_WIDTH..=MAX_WIDTH).contains(&w) {
         prefs.width = w;
@@ -387,7 +522,7 @@ fn show_panel(app: &mut SolveApp, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs
 /// Read the previous visible rectangle before clearing this frame's geometry.
 pub(crate) fn prepare_shared(app: &mut SolveApp, ctx: &egui::Context) {
     if shown(app) {
-        new_chat_shortcut(app, ctx);
+        new_chat_shortcut(&mut app.agent_chat, ctx);
         run_actions(app, ctx);
         #[cfg(not(target_arch = "wasm32"))]
         if app.agent_chat.open && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
@@ -410,22 +545,30 @@ pub(crate) fn finish_shared(app: &mut SolveApp, ctx: &egui::Context) {
         app.agent_chat.keyboard_owned = false;
     }
     #[cfg(not(target_arch = "wasm32"))]
-    gallery_window(app, ctx);
-    show_drop_hint(app, ctx);
+    gallery_window(&mut app.agent_chat, ctx);
+    show_drop_hint(&app.agent_chat, ctx);
 }
 
 /// Existing Assistant controls and conversation, inside the shared host's body.
 pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow) {
+    let view = PanelView::of(app, ui.ctx());
+    let prefs = AgentPanelPrefs::read(&app.preferences);
+    draw_content(&mut app.agent_chat, &view, &prefs, ui, flow);
+    hand_over(app, ui);
+    run_actions(app, &ui.ctx().clone());
+}
+
+/// The controls and conversation alone, filling `ui` (the shared host's body, which has its own
+/// header); what was asked is left in `chat.actions`, what the host measures in `chat.report`.
+pub fn draw_content(chat: &mut AgentChat, view: &PanelView, prefs: &AgentPanelPrefs, ui: &mut egui::Ui, flow: Flow) {
     let rect = ui.max_rect().intersect(ui.clip_rect());
-    if !shown(app) || !app.agent_chat.open || !rect.is_finite() || !rect.is_positive() {
+    if !view.shown || !chat.open || !rect.is_finite() || !rect.is_positive() {
         return;
     }
-    app.agent_chat.panel_rect = Some(rect);
-    app.agent_chat.drop_rect = Some(rect);
+    chat.panel_rect = Some(rect);
+    chat.drop_rect = Some(rect);
     solidcraft_ui_registry::publish_rect("agent_chat:panel", rect);
-    let prefs = AgentPanelPrefs::read(&app.preferences);
-    ui_kit::scope(ui, |ui| content(app, ui, flow, &prefs));
-    run_actions(app, &ui.ctx().clone());
+    ui_kit::scope(ui, |ui| content(chat, view, ui, flow, prefs));
 }
 
 /// Horizontal room reserved before the history and browser when Assistant is on the left.
@@ -458,13 +601,13 @@ pub(crate) fn tool_space(app: &SolveApp, mut available: Rect) -> Rect {
 }
 
 /// The same outer rectangle is used for the floating sheet and its docking preview.
-fn floating_bounds(app: &SolveApp, prefs: &AgentPanelPrefs, available: Rect, left: bool) -> Rect {
+fn floating_bounds(view: &PanelView, prefs: &AgentPanelPrefs, available: Rect, left: bool) -> Rect {
     let t = Tokens::get();
     let gap = crate::ui_kit::SHELL_GAP;
     let mut bounds = available.shrink(gap);
     // The ribbon already supplies the top gap shared by browser and history cards.
     bounds.min.y = available.top();
-    if let Some(history) = app.shell.history.filter(|_| app.ui.show_timeline && !app.preferences.timeline_left) {
+    if let Some(history) = view.history {
         bounds.max.y = (history.top() - gap).min(bounds.bottom()).max(bounds.top());
     }
     // Assistant owns the outside edge on either side. Tool sheets reserve space beside it.
@@ -480,30 +623,30 @@ fn floating_bounds(app: &SolveApp, prefs: &AgentPanelPrefs, available: Rect, lef
 
 /// Use the same bounded, rounded floating surface as feature panels. The sheet overlays
 /// the viewport, leaving the model's rendering and picking projection unchanged.
-fn floating(app: &mut SolveApp, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
+fn floating(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
     let ctx = ui.ctx().clone();
     let t = Tokens::get();
     let available = ui.available_rect_before_wrap();
-    app.agent_chat.dock_space = Some(available);
+    chat.dock_space = Some(available);
     let left = prefs.left;
     let side = if left { crate::frame::Side::Left } else { crate::frame::Side::Right };
     let minimized = prefs.minimized;
-    let bounds = floating_bounds(app, prefs, available, left);
+    let bounds = floating_bounds(view, prefs, available, left);
     if !bounds.is_positive() {
-        app.agent_chat.panel_rect = None;
+        chat.panel_rect = None;
         return;
     }
     let width = bounds.width();
     let height = bounds.height();
     let anchor = if left { bounds.left_top() } else { bounds.right_top() };
-    let frame = ui_kit::Panel::feature_frame(&ctx, app.ui.layout, side);
+    let frame = ui_kit::Panel::feature_frame(&ctx, view.layout, side);
     let inner = (vec2(width, height) - frame.total_margin().sum()).max(egui::Vec2::ZERO);
     let panel = ui_kit::Panel::new(tr("ui.assistant"), Id::unique("sc_agent_chat_floating"), anchor, available, side, frame).width(width);
     if let Some(card) = panel.fixed_window(&ctx, inner).show(&ctx, |ui| {
         ui.set_min_size(inner);
         ui.set_max_size(inner);
         ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, inner)));
-        ui_kit::scope(ui, |ui| if minimized { strip(app, ui, prefs) } else { body(app, ui, left, prefs) });
+        ui_kit::scope(ui, |ui| if minimized { strip(chat, view, ui, prefs) } else { body(chat, view, ui, left, prefs) });
         if !minimized {
             let rect = ui.max_rect();
             let rail = if left {
@@ -522,12 +665,12 @@ fn floating(app: &mut SolveApp, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) 
         }
     }) {
         let rect = card.response.rect;
-        app.agent_chat.panel_rect = Some(rect);
-        app.agent_chat.drop_rect = Some(rect);
+        chat.panel_rect = Some(rect);
+        chat.drop_rect = Some(rect);
         solidcraft_ui_registry::publish_rect("agent_chat:panel", rect);
     }
     #[cfg(not(target_arch = "wasm32"))]
-    gallery_window(app, &ctx);
+    gallery_window(chat, &ctx);
 }
 
 /// The most chips one group shows before "+N more".
@@ -694,8 +837,8 @@ fn fit(size: egui::Vec2, max: egui::Vec2) -> egui::Vec2 {
 /// The viewer: a message's pictures over the app, one at a time with a counter, Previous and Next
 /// (also the arrow keys), closed with the button, Esc or a click outside.
 #[cfg(not(target_arch = "wasm32"))]
-fn gallery_window(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(mut gallery) = app.agent_chat.gallery.take() else { return };
+fn gallery_window(chat: &mut AgentChat, ctx: &egui::Context) {
+    let Some(mut gallery) = chat.gallery.take() else { return };
     let count = gallery.pictures.len();
     gallery.at = gallery.at.min(count.saturating_sub(1));
     let (left, right) =
@@ -740,21 +883,21 @@ fn gallery_window(app: &mut SolveApp, ctx: &egui::Context) {
         gallery.at = (gallery.at as isize + step).rem_euclid(count as isize) as usize;
     }
     if !modal.should_close() {
-        app.agent_chat.gallery = Some(gallery);
+        chat.gallery = Some(gallery);
     }
 }
 
 /// While files are dragged over the window: if they would drop on the chat, say so over it.
-fn show_drop_hint(app: &SolveApp, ctx: &egui::Context) {
+fn show_drop_hint(chat: &AgentChat, ctx: &egui::Context) {
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(rect) = app.agent_chat.drop_rect
+    if let Some(rect) = chat.drop_rect
         && ctx.input(|i| !i.raw.hovered_files.is_empty())
-        && drop_is_ours(app, ctx)
+        && drop_is_ours(chat, ctx)
     {
         drop_hint(ctx, rect);
     }
     #[cfg(target_arch = "wasm32")]
-    let _ = (app, ctx);
+    let _ = (chat, ctx);
 }
 
 /// Where dragged files will go: a tinted zone over the chat with a line of text.
@@ -784,11 +927,11 @@ pub(crate) fn request_new_chat(app: &mut SolveApp) {
     }
 }
 
-fn new_chat_shortcut(app: &mut SolveApp, ctx: &egui::Context) {
+fn new_chat_shortcut(chat: &mut AgentChat, ctx: &egui::Context) {
     let in_chat = ctx.memory(|m| m.has_focus(Id::unique("sc_agent_chat_input")))
-        || ctx.pointer_hover_pos().is_some_and(|p| app.agent_chat.panel_rect.is_some_and(|r| r.contains(p)));
-    if app.agent_chat.open && in_chat && ctx.input_mut(|i| i.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
-        app.agent_chat.actions.push(PanelAction::RequestNewChat);
+        || ctx.pointer_hover_pos().is_some_and(|p| chat.panel_rect.is_some_and(|r| r.contains(p)));
+    if chat.open && in_chat && ctx.input_mut(|i| i.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
+        chat.actions.push(PanelAction::RequestNewChat);
     }
 }
 
@@ -807,10 +950,10 @@ pub fn window_place(saved: Option<[f32; 4]>) -> Option<([f32; 2], [f32; 2])> {
 /// The chat window's settings. The saved place and size go only to a window that is opening:
 /// egui turns a changed place into a move, and the system rounds what it is given, so giving it
 /// every frame made the window chase its own rounding (it shook a pixel up and down).
-pub fn window_builder(app: &SolveApp, prefs: &AgentPanelPrefs) -> egui::ViewportBuilder {
-    let title = format!("{} — {}", app.session.doc.name, tr("ui.agent_chat"));
+pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> egui::ViewportBuilder {
+    let title = format!("{document} — {}", tr("ui.agent_chat"));
     let builder = egui::ViewportBuilder::default().with_title(title).with_min_inner_size([MIN_WIDTH, 320.0]);
-    if app.agent_chat.window_placed {
+    if placed {
         return builder;
     }
     match window_place(prefs.window) {
@@ -823,36 +966,32 @@ pub fn window_builder(app: &SolveApp, prefs: &AgentPanelPrefs) -> egui::Viewport
 /// go to another screen, or a window floating inside the app where the system can't open one.
 /// The system's close button closes the chat (it opens there again); Dock puts it back.
 #[cfg(not(target_arch = "wasm32"))]
-fn window(app: &mut SolveApp, ctx: &egui::Context, prefs: &mut AgentPanelPrefs) {
-    let builder = window_builder(app, prefs);
-    app.agent_chat.window_placed = true;
+fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &mut AgentPanelPrefs) {
+    let builder = window_builder(&view.document, chat.window_placed, prefs);
+    chat.window_placed = true;
     // The side panel isn't drawn: its place no longer counts as "in the chat".
-    app.agent_chat.panel_rect = None;
+    chat.panel_rect = None;
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("sc_agent_chat_window"), builder, |ui, class| {
         // Root/embedded inputs are handled by SolveApp::logic. A native chat window owns
         // its input and must see the toggle before its text editor can consume the chord.
         // The window holds the panel, not the shared host, so the toggle works on the panel's
         // own state (the copy being drawn from).
-        if class != egui::ViewportClass::EmbeddedWindow
-            && shown(app)
-            && !crate::keymap::capturing(app)
-            && toggle_pressed(ui.ctx(), &crate::keymap::keys(app, "ui.assistant"))
-        {
-            toggle_panel(&mut app.agent_chat.open, prefs);
+        if class != egui::ViewportClass::EmbeddedWindow && view.shown && !view.capturing_keys && toggle_pressed(ui.ctx(), &view.toggle_keys) {
+            toggle_panel(&mut chat.open, prefs);
         }
         let t = Tokens::get();
         let frame = Container::new(ui.ctx(), Surface::Panel).edge_frame(t.dialog_body);
         let panel = Container::new(ui.ctx(), Surface::Viewport).central();
-        let r = Container::show_central(ui, panel, frame, |ui| ui_kit::scope(ui, |ui| body(app, ui, false, prefs)));
+        let r = Container::show_central(ui, panel, frame, |ui| ui_kit::scope(ui, |ui| body(chat, view, ui, false, prefs)));
         // The picture viewer opens over this window, where the click was, not over the main one.
-        gallery_window(app, ui.ctx());
+        gallery_window(chat, ui.ctx());
         if class == egui::ViewportClass::EmbeddedWindow {
             // Floating inside the app: its handles are the main window's, as the panel's are. The
             // app's own drop handling sees the drops, so the window counts as the chat's place
             // (the hint is drawn by the caller).
             solidcraft_ui_registry::publish_rect("agent_chat:window", r.response.rect);
-            app.agent_chat.panel_rect = Some(r.response.rect);
-            app.agent_chat.drop_rect = Some(r.response.rect);
+            chat.panel_rect = Some(r.response.rect);
+            chat.drop_rect = Some(r.response.rect);
             return;
         }
         let ctx = ui.ctx().clone();
@@ -860,21 +999,21 @@ fn window(app: &mut SolveApp, ctx: &egui::Context, prefs: &mut AgentPanelPrefs) 
         // is no pointer to ask about (the main window's handling never sees them).
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         if !dropped.is_empty() {
-            app.agent_chat.actions.push(PanelAction::AttachDropped(dropped.iter().map(|f| f.path().to_path_buf()).collect()));
+            chat.actions.push(PanelAction::AttachDropped(dropped.iter().map(|f| f.path().to_path_buf()).collect()));
         }
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             drop_hint(&ctx, r.response.rect);
         }
         // The whole window is the chat, so New chat works anywhere in it.
         if ctx.input_mut(|i| i.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
-            app.agent_chat.actions.push(PanelAction::RequestNewChat);
+            chat.actions.push(PanelAction::RequestNewChat);
         }
         let (outer, inner, close) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().inner_rect, i.viewport().close_requested()));
         if let (Some(o), Some(n)) = (outer, inner) {
             prefs.window = Some([o.min.x, o.min.y, n.width(), n.height()]);
         }
         if close {
-            app.agent_chat.open = false;
+            chat.open = false;
         }
     });
 }
@@ -946,7 +1085,7 @@ fn state_color(state: State) -> Color32 {
 
 /// The folded panel: the chat icon (unfolds it), the agent's state, and a mark while something
 /// waits for the user.
-fn strip(app: &mut SolveApp, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
+fn strip(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
     let t = Tokens::get();
     let r = ui.max_rect();
     let button = Rect::from_center_size(pos2(r.center().x, r.top() + 22.0), vec2(26.0, 26.0));
@@ -956,15 +1095,15 @@ fn strip(app: &mut SolveApp, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
         ui.painter().rect_filled(button, t.radius_sm, t.hover);
     }
     ui_kit::disclosure(ui.painter(), button.center(), false, t.text);
-    let state = app.agent_chat.state();
+    let state = chat.state();
     ui.painter().circle_filled(pos2(r.center().x, button.bottom() + 10.0), 3.5, state_color(state));
-    let waiting = app.agent_chat.waiting();
+    let waiting = chat.waiting();
     if waiting > 0 {
         ui_kit::attention_mark(ui.painter(), button, Some(waiting));
     }
     ui.painter()
         .line_segment(if prefs.left { [r.right_top(), r.right_bottom()] } else { [r.left_top(), r.left_bottom()] }, t.primary_border(t.border));
-    let tip = format!("{} · {}", tip(app), state.label());
+    let tip = format!("{} · {}", view.tip, state.label());
     if resp.backing_on_hover_text(tip).clicked() {
         prefs.minimized = false;
     }
@@ -973,9 +1112,9 @@ fn strip(app: &mut SolveApp, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
 /// The header: a grip to drag the panel to the other side, the title and state, Connect or Stop,
 /// Pop out (or Dock, in its own window), Minimise and Close. In its own window the system moves
 /// and minimises it, so there is no grip and no Minimise.
-fn header(app: &mut SolveApp, ui: &mut egui::Ui, left: bool, prefs: &mut AgentPanelPrefs) {
+fn header(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, left: bool, prefs: &mut AgentPanelPrefs) {
     let t = Tokens::get();
-    let state = app.agent_chat.state();
+    let state = chat.state();
     let popped = prefs.popped;
     ui_kit::assistant_header(ui, |ui| {
         ui.horizontal(|ui| {
@@ -985,7 +1124,7 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, left: bool, prefs: &mut AgentPa
                 let l = ui.label(RichText::new(tr("ui.assistant")).semibold().color(t.text).size(t.font_heading));
                 grip.union(l.rect)
             };
-            let waiting = app.agent_chat.waiting();
+            let waiting = chat.waiting();
             let s = if waiting > 0 { tr("ui.agent_chat_waiting").to_string() } else { state.label().to_string() };
             if ui.available_width() > t.space_24 * 9.0 {
                 ui_kit::assistant_badge(
@@ -1008,11 +1147,11 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, left: bool, prefs: &mut AgentPa
             if !popped {
                 let drag = ui.interact(title, Id::unique("sc_agent_chat_grip"), Sense::drag());
                 solidcraft_ui_registry::publish_handle("agent_chat:grip", title.center());
-                dock_drag(app, ui, &drag, left, prefs);
+                dock_drag(chat, view, ui, &drag, left, prefs);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if glyph_button(ui, "close", tr("ui.agent_chat_close")).clicked() {
-                    app.agent_chat.open = false;
+                    chat.open = false;
                 }
                 if !popped && glyph_button(ui, "minimize", tr("ui.agent_chat_minimize")).clicked() {
                     prefs.minimized = true;
@@ -1025,7 +1164,7 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, left: bool, prefs: &mut AgentPa
                 )
                 .clicked()
                 {
-                    app.agent_chat.actions.push(PanelAction::RequestNewChat);
+                    chat.actions.push(PanelAction::RequestNewChat);
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 {
@@ -1041,7 +1180,7 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, left: bool, prefs: &mut AgentPa
 
 /// While the header is dragged: the cursor grabs and the side it would dock on lights up; on
 /// release over the other half of the window the panel moves there.
-fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response, left: bool, prefs: &mut AgentPanelPrefs) {
+fn dock_drag(chat: &mut AgentChat, view: &PanelView, ui: &egui::Ui, drag: &egui::Response, left: bool, prefs: &mut AgentPanelPrefs) {
     if drag.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
@@ -1052,9 +1191,9 @@ fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response, left: boo
     {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         let to_left = target(p.x);
-        let available = app.agent_chat.dock_space.unwrap_or(screen);
-        let zone = if Container::for_layout(app.ui.layout, Surface::Panel).floating() {
-            floating_bounds(app, prefs, available, to_left)
+        let available = chat.dock_space.unwrap_or(screen);
+        let zone = if view.floating() {
+            floating_bounds(view, prefs, available, to_left)
         } else {
             let w = prefs.width.clamp(MIN_WIDTH, MAX_WIDTH).min(available.width());
             Rect::from_min_size(pos2(if to_left { available.left() } else { available.right() - w }, available.top()), vec2(w, available.height()))
@@ -1079,34 +1218,34 @@ fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response, left: boo
     }
 }
 
-fn body(app: &mut SolveApp, ui: &mut egui::Ui, left: bool, prefs: &mut AgentPanelPrefs) {
-    header(app, ui, left, prefs);
-    content(app, ui, Flow::Tall, prefs);
+fn body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, left: bool, prefs: &mut AgentPanelPrefs) {
+    header(chat, view, ui, left, prefs);
+    content(chat, view, ui, Flow::Tall, prefs);
 }
 
-fn content(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow, prefs: &AgentPanelPrefs) {
+fn content(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, flow: Flow, prefs: &AgentPanelPrefs) {
     #[cfg(target_arch = "wasm32")]
-    let _ = (flow, prefs);
+    let _ = (chat, view, flow, prefs);
     #[cfg(not(target_arch = "wasm32"))]
-    if !crate::panel_runtime::shared_content_measurement(ui.ctx()) {
-        ui_kit::assistant_controls(ui, |ui| switcher(app, ui));
+    if !view.shared {
+        ui_kit::assistant_controls(ui, |ui| switcher(chat, view, ui));
     }
     #[cfg(target_arch = "wasm32")]
     {
         ui.label(tr("ui.agent_chat_desktop_only"));
     }
     #[cfg(not(target_arch = "wasm32"))]
-    desktop_body(app, ui, flow, prefs);
+    desktop_body(chat, view, ui, flow, prefs);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow, prefs: &AgentPanelPrefs) {
+fn desktop_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, flow: Flow, prefs: &AgentPanelPrefs) {
     let top = ui.cursor().top();
-    let shared = crate::panel_runtime::shared_content_measurement(ui.ctx());
-    if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
-        app.agent_chat.actions.push(PanelAction::Refresh);
+    let shared = view.shared;
+    if chat.detection.is_none() && chat.detecting.is_none() {
+        chat.actions.push(PanelAction::Refresh);
     }
-    let state = app.agent_chat.state();
+    let state = chat.state();
     let bounds = ui.available_rect_before_wrap();
     let gap = Tokens::get().space_8;
     // Compact wide cards keep the existing stack until both regions fit.
@@ -1115,11 +1254,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow, prefs: &Agent
         let width = (bounds.width() - gap) / 2.0;
         let left = Rect::from_min_size(bounds.min, vec2(width, bounds.height()));
         let right = Rect::from_min_max(pos2(bounds.right() - width, bounds.top()), bounds.max);
-        if crate::i18n::panel_direction(&app.preferences.language) == solidcraft_engine::panels::Direction::Rtl {
-            (left, Some(right))
-        } else {
-            (right, Some(left))
-        }
+        if view.rtl { (left, Some(right)) } else { (right, Some(left)) }
     } else {
         (bounds, None)
     };
@@ -1132,8 +1267,8 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow, prefs: &Agent
     });
     let (top_height, outcome, remaining) = {
         let column = interaction.as_mut().unwrap_or(&mut *ui);
-        let top_height = top_controls(app, column, state, shared);
-        let outcome = composer(app, column, state, prefs);
+        let top_height = top_controls(chat, view, column, state, shared);
+        let outcome = composer(chat, view, column, state, prefs);
         (top_height, outcome, column.available_rect_before_wrap())
     };
     let mut transcript = shared.then(|| {
@@ -1142,16 +1277,16 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow, prefs: &Agent
         child.set_clip_rect(ui.clip_rect().intersect(bounds));
         child
     });
-    let transcript_height = transcript_body(app, transcript.as_mut().unwrap_or(&mut *ui));
+    let transcript_height = transcript_body(chat, view, transcript.as_mut().unwrap_or(&mut *ui));
     let interaction_height = top_height + outcome.height;
     let height = if wide { interaction_height.max(transcript_height) } else { interaction_height + transcript_height };
-    crate::panel_runtime::report_content_extent(ui, top, height, false);
-    finish_composer(app, outcome);
+    chat.report.extent = Some((ui.layer_id(), top, height));
+    finish_composer(chat, outcome);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn new_chat_confirmation(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if app.agent_chat.confirm_new {
+fn new_chat_confirmation(chat: &mut AgentChat, ui: &mut egui::Ui) {
+    if chat.confirm_new {
         ui_kit::scope(ui, |ui| {
             inset(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -1160,10 +1295,10 @@ fn new_chat_confirmation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let yes = ui_kit::button(ui, tr("ui.agent_chat_new"), ui_kit::Button::Normal);
                     solidcraft_ui_registry::publish_target("agent_chat:new_confirm", yes.rect);
                     if yes.clicked() {
-                        app.agent_chat.actions.push(PanelAction::NewChat);
+                        chat.actions.push(PanelAction::NewChat);
                     }
                     if ui_kit::button(ui, tr("ui.agent_chat_cancel"), ui_kit::Button::Normal).clicked() {
-                        app.agent_chat.confirm_new = false;
+                        chat.confirm_new = false;
                     }
                 });
             });
@@ -1172,11 +1307,11 @@ fn new_chat_confirmation(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn top_controls(app: &mut SolveApp, ui: &mut egui::Ui, state: State, shared: bool) -> f32 {
+fn top_controls(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: State, shared: bool) -> f32 {
     let top = ui.cursor().top();
     let reveal_confirmation = shared && {
         let id = ui.scope_id().with("assistant-confirm-visible");
-        let visible = app.agent_chat.confirm_new;
+        let visible = chat.confirm_new;
         ui.data_mut(|data| {
             let previous = data.get_temp::<bool>(id).unwrap_or(false);
             data.insert_temp(id, visible);
@@ -1184,14 +1319,13 @@ fn top_controls(app: &mut SolveApp, ui: &mut egui::Ui, state: State, shared: boo
         })
     };
     if !shared {
-        new_chat_confirmation(app, ui);
+        new_chat_confirmation(chat, ui);
     }
     // Shared top controls must yield scroll space to the pinned composer, including
     // when discovery lists several agents or a long message grows the editor.
     let picker_max = if shared {
         let t = Tokens::get();
-        let composer = crate::panel_runtime::shared_content_composer_height(ui.ctx())
-            .unwrap_or(48.0 + t.control_height * 3.0 + t.space_8 * 2.0 + t.space_6 * 3.0);
+        let composer = view.composer_height.unwrap_or(48.0 + t.control_height * 3.0 + t.space_8 * 2.0 + t.space_6 * 3.0);
         (ui.available_height() - composer - ui.spacing().item_spacing.y).max(0.0)
     } else {
         ui.available_height() / 3.0
@@ -1205,16 +1339,16 @@ fn top_controls(app: &mut SolveApp, ui: &mut egui::Ui, state: State, shared: boo
     let picker = provider_scroll.show(ui, |ui| {
         solidcraft_ui_registry::publish_rect("agent_chat:providers", ui.clip_rect());
         if shared {
-            new_chat_confirmation(app, ui);
-            ui_kit::assistant_controls(ui, |ui| switcher(app, ui));
+            new_chat_confirmation(chat, ui);
+            ui_kit::assistant_controls(ui, |ui| switcher(chat, view, ui));
         }
-        picker(app, ui);
+        picker(chat, view, ui);
         if shared && state == State::NeedsAuth {
-            inset(ui, |ui| auth_box(app, ui));
+            inset(ui, |ui| auth_box(chat, ui));
         }
     });
     if !shared && state == State::NeedsAuth {
-        inset(ui, |ui| auth_box(app, ui));
+        inset(ui, |ui| auth_box(chat, ui));
     }
     ui.cursor().top() - top - picker.inner_rect.height().min(picker.content_size.y) + picker.content_size.y
 }
@@ -1230,7 +1364,7 @@ struct ComposerOutcome {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State, prefs: &AgentPanelPrefs) -> ComposerOutcome {
+fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: State, prefs: &AgentPanelPrefs) -> ComposerOutcome {
     // The input sits at the bottom of the panel and grows upwards: a long message makes its box
     // taller up to `edit_max`, then it scrolls, and the conversation takes what is left above. It
     // is a panel of its own at the bottom, as high as its content this frame, so the buttons under
@@ -1253,16 +1387,16 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State, prefs: &AgentPa
         let footer = ui_kit::assistant_composer_footer(ui, |ui| {
             let boxed = ui_kit::assistant_composer(ui, focused, |ui| {
                 // What Pick context chose for this message, each item with an ×.
-                if !app.agent_chat.picked_context.is_empty() {
-                    let tray = app.agent_chat.picked_context.clone();
+                if !chat.picked_context.is_empty() {
+                    let tray = chat.picked_context.clone();
                     remove_picked_at = context_chips(ui, &tray, true);
                 }
                 // The files for the next message (#1744), as chips of their own.
-                attachment_chips(app, ui);
+                attachment_chips(chat, ui);
                 // Ctrl/Cmd+V: files and pictures on the clipboard attach; text goes to the box below.
                 #[cfg(not(target_arch = "wasm32"))]
-                if focused {
-                    super::paste::handle(app, ui);
+                if focused && let Some(action) = super::paste::handle(chat, ui) {
+                    chat.actions.push(action);
                 }
                 let r = egui::ScrollArea::vertical()
                     .id_salt("sc_agent_chat_input_scroll")
@@ -1275,13 +1409,13 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State, prefs: &AgentPa
                         ui_kit::assistant_input(
                             ui,
                             Id::unique("sc_agent_chat_input"),
-                            &mut app.agent_chat.input,
+                            &mut chat.input,
                             tr(if busy { "ui.agent_chat_placeholder_busy" } else { "ui.agent_chat_placeholder" }),
                         )
                     })
                     .inner;
                 solidcraft_ui_registry::publish_rect("agent_chat:input", r.rect);
-                crate::panel_runtime::register_content_focus(ui.ctx(), &r);
+                chat.report.focus.push(r.clone());
                 // macOS shows a window's cursors only while it is the active window: over the text box of a
                 // chat window that isn't, the pointer stays an arrow. Coming from the main window, the chat
                 // window becomes active, so the text cursor shows and the first click places the caret.
@@ -1296,10 +1430,8 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State, prefs: &AgentPa
                     Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.set_min_height(Tokens::get().control_height + Tokens::get().space_2);
-                        add_menu(app, ui);
-                        let agent =
-                            if state.running() { Some(app.agent_chat.running_id.clone()) } else { agents::current(app).map(|entry| entry.id) };
-                        let mode = agent.as_deref().map_or(app.preferences.ai_permissions, |id| agents::mode_for(&app.preferences, id));
+                        add_menu(chat, ui);
+                        let mode = view.permission;
                         let permissions = ui
                             .allocate_ui(vec2(Tokens::get().space_24 * 4.0, Tokens::get().control_height), |ui| {
                                 ui_kit::dropdown_menu(
@@ -1313,11 +1445,7 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State, prefs: &AgentPa
                                     |ui| {
                                         for choice in agents::Mode::ALL {
                                             if ui_kit::list_picker(ui, choice.id(), choice.label(), mode == choice).clicked() {
-                                                if let Some(id) = &agent {
-                                                    app.preferences.agent_permissions.insert(id.clone(), choice);
-                                                } else {
-                                                    app.preferences.ai_permissions = choice;
-                                                }
+                                                chat.actions.push(PanelAction::SetPermission { agent: view.permission_agent.clone(), mode: choice });
                                             }
                                         }
                                     },
@@ -1328,7 +1456,7 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State, prefs: &AgentPa
                         solidcraft_ui_registry::publish_rect("agent_chat:permissions", permissions.rect);
                         solidcraft_ui_registry::publish_handle("agent_chat:permissions", permissions.rect.center());
                         // A message waits for files still being read.
-                        let reading = !app.agent_chat.loading.is_empty();
+                        let reading = !chat.loading.is_empty();
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let action = ui_kit::assistant_send(
                                 ui,
@@ -1357,32 +1485,32 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State, prefs: &AgentPa
                     |ui| {
                         ui.set_min_height(Tokens::get().control_height);
                         // A picture of the view goes with the message to agents that take pictures.
-                        let images = app.agent_chat.images || !state.running();
+                        let images = chat.images || !state.running();
                         let attach = ui
-                            .add_enabled_ui(images, |ui| ui_kit::checkbox(ui, tr("ui.agent_chat_attach_view"), &mut app.agent_chat.attach_view))
+                            .add_enabled_ui(images, |ui| ui_kit::checkbox(ui, tr("ui.agent_chat_attach_view"), &mut chat.attach_view))
                             .inner
                             .backing_on_hover_text(tr("ui.agent_chat_attach_view_tip"))
                             .backing_on_disabled_hover_text(tr("ui.agent_chat_no_images"));
                         solidcraft_ui_registry::publish_handle("agent_chat:attach", attach.rect.center());
                         // What is selected in the model goes with the message: text for the agent,
                         // chips in the conversation.
-                        let selected = selected_count(app);
+                        let selected = view.selected;
                         let label = if selected > 0 {
                             format!("{} ({selected})", tr("ui.agent_chat_attach_selection"))
                         } else {
                             tr("ui.agent_chat_attach_selection").to_string()
                         };
-                        let pick = ui_kit::checkbox(ui, &label, &mut app.agent_chat.attach_selection)
-                            .backing_on_hover_text(tr("ui.agent_chat_attach_selection_tip"));
+                        let pick =
+                            ui_kit::checkbox(ui, &label, &mut chat.attach_selection).backing_on_hover_text(tr("ui.agent_chat_attach_selection_tip"));
                         solidcraft_ui_registry::publish_handle("agent_chat:attach_selection", pick.rect.center());
                         // Choose faces, edges, features and bodies on purpose, then OK.
-                        let picker = ui_kit::button(ui, tr("ui.agent_chat_pick_context"), ui_kit::Button::Enabled(app.dialog.is_none()))
+                        let picker = ui_kit::button(ui, tr("ui.agent_chat_pick_context"), ui_kit::Button::Enabled(!view.dialog_open))
                             .backing_on_hover_text(tr("ui.agent_chat_pick_context_tip"));
                         solidcraft_ui_registry::publish_handle("agent_chat:pick_context", picker.rect.center());
                         pick_clicked = picker.clicked();
-                        if let Some(turn) = &app.agent_chat.turn {
+                        if let Some(turn) = &chat.turn {
                             let n = turn.changes.to_string();
-                            let count = match app.preferences.agent_chat_turn_limit {
+                            let count = match view.turn_limit {
                                 0 => trf("ui.agent_chat_changes_n", &[("n", &n)]),
                                 limit => trf("ui.agent_chat_changes_of", &[("n", &n), ("limit", &limit.to_string())]),
                             };
@@ -1398,18 +1526,18 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State, prefs: &AgentPa
         // viewport. Reserve the actual footer content on the next frame.
         footer.response.rect.height()
     });
-    crate::panel_runtime::report_content_composer_height(ui.ctx(), composer.inner);
+    chat.report.composer_height = Some(composer.inner);
     if let Some(at) = remove_picked_at {
-        app.agent_chat.actions.push(PanelAction::RemovePicked(at));
+        chat.actions.push(PanelAction::RemovePicked(at));
     }
     if pick_clicked {
-        app.agent_chat.actions.push(PanelAction::StartPick);
+        chat.actions.push(PanelAction::StartPick);
     }
     ComposerOutcome { height: composer.inner, send_clicked, stop_clicked, enter, steer, esc }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn transcript_body(app: &mut SolveApp, ui: &mut egui::Ui) -> f32 {
+fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) -> f32 {
     let conversation = egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_scroll")
         .min_scrolled_height(0.0)
@@ -1419,7 +1547,7 @@ fn transcript_body(app: &mut SolveApp, ui: &mut egui::Ui) -> f32 {
         .show(ui, |ui| {
             egui::Frame::NONE.inner_margin(egui::Margin::same(Tokens::get().space_12 as i8)).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = Tokens::get().space_10;
-                conversation(app, ui);
+                conversation(chat, view, ui);
             });
             // Last, so the scroll goes to this area and not to one nested in the conversation.
             scroll_while_selecting(ui);
@@ -1429,50 +1557,50 @@ fn transcript_body(app: &mut SolveApp, ui: &mut egui::Ui) -> f32 {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn finish_composer(app: &mut SolveApp, outcome: ComposerOutcome) {
+fn finish_composer(chat: &mut AgentChat, outcome: ComposerOutcome) {
     let ComposerOutcome { send_clicked, stop_clicked, enter, steer, esc, .. } = outcome;
     if esc || stop_clicked {
-        app.agent_chat.actions.push(PanelAction::Cancel);
+        chat.actions.push(PanelAction::Cancel);
     }
     // A message waits for files still being read, and files alone make a message.
-    let reading = !app.agent_chat.loading.is_empty();
-    let something = !app.agent_chat.input.trim().is_empty() || !app.agent_chat.attachments.is_empty();
+    let reading = !chat.loading.is_empty();
+    let something = !chat.input.trim().is_empty() || !chat.attachments.is_empty();
     if reading {
         // Enter waits with the button.
     } else if (send_clicked || enter || steer) && something {
-        let text = std::mem::take(&mut app.agent_chat.input).trim_end_matches('\n').to_string();
-        app.agent_chat.actions.push(PanelAction::Send { text, steer });
+        let text = std::mem::take(&mut chat.input).trim_end_matches('\n').to_string();
+        chat.actions.push(PanelAction::Send { text, steer });
     } else if steer {
         // Nothing typed: Ctrl+Enter sends what is already queued.
-        app.agent_chat.actions.push(PanelAction::SendNow);
+        chat.actions.push(PanelAction::SendNow);
     }
 }
 
 /// The header's second row: the agent this conversation uses (a compact switcher), the agent's
 /// own mode when it has modes, and the state of its login.
 #[cfg(not(target_arch = "wasm32"))]
-fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
+fn switcher(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    let all = agents::entries(app);
-    let current = agents::current(app);
+    let all = &view.agents;
+    let current = view.current.clone();
     // An advertised (even empty) config list replaces the older ACP model/mode pickers.
-    let modern = app.agent_chat.config_options.is_some();
+    let modern = chat.config_options.is_some();
     ui.horizontal_wrapped(|ui| {
         let label = current.as_ref().map_or_else(
-            || tr(if app.agent_chat.detecting.is_some() { "ui.agent_chat_detecting" } else { "ui.agent_chat_none_found_short" }).to_string(),
+            || tr(if chat.detecting.is_some() { "ui.agent_chat_detecting" } else { "ui.agent_chat_none_found_short" }).to_string(),
             |e| e.name.clone(),
         );
-        let models = !modern && models_shown(app);
-        let providers = if models { model_providers(app) } else { Vec::new() };
-        let w = (ui.available_width() - if modern || app.agent_chat.modes.is_empty() { 4.0 } else { 116.0 } - if models { 146.0 } else { 0.0 })
-            .clamp(90.0, 260.0);
+        let models = !modern && chat.models_shown();
+        let providers = if models { chat.model_providers() } else { Vec::new() };
+        let w =
+            (ui.available_width() - if modern || chat.modes.is_empty() { 4.0 } else { 116.0 } - if models { 146.0 } else { 0.0 }).clamp(90.0, 260.0);
         let mut picked: Option<String> = None;
         let mut add = false;
         let combo = ui
             .allocate_ui(vec2(w, t.control_height), |ui| {
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                 ui_kit::dropdown_menu(ui, "sc_agent_switch", &label, |ui| {
-                    for e in &all {
+                    for e in all {
                         let sel = current.as_ref().is_some_and(|c| c.id == e.id);
                         let r = ui_kit::list_picker(ui, &e.id, &e.name, sel).backing_on_hover_text(format!("{} {}", e.detail(), e.login));
                         solidcraft_ui_registry::publish_handle(&format!("agent_chat:agent:{}", e.id), r.rect.center());
@@ -1485,7 +1613,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                         add = true;
                     }
                     if ui_kit::list_picker(ui, "settings", tr("ui.ai_settings"), false).clicked() {
-                        app.agent_chat.actions.push(PanelAction::OpenSettings);
+                        chat.actions.push(PanelAction::OpenSettings);
                     }
                 })
             })
@@ -1494,24 +1622,24 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
         solidcraft_ui_registry::publish_handle("agent_chat:switcher", combo.rect.center());
         combo.backing_on_hover_text(tr("ui.ai_switch_tip"));
         if add {
-            app.agent_chat.actions.push(PanelAction::AddAgent);
+            chat.actions.push(PanelAction::AddAgent);
         }
         if let Some(id) = picked
             && current.as_ref().is_none_or(|c| c.id != id)
         {
-            app.agent_chat.actions.push(PanelAction::SwitchAgent(id));
+            chat.actions.push(PanelAction::SwitchAgent(id));
         }
         // The agent's own modes (ACP `modes`): its own tools follow them.
-        if !modern && !app.agent_chat.modes.is_empty() {
-            let modes = app.agent_chat.modes.clone();
-            let cur = modes.iter().find(|(id, _)| *id == app.agent_chat.mode).map_or_else(|| app.agent_chat.mode.clone(), |(_, n)| n.clone());
+        if !modern && !chat.modes.is_empty() {
+            let modes = chat.modes.clone();
+            let cur = modes.iter().find(|(id, _)| *id == chat.mode).map_or_else(|| chat.mode.clone(), |(_, n)| n.clone());
             let mut pick: Option<String> = None;
             let r = ui
                 .allocate_ui(vec2(t.form_label_width, t.control_height), |ui| {
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                     ui_kit::dropdown_menu(ui, "sc_agent_mode", &cur, |ui| {
                         for (id, name) in &modes {
-                            if ui_kit::list_picker(ui, id, name, *id == app.agent_chat.mode).clicked() {
+                            if ui_kit::list_picker(ui, id, name, *id == chat.mode).clicked() {
                                 pick = Some(id.clone());
                             }
                         }
@@ -1522,23 +1650,20 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
             solidcraft_ui_registry::publish_handle("agent_chat:mode", r.rect.center());
             r.backing_on_hover_text(tr("ui.ai_agent_mode_tip"));
             if let Some(m) = pick {
-                app.agent_chat.actions.push(PanelAction::SetMode(m));
+                chat.actions.push(PanelAction::SetMode(m));
             }
         }
         // The agent's models (ACP `models`, or an endpoint's list): shown only when it reports some.
         if models {
             // Models from several providers fold under their providers inside the picker, the
             // current model's provider open.
-            let list = grouped_models(app);
-            let open = shown_provider(app).filter(|_| !providers.is_empty());
-            let cur = list
-                .iter()
-                .find(|(m, _, _, _)| m.id == app.agent_chat.model)
-                .map_or_else(|| app.agent_chat.model.clone(), |(_, name, _, _)| name.clone());
+            let list = chat.grouped_models();
+            let open = chat.shown_provider().filter(|_| !providers.is_empty());
+            let cur = list.iter().find(|(m, _, _, _)| m.id == chat.model).map_or_else(|| chat.model.clone(), |(_, name, _, _)| name.clone());
             let width = if providers.is_empty() { t.form_label_width } else { picker_width(ui, &cur) };
             let choices: Vec<ui_kit::SearchChoice<'_>> =
                 list.iter().map(|(m, name, group, tip)| ui_kit::SearchChoice { value: &m.id, label: name, tip, group: group.as_deref() }).collect();
-            let custom = custom_models_accepted(app);
+            let custom = chat.custom_models_accepted();
             let picker = ui
                 .allocate_ui(vec2(width, t.control_height), |ui| {
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
@@ -1548,11 +1673,11 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                             id: "sc_agent_model",
                             handles: "agent_chat:model",
                             current: &cur,
-                            current_value: &app.agent_chat.model,
+                            current_value: &chat.model,
                             hint: tr("ui.agent_chat_model_search"),
                             choices: &choices,
                             custom,
-                            note: app.agent_chat.models_note.as_deref(),
+                            note: chat.models_note.as_deref(),
                             open_group: open.as_deref(),
                             enabled: true,
                         },
@@ -1561,31 +1686,31 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .inner;
             picker.response.backing_on_hover_text(tr("ui.agent_chat_model_tip"));
             match picker.inner {
-                Some(ui_kit::Picked::Listed(m)) => app.agent_chat.actions.push(PanelAction::SetModel(m)),
-                Some(ui_kit::Picked::Custom(m)) => app.agent_chat.actions.push(PanelAction::SetCustomModel(m)),
+                Some(ui_kit::Picked::Listed(m)) => chat.actions.push(PanelAction::SetModel(m)),
+                Some(ui_kit::Picked::Custom(m)) => chat.actions.push(PanelAction::SetCustomModel(m)),
                 None => {}
             }
         }
     });
-    if let Some(warning) = settings::model_warning(app) {
+    if let Some(warning) = &view.model_warning {
         ui.add(egui::Label::new(RichText::new(warning).color(t.warning).size(t.font_small)).wrap());
     }
-    if let Some(options) = app.agent_chat.config_options.clone() {
-        config_selects(app, ui, &options);
+    if let Some(options) = chat.config_options.clone() {
+        config_selects(chat, ui, &options);
     }
     ui.horizontal(|ui| {
-        let b = if app.agent_chat.state().running() {
+        let b = if chat.state().running() {
             ui_kit::button(ui, tr("ui.agent_chat_stop"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.agent_chat_stop_tip"))
         } else {
-            let label = if app.agent_chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
+            let label = if chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
             ui_kit::button(ui, tr(label), ui_kit::Button::Normal)
         };
         solidcraft_ui_registry::publish_handle("agent_chat:connect", b.rect.center());
         if b.clicked() {
-            app.agent_chat.actions.push(if app.agent_chat.state().running() { PanelAction::Disconnect } else { PanelAction::Connect });
+            chat.actions.push(if chat.state().running() { PanelAction::Disconnect } else { PanelAction::Connect });
         }
     });
-    if let Some(a) = &app.agent_chat.auth_status {
+    if let Some(a) = &chat.auth_status {
         ui.label(RichText::new(a).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_small));
     }
 }
@@ -1628,9 +1753,9 @@ fn picker_width(ui: &egui::Ui, label: &str) -> f32 {
 /// An agent's select options are authoritative. Compact value pickers share a strip below the
 /// agent switcher; only a narrow chat wraps them, rather than spending two full rows per option.
 #[cfg(not(target_arch = "wasm32"))]
-fn config_selects(app: &mut SolveApp, ui: &mut egui::Ui, options: &[acp::ConfigOption]) {
+fn config_selects(chat: &mut AgentChat, ui: &mut egui::Ui, options: &[acp::ConfigOption]) {
     let t = Tokens::get();
-    let pending = app.agent_chat.config_pending;
+    let pending = chat.config_pending;
     let strip_width = ui.available_width().min(ui.max_rect().width()).max(0.0);
     let mut row = Vec::new();
     let mut used = 0.0;
@@ -1644,7 +1769,7 @@ fn config_selects(app: &mut SolveApp, ui: &mut egui::Ui, options: &[acp::ConfigO
         if !row.is_empty() && used + spacing + width > strip_width {
             ui.horizontal(|ui| {
                 for (option, width) in row.drain(..) {
-                    config_select(app, ui, option, width, pending);
+                    config_select(chat, ui, option, width, pending);
                 }
             });
             used = 0.0;
@@ -1655,14 +1780,14 @@ fn config_selects(app: &mut SolveApp, ui: &mut egui::Ui, options: &[acp::ConfigO
     if !row.is_empty() {
         ui.horizontal(|ui| {
             for (option, width) in row {
-                config_select(app, ui, option, width, pending);
+                config_select(chat, ui, option, width, pending);
             }
         });
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn config_select(app: &mut SolveApp, ui: &mut egui::Ui, option: &acp::ConfigOption, width: f32, pending: bool) {
+fn config_select(chat: &mut AgentChat, ui: &mut egui::Ui, option: &acp::ConfigOption, width: f32, pending: bool) {
     let t = Tokens::get();
     let current = option.options.iter().find(|choice| choice.value == option.current_value);
     let selected = current.map_or(option.current_value.as_str(), |choice| choice.name.as_str());
@@ -1768,8 +1893,8 @@ fn config_select(app: &mut SolveApp, ui: &mut egui::Ui, option: &acp::ConfigOpti
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, enabled, format!("{name}: {selected}")));
     response.backing_on_hover_text(tip);
     match picked {
-        Some(ui_kit::Picked::Listed(value)) => app.agent_chat.actions.push(PanelAction::SetConfigOption { id: option.id.clone(), value }),
-        Some(ui_kit::Picked::Custom(value)) => app.agent_chat.actions.push(PanelAction::SetCustomModel(value)),
+        Some(ui_kit::Picked::Listed(value)) => chat.actions.push(PanelAction::SetConfigOption { id: option.id.clone(), value }),
+        Some(ui_kit::Picked::Custom(value)) => chat.actions.push(PanelAction::SetCustomModel(value)),
         None => {}
     }
 }
@@ -1807,9 +1932,10 @@ mod config_ui_tests {
     fn draw_switcher(app: &mut SolveApp, ctx: &egui::Context, width: f32) {
         solidcraft_ui_registry::clear_handles();
         let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 700.0));
+        let view = PanelView::of(app, ctx);
         ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
             ui.allocate_ui(vec2(width - 16.0, 600.0), |ui| {
-                ui_kit::scope(ui, |ui| switcher(app, ui));
+                ui_kit::scope(ui, |ui| switcher(&mut app.agent_chat, &view, ui));
             });
         })
         .textures_delta
@@ -1892,49 +2018,49 @@ fn inset<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
 
 /// Before the first connection: what's installed, how to install the rest, and Add agent.
 #[cfg(not(target_arch = "wasm32"))]
-fn picker(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let open = app.agent_chat.picking.unwrap_or(!app.agent_chat.state().running() && app.agent_chat.items.is_empty());
+fn picker(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
+    let open = chat.picking.unwrap_or(!chat.state().running() && chat.items.is_empty());
     if !open {
         return;
     }
-    inset(ui, |ui| agent_list(app, ui));
+    inset(ui, |ui| agent_list(chat, view, ui));
 }
 
 /// [`picker`]'s content: the agents found, Refresh and Add agent, and what isn't installed.
 #[cfg(not(target_arch = "wasm32"))]
-fn agent_list(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let all = agents::entries(app);
-    let current = agents::current(app);
+fn agent_list(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
+    let all = &view.agents;
+    let current = view.current.clone();
     ui.horizontal(|ui| {
         ui_kit::text(ui, tr("ui.agent_chat_pick"), ui_kit::Text::Inline);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let refreshing = app.agent_chat.detecting.is_some();
+            let refreshing = chat.detecting.is_some();
             if ui_kit::button(ui, tr("ui.agent_chat_refresh"), ui_kit::Button::Enabled(!refreshing)).clicked() {
-                app.agent_chat.actions.push(PanelAction::Refresh);
+                chat.actions.push(PanelAction::Refresh);
             }
             if ui_kit::button(ui, tr("ui.ai_add_agent"), ui_kit::Button::Small).clicked() {
-                app.agent_chat.actions.push(PanelAction::AddAgent);
+                chat.actions.push(PanelAction::AddAgent);
             }
         });
     });
-    if app.agent_chat.detecting.is_some() {
+    if chat.detecting.is_some() {
         ui_kit::text(ui, tr("ui.agent_chat_detecting"), ui_kit::Text::Note("detecting"));
     }
-    for e in &all {
+    for e in all {
         let selected = current.as_ref().is_some_and(|c| c.id == e.id);
         let resp = ui_kit::list_picker(ui, &e.id, &e.name, selected).backing_on_hover_text(format!("{} {}", e.detail(), e.login));
         solidcraft_ui_registry::publish_handle(&format!("agent_chat:pick:{}", e.id), resp.rect.center());
         if resp.clicked() {
-            app.agent_chat.agent_id = Some(e.id.clone());
+            chat.agent_id = Some(e.id.clone());
         }
     }
     // In the Flatpak the hint already says nothing was found, so the install list below is
     // headed "Not installed" instead of repeating it.
-    let flatpak_hint = all.is_empty() && app.agent_chat.detecting.is_none() && std::env::var_os("FLATPAK_ID").is_some();
+    let flatpak_hint = all.is_empty() && chat.detecting.is_none() && std::env::var_os("FLATPAK_ID").is_some();
     if flatpak_hint {
         no_agents(ui);
     }
-    let missing: Vec<discover::Missing> = app.agent_chat.detection.as_ref().map(|d| d.missing.clone()).unwrap_or_default();
+    let missing: Vec<discover::Missing> = chat.detection.as_ref().map(|d| d.missing.clone()).unwrap_or_default();
     if !missing.is_empty() {
         let heading = if all.is_empty() && !flatpak_hint { tr("ui.agent_chat_none_found") } else { tr("ui.agent_chat_not_installed") };
         ui_kit::section(ui, "sc_agent_missing", heading, all.is_empty(), |ui| {
@@ -1952,12 +2078,12 @@ fn agent_list(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn auth_box(app: &mut SolveApp, ui: &mut egui::Ui) {
+fn auth_box(chat: &mut AgentChat, ui: &mut egui::Ui) {
     ui_kit::section(ui, "authentication", tr("ui.agent_chat_auth_title"), true, |ui| {
         ui.set_width(ui.available_width());
         ui_kit::text(ui, tr("ui.agent_chat_auth_needed"), ui_kit::Text::Note("auth_needed"));
-        let methods = app.agent_chat.auth.clone();
-        let base = app.agent_chat.argv.iter().map(|a| quote(a)).collect::<Vec<_>>().join(" ");
+        let methods = chat.auth.clone();
+        let base = chat.argv.iter().map(|a| quote(a)).collect::<Vec<_>>().join(" ");
         if methods.is_empty() {
             ui_kit::text(ui, tr("ui.agent_chat_auth_none"), ui_kit::Text::Note("auth_none"));
         }
@@ -1984,7 +2110,7 @@ fn auth_box(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let b = ui_kit::button(ui, trf("ui.agent_chat_auth_agent", &[("name", &m.name)]), ui_kit::Button::Normal);
                     solidcraft_ui_registry::publish_handle(&format!("agent_chat:auth:{}", m.id), b.rect.center());
                     if b.clicked() {
-                        app.agent_chat.authenticate(&m.id);
+                        chat.authenticate(&m.id);
                     }
                 }
                 acp::AuthKind::EnvVar { vars } => {
@@ -1994,7 +2120,7 @@ fn auth_box(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         ui.add_space(solidcraft_theme::Tokens::get().space_4);
         if ui_kit::button(ui, tr("ui.agent_chat_auth_retry"), ui_kit::Button::Normal).clicked() {
-            app.agent_chat.actions.push(PanelAction::Connect);
+            chat.actions.push(PanelAction::Connect);
         }
     });
 }
@@ -2077,16 +2203,16 @@ fn scroll_while_selecting(ui: &egui::Ui) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
+fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let mut answer: Option<(usize, Option<String>)> = None;
     // Allow (true), Deny (false), Always allow (None).
     let mut approval: Option<(u64, Option<bool>)> = None;
     let mut undo: Option<usize> = None;
     let mut open_gallery: Option<Gallery> = None;
-    let current_doc = app.session.doc.clone();
-    let units = summary::Units { units: &app.session.doc.units, decimals: app.preferences.length_decimals };
-    for (n, item) in app.agent_chat.items.iter().enumerate() {
+    let current_doc = view.doc.clone();
+    let units = summary::Units { units: &view.units, decimals: view.decimals };
+    for (n, item) in chat.items.iter().enumerate() {
         match item {
             Item::User { text, image, pictures, context, files } => {
                 // A picture-only prompt has no text to copy: no action rather than an empty copy (#10675).
@@ -2133,12 +2259,12 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             Item::Tool { .. } => {
-                if n > 0 && matches!(app.agent_chat.items.get(n - 1), Some(Item::Tool { .. })) {
+                if n > 0 && matches!(chat.items.get(n - 1), Some(Item::Tool { .. })) {
                     continue;
                 }
                 ui_kit::assistant_tool_frame(ui, false, |ui| {
                     ui.spacing_mut().item_spacing.y = Tokens::get().space_2;
-                    for (offset, next) in app.agent_chat.items.iter().skip(n).take_while(|next| matches!(next, Item::Tool { .. })).enumerate() {
+                    for (offset, next) in chat.items.iter().skip(n).take_while(|next| matches!(next, Item::Tool { .. })).enumerate() {
                         if let Item::Tool { title, kind, status, input, output, .. } = next {
                             let words = summary::summary(title, input.as_ref(), output.as_deref(), *status == Some(ToolStatus::Completed), units);
                             let call = ToolCall {
@@ -2263,12 +2389,12 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     let (mut send_now_clicked, mut send_queue_clicked) = (false, false);
     let mut remove: Option<usize> = None;
     let mut edit_done: Option<(usize, Option<String>)> = None;
-    let busy = app.agent_chat.state() == State::Busy;
-    let stopped = app.agent_chat.stopped;
-    let editing = app.agent_chat.pending_edit.clone();
+    let busy = chat.state() == State::Busy;
+    let stopped = chat.stopped;
+    let editing = chat.pending_edit.clone();
     let mut start_edit: Option<(usize, String)> = None;
     let mut edit_buf = editing.as_ref().map(|(_, b)| b.clone());
-    for (n, p) in app.agent_chat.pending.iter().enumerate() {
+    for (n, p) in chat.pending.iter().enumerate() {
         ui.add_space(6.0);
         let frame = Container::new(ui.ctx(), Surface::Panel)
             .edge_frame(t.panel)
@@ -2299,7 +2425,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (Some((i, _)), Some(buf)) if *i == n => {
                     let te = ui_kit::message_field(ui, Id::unique(("sc_agent_pending_input", n)), buf, "");
                     solidcraft_ui_registry::publish_rect("agent_chat:pending_input", te.rect);
-                    crate::panel_runtime::register_content_focus(ui.ctx(), &te);
+                    chat.report.focus.push(te.clone());
                     ui.horizontal(|ui| {
                         if ui_kit::button(ui, tr("ui.agent_chat_save"), ui_kit::Button::Normal).clicked() {
                             edit_done = Some((n, Some(buf.clone())));
@@ -2322,7 +2448,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
     }
-    if !app.agent_chat.pending.is_empty() && editing.is_none() {
+    if !chat.pending.is_empty() && editing.is_none() {
         ui.horizontal(|ui| {
             if busy {
                 let b =
@@ -2337,15 +2463,15 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
     }
     if let Some(start) = start_edit {
-        app.agent_chat.pending_edit = Some(start);
-    } else if let (Some(buf), Some(slot)) = (edit_buf, app.agent_chat.pending_edit.as_mut()) {
+        chat.pending_edit = Some(start);
+    } else if let (Some(buf), Some(slot)) = (edit_buf, chat.pending_edit.as_mut()) {
         slot.1 = buf;
     }
-    if app.agent_chat.items.is_empty() && app.agent_chat.pending.is_empty() {
-        if agents::entries(app).is_empty() && app.agent_chat.detecting.is_none() {
+    if chat.items.is_empty() && chat.pending.is_empty() {
+        if view.agents.is_empty() && chat.detecting.is_none() {
             ui_kit::assistant_empty(ui, tr("ui.agent_chat_setup_title"), tr("ui.agent_chat_setup_body"), |ui| {
                 if ui_kit::primary_button(ui, tr("ui.agent_chat_open_settings")).clicked() {
-                    app.agent_chat.actions.push(PanelAction::OpenSettings);
+                    chat.actions.push(PanelAction::OpenSettings);
                 }
             });
         } else {
@@ -2356,33 +2482,33 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     if let Some((n, text)) = edit_done {
-        if let (Some(text), Some(p)) = (text.filter(|t| !t.trim().is_empty()), app.agent_chat.pending.get_mut(n)) {
+        if let (Some(text), Some(p)) = (text.filter(|t| !t.trim().is_empty()), chat.pending.get_mut(n)) {
             p.text = text;
         }
-        app.agent_chat.pending_edit = None;
+        chat.pending_edit = None;
     }
     if let Some(n) = remove {
-        app.agent_chat.actions.push(PanelAction::RemovePending(n));
+        chat.actions.push(PanelAction::RemovePending(n));
     }
     if send_now_clicked {
-        app.agent_chat.actions.push(PanelAction::SendNow);
+        chat.actions.push(PanelAction::SendNow);
     }
     if send_queue_clicked {
-        app.agent_chat.actions.push(PanelAction::SendNow);
+        chat.actions.push(PanelAction::SendNow);
     }
     if open_gallery.is_some() {
-        app.agent_chat.gallery = open_gallery;
+        chat.gallery = open_gallery;
     }
     if let Some((n, o)) = answer {
-        app.agent_chat.actions.push(PanelAction::AnswerPermission(n, o));
+        chat.actions.push(PanelAction::AnswerPermission(n, o));
     }
     match approval {
-        Some((id, Some(allow))) => app.agent_chat.actions.push(PanelAction::Approve(id, allow)),
-        Some((id, None)) => app.agent_chat.actions.push(PanelAction::ApproveAlways(id)),
+        Some((id, Some(allow))) => chat.actions.push(PanelAction::Approve(id, allow)),
+        Some((id, None)) => chat.actions.push(PanelAction::ApproveAlways(id)),
         None => {}
     }
     if let Some(n) = undo {
-        app.agent_chat.actions.push(PanelAction::UndoChanges(n));
+        chat.actions.push(PanelAction::UndoChanges(n));
     }
 }
 
@@ -2403,8 +2529,7 @@ const CHIP_W: f32 = 170.0;
 /// a file mark), the name cut to fit, and a × that takes the file off. Laid out by hand: egui
 /// wraps plain widgets, not framed groups, and one row wider than the chat widens all below it.
 #[cfg(not(target_arch = "wasm32"))]
-fn attachment_chips(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let chat = &mut app.agent_chat;
+fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
     // Thumbnails of files no longer on the message are let go.
     let keep: Vec<u64> = chat.attachments.iter().filter(|f| f.thumb.is_some()).map(|f| f.id).collect();
     chat.thumbs.retain(|k, _| keep.contains(k));
@@ -2559,7 +2684,7 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
 /// The + button: choose a file with the app's picker (pictures, text and CAD files), or paste
 /// the clipboard's picture.
 #[cfg(not(target_arch = "wasm32"))]
-fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
+fn add_menu(chat: &mut AgentChat, ui: &mut egui::Ui) {
     let (mut choose, mut paste) = (false, false);
     let r = ui_kit::action_menu(ui, "+", |ui| {
         let a = ui_kit::button(ui, tr("ui.agent_chat_add_file"), ui_kit::Button::Normal);
@@ -2578,10 +2703,10 @@ fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
     solidcraft_ui_registry::publish_handle("agent_chat:add", r.response.rect.center());
     r.response.backing_on_hover_text(tr("ui.agent_chat_add"));
     if choose {
-        app.agent_chat.actions.push(PanelAction::ChooseAttachment);
+        chat.actions.push(PanelAction::ChooseAttachment);
     }
     if paste {
-        app.agent_chat.actions.push(PanelAction::PastePicture);
+        chat.actions.push(PanelAction::PastePicture);
     }
 }
 
@@ -2724,8 +2849,9 @@ mod tests {
                 assert!(message.contains("restart"), "{message}");
                 let ctx = crate::fonts::test_context();
                 let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(300.0, 900.0))), ..Default::default() };
+                let view = PanelView::of(&mut app, &ctx);
                 for _ in 0..2 {
-                    let mut output = ctx.run_ui(input.clone(), |ui| picker(&mut app, ui));
+                    let mut output = ctx.run_ui(input.clone(), |ui| picker(&mut app.agent_chat, &view, ui));
                     assert!(crate::test_support::text_shapes(&output).any(|text| text.galley.text() == message));
                     assert!(crate::test_support::text_shapes(&output).any(|text| text.galley.text() == FLATPAK_OVERRIDE));
                     output.textures_delta.clear();
@@ -2733,8 +2859,9 @@ mod tests {
                 let at = solidcraft_ui_registry::handle_at("agent_chat:flatpak_override").expect("copy override");
                 let mut copied = false;
                 for pressed in [true, false] {
-                    let mut output =
-                        ctx.run_ui(egui::RawInput { events: crate::test_support::pointer(at, pressed), ..input.clone() }, |ui| picker(&mut app, ui));
+                    let mut output = ctx.run_ui(egui::RawInput { events: crate::test_support::pointer(at, pressed), ..input.clone() }, |ui| {
+                        picker(&mut app.agent_chat, &view, ui)
+                    });
                     copied |= output
                         .platform_output
                         .commands
@@ -2782,7 +2909,8 @@ mod tests {
             let input = egui::RawInput { screen_rect: Some(screen), focused: true, events, ..Default::default() };
             let mut output = ctx.run_ui(input, |ui| {
                 let prefs = AgentPanelPrefs::read(&app.preferences);
-                ui_kit::scope(ui, |ui| desktop_body(app, ui, Flow::Tall, &prefs));
+                let view = PanelView::of(app, ui.ctx());
+                ui_kit::scope(ui, |ui| desktop_body(&mut app.agent_chat, &view, ui, Flow::Tall, &prefs));
             });
             output.textures_delta.clear();
         };
@@ -2796,6 +2924,97 @@ mod tests {
         }
         assert_eq!(app.agent_chat.actions, [PanelAction::Send { text: "Make a plate".into(), steer: false }]);
         assert!(app.agent_chat.items.is_empty(), "the panel itself sends nothing");
+    }
+
+    /// What a host with no agents, no selection and nothing open shows the panel.
+    fn plain_view(shared: bool) -> PanelView {
+        PanelView {
+            shown: true,
+            layout: ui_kit::LayoutMode::default(),
+            history: None,
+            document: "Plate".into(),
+            doc: solidcraft_engine::Session::default().doc,
+            units: "mm".into(),
+            decimals: 2,
+            agents: Vec::new(),
+            current: None,
+            permission_agent: None,
+            permission: agents::Mode::default(),
+            selected: 0,
+            dialog_open: false,
+            turn_limit: 0,
+            model_warning: None,
+            tip: "Assistant".into(),
+            toggle_keys: Vec::new(),
+            capturing_keys: false,
+            rtl: false,
+            shared,
+            composer_height: None,
+        }
+    }
+
+    /// A conversation ready to send "Make a plate", with no app.
+    fn plain_chat() -> AgentChat {
+        let mut chat = AgentChat::default();
+        chat.open = true;
+        chat.input = "Make a plate".into();
+        chat.detection = Some(discover::Detection::default());
+        chat.picking = Some(false);
+        chat.state = Some(State::Ready);
+        chat
+    }
+
+    /// The panel draws from the chat's state and plain host data, with no app, and returns what
+    /// was asked.
+    #[test]
+    fn the_panel_draws_from_plain_state_and_returns_the_message_to_send() {
+        let ctx = crate::fonts::test_context();
+        let mut chat = plain_chat();
+        let view = plain_view(false);
+        let mut prefs = AgentPanelPrefs { left: false, width: 420.0, minimized: false, popped: false, window: None };
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1200.0, 800.0));
+        let frame = |chat: &mut AgentChat, prefs: &mut AgentPanelPrefs, events: Vec<egui::Event>| {
+            solidcraft_ui_registry::clear_handles();
+            let input = egui::RawInput { screen_rect: Some(screen), focused: true, events, ..Default::default() };
+            let mut output = ctx.run_ui(input, |ui| draw(chat, &view, prefs, ui));
+            output.textures_delta.clear();
+        };
+        for _ in 0..3 {
+            frame(&mut chat, &mut prefs, Vec::new());
+        }
+        let at = solidcraft_ui_registry::handle_at("agent_chat:send").expect("the send button is drawn");
+        for pressed in [true, false] {
+            frame(&mut chat, &mut prefs, crate::test_support::pointer(at, pressed));
+        }
+        assert_eq!(chat.actions, [PanelAction::Send { text: "Make a plate".into(), steer: false }]);
+        assert!(chat.items.is_empty(), "the panel itself sends nothing");
+    }
+
+    /// In the shared host's body the content keeps what the host measures (the composer's
+    /// height, the height it needs, the text box that takes the keyboard) for the host to take
+    /// after drawing, rather than handing it over itself.
+    #[test]
+    fn shared_content_reports_its_measures_for_the_host_to_take() {
+        let ctx = crate::fonts::test_context();
+        let mut chat = plain_chat();
+        let view = plain_view(true);
+        let prefs = AgentPanelPrefs { left: false, width: 420.0, minimized: false, popped: false, window: None };
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(440.0, 720.0));
+        let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+        let mut layer = None;
+        let mut output = ctx.run_ui(input, |ui| {
+            layer = Some(ui.layer_id());
+            draw_content(&mut chat, &view, &prefs, ui, Flow::Tall);
+        });
+        output.textures_delta.clear();
+        let report = std::mem::take(&mut chat.report);
+        assert!(report.composer_height.is_some_and(|h| h > 0.0), "the composer's height is kept");
+        let (drawn_on, _, height) = report.extent.expect("the height the content needs is kept");
+        assert_eq!(Some(drawn_on), layer);
+        assert!(height > 0.0);
+        let input = solidcraft_ui_registry::rect_of("agent_chat:input").expect("the text box is drawn");
+        assert_eq!(report.focus.iter().map(|r| r.rect).collect::<Vec<_>>(), [input], "the text box takes the keyboard");
+        assert!(chat.actions.is_empty());
     }
 
     /// The panel's place and fold are its own state: toggled and stored without the app.
@@ -2854,8 +3073,9 @@ mod tests {
                         ui.set_width(width);
                         ui_kit::scope(ui, |ui| {
                             let mut prefs = AgentPanelPrefs::read(&app.preferences);
-                            header(&mut app, ui, false, &mut prefs);
-                            desktop_body(&mut app, ui, Flow::Tall, &prefs);
+                            let view = PanelView::of(&mut app, ui.ctx());
+                            header(&mut app.agent_chat, &view, ui, false, &mut prefs);
+                            desktop_body(&mut app.agent_chat, &view, ui, Flow::Tall, &prefs);
                         });
                     });
                     output.textures_delta.clear();
@@ -2896,9 +3116,10 @@ mod tests {
             });
             let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width + 16.0, 720.0))), ..Default::default() };
             solidcraft_ui_registry::clear_handles();
+            let view = PanelView::of(&mut app, &ctx);
             let mut output = ctx.run_ui(input, |ui| {
                 ui.set_width(width);
-                ui_kit::scope(ui, |ui| conversation(&mut app, ui));
+                ui_kit::scope(ui, |ui| conversation(&mut app.agent_chat, &view, ui));
             });
             output.textures_delta.clear();
             for id in ["reject", "remember", "once", "custom"] {
@@ -2938,9 +3159,10 @@ mod tests {
         app.agent_chat.model = "model".into();
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(296.0, 720.0))), ..Default::default() };
         solidcraft_ui_registry::clear_handles();
+        let view = PanelView::of(&mut app, &ctx);
         let mut output = ctx.run_ui(input, |ui| {
             ui.set_width(280.0);
-            ui_kit::scope(ui, |ui| switcher(&mut app, ui));
+            ui_kit::scope(ui, |ui| switcher(&mut app.agent_chat, &view, ui));
         });
         output.textures_delta.clear();
         let rects: Vec<_> = ["switcher", "mode", "model"]

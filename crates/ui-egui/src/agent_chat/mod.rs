@@ -375,6 +375,8 @@ pub struct AgentChat {
     pub confirm_new: bool,
     /// What the panel recorded this frame, run after it is drawn (`panel::run`).
     pub actions: Vec<panel::PanelAction>,
+    /// What the panel measured for the shared panel host this frame, handed over after it is drawn.
+    pub report: panel::ContentReport,
     /// Where the panel was drawn last (for its shortcuts).
     pub panel_rect: Option<egui::Rect>,
     /// A pointer press in the transcript owns keys just like a focused text editor.
@@ -1723,7 +1725,7 @@ pub fn paste_picture(app: &mut SolveApp) -> std::result::Result<String, String> 
 /// the platform gives no position during a drag (winit 0.30), so that is the best the chat can
 /// know; the + button always works.
 pub fn take_drops(app: &mut SolveApp, ctx: &egui::Context) {
-    if !drop_is_ours(app, ctx) || !ctx.input(|i| !i.raw.dropped_files.is_empty()) {
+    if !drop_is_ours(&app.agent_chat, ctx) || !ctx.input(|i| !i.raw.dropped_files.is_empty()) {
         return;
     }
     let files = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
@@ -1731,8 +1733,9 @@ pub fn take_drops(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// Whether files dropped now would be the chat's: the pointer was last seen over it.
-pub(crate) fn drop_is_ours(app: &SolveApp, ctx: &egui::Context) -> bool {
-    let Some(rect) = app.agent_chat.drop_rect else { return false };
+pub(crate) fn drop_is_ours(chat: &AgentChat, ctx: &egui::Context) -> bool {
+    let Some(rect) = chat.drop_rect else { return false };
+
     ctx.input(|i| i.pointer.latest_pos()).is_some_and(|p| rect.contains(p))
 }
 
