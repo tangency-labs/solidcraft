@@ -429,7 +429,7 @@ impl TessGpu {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn run(&self, packed: &Packed, vertices: &[u32], n: usize) -> Result<Vec<f32>> {
+    fn run(&self, packed: &PackedPlans, vertices: &[u32], n: usize) -> Result<Vec<f32>> {
         if n == 0 || packed.surfaces.is_empty() {
             return Ok(Vec::new());
         }
@@ -490,9 +490,9 @@ impl TessGpu {
 }
 
 /// Words per vertex: u, v (f32 bits), surface, flags, then a vec4 position.
-const VERTEX_WORDS: usize = 8;
+pub const VERTEX_WORDS: usize = 8;
 /// Words per surface header (matches `Surface` in the shader).
-const SURFACE_WORDS: usize = 12;
+pub const SURFACE_WORDS: usize = 12;
 
 // Each empty binding still needs a whole element of its packed shader representation.
 fn tess_buffer<T>(device: &wgpu::Device, label: &str, mut contents: Vec<u8>, usage: wgpu::BufferUsages) -> wgpu::Buffer {
@@ -500,16 +500,34 @@ fn tess_buffer<T>(device: &wgpu::Device, label: &str, mut contents: Vec<u8>, usa
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: &contents, usage })
 }
 
-/// A plan as the shader reads it.
-struct Packed {
-    surfaces: Vec<u32>,
-    data: Vec<f32>,
-    vertices: Vec<u32>,
-    count: usize,
+/// Plans as the tessellation shader reads them: exactly what [`TessGpu::prepare_many`] uploads
+/// (and [`TessGpu::evaluate`] dispatches), so a host or a test can see and compare it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PackedPlans {
+    /// One header of [`SURFACE_WORDS`] words per surface, every plan's in turn (`Surface` in the
+    /// shader): its kind, degrees, counts, and where its numbers start in [`PackedPlans::data`].
+    pub surfaces: Vec<u32>,
+    /// The surfaces' numbers in f32: plane frames, knots, homogeneous control points, revolve
+    /// frames and transforms.
+    pub data: Vec<f32>,
+    /// [`VERTEX_WORDS`] words per vertex: u and v (f32 bits), the surface, flags (flipped,
+    /// pinned), then a pinned position (f32 bits) and a pad.
+    pub vertices: Vec<u32>,
+    /// The vertices in all.
+    pub count: usize,
     /// Exact positions of fixed vertices (index in the evaluated order), for the blocking
     /// [`TessGpu::evaluate`] to restore after the f32 evaluation (native only).
     #[cfg(not(target_arch = "wasm32"))]
-    fixed: Vec<(usize, Vec3)>,
+    pub fixed: Vec<(usize, Vec3)>,
+}
+
+impl PackedPlans {
+    /// `plans` packed as one: their surfaces one after another, each face's surface index offset
+    /// by the surfaces of the plans before it. Refused for a face without an evaluable surface or
+    /// with pole nodes ([`GpuError::PoleNodes`]), and for a surface index past its plan's.
+    pub fn of(plans: &[&TessPlan]) -> Result<PackedPlans> {
+        pack(plans)
+    }
 }
 
 fn word(x: usize) -> Result<u32> {
@@ -530,7 +548,7 @@ fn push_curve(data: &mut Vec<f32>, c: &EvalCurve) -> Result<(u32, u32)> {
 
 /// Several plans as one: their surfaces one after another, each face's surface index offset by
 /// the surfaces of the plans before it.
-fn pack(plans: &[&TessPlan]) -> Result<Packed> {
+fn pack(plans: &[&TessPlan]) -> Result<PackedPlans> {
     let mut surfaces = Vec::with_capacity(plans.iter().map(|p| p.surfaces.len()).sum::<usize>() * SURFACE_WORDS);
     let mut data: Vec<f32> = Vec::new();
     for s in plans.iter().flat_map(|p| &p.surfaces) {
@@ -620,7 +638,7 @@ fn pack(plans: &[&TessPlan]) -> Result<Packed> {
         }
         base += word(plan.surfaces.len())?;
     }
-    Ok(Packed {
+    Ok(PackedPlans {
         surfaces,
         data,
         vertices,

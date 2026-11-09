@@ -488,7 +488,7 @@ fn synthetic_plans() -> Vec<GeomPlan> {
 /// FNV-1a over what the shader reads of packed plans (surface headers, data, vertices) and what
 /// the blocking evaluation restores (the pinned nodes), so packing is pinned byte for byte.
 fn packed_digest(plans: &[&TessPlan]) -> u64 {
-    let packed = ok(pack(plans));
+    let packed = ok(PackedPlans::of(plans));
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mut eat = |bytes: &[u8]| {
         for b in bytes {
@@ -548,7 +548,7 @@ fn a_plan_with_pole_nodes_is_refused_by_name() {
         f.face
     });
     assert_eq!(face, Some(1));
-    assert!(matches!(pack(&[&plan]), Err(GpuError::PoleNodes { face: 1 })));
+    assert!(matches!(PackedPlans::of(&[&plan]), Err(GpuError::PoleNodes { face: 1 })));
     let Some(gpu) = gpu() else { return };
     assert!(matches!(gpu.prepare(&plan), Err(GpuError::PoleNodes { face: 1 })));
     assert!(matches!(gpu.evaluate(&plan), Err(GpuError::PoleNodes { face: 1 })));
