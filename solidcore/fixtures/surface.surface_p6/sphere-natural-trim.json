@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "name": "sphere_canonical_r2_interior_natural_trim_u",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:9048 (CreateNaturalUVTrimCurves); source/SMLib/src/SmSphere.cpp:168 (CreateCanonical); synthetic interior NURB-domain regression, not an upstream test asset",
+      "inputs": {
+        "surface": { "sphere": {} },
+        "op": { "op": "trim", "dom": [0.125, 0.25, 0.375, 0.75], "side": 0, "remove": false }
+      }
+    }
+  ]
+}

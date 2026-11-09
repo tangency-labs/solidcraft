@@ -55,7 +55,7 @@ impl Model {
     }
 }
 
-fn local_plane(plane: &PlaneRef, depth: usize) -> bool {
+pub(super) fn local_plane(plane: &PlaneRef, depth: usize) -> bool {
     if depth > crate::MAX_PLACEMENT_DEPTH {
         return false;
     }

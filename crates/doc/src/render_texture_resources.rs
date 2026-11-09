@@ -465,7 +465,17 @@ mod tests {
         let doc = crate::Document { render: Arc::new(settings.clone()), ..Default::default() };
         let wire = doc.to_json();
         assert_eq!(crate::Document::from_json(&wire).unwrap(), doc);
-        assert!(wire.contains("embedded-surface-textures"));
+        // The saved design holds the texture's bytes under the resource's own key.
+        fn resource_saved(v: &serde_json::Value, key: &str) -> bool {
+            match v {
+                serde_json::Value::Object(map) => {
+                    map.get("texture_resources").and_then(|t| t.get(key)).is_some() || map.values().any(|v| resource_saved(v, key))
+                }
+                serde_json::Value::Array(items) => items.iter().any(|v| resource_saved(v, key)),
+                _ => false,
+            }
+        }
+        assert!(resource_saved(&serde_json::from_str(&wire).unwrap(), &id.to_string()));
         assert!(!wire.contains("builtin://"));
         assert!(!wire.contains("file://"));
         settings.texture_resources.remove(&id);

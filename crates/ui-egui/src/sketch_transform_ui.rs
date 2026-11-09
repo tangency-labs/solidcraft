@@ -207,7 +207,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     let Some((lines, _, _)) = picked_box(app, d) else { return };
     let Some(frame) = frame_of(app, d) else { return };
     let Some(plane) = app.session.active_sketch.and_then(|id| crate::canvas::profile_plane(app, id)) else { return };
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let painter = ui.painter().clone();
     let stroke = Stroke::new(1.5, t.accent);
     // The picks where OK would leave them.

@@ -160,8 +160,8 @@ impl OpaqueSurface {
     }
 }
 
-/// Exact piecewise sRGB decoding of an existing 8-bit color channel ([`solidcraft_geom::srgb::decode8`]).
-pub use solidcraft_geom::srgb::decode8 as srgb8_to_linear;
+/// Exact piecewise sRGB decoding of an existing 8-bit color channel ([`solidcraft_color::srgb::decode8`]).
+pub use solidcraft_color::srgb::decode8 as srgb8_to_linear;
 
 /// Normalize finite directions without overflow or an arbitrary magnitude threshold.
 pub fn unit_direction(v: Vec3) -> Result<Vec3, SurfaceError> {

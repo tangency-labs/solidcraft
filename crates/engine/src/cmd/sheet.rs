@@ -16,8 +16,10 @@ use super::features::{add_feature, check_expr, feature_sketch, profiles, sketch_
 use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
-    ConvertParams, FlangeParams, FoldParams, HemParams, ListedRule, ManageRulesParams, ManageRulesResult, PerforateParams, RuleFeatureError,
-    RuleReply, RulesParams, RulesResult, UnfoldParams,
+    BendDirection, BendTableFormat, BendTableParams, BendTableResult, ConvertParams, FlangeParams, FlatBend, FlatBore, FlatCircle, FlatPatternParams,
+    FlatPatternResult, FlatPerforation, FlatPerforationPattern, FlatPocket, FlatSegment, FlatShape, FoldParams, HemParams, ListedRule,
+    ManageRulesParams, ManageRulesResult, PathFlangeParams, PerforateParams, PocketSide, RuleFeatureError, RuleReply, RulesParams, RulesResult,
+    UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -31,6 +33,10 @@ const CONVERT_CONTRACT: TypedContract<ConvertParams> = TypedContract::new();
 
 const RULES_CONTRACT: TypedContract<RulesParams> = TypedContract::new();
 const MANAGE_RULES_CONTRACT: TypedContract<ManageRulesParams> = TypedContract::new();
+
+const PATH_FLANGE_CONTRACT: TypedContract<PathFlangeParams> = TypedContract::new();
+const FLAT_PATTERN_CONTRACT: TypedContract<FlatPatternParams> = TypedContract::new();
+const BEND_TABLE_CONTRACT: TypedContract<BendTableParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sheet.flange", "Flange", crate::checked!("sheet.flange", flange))
@@ -53,7 +59,12 @@ pub static COMMANDS: &[CommandSpec] = &[
          Thickness, K-factor and bend radius come from the rule (sheet.manage_rules); passing them here is refused, \
          and so is the corner relief on a base or contour flange",
     ),
-    CommandSpec::new("sheet.path_flange", "Path Flange", path_flange).at("SHEET METAL", "CREATE").icon("path_flange").params(
+    CommandSpec::new("sheet.path_flange", "Path Flange", crate::checked!("sheet.path_flange", path_flange))
+        .at("SHEET METAL", "CREATE")
+        .icon("path_flange")
+        .contract(&PATH_FLANGE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
         "edge: [x,y,z] on a top or bottom edge of the sheet; sketch + curves: an open chain of sketch lines drawn on a plane across \
          that edge, from the edge out (each line one flange as long as the line, to the outer face from the virtual sharp; each \
          corner one bend, turning the way the lines turn); radius? (default: rule); body?. One feature, one body",
@@ -121,10 +132,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("sheet.rules", "List Sheet Metal Rules", crate::checked!("sheet.rules", list_rules))
         .contract(&RULES_CONTRACT).output(output_schema_for::<RulesResult>).icon("sheet_rules").noundo().doc_only().params("→ rules with their expressions and values, and the active one"),
-    CommandSpec::new("sheet.flat_pattern", "Create Flat Pattern", flat_pattern)
+    CommandSpec::new("sheet.flat_pattern", "Create Flat Pattern", crate::checked!("sheet.flat_pattern", flat_pattern))
         .at("SHEET METAL", "CREATE")
         .icon("flat")
         .noundo()
+        .contract(&FLAT_PATTERN_CONTRACT)
+        .output(output_schema_for::<FlatPatternResult>)
         .params(
             "body? → flat size, outline loops and cut-outs (flat coordinates, as point lists), cutout_shapes (the same cut-outs exactly, in the same order: {circle: {center, radius}} for a round hole, else {segments: [{line: [a, b]} | {arc: {center, radius, start_deg, sweep_deg}} | {polyline: [...]}]}), pockets (with their own cutout_shapes), bend lines and the bend table",
         ),
@@ -141,8 +154,10 @@ pub static COMMANDS: &[CommandSpec] = &[
              → DXF (AutoCAD 2000, mm): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES, \
              POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth) and PERFORATION; inner contours come before the outline",
         ),
-    CommandSpec::new("sheet.export_bend_table", "Export Bend Table", export_bend_table).icon("bendtable")
+    CommandSpec::new("sheet.export_bend_table", "Export Bend Table", crate::checked!("sheet.export_bend_table", export_bend_table)).icon("bendtable")
         .noundo()
+        .contract(&BEND_TABLE_CONTRACT)
+        .output(output_schema_for::<BendTableResult>)
         .params("body?, format?: csv|json (default csv), path? → bend table in mm and degrees, including rule and flat centre-line coordinates; angle_deg is the bend angle and included_angle_deg the angle left between the bend's sides (180° less it); a bend that cut-outs split has a row for each piece"),
 ];
 
@@ -734,24 +749,24 @@ fn loop_circle(lp: &solidcore_record::Loop2) -> Option<(Vec2, f64)> {
 
 /// A loop's exact shape for the flat pattern JSON: a circle, or its lines and arcs (other
 /// curves as point lists at the flat pattern's 0.001 mm tolerance).
-fn loop_shape(lp: &solidcore_record::Loop2) -> Value {
+fn loop_shape(lp: &solidcore_record::Loop2) -> FlatShape {
     use solidcore_record::Seg2;
-    let pt = |v: Vec2| json!([v.x, v.y]);
+    let pt = |v: Vec2| [v.x, v.y];
     if let Some((center, radius)) = loop_circle(lp) {
-        return json!({"circle": {"center": pt(center), "radius": radius}});
+        return FlatShape::Circle { circle: FlatCircle { center: pt(center), radius } };
     }
-    let segments: Vec<Value> = lp
+    let segments: Vec<FlatSegment> = lp
         .segs
         .iter()
         .map(|seg| match *seg {
-            Seg2::Line { a, b } => json!({"line": [pt(a), pt(b)]}),
+            Seg2::Line { a, b } => FlatSegment::Line([pt(a), pt(b)]),
             Seg2::Arc { center, radius, start, sweep } => {
-                json!({"arc": {"center": pt(center), "radius": radius, "start_deg": start.to_degrees(), "sweep_deg": sweep.to_degrees()}})
+                FlatSegment::Arc { center: pt(center), radius, start_deg: start.to_degrees(), sweep_deg: sweep.to_degrees() }
             }
-            ref other => json!({"polyline": other.polyline(1e-3).into_iter().map(pt).collect::<Vec<_>>()}),
+            ref other => FlatSegment::Polyline(other.polyline(1e-3).into_iter().map(pt).collect()),
         })
         .collect();
-    json!({"segments": segments})
+    FlatShape::Segments { segments }
 }
 
 fn flat_json(sh: &SheetBody) -> Result<Value> {
@@ -759,63 +774,98 @@ fn flat_json(sh: &SheetBody) -> Result<Value> {
     let loops: Vec<Ring<Vec2>> = regions.iter().map(|r| r.outer.polyline(1e-3)).collect();
     let size = loops.iter().fold(Aabb2::EMPTY, |b, l| b.union(&l.bounds())).size();
     let (w, h) = (size.x, size.y);
-    let pt = |v: &Vec2| json!([v.x, v.y]);
-    let outline: Vec<Value> = loops.iter().map(|l| Value::Array(l.iter().map(pt).collect())).collect();
-    let holes: Vec<Value> = regions.iter().flat_map(|r| &r.holes).map(|h| Value::Array(h.polyline(1e-3).iter().map(pt).collect())).collect();
-    let hole_shapes: Vec<Value> = regions.iter().flat_map(|r| &r.holes).map(loop_shape).collect();
-    let bends: Vec<Value> = sh
+    let pt = |v: &Vec2| [v.x, v.y];
+    let outline: Vec<Vec<[f64; 2]>> = loops.iter().map(|l| l.iter().map(pt).collect()).collect();
+    let holes: Vec<Vec<[f64; 2]>> = regions.iter().flat_map(|r| &r.holes).map(|h| h.polyline(1e-3).iter().map(pt).collect()).collect();
+    let hole_shapes: Vec<FlatShape> = regions.iter().flat_map(|r| &r.holes).map(loop_shape).collect();
+    let bends: Vec<FlatBend> = sh
         .bends()
         .iter()
-        .map(|b| {
-            json!({"bend": b.index, "angle_deg": b.angle_deg, "included_angle_deg": b.included_angle_deg(), "radius": b.radius, "direction": if b.up { "up" } else { "down" },
-                "allowance": b.allowance, "length": b.length, "start": pt(&b.start), "end": pt(&b.end)})
+        .map(|b| FlatBend {
+            bend: b.index,
+            angle_deg: b.angle_deg,
+            included_angle_deg: b.included_angle_deg(),
+            radius: b.radius,
+            direction: if b.up { BendDirection::Up } else { BendDirection::Down },
+            allowance: b.allowance,
+            length: b.length,
+            start: pt(&b.start),
+            end: pt(&b.end),
         })
         .collect();
-    let pockets: Vec<Value> = sh
+    let pockets: Vec<FlatPocket> = sh
         .machining()?
         .iter()
         .map(|p| {
             let side = if p.z0 == 0.0 {
-                "bottom"
+                PocketSide::Bottom
             } else if p.z1 == sh.t {
-                "top"
+                PocketSide::Top
             } else {
-                "internal"
+                PocketSide::Internal
             };
-            json!({"outline": p.region.outer.polyline(1e-3).iter().map(pt).collect::<Vec<_>>(),
-            "cutouts": p.region.holes.iter().map(|h| h.polyline(1e-3).iter().map(pt).collect::<Vec<_>>()).collect::<Vec<_>>(),
-            "cutout_shapes": p.region.holes.iter().map(loop_shape).collect::<Vec<_>>(),
-            "side": side, "depth_mm": p.z1-p.z0, "z0_mm": p.z0, "z1_mm": p.z1})
+            FlatPocket {
+                outline: p.region.outer.polyline(1e-3).iter().map(pt).collect(),
+                cutouts: p.region.holes.iter().map(|h| h.polyline(1e-3).iter().map(pt).collect()).collect(),
+                cutout_shapes: p.region.holes.iter().map(loop_shape).collect(),
+                side,
+                depth_mm: p.z1 - p.z0,
+                z0_mm: p.z0,
+                z1_mm: p.z1,
+            }
         })
         .collect();
     // Holes drilled along a panel into its rim: drilled after cutting, not in the outline.
-    let bores: Vec<Value> = sh
+    let bores: Vec<FlatBore> = sh
         .bores
         .iter()
-        .map(|b| json!({"start": [b.base.x, b.base.y, b.base.z], "axis": [b.axis.x, b.axis.y, b.axis.z], "diameter": b.radius * 2.0, "length": b.height.abs()}))
+        .map(|b| FlatBore {
+            start: [b.base.x, b.base.y, b.base.z],
+            axis: [b.axis.x, b.axis.y, b.axis.z],
+            diameter: b.radius * 2.0,
+            length: b.height.abs(),
+        })
         .collect();
     let mut perforations = Vec::new();
     for p in &sh.perforations {
         let n = sh.perforation_holes(p)?.len();
-        perforations.push(json!({"feature": p.feature, "diameter": p.diameter, "pitch": p.pitch, "margin": p.margin,
-            "pattern": if p.square { "square" } else { "staggered" }, "count": n,
-            "open_area_mm2": n as f64 * std::f64::consts::PI * (p.diameter / 2.0).powi(2)}));
+        perforations.push(FlatPerforation {
+            feature: p.feature,
+            diameter: p.diameter,
+            pitch: p.pitch,
+            margin: p.margin,
+            pattern: if p.square { FlatPerforationPattern::Square } else { FlatPerforationPattern::Staggered },
+            count: n,
+            open_area_mm2: n as f64 * std::f64::consts::PI * (p.diameter / 2.0).powi(2),
+        });
     }
-    let bend_zones: Vec<Value> = sh
+    let bend_zones: Vec<[f64; 4]> = sh
         .bend_zones()
         .iter()
         .map(|z| {
             let pts = z.outer.polyline(1e-3);
             let f = |g: fn(&Vec2) -> f64, m: fn(f64, f64) -> f64, s: f64| pts.iter().map(g).fold(s, m);
-            json!([f(|p| p.x, f64::min, f64::MAX), f(|p| p.x, f64::max, f64::MIN), f(|p| p.y, f64::min, f64::MAX), f(|p| p.y, f64::max, f64::MIN)])
+            [f(|p| p.x, f64::min, f64::MAX), f(|p| p.x, f64::max, f64::MIN), f(|p| p.y, f64::min, f64::MAX), f(|p| p.y, f64::max, f64::MIN)]
         })
         .collect();
-    let mut out = json!({"body": sh.body, "rule": sh.rule, "thickness": sh.t, "k_factor": sh.k, "flat_size_mm": [w, h, sh.t], "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "unfolded": sh.flat,
-        "perforations": perforations, "bend_zones": bend_zones});
-    if !bores.is_empty() {
-        out["bores"] = Value::Array(bores);
-    }
-    Ok(out)
+    let out = FlatPatternResult {
+        body: sh.body.clone(),
+        rule: sh.rule.clone(),
+        thickness: sh.t,
+        k_factor: sh.k,
+        flat_size_mm: [w, h, sh.t],
+        outline,
+        cutouts: holes,
+        cutout_shapes: hole_shapes,
+        pockets,
+        bends,
+        unfolded: sh.flat,
+        perforations,
+        bend_zones,
+        bores,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(out).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1137,20 +1187,27 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"dxf": text, "bends": sh.bends().len()}))
 }
 
+/// A bend table's `format`: csv or json, in any case.
+pub(crate) fn bend_table_format(t: &str) -> Option<BendTableFormat> {
+    match t.to_ascii_lowercase().as_str() {
+        "csv" => Some(BendTableFormat::Csv),
+        "json" => Some(BendTableFormat::Json),
+        _ => None,
+    }
+}
+
 fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.export_bend_table";
-    let format = str_(p, "format").unwrap_or("csv").to_ascii_lowercase();
-    if !matches!(format.as_str(), "csv" | "json") {
-        return Err(bad(cmd, "`format` must be csv or json"));
-    }
+    let format = str_(p, "format").map_or(Some(BendTableFormat::Csv), bend_table_format).ok_or_else(|| bad(cmd, "`format` must be csv or json"))?;
     let sh = sheet_of(s, p, cmd)?;
     sh.flat_matches_body()?;
     let table = flat_json(&sh)?;
-    let text = if format == "json" {
+    let text = if format == BendTableFormat::Json {
         serde_json::to_string_pretty(&table).map_err(|e| EngineError::Other(e.to_string()))?
     } else {
-        // Always quote text fields: body/rule names may include commas, quotes or newlines.
-        let quote = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+        // Always quote text fields: body/rule names may include commas, quotes or newlines, or start
+        // as a spreadsheet formula does.
+        let quote = solidcraft_doc::csv::quoted;
         let mut csv =
             "body,rule,thickness_mm,k_factor,bend,angle_deg,direction,radius_mm,allowance_mm,length_mm,start_x_mm,start_y_mm,end_x_mm,end_y_mm,included_angle_deg\r\n"
                 .to_string();
@@ -1176,11 +1233,14 @@ fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
         }
         csv
     };
-    if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty()) {
+    let bends = sh.bends().len();
+    let reply = if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty()) {
         solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-        return Ok(json!({"path": path, "format": format, "bends": sh.bends().len()}));
-    }
-    Ok(json!({"format": format, "text": text, "bends": sh.bends().len()}))
+        BendTableResult::Written { path: path.to_string(), format, bends, param_warnings: Vec::new() }
+    } else {
+        BendTableResult::Text { format, text, bends, param_warnings: Vec::new() }
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 #[cfg(test)]

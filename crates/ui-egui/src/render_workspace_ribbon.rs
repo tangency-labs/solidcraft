@@ -226,7 +226,7 @@ pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
                 super::export_image(app, job, overwrite);
             }
         }
-        _ => return Err(crate::i18n::tr("render.error_job_action").into()),
+        _ => return Err(solidcraft_ui_text::tr("render.error_job_action").into()),
     }
     Ok(())
 }
@@ -281,11 +281,11 @@ pub(super) fn submit_deferred(app: &mut SolveApp, pending: PendingFinal) -> Resu
         "render.result.regrade" => {
             let reply = app.run(id, pending.params)?;
             let job = serde_json::from_value(reply["job"].clone())
-                .map_err(|error| crate::i18n::format("render.error_regrade_identity", &[("error", &error.to_string())]))?;
+                .map_err(|error| solidcraft_ui_text::format("render.error_regrade_identity", &[("error", &error.to_string())]))?;
             app.render_workspace.view.job = Some(job);
         }
 
-        _ => return Err(crate::i18n::tr("render.error_job_action").into()),
+        _ => return Err(solidcraft_ui_text::tr("render.error_job_action").into()),
     }
     Ok(())
 }
@@ -293,8 +293,8 @@ pub(super) fn submit_deferred(app: &mut SolveApp, pending: PendingFinal) -> Resu
 /// The explicit Render click follows its newly minted real-session job. The
 /// asynchronous preparation path reuses this after the same command post-hooks.
 pub(super) fn follow_started(app: &mut SolveApp, reply: &serde_json::Value) -> Result<(), String> {
-    let job =
-        serde_json::from_value(reply["job"].clone()).map_err(|e| crate::i18n::format("render.error_job_identity", &[("error", &e.to_string())]))?;
+    let job = serde_json::from_value(reply["job"].clone())
+        .map_err(|e| solidcraft_ui_text::format("render.error_job_identity", &[("error", &e.to_string())]))?;
     app.render_workspace.view.job = Some(job);
     app.render_workspace.view.job_shot = Some(app.render_workspace.view.name.clone());
     // An explicit UI Render action must show the image being computed. Otherwise
@@ -433,7 +433,7 @@ fn navigate(app: &mut SolveApp, id: &str) -> Result<(), String> {
             library::review_selected_quality(app)?;
         }
         "render.status" | "render.backends" => focus(app, RenderSelection::Check, None),
-        _ => return Err(crate::i18n::tr("render.error_interactive_command").into()),
+        _ => return Err(solidcraft_ui_text::tr("render.error_interactive_command").into()),
     }
     Ok(())
 }
