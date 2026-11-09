@@ -843,5 +843,5 @@ fn render_with_look(doc: &Doc, look: PaintLook, px: u32) -> Option<sk::Pixmap> {
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "svg_tests.rs"]
 mod tests;

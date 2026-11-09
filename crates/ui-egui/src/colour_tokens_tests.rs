@@ -133,9 +133,10 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 }
 
 // Icons no longer take their colours from the caller or from `IconColors`: the SVG masters name
-// palette roles (`assets/icons/ui/design/palette.toml`, light and dark, plus accents) that
-// `icon_svg` resolves. `icon_svg`'s own tests hold that every master parses and that only the
-// palette's colours exist, including its colour-vision variants.
+// palette roles (`assets/icons/ui/design/palette.toml`, light and dark, plus accents) that the
+// kit's renderer (`ui_kit::icons`) resolves in SolidCraft's set (`icon_svg::SET`). `icon_svg`'s
+// own tests hold that every master parses and that only the palette's colours exist, including
+// its colour-vision variants.
 
 /// The most colour literals each UI file may hold, and why. None of them carries a meaning that a
 /// colour vision mode must change. A file with more fails here: make the new colour a token in
@@ -161,10 +162,11 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("dialogs_assembly.rs", 1, "the interference fill, shaded from its token"),
     ("dialogs_motion.rs", 1, "a white outline"),
     ("gizmo.rs", 2, "the gizmo's neutral grey ball"),
-    ("icons.rs", 1, "the white tint that carries an icon image's opacity"),
     ("ref_images.rs", 1, "a reference image's opacity tint"),
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),
+    ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
+    ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
     ("ui_kit/menu.rs", 1, "a menu entry's swatch: the colour is document data"),
 ];
 
