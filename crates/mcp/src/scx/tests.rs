@@ -39,6 +39,18 @@ fn script_mode_lists_three_tools_and_its_own_instructions() {
     assert!(text.is_empty(), "{text}");
 }
 
+/// Claude clients cut server instructions at 2048 characters, so script mode sends the
+/// vocabulary alone and it has to fit.
+#[test]
+fn instructions_fit_the_2048_character_cap() {
+    let mut s = Server::new(Box::new(Headless::default())).with_options(Options { scx: true, ..Default::default() });
+    let init = s.handle_line(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}).to_string()).unwrap_or_default();
+    let init: Value = serde_json::from_str(&init).unwrap_or_default();
+    let text = init["result"]["instructions"].as_str().unwrap_or_default();
+    assert_eq!(text, super::INSTRUCTIONS);
+    assert!(text.chars().count() <= 2048, "{} characters", text.chars().count());
+}
+
 #[test]
 fn off_by_default() {
     let list = crate::tool_definitions_with(Options::default());

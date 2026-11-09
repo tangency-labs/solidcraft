@@ -294,8 +294,10 @@ impl Server {
                     "protocolVersion": version,
                     "capabilities": {"tools": {"listChanged": false}, "resources": {"listChanged": false}},
                     "serverInfo": {"name": "solidcraft", "title": "SolidCraft", "version": env!("CARGO_PKG_VERSION")},
+                    // Script mode sends the vocabulary alone: Claude clients cut instructions at
+                    // 2048 characters, and a backend line after it would push the end out.
                     "instructions": if self.session_options(true).scx {
-                        format!("{}Backend: {}.", crate::scx::INSTRUCTIONS, self.backend.describe())
+                        crate::scx::INSTRUCTIONS.to_string()
                     } else {
                         format!("{INSTRUCTIONS} Backend: {}.", self.backend.describe())
                     },

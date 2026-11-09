@@ -65,7 +65,7 @@ pub fn tool_definitions() -> Vec<Value> {
         json!({
             "name": "run",
             "title": "Run a build script",
-            "description": "Run a Python build script in SolidCraft (vocabulary in the server instructions). Returns printed output, errors with line numbers and hints, and what changed (bodies, volumes, bboxes).",
+            "description": "Run a Python build script in SolidCraft (vocabulary in the server instructions). cmd('command.id', **params) runs any app command, such as cmd('doc.open', path=...) or cmd('file.save'), and commands('word') finds ids. Returns printed output, errors with line numbers and hints, and what changed (bodies, volumes, bboxes).",
             "inputSchema": {"type": "object", "properties": {
                 "code": {"type": "string", "description": "Python script"},
                 "look": {"type": "boolean", "description": "Add a small picture after it runs"},
