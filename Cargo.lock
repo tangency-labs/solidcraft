@@ -4406,6 +4406,7 @@ version = "0.40.0-rc.3"
 dependencies = [
  "serde",
  "serde_json",
+ "solidcore",
  "solidcore-ops",
  "solidcore-record",
  "solidcore-tess",
@@ -4476,6 +4477,7 @@ dependencies = [
  "serde_json",
  "solidcore-ops",
  "solidcore-record",
+ "solidcore-tess",
  "solidcraft-geom",
  "solidcraft-profile",
  "solidcraft-smlib",

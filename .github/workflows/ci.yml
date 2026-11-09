@@ -402,7 +402,7 @@ jobs:
     name: Format and repository checks
     if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable

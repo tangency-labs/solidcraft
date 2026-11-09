@@ -1,19 +1,18 @@
 //! Surface records ([`brep::Surface`]) in the evaluator's form ([`EvalSurface`]), which the
 //! planner and the CPU and GPU evaluators share, and the map from the record's (u, v) to the
 //! evaluator's, so a face's boundary takes its parameters from its edges' exact pcurves.
-//! Planes, splines and revolutions keep their own parameters ([`SurfaceEval`] holds them in
+//! Planes, splines and revolutions keep their own parameters ([`solidcore::eval::SurfaceEval`] holds them in
 //! that form already). A cylinder, cone, sphere or torus is the revolution it is, exactly: its
 //! generator (a line, or a circle as an exact rational arc) turned about its axis by the
 //! record's angle u; the generator's parameter is −v on a line and, on an arc, the rational
 //! parameter of the record's angle v (closed form, [`Arc::param`]).
 
-use solidcore_record::Vec3;
+use solidcore::Vec3;
 use solidcore_record::brep::{self, Frame};
-use solidcraft_geom::brep::eval::SurfaceEval;
-use solidcraft_geom::prelude::*;
-use solidcraft_geom::tess::{EvalCurve, EvalSurface};
+use crate::vec::VecExt as _;
+use solidcore::eval::plan::{EvalCurve, EvalSurface};
 
-use crate::{KernelError, Result};
+use crate::{Result, TessError};
 
 fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
@@ -76,7 +75,7 @@ impl Arc {
 /// or cone's generator spans the face's heights.
 pub(crate) fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Result<(EvalSurface, Params)> {
     use std::f64::consts::{FRAC_PI_2, TAU};
-    let invalid = |what: &str| KernelError::Invalid(format!("tessellation: {what}"));
+    let invalid = |what: &str| TessError::Invalid(format!("tessellation: {what}"));
     let axes = |f: &Frame| {
         let (o, x, y) = (v3(f.origin), v3(f.x_axis), v3(f.y_axis));
         (o, x, x.cross(y))
@@ -123,11 +122,14 @@ pub(crate) fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Re
             let (s, c) = tube_start.sin_cos();
             meridian(o + x * *major_radius, [x * c + z * s, z * c - x * s], z, *minor_radius, [0.0, TAU], o)
         }
-        _ => match SurfaceEval::new(surface) {
-            Ok(SurfaceEval::Eval(e, _)) => Ok((e, Params::Same)),
-            Ok(_) => Err(invalid("an analytic surface out of place")),
-            Err(e) => Err(KernelError::Failed(format!("not supported yet: tessellation: {e}"))),
-        },
+        _ => {
+            let value = solidcore_convert::surface(surface).map_err(|e| TessError::Invalid(format!("tessellation: {e}")))?;
+            match solidcore::eval::SurfaceEval::new(&value) {
+                Ok(solidcore::eval::SurfaceEval::Eval(e, _)) => Ok((evaluator_form(&e), Params::Same)),
+                Ok(_) => Err(invalid("an analytic surface out of place")),
+                Err(e) => Err(TessError::Failed(format!("not supported yet: tessellation: {}", crate::eval_message(e)))),
+            }
+        }
     }
 }
 
@@ -169,12 +171,28 @@ impl Reversed for EvalCurve {
     }
 }
 
+/// The kernel's form of a plane, spline or revolution ([`solidcore::eval::EvalSurface`]) in
+/// the plan evaluator's: the same values, field for field.
+fn evaluator_form(s: &solidcore::eval::EvalSurface) -> EvalSurface {
+    match s {
+        solidcore::eval::EvalSurface::Plane { origin, du, dv } => EvalSurface::Plane { origin: *origin, du: *du, dv: *dv },
+        solidcore::eval::EvalSurface::Nurbs(n) => EvalSurface::nurbs(n.degree(), n.knots().clone(), n.count(), n.ctrl().to_vec()),
+        solidcore::eval::EvalSurface::Revolved { profile, origin, axis, transform, swap } => EvalSurface::Revolved {
+            profile: EvalCurve { degree: profile.degree(), knots: profile.knots().to_vec(), ctrl: profile.ctrl().to_vec() },
+            origin: *origin,
+            axis: *axis,
+            transform: *transform,
+            swap: *swap,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Every face of `b` evaluates, through [`eval_surface`] and its [`Params`], as the record's
-    /// own evaluator ([`SurfaceEval`]) evaluates it, over the face's parameter box: the same
+    /// Every face of `b` evaluates, through [`eval_surface`] and its [`Params`], as the kernel's
+    /// evaluator ([`solidcore::eval::SurfaceEval`]) evaluates the record, over the face's parameter box: the same
     /// point and the same natural normal. Counts of planes, analytic surfaces and others.
     fn assert_matches_the_record(b: &brep::Brep) -> [usize; 3] {
         let mut kinds = [0; 3];
@@ -188,7 +206,8 @@ mod tests {
                 Ok(e) => e,
                 Err(e) => panic!("not evaluable: {e} ({:?})", face.surface),
             };
-            let Ok(reference) = SurfaceEval::new(face.parameters()) else { panic!("the record's evaluator: {:?}", face.surface) };
+            let Ok(reference) = solidcore_convert::surface(face.parameters()).map(|s| solidcore::eval::SurfaceEval::new(&s)) else { panic!("the record: {:?}", face.surface) };
+            let Ok(reference) = reference else { panic!("the kernel's evaluator: {:?}", face.surface) };
             let [[u0, u1], [v0, v1]] = face.domain;
             for i in 0..=6 {
                 for j in 0..=6 {
@@ -207,24 +226,14 @@ mod tests {
         kinds
     }
 
-    fn record(b: crate::Result<crate::Body>) -> brep::Brep {
-        match b.and_then(|b| crate::brep_record(&b)) {
-            Ok(r) => r,
-            Err(e) => panic!("{e}"),
-        }
-    }
-
     #[test]
     fn primitives_evaluate_like_the_record() {
-        let bodies = [
-            crate::box_solid(Vec3::new(-1.0, -2.0, 0.0), Vec3::new(3.0, 4.0, 5.0)),
-            crate::cylinder(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 1.0), 2.5, 7.0),
-            crate::sphere(Vec3::new(0.0, 0.0, 1.0), 4.0),
-            crate::torus(Vec3::ZERO, 6.0, 1.5),
-        ];
+        // A box from (-1, -2, 0) to (3, 4, 5); a cylinder of radius 2.5 and length 7 from (1, 2, 3)
+        // along (0, 1, 1); a sphere of radius 4 about (0, 0, 1); a torus of radii 6 and 1.5.
+        let bodies = ["box_offset", "cylinder_tilted", "sphere_r4", "torus_6_1_5"].map(crate::fixtures::fixture);
         let mut kinds = [0; 3];
         for b in bodies {
-            for (k, n) in kinds.iter_mut().zip(assert_matches_the_record(&record(b))) {
+            for (k, n) in kinds.iter_mut().zip(assert_matches_the_record(&b)) {
                 *k += n;
             }
         }
@@ -234,9 +243,7 @@ mod tests {
 
     #[test]
     fn transformed_and_mirrored_bodies_evaluate_like_the_record() {
-        let Ok(cyl) = crate::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 5.0) else { panic!("cylinder") };
-        // Column-major: x → 3 − x, z → z + 1.
-        let mirror = [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [3.0, 0.0, 1.0, 1.0]];
-        assert!(assert_matches_the_record(&record(crate::transform_matrix(&cyl, mirror))).iter().sum::<usize>() > 0);
+        // A cylinder of radius 2 and length 5 mirrored by x → 3 − x and moved by z → z + 1.
+        assert!(assert_matches_the_record(&crate::fixtures::fixture("cylinder_r2_h5_mirrored")).iter().sum::<usize>() > 0);
     }
 }
