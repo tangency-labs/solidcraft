@@ -2662,6 +2662,10 @@ impl prefs_window::Host for SolveApp {
         }
         Ok(())
     }
+    /// The shared panel layout switches on or off only on Apply.
+    fn apply(&mut self) -> Result<(), String> {
+        crate::panel_runtime::sync_production_setting(self).map_err(solidcraft_engine::panels::commands::error_text)
+    }
     fn keys_captured(&self) -> bool {
         crate::keymap::capturing(self)
     }
@@ -3115,10 +3119,10 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     app.prefs_window.follow = follow;
     let mut out = apply_preferences(app, new, &serde_json::Value::Object(rest))?;
     match button.as_ref().and_then(|b| b.as_str()) {
-        Some("ok") => prefs_window::press(app, WINDOW_PAGES, prefs_window::Button::Ok),
-        Some("cancel") => prefs_window::press(app, WINDOW_PAGES, prefs_window::Button::Cancel),
-        Some("apply") => prefs_window::press(app, WINDOW_PAGES, prefs_window::Button::Apply),
-        Some("defaults") => prefs_window::press(app, WINDOW_PAGES, prefs_window::Button::Defaults),
+        Some("ok") => prefs_window::press(app, WINDOW_PAGES, prefs_window::Button::Ok)?,
+        Some("cancel") => prefs_window::press(app, WINDOW_PAGES, prefs_window::Button::Cancel)?,
+        Some("apply") => prefs_window::press(app, WINDOW_PAGES, prefs_window::Button::Apply)?,
+        Some("defaults") => prefs_window::press(app, WINDOW_PAGES, prefs_window::Button::Defaults)?,
         Some(b) => return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults)")),
         None => {}
     }
@@ -9339,7 +9343,7 @@ mod tests {
         assert_eq!(held["preferences"]["sketch_tab_always"], false);
         assert_eq!(held["dark"], true, "the Light tile's dark flag is not saved either");
         // Apply makes the change the baseline: from now on it is saved.
-        prefs_window::press(&mut app, WINDOW_PAGES, prefs_window::Button::Apply);
+        prefs_window::press(&mut app, WINDOW_PAGES, prefs_window::Button::Apply).unwrap();
         let applied = saved_prefs(&app);
         assert_eq!(applied["preferences"]["theme"], "light");
         assert_eq!(applied["dark"], false);

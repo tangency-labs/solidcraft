@@ -17,6 +17,8 @@ struct Fake {
     closed: usize,
     /// Restores that fail before one succeeds.
     failing_restores: usize,
+    /// Applies that fail before one succeeds.
+    failing_applies: usize,
 }
 
 impl Host for Fake {
@@ -39,6 +41,13 @@ impl Host for Fake {
             return Err("not now".into());
         }
         self.values = snapshot.clone();
+        Ok(())
+    }
+    fn apply(&mut self) -> Result<(), String> {
+        if self.failing_applies > 0 {
+            self.failing_applies -= 1;
+            return Err("no room".into());
+        }
         Ok(())
     }
     fn page_left(&mut self) {
@@ -197,13 +206,34 @@ fn a_failed_restore_keeps_the_window_and_the_snapshot_until_one_succeeds() {
     assert_eq!(click(&ctx, &mut fake, "test:cancel"), Some(Button::Cancel));
     assert!(fake.window.open && fake.window.snapshot().is_some() && fake.closed == 0);
     assert_eq!(fake.window.restore_error(), Some("not now"));
-    press(&mut fake, PAGES, Button::Apply);
+    press(&mut fake, PAGES, Button::Apply).unwrap();
     assert!(apply_pending(&fake), "Apply waits for the restore");
-    press(&mut fake, PAGES, Button::Ok);
+    press(&mut fake, PAGES, Button::Ok).unwrap();
     assert_eq!(fake.values, Values::default(), "after a failed restore, OK reverts too");
     assert!(!fake.window.open && fake.window.restore_error().is_none() && fake.closed == 1);
     frame(&ctx, &mut fake, Vec::new());
     assert!(fake.drawn.is_empty() && registry::rect_of("prefs:window").is_none(), "a closed window draws nothing");
+}
+
+#[test]
+fn a_failed_apply_keeps_the_last_snapshot_and_the_footer_shows_it_until_a_close_reverts() {
+    let (ctx, mut fake) = opened();
+    fake.values.grid = true;
+    fake.failing_applies = 1;
+    assert_eq!(press(&mut fake, PAGES, Button::Apply), Err("no room".to_owned()), "a command gets the reason");
+    assert_eq!(fake.window.snapshot(), Some(&Values::default()), "the last snapshot stays");
+    assert!(fake.window.restore_error().is_none() && apply_pending(&fake), "a command's failure is only reported");
+
+    fake.failing_applies = 1;
+    frame(&ctx, &mut fake, Vec::new());
+    assert_eq!(click(&ctx, &mut fake, "test:apply"), Some(Button::Apply));
+    assert_eq!(fake.window.restore_error(), Some("no room"), "the footer's failure shows on the window");
+    assert_eq!(fake.window.snapshot(), Some(&Values::default()));
+    press(&mut fake, PAGES, Button::Apply).unwrap();
+    assert_eq!(fake.window.snapshot(), Some(&Values::default()), "Apply waits while the failure shows");
+    press(&mut fake, PAGES, Button::Ok).unwrap();
+    assert_eq!(fake.values, Values::default(), "after a failed Apply, a close reverts");
+    assert!(!fake.window.open && fake.window.restore_error().is_none() && fake.closed == 1);
 }
 
 #[test]
@@ -213,7 +243,7 @@ fn a_hostile_page_index_shows_the_last_page_and_no_pages_draws_no_body() {
     assert_eq!(fake.window.section, 1);
     fake.window.open_at(3, 0);
     assert_eq!(fake.window.section, 0);
-    press(&mut fake, &[], Button::Defaults);
+    press(&mut fake, &[], Button::Defaults).unwrap();
     assert_eq!(fake.values, Values::default());
 }
 

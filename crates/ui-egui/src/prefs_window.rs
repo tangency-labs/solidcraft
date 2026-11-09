@@ -84,6 +84,11 @@ pub trait Host: Sized {
     /// Put the settings back (Cancel). An error keeps the window open with the snapshot, and the
     /// next close tries again.
     fn restore(&mut self, snapshot: &Self::Snapshot) -> Result<(), String>;
+    /// What Apply does before the settings become the new snapshot, for a setting a running part
+    /// of the host takes up only on Apply. An error keeps the old snapshot.
+    fn apply(&mut self) -> Result<(), String> {
+        Ok(())
+    }
     /// A control is taking the keys (a shortcut being recorded): search leaves them and Esc does
     /// not close the window.
     fn keys_captured(&self) -> bool {
@@ -162,13 +167,14 @@ pub fn apply_pending<S: Host>(host: &S) -> bool {
     host.window_ref().snapshot.as_ref().is_some_and(|snapshot| !host.matches(snapshot))
 }
 
-/// Do what `button` does, from the footer or from a command.
-pub fn press<S: Host>(host: &mut S, pages: &[Page<S>], button: Button) {
+/// Do what `button` does, from the footer or from a command. Returns why [`Host::apply`] failed.
+pub fn press<S: Host>(host: &mut S, pages: &[Page<S>], button: Button) -> Result<(), String> {
     match button {
         Button::Ok => close(host, false),
         Button::Cancel => close(host, true),
         Button::Apply => {
             if host.window_ref().restore_error.is_none() {
+                host.apply()?;
                 let snapshot = host.take_snapshot();
                 host.window().snapshot = Some(snapshot);
             }
@@ -179,6 +185,7 @@ pub fn press<S: Host>(host: &mut S, pages: &[Page<S>], button: Button) {
             }
         }
     }
+    Ok(())
 }
 
 /// Close the window; `revert` puts back the snapshot (Cancel, Esc, ×). While a restore has failed,
@@ -284,8 +291,11 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
         ui_kit::Action::None if closed => Some(Button::Cancel),
         ui_kit::Action::None => None,
     };
-    if let Some(button) = button {
-        press(host, pages, button);
+    // A failed Apply shows on the window like a failed restore: Apply waits and a close reverts.
+    if let Some(button) = button
+        && let Err(reason) = press(host, pages, button)
+    {
+        host.window().restore_error = Some(reason);
     }
     // The footer was drawn before this frame's edits (and before an Apply): show Apply's new
     // state on the next frame rather than at the next input.
