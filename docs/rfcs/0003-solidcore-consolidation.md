@@ -165,7 +165,7 @@ The remaining lines of `app-geometry.txt` and `mesh-decisions.txt`, one cluster 
 - **No fallbacks or try-chains.** One construction per job. An old path is deleted when its replacement lands, never kept behind it (§4b).
 - **One topic per PR**: one job moved, its callers switched, the old copy deleted, its ledger lines removed.
 - **ops stays general.** Nothing SolidCraft-specific goes in it: no defaults, command ids, UI or document types. SolidCraft passes those in as parameters.
-- **Branches.** Kernel-only PRs (`solidcore/` alone) target `kernel`. PRs that also touch SolidCraft's crates target `main`.
+- **Branches.** PRs target `main`. Only multi-step kernel work that isn't safe on `main` until every step has landed goes to the `kernel` branch.
 - **No compatibility flags.** No switch between old and new, no `UpstreamFixes` field, no preference for the old result.
 - **Claim first** on the job's tracking issue, and name what is added from the other copy, with its measurement.
 - **Naming survives topology changes.** When a move changes a body's topology (as truck's split cylinder sides did in R70), add the face-name mapping in SolidCraft's naming layer (`crates/doc/src/naming.rs`, `history_names.rs`) so saved references resolve. Never bend the kernel's topology to match the old names.
