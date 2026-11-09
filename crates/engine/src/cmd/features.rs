@@ -18,6 +18,7 @@ use crate::schema::features::{
     FeatureNotice, FeatureResult, FilletParams, FilletResult, NoticeAction, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams,
     SphereParams, TorusParams,
 };
+use crate::schema::split::{SplitBodyParams, SplitFaceParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -36,6 +37,8 @@ const OFFSET_PLANE_CONTRACT: TypedContract<OffsetPlaneParams> = TypedContract::n
 const PLANE_AT_ANGLE_CONTRACT: TypedContract<PlaneAtAngleParams> = TypedContract::new();
 const FILLET_CONTRACT: TypedContract<FilletParams> = TypedContract::new();
 const CHAMFER_CONTRACT: TypedContract<ChamferParams> = TypedContract::new();
+const SPLIT_FACE_CONTRACT: TypedContract<SplitFaceParams> = TypedContract::new();
+const SPLIT_BODY_CONTRACT: TypedContract<SplitBodyParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -173,15 +176,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PLANE_AT_ANGLE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (where it is now)|{origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
-    CommandSpec::new("solid.split_face", "Split Face", split_face)
+    CommandSpec::new("solid.split_face", "Split Face", crate::checked!("solid.split_face", split_face))
         .at("SOLID", "MODIFY")
         .icon("split_face")
+        .contract(&SPLIT_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params(
             "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal)",
         ),
-    CommandSpec::new("solid.split_body", "Split Body", split_body)
+    CommandSpec::new("solid.split_body", "Split Body", crate::checked!("solid.split_body", split_body))
         .at("SOLID", "MODIFY")
         .icon("split_body")
+        .contract(&SPLIT_BODY_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)"),
     CommandSpec::new("solid.press_pull", "Press Pull", press_pull)
         .at("SOLID", "MODIFY")

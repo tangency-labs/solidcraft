@@ -12894,6 +12894,92 @@ fn content_focus_bookmark_restores_caret_after_explicit_collapse_and_focus() {
 }
 
 #[test]
+fn editor_focus_survives_floating_sizing_unless_a_live_foreign_control_takes_it() {
+    for scale in [1.0, 2.0] {
+        for foreign_focus in [false, true] {
+            let (mut content, trace) = review_cohort_host(|_| {});
+            content.dispatch(vec![fixture_open("fixture.editor", "wrapping-editor", "wrapping", Zone::Left, 0).unwrap()]).unwrap();
+            let mut raw = RawPanelHost::new(content, scale);
+            raw.frame(Vec::new(), false);
+            raw.frame(Vec::new(), false);
+            if foreign_focus {
+                raw.prime_foreign_window();
+            }
+            let editor = trace.borrow().editors.last().unwrap().0;
+            raw.ctx.memory_mut(|memory| memory.request_focus(editor));
+            raw.frame(Vec::new(), false);
+            raw.frame_late(vec![egui::Event::Text(" retained reparent selection".into())], false, |_, _| {});
+            raw.frame(Vec::new(), false);
+            let mut state = egui::TextEdit::load_state(&raw.ctx, editor).unwrap();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(1), egui::text::CCursor::new(4))));
+            state.store(&raw.ctx, editor);
+            raw.frame(Vec::new(), false);
+            assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(editor));
+            let caret = egui::TextEdit::load_state(&raw.ctx, editor).unwrap().cursor.char_range();
+            assert!(!caret.unwrap().is_empty());
+            let draft = trace.borrow().editors.last().unwrap().3.clone();
+            let key = ControllerKey { instance: id("wrapping-editor"), owner: raw.content.runtime.instance_owner(&id("wrapping-editor")).unwrap() };
+            let renders = raw.content.probe.state(&key).unwrap().renders;
+            if foreign_focus {
+                raw.foreign_cover = Some(egui::Rect::from_min_size(egui::pos2(1000.0, 600.0), egui::vec2(180.0, 80.0)));
+                raw.foreign_takes_focus = true;
+            }
+            raw.content
+                .dispatch(vec![Mutation::Move {
+                    instance: id("wrapping-editor"),
+                    destination: Destination::NewSection {
+                        section: section("reparented-editor"),
+                        index: 0,
+                        location: SectionLocation::Floating { origin: Point { x: 400.0, y: 180.0 } },
+                        size: Size { width: 400.0, height: 320.0 },
+                    },
+                }])
+                .unwrap();
+            raw.frame(Vec::new(), false);
+            assert_eq!(raw.content.probe.state(&key).unwrap().renders, renders, "the new Area sizing pass must not run a hidden body");
+            let foreign = foreign_focus.then(|| raw.foreign_responses.last().unwrap().id);
+            assert_eq!(
+                raw.ctx.memory(|memory| memory.focused()),
+                foreign,
+                "sizing removes the editor; only the real late foreign widget may take focus"
+            );
+            // Stop requesting focus: subsequent passes must retain the person's
+            // choice without repeatedly forcing it after host restoration.
+            raw.foreign_takes_focus = false;
+            for _ in 0..2 {
+                raw.frame(Vec::new(), false);
+                assert_eq!(raw.ctx.memory(|memory| memory.focused()), foreign.or(Some(editor)));
+            }
+            assert!(raw.content.probe.state(&key).unwrap().renders > renders);
+            assert_eq!(trace.borrow().editors.last().unwrap().3, draft);
+            if foreign_focus {
+                // A later deliberate focus command may return to the retained
+                // selection. It is separate from the Move tested above.
+                let reply = raw.content.dispatch(vec![Mutation::Focus { instance: id("wrapping-editor") }]).unwrap();
+                raw.host.note_reply(&reply);
+                raw.frame(Vec::new(), false);
+                raw.frame(Vec::new(), false);
+            }
+            assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(editor));
+            assert_eq!(egui::TextEdit::load_state(&raw.ctx, editor).unwrap().cursor.char_range(), caret);
+            assert_eq!(trace.borrow().editors.last().unwrap().3, draft);
+            assert_eq!(raw.content.commands.calls, 0);
+
+            // A retained bookmark must not keep its editor focused after the
+            // owning content becomes unavailable, even before another paint.
+            trace.borrow_mut().unavailable.insert(key.clone());
+            raw.content.tick().unwrap();
+            assert_ne!(raw.content.runtime.layout().availability(&key.instance), Availability::Available);
+            assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(editor));
+            raw.host.reconcile_scope(&raw.content.runtime);
+            assert_ne!(raw.ctx.memory(|memory| memory.focused()), Some(editor));
+            assert_eq!(egui::TextEdit::load_state(&raw.ctx, editor).unwrap().cursor.char_range(), caret);
+            assert_eq!(trace.borrow().editors.last().unwrap().3, draft);
+        }
+    }
+}
+
+#[test]
 fn custom_header_action_reports_enabled_and_pressed_state_from_retained_presentation() {
     let (mut content, trace) = review_cohort_host(|_| {});
     content.dispatch(vec![fixture_open("fixture.log", "log", "log-section", Zone::Left, 0).unwrap()]).unwrap();

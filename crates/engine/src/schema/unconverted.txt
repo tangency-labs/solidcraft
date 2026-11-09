@@ -7,7 +7,6 @@ doc.recover
 doc.recovery_discard
 doc.recovery_list
 face.delete
-file.export
 file.insert_mesh
 file.insert_step
 file.new
@@ -24,7 +23,6 @@ render.preflight
 render.scene
 render.start
 sheet.export_dxf
-sketch.draw.dimensioned
 solid.coil
 solid.draft
 solid.emboss
@@ -40,8 +38,6 @@ solid.press_pull
 solid.replace_face
 solid.revolve
 solid.shell
-solid.split_body
-solid.split_face
 solid.thread
 surface.blend
 surface.extend
